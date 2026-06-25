@@ -23,7 +23,12 @@ set password $GS_PASS
 login
 iferr 1 stk
 display oops
+errorcount
+output push load.out only
 input load.gs
+errorcount
+output pop
+errorcount
 commit
 logout
 exit

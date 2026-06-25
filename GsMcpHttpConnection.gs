@@ -41,11 +41,15 @@ category: 'reading'
 method: GsMcpHttpConnection
 readRequest
   "Read one HTTP/1.1 request. Returns a Dictionary with keys
-   'method' 'path' 'headers' (lowercased keys) and 'body', or nil on EOF/error."
-  | crlfcrlf buffer headEnd req contentLength body chunk |
+   'method' 'path' 'headers' (lowercased keys) and 'body', or nil on EOF/error/timeout.
+   Bails (nil) if the client sends no data within the read timeout, so a stalled
+   connection cannot wedge the single-threaded accept loop."
+  | crlfcrlf buffer headEnd req contentLength body chunk timeout |
   crlfcrlf := String with: Character cr with: Character lf with: Character cr with: Character lf.
+  timeout := 8000.
   buffer := String new.
   [(buffer indexOfSubCollection: crlfcrlf) = 0] whileTrue: [
+    (socket readWillNotBlockWithin: timeout) == true ifFalse: [^nil].
     chunk := socket readString: 4096.
     (chunk isNil or: [chunk isEmpty]) ifTrue: [^nil].
     buffer := buffer , chunk.
@@ -55,6 +59,7 @@ readRequest
   body := buffer copyFrom: headEnd + 4 to: buffer size.
   contentLength := ((req at: 'headers') at: 'content-length' ifAbsent: ['0']) asNumber.
   [body size < contentLength] whileTrue: [
+    (socket readWillNotBlockWithin: timeout) == true ifFalse: [^nil].
     chunk := socket readString: 4096.
     (chunk isNil or: [chunk isEmpty]) ifTrue: [^nil].
     body := body , chunk].
@@ -105,6 +110,35 @@ writeStatus: code reason: reasonString body: aBodyString
     'Content-Length: ' , aBodyString size printString , crlf ,
     'Connection: close' , crlf , crlf , aBodyString.
   ^socket write: resp
+%
+category: 'writing-sse'
+method: GsMcpHttpConnection
+writeSseStreamHeaders
+  "Begin a text/event-stream response (no Content-Length; the stream stays open)."
+  | crlf resp |
+  crlf := String with: Character cr with: Character lf.
+  resp := 'HTTP/1.1 200 OK' , crlf ,
+    'Content-Type: text/event-stream' , crlf ,
+    'Cache-Control: no-cache' , crlf ,
+    'Connection: keep-alive' , crlf , crlf.
+  ^socket write: resp
+%
+category: 'writing-sse'
+method: GsMcpHttpConnection
+writeSseComment: aString
+  "Write an SSE comment line (used for keepalives). Returns nil if the write fails
+   (e.g. the client disconnected)."
+  | lf |
+  lf := String with: Character lf.
+  ^socket write: ': ' , aString , lf , lf
+%
+category: 'writing-sse'
+method: GsMcpHttpConnection
+writeSseData: aJsonString
+  "Write one SSE 'message' event carrying aJsonString. Returns nil on write failure."
+  | lf |
+  lf := String with: Character lf.
+  ^socket write: 'event: message' , lf , 'data: ' , aJsonString , lf , lf
 %
 category: 'closing'
 method: GsMcpHttpConnection
