@@ -8,4 +8,10 @@ input GsMcpHttpConnection.gs
 input GsMcpDispatcher.gs
 input GsMcpServer.gs
 
+! Unit-test classes (GsTestCase subclasses) + their mock transport.
+input GsMcpMockSocket.gs
+input GsMcpToolTest.gs
+input GsMcpDispatcherTest.gs
+input GsMcpTransportTest.gs
+
 commit

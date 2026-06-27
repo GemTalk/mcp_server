@@ -4,7 +4,8 @@ expectvalue /Class
 doit
 Object subclass: 'GsMcpServer'
   instVarNames: #( serverSocket port running
-                    registry dispatcher log mutex)
+                    registry dispatcher log mutex
+                    routes)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -60,6 +61,19 @@ boolProperty: aDescription
   d at: 'description' put: aDescription.
   ^d
 %
+category: 'running'
+method: GsMcpServer
+buildRoutes
+  "HTTP method -> [:req :conn | ...] handler table for the Streamable HTTP transport.
+   Built once in initialize and cached in `routes`. Unknown methods get a 405 in
+   handleConnection: (the at:ifAbsent: branch)."
+  | d |
+  d := Dictionary new.
+  d at: 'POST'   put: [:req :conn | self servePost: req on: conn].
+  d at: 'GET'    put: [:req :conn | self serveGetStream: conn].
+  d at: 'DELETE' put: [:req :conn | conn writeStatus: 200 reason: 'OK' body: ''].
+  ^d
+%
 category: 'private'
 method: GsMcpServer
 dictNamed: aName
@@ -108,30 +122,24 @@ formatTestResult: aTestResult label: aLabel
 %
 category: 'running'
 method: GsMcpServer
-handleConnection: aClientSocket
+handleConnection: aConnection
   "Streamable HTTP routing for one connection: POST = JSON-RPC, GET = standalone SSE
-   stream, DELETE = session end. Runs in its own GsProcess; errors are contained."
-  | conn |
-  conn := GsMcpHttpConnection on: aClientSocket.
-  [ | req httpMethod |
-    req := conn readRequest.
+   stream, DELETE = session end. The verb is looked up in the cached `routes` table;
+   unknown verbs fall through to 405. Runs in its own GsProcess; errors are contained."
+  [ | req httpMethod handler |
+    req := aConnection readRequest.
     req isNil ifFalse: [
       httpMethod := (req at: 'method' ifAbsent: ['']) asUppercase.
-      httpMethod = 'POST'
-        ifTrue: [self servePost: req on: conn]
-        ifFalse: [
-          httpMethod = 'GET'
-            ifTrue: [self serveGetStream: conn]
-            ifFalse: [
-              httpMethod = 'DELETE'
-                ifTrue: [conn writeStatus: 200 reason: 'OK' body: '']
-                ifFalse: [conn writeStatus: 405 reason: 'Method Not Allowed' body: '']]]]
+      handler := routes
+        at: httpMethod
+        ifAbsent: [[:rq :conn | conn writeStatus: 405 reason: 'Method Not Allowed' body: '']].
+      handler value: req value: aConnection]
   ] on: Error do: [:ex |
     self log: 'GsMcpServer handleConnection: error: ' , ex messageText.
-    [conn writeStatus: 500 reason: 'Internal Server Error'
+    [aConnection writeStatus: 500 reason: 'Internal Server Error'
        body: '{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Internal error"}}']
       on: Error do: [:e | nil]].
-  conn close
+  aConnection close
 %
 category: 'initialization'
 method: GsMcpServer
@@ -139,6 +147,7 @@ initialize
   registry := GsMcpToolRegistry new.
   dispatcher := GsMcpDispatcher registry: registry.
   mutex := Semaphore forMutualExclusion.
+  routes := self buildRoutes.
   running := false.
   self registerCoreTools.
   self registerSessionTools.
@@ -220,51 +229,21 @@ pythonStatus
 category: 'tools'
 method: GsMcpServer
 registerBrowsingTools
+  "Handlers live in the 'tools - browsing' category."
   | classArg |
   classArg := self objectSchema:
     (Dictionary new at: 'className' put: (self propString: 'Name of the class'); yourself)
     required: (Array with: 'className').
-
-  registry
-    name: 'get_class_definition'
+  registry name: 'get_class_definition'
     description: 'Return the class definition (superclass, instance/class variables, pools) as a source expression.'
-    inputSchema: classArg
-    do: [:args | | cls |
-      cls := self resolveClass: (args at: 'className').
-      cls isNil ifTrue: ['Class not found: ' , (args at: 'className')] ifFalse: [cls definition]].
-
-  registry
-    name: 'get_class_hierarchy'
+    inputSchema: classArg do: [:args | self tool_get_class_definition: args].
+  registry name: 'get_class_hierarchy'
     description: 'Show the superclass chain (top-down, indented) and the direct subclasses of a class.'
-    inputSchema: classArg
-    do: [:args | | cls s chain c subs |
-      cls := self resolveClass: (args at: 'className').
-      cls isNil ifTrue: ['Class not found: ' , (args at: 'className')] ifFalse: [
-        s := WriteStream on: String new.
-        chain := OrderedCollection new. c := cls.
-        [c notNil] whileTrue: [chain addFirst: c. c := c superclass].
-        1 to: chain size do: [:i |
-          ((i - 1) * 2) timesRepeat: [s nextPut: Character space].
-          s nextPutAll: (chain at: i) name asString; nextPut: Character lf].
-        s nextPutAll: 'Direct subclasses:'; nextPut: Character lf.
-        subs := (cls subclasses collect: [:x | x name asString]).
-        subs isEmpty
-          ifTrue: [s nextPutAll: '  (none)']
-          ifFalse: [subs asSortedCollection do: [:n | s nextPutAll: '  '; nextPutAll: n; nextPut: Character lf]].
-        s contents]].
-
-  registry
-    name: 'list_methods'
+    inputSchema: classArg do: [:args | self tool_get_class_hierarchy: args].
+  registry name: 'list_methods'
     description: 'List a class instance-side and class-side method selectors, grouped by category.'
-    inputSchema: classArg
-    do: [:args | | cls |
-      cls := self resolveClass: (args at: 'className').
-      cls isNil ifTrue: ['Class not found: ' , (args at: 'className')] ifFalse: [
-        (self methodsReportFor: cls label: 'Instance') , (String with: Character lf)
-          , (self methodsReportFor: cls class label: 'Class')]].
-
-  registry
-    name: 'set_class_comment'
+    inputSchema: classArg do: [:args | self tool_list_methods: args].
+  registry name: 'set_class_comment'
     description: 'Set (replace) the class comment and commit.'
     inputSchema: (self objectSchema:
       (Dictionary new
@@ -272,50 +251,30 @@ registerBrowsingTools
         at: 'comment' put: (self propString: 'New comment text');
         yourself)
       required: (Array with: 'className' with: 'comment'))
-    do: [:args | | cls |
-      cls := self resolveClass: (args at: 'className').
-      cls isNil ifTrue: ['Class not found: ' , (args at: 'className')] ifFalse: [
-        cls comment: (args at: 'comment').
-        System commitTransaction.
-        'Comment set on ' , cls name asString , ' and committed.']].
-
-  registry
-    name: 'export_class_source'
+    do: [:args | self tool_set_class_comment: args].
+  registry name: 'export_class_source'
     description: 'Export a class as a Topaz file-in (class definition plus all methods).'
-    inputSchema: classArg
-    do: [:args | | cls |
-      cls := self resolveClass: (args at: 'className').
-      cls isNil ifTrue: ['Class not found: ' , (args at: 'className')] ifFalse: [cls fileOutClass]].
+    inputSchema: classArg do: [:args | self tool_export_class_source: args].
   ^self
 %
 category: 'tools'
 method: GsMcpServer
 registerCoreTools
-  "Register the v1 core tool set. Each handler is a one-arg block [:args | aString].
-   Adding a tool later is one more registry name:description:inputSchema:do: send."
-  | nl |
-  nl := String with: Character lf.
-
+  "Register the core execution/inspection tools. Handlers live in the 'tools - core'
+   category (tool_execute_code: etc.)."
   registry
     name: 'execute_code'
     description: 'Execute GemStone Smalltalk code and return the printString of the result. Accepts a single expression or a sequence of statements.'
     inputSchema: (self objectSchema:
         (Dictionary new at: 'code' put: (self propString: 'Smalltalk source to evaluate'); yourself)
         required: (Array with: 'code'))
-    do: [:args | | result |
-      result := (args at: 'code') evaluate printString.
-      result size > 50000 ifTrue: [result := (result copyFrom: 1 to: 50000) , ' ...[truncated]'].
-      result].
+    do: [:args | self tool_execute_code: args].
 
   registry
     name: 'status'
     description: 'Report the GemStone session: user, session id, stone, and whether there are uncommitted changes.'
     inputSchema: (self objectSchema: Dictionary new required: #())
-    do: [:args |
-      'user=' , System myUserProfile userId ,
-      ' session=' , System session printString ,
-      ' stone=' , System stoneName ,
-      ' uncommittedChanges=' , System needsCommit printString].
+    do: [:args | self tool_status: args].
 
   registry
     name: 'describe_class'
@@ -323,15 +282,7 @@ registerCoreTools
     inputSchema: (self objectSchema:
         (Dictionary new at: 'className' put: (self propString: 'Name of the class'); yourself)
         required: (Array with: 'className'))
-    do: [:args | | cls |
-      cls := System myUserProfile objectNamed: (args at: 'className') asSymbol.
-      cls isNil
-        ifTrue: ['Class not found: ' , (args at: 'className')]
-        ifFalse: [
-          'name=' , cls name , nl ,
-          'superclass=' , (cls superclass isNil ifTrue: ['nil'] ifFalse: [cls superclass name]) , nl ,
-          'instVarNames=' , cls instVarNames printString , nl ,
-          'selectors=' , (cls selectors asSortedCollection asArray) printString]].
+    do: [:args | self tool_describe_class: args].
 
   registry
     name: 'get_method_source'
@@ -342,16 +293,7 @@ registerCoreTools
           at: 'selector' put: (self propString: 'Method selector, e.g. printOn:');
           yourself)
         required: (Array with: 'className' with: 'selector'))
-    do: [:args | | cls target src |
-      cls := System myUserProfile objectNamed: (args at: 'className') asSymbol.
-      cls isNil
-        ifTrue: ['Class not found: ' , (args at: 'className')]
-        ifFalse: [
-          target := ((args at: 'meta' ifAbsent: [false]) == true) ifTrue: [cls class] ifFalse: [cls].
-          src := target sourceCodeAt: (args at: 'selector') asSymbol.
-          src isNil
-            ifTrue: ['No such method: ' , (args at: 'className') , '>>' , (args at: 'selector')]
-            ifFalse: [src]]].
+    do: [:args | self tool_get_method_source: args].
 
   registry
     name: 'compile_method'
@@ -363,142 +305,56 @@ registerCoreTools
           at: 'category' put: (self propString: 'Method category (optional, default mcp)');
           yourself)
         required: (Array with: 'className' with: 'source'))
-    do: [:args | | cls target errs |
-      cls := System myUserProfile objectNamed: (args at: 'className') asSymbol.
-      cls isNil
-        ifTrue: ['Class not found: ' , (args at: 'className')]
-        ifFalse: [
-          target := ((args at: 'meta' ifAbsent: [false]) == true) ifTrue: [cls class] ifFalse: [cls].
-          errs := target
-            compileMethod: (args at: 'source')
-            dictionaries: System myUserProfile symbolList
-            category: (args at: 'category' ifAbsent: ['mcp']).
-          errs isNil
-            ifTrue: [System commitTransaction. 'Compiled ' , (args at: 'className') , ' and committed.']
-            ifFalse: [System abortTransaction. 'Compile errors: ' , errs printString]]].
+    do: [:args | self tool_compile_method: args].
   ^self
 %
 category: 'tools'
 method: GsMcpServer
 registerListingTools
+  "Handlers live in the 'tools - listing' category."
   | noArgs dictArg |
   noArgs := self objectSchema: Dictionary new required: #().
   dictArg := self objectSchema:
     (Dictionary new at: 'dictionaryName' put: (self propString: 'Name of the symbol dictionary'); yourself)
     required: (Array with: 'dictionaryName').
-
-  registry
-    name: 'list_dictionaries'
+  registry name: 'list_dictionaries'
     description: 'List the symbol dictionaries in the current symbol list, in lookup order.'
-    inputSchema: noArgs
-    do: [:args | | s | s := WriteStream on: String new.
-      System myUserProfile symbolList do: [:d | s nextPutAll: d name asString; nextPut: Character lf].
-      s contents].
-
-  registry
-    name: 'list_classes'
+    inputSchema: noArgs do: [:args | self tool_list_dictionaries: args].
+  registry name: 'list_classes'
     description: 'List the classes defined in a given symbol dictionary.'
-    inputSchema: dictArg
-    do: [:args | | dict |
-      dict := self dictNamed: (args at: 'dictionaryName').
-      dict isNil
-        ifTrue: ['Dictionary not found: ' , (args at: 'dictionaryName')]
-        ifFalse: [self linesFrom: ((dict values select: [:v | v isKindOf: Behavior]) collect: [:c | c name asString])]].
-
-  registry
-    name: 'list_dictionary_entries'
+    inputSchema: dictArg do: [:args | self tool_list_classes: args].
+  registry name: 'list_dictionary_entries'
     description: 'List every entry in a symbol dictionary, tagged as (class) or (global).'
-    inputSchema: dictArg
-    do: [:args | | dict lines |
-      dict := self dictNamed: (args at: 'dictionaryName').
-      dict isNil
-        ifTrue: ['Dictionary not found: ' , (args at: 'dictionaryName')]
-        ifFalse: [lines := OrderedCollection new.
-          dict keysAndValuesDo: [:k :v |
-            lines add: k asString , ((v isKindOf: Behavior) ifTrue: ['  (class)'] ifFalse: ['  (global)'])].
-          self linesFrom: lines]].
-
-  registry
-    name: 'list_all_classes'
+    inputSchema: dictArg do: [:args | self tool_list_dictionary_entries: args].
+  registry name: 'list_all_classes'
     description: 'List every class across all dictionaries in the symbol list, tagged with its dictionary.'
-    inputSchema: noArgs
-    do: [:args | | names |
-      names := OrderedCollection new.
-      System myUserProfile symbolList do: [:d |
-        d values do: [:v | (v isKindOf: Behavior) ifTrue: [names add: v name asString , '  (' , d name asString , ')']]].
-      self linesFrom: names].
-
-  registry
-    name: 'add_dictionary'
+    inputSchema: noArgs do: [:args | self tool_list_all_classes: args].
+  registry name: 'add_dictionary'
     description: 'Create a new symbol dictionary, append it to the user symbol list, and commit.'
-    inputSchema: dictArg
-    do: [:args | | name up d |
-      name := args at: 'dictionaryName'.
-      (self dictNamed: name) notNil
-        ifTrue: ['Dictionary already exists: ' , name]
-        ifFalse: [up := System myUserProfile.
-          d := up createDictionary: name asSymbol.
-          up insertDictionary: d at: up symbolList size + 1.
-          System commitTransaction.
-          'Created dictionary: ' , name]].
-
-  registry
-    name: 'remove_dictionary'
+    inputSchema: dictArg do: [:args | self tool_add_dictionary: args].
+  registry name: 'remove_dictionary'
     description: 'Remove a symbol dictionary from the user symbol list and commit. Destructive.'
-    inputSchema: dictArg
-    do: [:args | | name dict up |
-      name := args at: 'dictionaryName'.
-      dict := self dictNamed: name.
-      dict isNil
-        ifTrue: ['Dictionary not found: ' , name]
-        ifFalse: [up := System myUserProfile.
-          up removeDictionaryAt: (up symbolList indexOf: dict).
-          "createDictionary: also binds the dict as a global; remove that binding too"
-          up symbolList do: [:d | (d at: name asSymbol ifAbsent: [nil]) == dict ifTrue: [d removeKey: name asSymbol ifAbsent: [nil]]].
-          System commitTransaction.
-          'Removed dictionary: ' , name]].
+    inputSchema: dictArg do: [:args | self tool_remove_dictionary: args].
   ^self
 %
 category: 'tools'
 method: GsMcpServer
 registerMutationTools
+  "Handlers live in the 'tools - mutation' category."
   | classArg |
   classArg := self objectSchema:
     (Dictionary new at: 'className' put: (self propString: 'Name of the class'); yourself)
     required: (Array with: 'className').
-
-  registry
-    name: 'compile_class_definition'
+  registry name: 'compile_class_definition'
     description: 'Evaluate a class-definition expression (e.g. Object subclass: ... inDictionary: ...), then commit. Creates or updates the class.'
     inputSchema: (self objectSchema:
       (Dictionary new at: 'source' put: (self propString: 'Full class-definition Smalltalk expression including the subclass: send and inDictionary:'); yourself)
       required: (Array with: 'source'))
-    do: [:args | | result |
-      result := (args at: 'source') evaluate.
-      System commitTransaction.
-      (result isKindOf: Behavior)
-        ifTrue: ['Compiled and committed class: ' , result name asString]
-        ifFalse: ['Evaluated and committed. Result: ' , result printString]].
-
-  registry
-    name: 'delete_class'
+    do: [:args | self tool_compile_class_definition: args].
+  registry name: 'delete_class'
     description: 'Remove a class from its dictionary and commit. Destructive.'
-    inputSchema: classArg
-    do: [:args | | cls arr dict |
-      cls := self resolveClass: (args at: 'className').
-      cls isNil
-        ifTrue: ['Class not found: ' , (args at: 'className')]
-        ifFalse: [
-          arr := System myUserProfile dictionaryAndSymbolOf: cls.
-          arr isNil
-            ifTrue: ['Class is not resident in a dictionary: ' , (args at: 'className')]
-            ifFalse: [dict := arr at: 1.
-              dict removeKey: (arr at: 2).
-              System commitTransaction.
-              'Deleted class ' , (args at: 'className') , ' from ' , dict name asString , ' and committed.']]].
-
-  registry
-    name: 'delete_method'
+    inputSchema: classArg do: [:args | self tool_delete_class: args].
+  registry name: 'delete_method'
     description: 'Remove a method from a class and commit. Set meta=true for the class-side method. Destructive.'
     inputSchema: (self objectSchema:
       (Dictionary new
@@ -507,75 +363,46 @@ registerMutationTools
         at: 'meta' put: (self boolProperty: 'true for the class-side method (default false)');
         yourself)
       required: (Array with: 'className' with: 'selector'))
-    do: [:args | | cls target sel |
-      cls := self resolveClass: (args at: 'className').
-      cls isNil
-        ifTrue: ['Class not found: ' , (args at: 'className')]
-        ifFalse: [
-          target := ((args at: 'meta' ifAbsent: [false]) == true) ifTrue: [cls class] ifFalse: [cls].
-          sel := (args at: 'selector') asSymbol.
-          (target selectors includes: sel)
-            ifFalse: ['Method not found: ' , (args at: 'className') , '>>' , (args at: 'selector')]
-            ifTrue: [target removeSelector: sel.
-              System commitTransaction.
-              'Deleted method ' , (args at: 'className') , '>>' , (args at: 'selector') , ' and committed.']]].
+    do: [:args | self tool_delete_method: args].
   ^self
 %
 category: 'tools'
 method: GsMcpServer
 registerPythonTools
+  "Handlers live in the 'tools - python' category. Grail may be absent (see pythonStatus)."
   | codeArg |
   codeArg := self objectSchema:
     (Dictionary new at: 'code' put: (self propString: 'Python source code'); yourself)
     required: (Array with: 'code').
-
-  registry
-    name: 'eval_python'
+  registry name: 'eval_python'
     description: 'Compile and execute Python code (requires the Grail Python transpiler).'
-    inputSchema: codeArg
-    do: [:args | self pythonStatus].
-
-  registry
-    name: 'compile_python'
+    inputSchema: codeArg do: [:args | self tool_eval_python: args].
+  registry name: 'compile_python'
     description: 'Transpile Python source to Smalltalk via Grail (requires the Grail Python transpiler).'
-    inputSchema: codeArg
-    do: [:args | self pythonStatus].
+    inputSchema: codeArg do: [:args | self tool_compile_python: args].
   ^self
 %
 category: 'tools'
 method: GsMcpServer
 registerSearchTools
+  "Handlers live in the 'tools - search' category."
   | selectorArg |
   selectorArg := self objectSchema:
     (Dictionary new at: 'selector' put: (self propString: 'Method selector to search for'); yourself)
     required: (Array with: 'selector').
-
-  registry
-    name: 'find_implementors'
+  registry name: 'find_implementors'
     description: 'Find all methods that implement a given selector.'
-    inputSchema: selectorArg
-    do: [:args | self formatMethodList: (ClassOrganizer new implementorsOf: (args at: 'selector') asSymbol)].
-
-  registry
-    name: 'find_senders'
+    inputSchema: selectorArg do: [:args | self tool_find_implementors: args].
+  registry name: 'find_senders'
     description: 'Find all methods that send a given selector.'
-    inputSchema: selectorArg
-    do: [:args | self formatMethodList: (ClassOrganizer new sendersOf: (args at: 'selector') asSymbol)].
-
-  registry
-    name: 'find_references_to'
+    inputSchema: selectorArg do: [:args | self tool_find_senders: args].
+  registry name: 'find_references_to'
     description: 'Find all methods that reference a named global (e.g. a class or shared variable).'
     inputSchema: (self objectSchema:
       (Dictionary new at: 'name' put: (self propString: 'Name of the global / class to find references to'); yourself)
       required: (Array with: 'name'))
-    do: [:args | | obj |
-      obj := System myUserProfile objectNamed: (args at: 'name') asSymbol.
-      obj isNil
-        ifTrue: ['Global not found: ' , (args at: 'name')]
-        ifFalse: [self formatMethodList: (ClassOrganizer new referencesToObject: obj)]].
-
-  registry
-    name: 'search_method_source'
+    do: [:args | self tool_find_references_to: args].
+  registry name: 'search_method_source'
     description: 'Search method source code for a substring. Optionally scope to one dictionary (recommended; searching all dictionaries scans the kernel and can be slow). Capped at 200 hits.'
     inputSchema: (self objectSchema:
       (Dictionary new
@@ -583,53 +410,30 @@ registerSearchTools
         at: 'dictionaryName' put: (self propString: 'Optional: limit the search to this dictionary');
         yourself)
       required: (Array with: 'pattern'))
-    do: [:args | | pattern cap hits dicts |
-      pattern := args at: 'pattern'.
-      cap := 200.
-      hits := OrderedCollection new.
-      dicts := (args at: 'dictionaryName' ifAbsent: [nil])
-        ifNil: [System myUserProfile symbolList asArray]
-        ifNotNil: [:dn | | d | d := self dictNamed: dn. d isNil ifTrue: [#()] ifFalse: [Array with: d]].
-      dicts do: [:dict | dict values do: [:v | (v isKindOf: Behavior) ifTrue: [
-        (Array with: v with: v class) do: [:beh | beh selectors do: [:sel |
-          hits size < cap ifTrue: [ | src |
-            src := [beh sourceCodeAt: sel] on: Error do: [:e | nil].
-            (src notNil and: [src includesString: pattern]) ifTrue: [
-              hits add: beh name asString , '>>' , sel asString]]]]]]].
-      (hits size >= cap ifTrue: ['(truncated at ' , cap printString , ' hits)' , (String with: Character lf)] ifFalse: [''])
-        , (self linesFrom: hits)].
+    do: [:args | self tool_search_method_source: args].
   ^self
 %
 category: 'tools'
 method: GsMcpServer
 registerSessionTools
+  "Handlers live in the 'tools - session' category."
   | noArgs |
   noArgs := self objectSchema: Dictionary new required: #().
-
-  registry
-    name: 'abort'
+  registry name: 'abort'
     description: 'Abort the current transaction, discarding uncommitted changes and refreshing the session view.'
-    inputSchema: noArgs
-    do: [:args | System abortTransaction. 'Transaction aborted; view refreshed.'].
-
-  registry
-    name: 'commit'
+    inputSchema: noArgs do: [:args | self tool_abort: args].
+  registry name: 'commit'
     description: 'Commit the current transaction, persisting all changes.'
-    inputSchema: noArgs
-    do: [:args | System commitTransaction
-      ifTrue: ['Transaction committed.']
-      ifFalse: ['Commit failed due to conflicts; the transaction is still open.']].
-
-  registry
-    name: 'refresh'
+    inputSchema: noArgs do: [:args | self tool_commit: args].
+  registry name: 'refresh'
     description: 'Refresh the session view to see changes committed by other sessions (aborts any uncommitted work).'
-    inputSchema: noArgs
-    do: [:args | System abortTransaction. 'View refreshed.'].
+    inputSchema: noArgs do: [:args | self tool_refresh: args].
   ^self
 %
 category: 'tools'
 method: GsMcpServer
 registerTestTools
+  "Handlers live in the 'tools - testing' category."
   | noArgs classArg methodArg |
   noArgs := self objectSchema: Dictionary new required: #().
   classArg := self objectSchema:
@@ -641,40 +445,16 @@ registerTestTools
       at: 'selector' put: (self propString: 'Test method selector, e.g. testFoo');
       yourself)
     required: (Array with: 'className' with: 'selector').
-
-  registry
-    name: 'list_test_classes'
+  registry name: 'list_test_classes'
     description: 'List all TestCase subclasses in the symbol list.'
-    inputSchema: noArgs
-    do: [:args | | tc |
-      tc := System myUserProfile objectNamed: #TestCase.
-      tc isNil
-        ifTrue: ['TestCase is not available in this image.']
-        ifFalse: [self linesFrom: ((ClassOrganizer new allSubclassesOf: tc) collect: [:c | c name asString])]].
-
-  registry
-    name: 'run_test_class'
+    inputSchema: noArgs do: [:args | self tool_list_test_classes: args].
+  registry name: 'run_test_class'
     description: 'Run all test methods in a TestCase subclass and report the result.'
-    inputSchema: classArg
-    do: [:args | | cls |
-      cls := self resolveClass: (args at: 'className').
-      cls isNil
-        ifTrue: ['Class not found: ' , (args at: 'className')]
-        ifFalse: [self formatTestResult: cls suite run label: cls name asString]].
-
-  registry
-    name: 'run_test_method'
+    inputSchema: classArg do: [:args | self tool_run_test_class: args].
+  registry name: 'run_test_method'
     description: 'Run a single test method and report the result.'
-    inputSchema: methodArg
-    do: [:args | | cls |
-      cls := self resolveClass: (args at: 'className').
-      cls isNil
-        ifTrue: ['Class not found: ' , (args at: 'className')]
-        ifFalse: [self formatTestResult: (cls selector: (args at: 'selector') asSymbol) run
-          label: (args at: 'className') , '>>' , (args at: 'selector')]].
-
-  registry
-    name: 'list_failing_tests'
+    inputSchema: methodArg do: [:args | self tool_run_test_method: args].
+  registry name: 'list_failing_tests'
     description: 'Run test classes (a given list, or all TestCase subclasses) and list only the failing/erroring test methods.'
     inputSchema: (self objectSchema:
       (Dictionary new at: 'classNames' put:
@@ -683,32 +463,10 @@ registerTestTools
           at: 'description' put: 'Optional: TestCase subclass names to run (default: all)'; yourself);
         yourself)
       required: #())
-    do: [:args | | names classes out |
-      classes := OrderedCollection new.
-      names := args at: 'classNames' ifAbsent: [nil].
-      names isNil
-        ifTrue: [classes addAll: (ClassOrganizer new allSubclassesOf: (System myUserProfile objectNamed: #TestCase))]
-        ifFalse: [names do: [:n | | c | c := self resolveClass: n. c ifNotNil: [classes add: c]]].
-      out := WriteStream on: String new.
-      classes do: [:cls | | res |
-        res := cls suite run.
-        res failures do: [:t | out nextPutAll: 'FAIL  '; nextPutAll: t class name asString; nextPutAll: '>>'; nextPutAll: t selector asString; nextPut: Character lf].
-        res errors do: [:t | out nextPutAll: 'ERROR '; nextPutAll: t class name asString; nextPutAll: '>>'; nextPutAll: t selector asString; nextPut: Character lf]].
-      out contents isEmpty ifTrue: ['(no failing tests)'] ifFalse: [out contents]].
-
-  registry
-    name: 'describe_test_failure'
+    do: [:args | self tool_list_failing_tests: args].
+  registry name: 'describe_test_failure'
     description: 'Re-run a single test method and return the failure or error detail.'
-    inputSchema: methodArg
-    do: [:args | | cls sel |
-      cls := self resolveClass: (args at: 'className').
-      cls isNil
-        ifTrue: ['Class not found: ' , (args at: 'className')]
-        ifFalse: [sel := (args at: 'selector') asSymbol.
-          [(cls selector: sel) runCase.
-           (args at: 'className') , '>>' , (args at: 'selector') , ' passed (no failure).']
-            on: Error, TestFailure
-            do: [:ex | (args at: 'className') , '>>' , (args at: 'selector') , ' — ' , ex class name asString , ': ' , (ex messageText ifNil: ['(no message)'])]]].
+    inputSchema: methodArg do: [:args | self tool_describe_test_failure: args].
   ^self
 %
 category: 'accessing'
@@ -749,7 +507,7 @@ method: GsMcpServer
 serve: aClientSocket
   "Handle each connection in its own GsProcess so a slow or stalled client cannot
    block the accept loop. The forked process runs during the loop's accept waits."
-  [self handleConnection: aClientSocket] fork
+  [self handleConnection: (GsMcpHttpConnection on: aClientSocket)] fork
 %
 category: 'running'
 method: GsMcpServer
@@ -780,4 +538,348 @@ method: GsMcpServer
 stop
   "Request a graceful shutdown; the accept loop exits within one accept timeout."
   running := false
+%
+category: 'tools - session'
+method: GsMcpServer
+tool_abort: args
+  System abortTransaction.
+  ^'Transaction aborted; view refreshed.'
+%
+category: 'tools - listing'
+method: GsMcpServer
+tool_add_dictionary: args
+  | name up d |
+  name := args at: 'dictionaryName'.
+  ^(self dictNamed: name) notNil
+    ifTrue: ['Dictionary already exists: ' , name]
+    ifFalse: [up := System myUserProfile.
+      d := up createDictionary: name asSymbol.
+      up insertDictionary: d at: up symbolList size + 1.
+      System commitTransaction.
+      'Created dictionary: ' , name]
+%
+category: 'tools - session'
+method: GsMcpServer
+tool_commit: args
+  ^System commitTransaction
+    ifTrue: ['Transaction committed.']
+    ifFalse: ['Commit failed due to conflicts; the transaction is still open.']
+%
+category: 'tools - mutation'
+method: GsMcpServer
+tool_compile_class_definition: args
+  | result |
+  result := (args at: 'source') evaluate.
+  System commitTransaction.
+  ^(result isKindOf: Behavior)
+    ifTrue: ['Compiled and committed class: ' , result name asString]
+    ifFalse: ['Evaluated and committed. Result: ' , result printString]
+%
+category: 'tools - core'
+method: GsMcpServer
+tool_compile_method: args
+  | cls target errs |
+  cls := System myUserProfile objectNamed: (args at: 'className') asSymbol.
+  ^cls isNil
+    ifTrue: ['Class not found: ' , (args at: 'className')]
+    ifFalse: [
+      target := ((args at: 'meta' ifAbsent: [false]) == true) ifTrue: [cls class] ifFalse: [cls].
+      errs := target
+        compileMethod: (args at: 'source')
+        dictionaries: System myUserProfile symbolList
+        category: (args at: 'category' ifAbsent: ['mcp']).
+      errs isNil
+        ifTrue: [System commitTransaction. 'Compiled ' , (args at: 'className') , ' and committed.']
+        ifFalse: [System abortTransaction. 'Compile errors: ' , errs printString]]
+%
+category: 'tools - python'
+method: GsMcpServer
+tool_compile_python: args
+  ^self pythonStatus
+%
+category: 'tools - mutation'
+method: GsMcpServer
+tool_delete_class: args
+  | cls arr dict |
+  cls := self resolveClass: (args at: 'className').
+  ^cls isNil
+    ifTrue: ['Class not found: ' , (args at: 'className')]
+    ifFalse: [
+      arr := System myUserProfile dictionaryAndSymbolOf: cls.
+      arr isNil
+        ifTrue: ['Class is not resident in a dictionary: ' , (args at: 'className')]
+        ifFalse: [dict := arr at: 1.
+          dict removeKey: (arr at: 2).
+          System commitTransaction.
+          'Deleted class ' , (args at: 'className') , ' from ' , dict name asString , ' and committed.']]
+%
+category: 'tools - mutation'
+method: GsMcpServer
+tool_delete_method: args
+  | cls target sel |
+  cls := self resolveClass: (args at: 'className').
+  ^cls isNil
+    ifTrue: ['Class not found: ' , (args at: 'className')]
+    ifFalse: [
+      target := ((args at: 'meta' ifAbsent: [false]) == true) ifTrue: [cls class] ifFalse: [cls].
+      sel := (args at: 'selector') asSymbol.
+      (target selectors includes: sel)
+        ifFalse: ['Method not found: ' , (args at: 'className') , '>>' , (args at: 'selector')]
+        ifTrue: [target removeSelector: sel.
+          System commitTransaction.
+          'Deleted method ' , (args at: 'className') , '>>' , (args at: 'selector') , ' and committed.']]
+%
+category: 'tools - core'
+method: GsMcpServer
+tool_describe_class: args
+  | cls nl |
+  cls := System myUserProfile objectNamed: (args at: 'className') asSymbol.
+  nl := String with: Character lf.
+  ^cls isNil
+    ifTrue: ['Class not found: ' , (args at: 'className')]
+    ifFalse: [
+      'name=' , cls name , nl ,
+      'superclass=' , (cls superclass isNil ifTrue: ['nil'] ifFalse: [cls superclass name]) , nl ,
+      'instVarNames=' , cls instVarNames printString , nl ,
+      'selectors=' , (cls selectors asSortedCollection asArray) printString]
+%
+category: 'tools - testing'
+method: GsMcpServer
+tool_describe_test_failure: args
+  | cls sel |
+  cls := self resolveClass: (args at: 'className').
+  ^cls isNil
+    ifTrue: ['Class not found: ' , (args at: 'className')]
+    ifFalse: [sel := (args at: 'selector') asSymbol.
+      [(cls selector: sel) runCase.
+       (args at: 'className') , '>>' , (args at: 'selector') , ' passed (no failure).']
+        on: Error, TestFailure
+        do: [:ex | (args at: 'className') , '>>' , (args at: 'selector') , ' — ' , ex class name asString , ': ' , (ex messageText ifNil: ['(no message)'])]]
+%
+category: 'tools - python'
+method: GsMcpServer
+tool_eval_python: args
+  ^self pythonStatus
+%
+category: 'tools - core'
+method: GsMcpServer
+tool_execute_code: args
+  | result |
+  result := (args at: 'code') evaluate printString.
+  result size > 50000 ifTrue: [result := (result copyFrom: 1 to: 50000) , ' ...[truncated]'].
+  ^result
+%
+category: 'tools - browsing'
+method: GsMcpServer
+tool_export_class_source: args
+  | cls |
+  cls := self resolveClass: (args at: 'className').
+  ^cls isNil ifTrue: ['Class not found: ' , (args at: 'className')] ifFalse: [cls fileOutClass]
+%
+category: 'tools - search'
+method: GsMcpServer
+tool_find_implementors: args
+  ^self formatMethodList: (ClassOrganizer new implementorsOf: (args at: 'selector') asSymbol)
+%
+category: 'tools - search'
+method: GsMcpServer
+tool_find_references_to: args
+  | obj |
+  obj := System myUserProfile objectNamed: (args at: 'name') asSymbol.
+  ^obj isNil
+    ifTrue: ['Global not found: ' , (args at: 'name')]
+    ifFalse: [self formatMethodList: (ClassOrganizer new referencesToObject: obj)]
+%
+category: 'tools - search'
+method: GsMcpServer
+tool_find_senders: args
+  ^self formatMethodList: (ClassOrganizer new sendersOf: (args at: 'selector') asSymbol)
+%
+category: 'tools - browsing'
+method: GsMcpServer
+tool_get_class_definition: args
+  | cls |
+  cls := self resolveClass: (args at: 'className').
+  ^cls isNil ifTrue: ['Class not found: ' , (args at: 'className')] ifFalse: [cls definition]
+%
+category: 'tools - browsing'
+method: GsMcpServer
+tool_get_class_hierarchy: args
+  | cls s chain c subs |
+  cls := self resolveClass: (args at: 'className').
+  ^cls isNil ifTrue: ['Class not found: ' , (args at: 'className')] ifFalse: [
+    s := WriteStream on: String new.
+    chain := OrderedCollection new. c := cls.
+    [c notNil] whileTrue: [chain addFirst: c. c := c superclass].
+    1 to: chain size do: [:i |
+      ((i - 1) * 2) timesRepeat: [s nextPut: Character space].
+      s nextPutAll: (chain at: i) name asString; nextPut: Character lf].
+    s nextPutAll: 'Direct subclasses:'; nextPut: Character lf.
+    subs := (cls subclasses collect: [:x | x name asString]).
+    subs isEmpty
+      ifTrue: [s nextPutAll: '  (none)']
+      ifFalse: [subs asSortedCollection do: [:n | s nextPutAll: '  '; nextPutAll: n; nextPut: Character lf]].
+    s contents]
+%
+category: 'tools - core'
+method: GsMcpServer
+tool_get_method_source: args
+  | cls target src |
+  cls := System myUserProfile objectNamed: (args at: 'className') asSymbol.
+  ^cls isNil
+    ifTrue: ['Class not found: ' , (args at: 'className')]
+    ifFalse: [
+      target := ((args at: 'meta' ifAbsent: [false]) == true) ifTrue: [cls class] ifFalse: [cls].
+      src := target sourceCodeAt: (args at: 'selector') asSymbol.
+      src isNil
+        ifTrue: ['No such method: ' , (args at: 'className') , '>>' , (args at: 'selector')]
+        ifFalse: [src]]
+%
+category: 'tools - listing'
+method: GsMcpServer
+tool_list_all_classes: args
+  | names |
+  names := OrderedCollection new.
+  System myUserProfile symbolList do: [:d |
+    d values do: [:v | (v isKindOf: Behavior) ifTrue: [names add: v name asString , '  (' , d name asString , ')']]].
+  ^self linesFrom: names
+%
+category: 'tools - listing'
+method: GsMcpServer
+tool_list_classes: args
+  | dict |
+  dict := self dictNamed: (args at: 'dictionaryName').
+  ^dict isNil
+    ifTrue: ['Dictionary not found: ' , (args at: 'dictionaryName')]
+    ifFalse: [self linesFrom: ((dict values select: [:v | v isKindOf: Behavior]) collect: [:c | c name asString])]
+%
+category: 'tools - listing'
+method: GsMcpServer
+tool_list_dictionaries: args
+  | s |
+  s := WriteStream on: String new.
+  System myUserProfile symbolList do: [:d | s nextPutAll: d name asString; nextPut: Character lf].
+  ^s contents
+%
+category: 'tools - listing'
+method: GsMcpServer
+tool_list_dictionary_entries: args
+  | dict lines |
+  dict := self dictNamed: (args at: 'dictionaryName').
+  ^dict isNil
+    ifTrue: ['Dictionary not found: ' , (args at: 'dictionaryName')]
+    ifFalse: [lines := OrderedCollection new.
+      dict keysAndValuesDo: [:k :v |
+        lines add: k asString , ((v isKindOf: Behavior) ifTrue: ['  (class)'] ifFalse: ['  (global)'])].
+      self linesFrom: lines]
+%
+category: 'tools - testing'
+method: GsMcpServer
+tool_list_failing_tests: args
+  | names classes out |
+  classes := OrderedCollection new.
+  names := args at: 'classNames' ifAbsent: [nil].
+  names isNil
+    ifTrue: [classes addAll: (ClassOrganizer new allSubclassesOf: (System myUserProfile objectNamed: #TestCase))]
+    ifFalse: [names do: [:n | | c | c := self resolveClass: n. c ifNotNil: [classes add: c]]].
+  out := WriteStream on: String new.
+  classes do: [:cls | | res |
+    res := cls suite run.
+    res failures do: [:t | out nextPutAll: 'FAIL  '; nextPutAll: t class name asString; nextPutAll: '>>'; nextPutAll: t selector asString; nextPut: Character lf].
+    res errors do: [:t | out nextPutAll: 'ERROR '; nextPutAll: t class name asString; nextPutAll: '>>'; nextPutAll: t selector asString; nextPut: Character lf]].
+  ^out contents isEmpty ifTrue: ['(no failing tests)'] ifFalse: [out contents]
+%
+category: 'tools - browsing'
+method: GsMcpServer
+tool_list_methods: args
+  | cls |
+  cls := self resolveClass: (args at: 'className').
+  ^cls isNil ifTrue: ['Class not found: ' , (args at: 'className')] ifFalse: [
+    (self methodsReportFor: cls label: 'Instance') , (String with: Character lf)
+      , (self methodsReportFor: cls class label: 'Class')]
+%
+category: 'tools - testing'
+method: GsMcpServer
+tool_list_test_classes: args
+  | tc |
+  tc := System myUserProfile objectNamed: #TestCase.
+  ^tc isNil
+    ifTrue: ['TestCase is not available in this image.']
+    ifFalse: [self linesFrom: ((ClassOrganizer new allSubclassesOf: tc) collect: [:c | c name asString])]
+%
+category: 'tools - session'
+method: GsMcpServer
+tool_refresh: args
+  System abortTransaction.
+  ^'View refreshed.'
+%
+category: 'tools - listing'
+method: GsMcpServer
+tool_remove_dictionary: args
+  | name dict up |
+  name := args at: 'dictionaryName'.
+  dict := self dictNamed: name.
+  ^dict isNil
+    ifTrue: ['Dictionary not found: ' , name]
+    ifFalse: [up := System myUserProfile.
+      up removeDictionaryAt: (up symbolList indexOf: dict).
+      up symbolList do: [:d | (d at: name asSymbol ifAbsent: [nil]) == dict ifTrue: [d removeKey: name asSymbol ifAbsent: [nil]]].
+      System commitTransaction.
+      'Removed dictionary: ' , name]
+%
+category: 'tools - testing'
+method: GsMcpServer
+tool_run_test_class: args
+  | cls |
+  cls := self resolveClass: (args at: 'className').
+  ^cls isNil
+    ifTrue: ['Class not found: ' , (args at: 'className')]
+    ifFalse: [self formatTestResult: cls suite run label: cls name asString]
+%
+category: 'tools - testing'
+method: GsMcpServer
+tool_run_test_method: args
+  | cls |
+  cls := self resolveClass: (args at: 'className').
+  ^cls isNil
+    ifTrue: ['Class not found: ' , (args at: 'className')]
+    ifFalse: [self formatTestResult: (cls selector: (args at: 'selector') asSymbol) run
+      label: (args at: 'className') , '>>' , (args at: 'selector')]
+%
+category: 'tools - search'
+method: GsMcpServer
+tool_search_method_source: args
+  | pattern cap hits dicts |
+  pattern := args at: 'pattern'.
+  cap := 200.
+  hits := OrderedCollection new.
+  dicts := (args at: 'dictionaryName' ifAbsent: [nil])
+    ifNil: [System myUserProfile symbolList asArray]
+    ifNotNil: [:dn | | d | d := self dictNamed: dn. d isNil ifTrue: [#()] ifFalse: [Array with: d]].
+  dicts do: [:dict | dict values do: [:v | (v isKindOf: Behavior) ifTrue: [
+    (Array with: v with: v class) do: [:beh | beh selectors do: [:sel |
+      hits size < cap ifTrue: [ | src |
+        src := [beh sourceCodeAt: sel] on: Error do: [:e | nil].
+        (src notNil and: [src includesString: pattern]) ifTrue: [
+          hits add: beh name asString , '>>' , sel asString]]]]]]].
+  ^(hits size >= cap ifTrue: ['(truncated at ' , cap printString , ' hits)' , (String with: Character lf)] ifFalse: [''])
+    , (self linesFrom: hits)
+%
+category: 'tools - browsing'
+method: GsMcpServer
+tool_set_class_comment: args
+  | cls |
+  cls := self resolveClass: (args at: 'className').
+  ^cls isNil ifTrue: ['Class not found: ' , (args at: 'className')] ifFalse: [
+    cls comment: (args at: 'comment').
+    System commitTransaction.
+    'Comment set on ' , cls name asString , ' and committed.']
+%
+category: 'tools - core'
+method: GsMcpServer
+tool_status: args
+  ^'user=' , System myUserProfile userId ,
+   ' session=' , System session printString ,
+   ' stone=' , System stoneName ,
+   ' uncommittedChanges=' , System needsCommit printString
 %

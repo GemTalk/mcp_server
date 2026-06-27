@@ -141,12 +141,30 @@ GS_MCP_PORT=8000 ./run-server.sh   # start the server gem (blocks)
 
 ## Test
 
-`./test.sh` is a self-contained integration test: it starts the server in its own gem
-(one session), then acts as an MCP client (a separate process) driving the full
-Streamable HTTP transport — initialize, the initialized notification, tools/list, every
-core tool, a compile_method/commit round-trip on a throwaway class, the error paths, the
-SSE GET stream, and DELETE — asserting each result, and shuts the server down on exit.
-Uses port `8011` by default (set `GS_MCP_PORT` to change). Exit status 0 = all passed.
+Two complementary suites:
+
+**Unit tests (in-image, no socket)** — `./run-unit-tests.sh` logs in via topaz and runs three
+`GsTestCase` suites against the server's logic directly (milliseconds, no network):
+- `GsMcpToolTest` — every `tool_*` handler called directly (one+ test per tool, grouped by
+  the `tools - *` categories). Mutating-tool tests create a throwaway, commented fixture
+  (`GsMcpTestFixture` / `GsMcpTestDict`) and clean it up in `tearDown`.
+- `GsMcpDispatcherTest` — JSON-RPC routing/envelope: initialize, tools/list (33, alphabetical),
+  success + error wrapping, `-32601`/`-32602`/`-32700`, notifications → nil.
+- `GsMcpTransportTest` — `handleConnection:` driven over a **`GsMcpMockSocket`** wrapped in a
+  real `GsMcpHttpConnection`, so the genuine HTTP parsing/writing runs with no TCP: POST→JSON,
+  GET→SSE, DELETE→200, unknown verb→405, malformed body, chunked delivery, EOF.
+
+Run a single suite while a server is up via the `run_test_class` tool (e.g. `run_test_class
+GsMcpToolTest`), or all three via `./run-unit-tests.sh` (exit 0 = all passed). 51 tests total.
+
+> Note: a test helper must never reuse a SUnit framework selector (`run:`, `setUp`, …) — doing
+> so shadows the framework method and silently breaks `suite run`. The transport helper is named
+> `runRequest:` for this reason.
+
+**Integration test (real socket)** — `./test.sh` starts the server in its own gem and drives the
+full Streamable HTTP transport with `curl` (initialize, notification, tools/list, every core
+tool, a compile_method/commit round-trip, error paths, the SSE GET stream, DELETE), then shuts
+the server down. Uses port `8011` by default (set `GS_MCP_PORT`). Exit status 0 = all passed.
 
 ## Adding a tool
 

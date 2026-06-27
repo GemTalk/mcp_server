@@ -57,6 +57,6 @@ at: aName
 category: 'accessing'
 method: GsMcpToolRegistry
 descriptors
-  "An Array of MCP tool descriptors for tools/list."
-  ^tools values asArray collect: [:t | t descriptor]
+  "An Array of MCP tool descriptors for tools/list, sorted alphabetically by tool name."
+  ^(tools keys asSortedCollection asArray) collect: [:toolName | (tools at: toolName) descriptor]
 %
