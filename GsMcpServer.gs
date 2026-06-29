@@ -78,10 +78,8 @@ category: 'private'
 method: GsMcpServer
 dictNamed: aName
   "Find a symbol dictionary by name in the current symbol list, or nil."
-  | found |
-  found := nil.
-  System myUserProfile symbolList do: [:d | d name asString = aName ifTrue: [found := d]].
-  ^found
+  System myUserProfile symbolList do: [:d | d name asString = aName ifTrue: [^d]].
+  ^nil
 %
 category: 'private'
 method: GsMcpServer

@@ -168,20 +168,13 @@ the server down. Uses port `8011` by default (set `GS_MCP_PORT`). Exit status 0 
 
 ## Adding a tool
 
-One line in `GsMcpServer>>registerCoreTools`:
+There are two steps to adding a tool, both of which happen in the `GsMcpServer` class. First,
+write the tool as an instance method whose argument is a dictionary that has been parsed from
+JSON. This method must return a `String` that will be sent to the client. Second, modify one of
+the tool registration methods so that it adds the tool to the registry with a handler block that
+calls its method.
 
-```smalltalk
-registry
-  name: 'find_senders'
-  description: 'Find methods that send a selector.'
-  inputSchema: (self objectSchema:
-      (Dictionary new at: 'selector' put: (self propString: 'Selector'); yourself)
-      required: (Array with: 'selector'))
-  do: [:args | ... return a String ...].
-```
-
-Handler blocks must return a `String` and must not use `^` (non-local return). Errors
-raised inside a handler are caught by the dispatcher and returned as an MCP error result
+Errors raised inside a handler are caught by the dispatcher and returned as an MCP error result 
 (`isError: true`).
 
 ## Concurrency & robustness

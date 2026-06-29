@@ -55,7 +55,7 @@ handle: requestDict
   method = 'tools/list' ifTrue: [^self resultFor: id with: self toolsListResult].
   method = 'tools/call' ifTrue: [
     ^self handleToolsCall: (requestDict at: 'params' ifAbsent: [Dictionary new]) id: id].
-  (method size >= 14 and: [(method copyFrom: 1 to: 14) = 'notifications/']) ifTrue: [^nil].
+  method beginsWith: 'notifications/' ifTrue: [^nil].
   id isNil ifTrue: [^nil].
   ^self errorFor: id code: -32601 message: 'Method not found: ' , method
 %
