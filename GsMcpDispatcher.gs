@@ -3,7 +3,7 @@ set compile_env: 0
 expectvalue /Class
 doit
 Object subclass: 'GsMcpDispatcher'
-  instVarNames: #( registry serverName serverVersion protocolVersion)
+  instVarNames: #( toolRegistry serverName serverVersion protocolVersion)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -28,14 +28,14 @@ removeallclassmethods GsMcpDispatcher
 ! ------------------- Class methods for GsMcpDispatcher
 category: 'instance creation'
 classmethod: GsMcpDispatcher
-registry: aRegistry
+withToolRegistry: aRegistry
   ^self new setRegistry: aRegistry
 %
 ! ------------------- Instance methods for GsMcpDispatcher
 category: 'initialization'
 method: GsMcpDispatcher
 setRegistry: aRegistry
-  registry := aRegistry.
+  toolRegistry := aRegistry.
   protocolVersion := '2024-11-05'.
   serverName := 'gemstone-mcp'.
   serverVersion := '0.1.0'.
@@ -66,7 +66,7 @@ handleToolsCall: params id: id
   | name tool |
   name := params at: 'name' ifAbsent: [nil].
   name isNil ifTrue: [^self errorFor: id code: -32602 message: 'Missing tool name'].
-  tool := registry at: name.
+  tool := toolRegistry at: name.
   tool isNil ifTrue: [^self errorFor: id code: -32602 message: 'Unknown tool: ' , name].
   System abortTransaction.
   ^[ | text |
@@ -133,6 +133,6 @@ method: GsMcpDispatcher
 toolsListResult
   | d |
   d := Dictionary new.
-  d at: 'tools' put: registry descriptors.
+  d at: 'tools' put: toolRegistry descriptors.
   ^d
 %

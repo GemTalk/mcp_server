@@ -3,9 +3,8 @@ set compile_env: 0
 expectvalue /Class
 doit
 Object subclass: 'GsMcpServer'
-  instVarNames: #( serverSocket port running
-                    registry dispatcher log mutex
-                    routes)
+  instVarNames: #( dispatcher isRunning mutex
+                    routesTable serverSocket toolRegistry )
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -65,7 +64,7 @@ category: 'running'
 method: GsMcpServer
 buildRoutes
   "HTTP method -> [:req :conn | ...] handler table for the Streamable HTTP transport.
-   Built once in initialize and cached in `routes`. Unknown methods get a 405 in
+   Built once in initialize and cached in `routesTable`. Unknown methods get a 405 in
    handleConnection: (the at:ifAbsent: branch)."
   | d |
   d := Dictionary new.
@@ -80,13 +79,10 @@ classNameFromDefinition: source
   "The class name in a 'Super subclass: ''Name'' ...' definition: the substring between the
    first two single quotes, as a Symbol. Returns nil if the source has no quoted literal
    (e.g. a symbol-form name) — callers then treat it as a plain redefine."
-  | q1 rest q2 |
-  q1 := source indexOf: $'.
-  q1 = 0 ifTrue: [^nil].
-  rest := source copyFrom: q1 + 1 to: source size.
-  q2 := rest indexOf: $'.
-  q2 = 0 ifTrue: [^nil].
-  ^(rest copyFrom: 1 to: q2 - 1) asSymbol
+  | q1 q2 |
+  q1 := source indexOf: $' ifAbsent: [^nil].
+  q2 := source indexOf: $' startingAt: q1 + 1 ifAbsent: [^nil].
+  ^(source copyFrom: q1 + 1 to: q2 - 1) asSymbol
 %
 category: 'private'
 method: GsMcpServer
@@ -104,10 +100,10 @@ formatMethodList: aCollection
   | methods s |
   methods := OrderedCollection new.
   aCollection do: [:e |
-    (e respondsTo: #inClass)
+    (e isKindOf: GsNMethod)
       ifTrue: [methods add: e]
       ifFalse: [(e isKindOf: Collection) ifTrue: [
-        e do: [:m | (m respondsTo: #inClass) ifTrue: [methods add: m]]]]].
+        e do: [:m | (m isKindOf: GsNMethod) ifTrue: [methods add: m]]]]].
   methods isEmpty ifTrue: [^'(none)'].
   s := WriteStream on: String new.
   methods do: [:m | | cat |
@@ -136,13 +132,13 @@ category: 'running'
 method: GsMcpServer
 handleConnection: aConnection
   "Streamable HTTP routing for one connection: POST = JSON-RPC, GET = standalone SSE
-   stream, DELETE = session end. The verb is looked up in the cached `routes` table;
+   stream, DELETE = session end. The verb is looked up in the cached `routesTable` dictionary;
    unknown verbs fall through to 405. Runs in its own GsProcess; errors are contained."
   [ | req httpMethod handler |
     req := aConnection readRequest.
     req isNil ifFalse: [
       httpMethod := (req at: 'method' ifAbsent: ['']) asUppercase.
-      handler := routes
+      handler := routesTable
         at: httpMethod
         ifAbsent: [[:rq :conn | conn writeStatus: 405 reason: 'Method Not Allowed' body: '']].
       handler value: req value: aConnection]
@@ -156,11 +152,11 @@ handleConnection: aConnection
 category: 'initialization'
 method: GsMcpServer
 initialize
-  registry := GsMcpToolRegistry new.
-  dispatcher := GsMcpDispatcher registry: registry.
+  toolRegistry := GsMcpToolRegistry new.
+  dispatcher := GsMcpDispatcher withToolRegistry: toolRegistry.
   mutex := Semaphore forMutualExclusion.
-  routes := self buildRoutes.
-  running := false.
+  routesTable := self buildRoutes.
+  isRunning := false.
   self registerCoreTools.
   self registerSessionTools.
   self registerListingTools.
@@ -283,16 +279,16 @@ registerBrowsingTools
   classArg := self objectSchema:
     (Dictionary new at: 'className' put: (self propString: 'Name of the class'); yourself)
     required: (Array with: 'className').
-  registry name: 'get_class_definition'
+  toolRegistry name: 'get_class_definition'
     description: 'Return the class definition (superclass, instance/class variables, pools) as a source expression.'
     inputSchema: classArg do: [:args | self tool_get_class_definition: args].
-  registry name: 'get_class_hierarchy'
+  toolRegistry name: 'get_class_hierarchy'
     description: 'Show the superclass chain (top-down, indented) and the direct subclasses of a class.'
     inputSchema: classArg do: [:args | self tool_get_class_hierarchy: args].
-  registry name: 'list_methods'
+  toolRegistry name: 'list_methods'
     description: 'List a class instance-side and class-side method selectors, grouped by category.'
     inputSchema: classArg do: [:args | self tool_list_methods: args].
-  registry name: 'set_class_comment'
+  toolRegistry name: 'set_class_comment'
     description: 'Set (replace) the class comment and commit.'
     inputSchema: (self objectSchema:
       (Dictionary new
@@ -301,7 +297,7 @@ registerBrowsingTools
         yourself)
       required: (Array with: 'className' with: 'comment'))
     do: [:args | self tool_set_class_comment: args].
-  registry name: 'export_class_source'
+  toolRegistry name: 'export_class_source'
     description: 'Export a class as a Topaz file-in (class definition plus all methods).'
     inputSchema: classArg do: [:args | self tool_export_class_source: args].
   ^self
@@ -311,7 +307,7 @@ method: GsMcpServer
 registerCoreTools
   "Register the core execution/inspection tools. Handlers live in the 'tools - core'
    category (tool_execute_code: etc.)."
-  registry
+  toolRegistry
     name: 'execute_code'
     description: 'Execute GemStone Smalltalk code and return the printString of the result. Accepts a single expression or a sequence of statements.'
     inputSchema: (self objectSchema:
@@ -319,13 +315,13 @@ registerCoreTools
         required: (Array with: 'code'))
     do: [:args | self tool_execute_code: args].
 
-  registry
+  toolRegistry
     name: 'status'
     description: 'Report the GemStone session: user, session id, stone, and whether there are uncommitted changes.'
     inputSchema: (self objectSchema: Dictionary new required: #())
     do: [:args | self tool_status: args].
 
-  registry
+  toolRegistry
     name: 'describe_class'
     description: 'Describe a class: superclass, instance variables, and selectors.'
     inputSchema: (self objectSchema:
@@ -333,7 +329,7 @@ registerCoreTools
         required: (Array with: 'className'))
     do: [:args | self tool_describe_class: args].
 
-  registry
+  toolRegistry
     name: 'get_method_source'
     description: 'Return the source code of a method. Set meta=true for the class-side method.'
     inputSchema: (self objectSchema:
@@ -344,7 +340,7 @@ registerCoreTools
         required: (Array with: 'className' with: 'selector'))
     do: [:args | self tool_get_method_source: args].
 
-  registry
+  toolRegistry
     name: 'compile_method'
     description: 'Compile (add or update) a method on a class, then commit. Set meta=true for class-side. category defaults to "mcp".'
     inputSchema: (self objectSchema:
@@ -366,22 +362,22 @@ registerListingTools
   dictArg := self objectSchema:
     (Dictionary new at: 'dictionaryName' put: (self propString: 'Name of the symbol dictionary'); yourself)
     required: (Array with: 'dictionaryName').
-  registry name: 'list_dictionaries'
+  toolRegistry name: 'list_dictionaries'
     description: 'List the symbol dictionaries in the current symbol list, in lookup order.'
     inputSchema: noArgs do: [:args | self tool_list_dictionaries: args].
-  registry name: 'list_classes'
+  toolRegistry name: 'list_classes'
     description: 'List the classes defined in a given symbol dictionary.'
     inputSchema: dictArg do: [:args | self tool_list_classes: args].
-  registry name: 'list_dictionary_entries'
+  toolRegistry name: 'list_dictionary_entries'
     description: 'List every entry in a symbol dictionary, tagged as (class) or (global).'
     inputSchema: dictArg do: [:args | self tool_list_dictionary_entries: args].
-  registry name: 'list_all_classes'
+  toolRegistry name: 'list_all_classes'
     description: 'List every class across all dictionaries in the symbol list, tagged with its dictionary.'
     inputSchema: noArgs do: [:args | self tool_list_all_classes: args].
-  registry name: 'add_dictionary'
+  toolRegistry name: 'add_dictionary'
     description: 'Create a new symbol dictionary, append it to the user symbol list, and commit.'
     inputSchema: dictArg do: [:args | self tool_add_dictionary: args].
-  registry name: 'remove_dictionary'
+  toolRegistry name: 'remove_dictionary'
     description: 'Remove a symbol dictionary from the user symbol list and commit. Destructive.'
     inputSchema: dictArg do: [:args | self tool_remove_dictionary: args].
   ^self
@@ -394,7 +390,7 @@ registerMutationTools
   classArg := self objectSchema:
     (Dictionary new at: 'className' put: (self propString: 'Name of the class'); yourself)
     required: (Array with: 'className').
-  registry name: 'compile_class_definition'
+  toolRegistry name: 'compile_class_definition'
     description: 'Evaluate a class-definition expression (e.g. Object subclass: ... inDictionary: ...), then commit. On a shape-changing redefinition of an existing class, by default recompiles its existing methods onto the new version (a raw redefine drops them) and reports any that fail; refused if the class has subclasses.'
     inputSchema: (self objectSchema:
       (Dictionary new
@@ -403,10 +399,10 @@ registerMutationTools
         yourself)
       required: (Array with: 'source'))
     do: [:args | self tool_compile_class_definition: args].
-  registry name: 'delete_class'
+  toolRegistry name: 'delete_class'
     description: 'Remove a class from its dictionary and commit. Destructive.'
     inputSchema: classArg do: [:args | self tool_delete_class: args].
-  registry name: 'delete_method'
+  toolRegistry name: 'delete_method'
     description: 'Remove a method from a class and commit. Set meta=true for the class-side method. Destructive.'
     inputSchema: (self objectSchema:
       (Dictionary new
@@ -426,10 +422,10 @@ registerPythonTools
   codeArg := self objectSchema:
     (Dictionary new at: 'code' put: (self propString: 'Python source code'); yourself)
     required: (Array with: 'code').
-  registry name: 'eval_python'
+  toolRegistry name: 'eval_python'
     description: 'Compile and execute Python code (requires the Grail Python transpiler).'
     inputSchema: codeArg do: [:args | self tool_eval_python: args].
-  registry name: 'compile_python'
+  toolRegistry name: 'compile_python'
     description: 'Transpile Python source to Smalltalk via Grail (requires the Grail Python transpiler).'
     inputSchema: codeArg do: [:args | self tool_compile_python: args].
   ^self
@@ -442,19 +438,19 @@ registerSearchTools
   selectorArg := self objectSchema:
     (Dictionary new at: 'selector' put: (self propString: 'Method selector to search for'); yourself)
     required: (Array with: 'selector').
-  registry name: 'find_implementors'
+  toolRegistry name: 'find_implementors'
     description: 'Find all methods that implement a given selector.'
     inputSchema: selectorArg do: [:args | self tool_find_implementors: args].
-  registry name: 'find_senders'
+  toolRegistry name: 'find_senders'
     description: 'Find all methods that send a given selector.'
     inputSchema: selectorArg do: [:args | self tool_find_senders: args].
-  registry name: 'find_references_to'
+  toolRegistry name: 'find_references_to'
     description: 'Find all methods that reference a named global (e.g. a class or shared variable).'
     inputSchema: (self objectSchema:
       (Dictionary new at: 'name' put: (self propString: 'Name of the global / class to find references to'); yourself)
       required: (Array with: 'name'))
     do: [:args | self tool_find_references_to: args].
-  registry name: 'search_method_source'
+  toolRegistry name: 'search_method_source'
     description: 'Search method source code for a substring. Optionally scope to one dictionary (recommended; searching all dictionaries scans the kernel and can be slow). Capped at 200 hits.'
     inputSchema: (self objectSchema:
       (Dictionary new
@@ -471,13 +467,13 @@ registerSessionTools
   "Handlers live in the 'tools - session' category."
   | noArgs |
   noArgs := self objectSchema: Dictionary new required: #().
-  registry name: 'abort'
+  toolRegistry name: 'abort'
     description: 'Abort the current transaction, discarding uncommitted changes and refreshing the session view.'
     inputSchema: noArgs do: [:args | self tool_abort: args].
-  registry name: 'commit'
+  toolRegistry name: 'commit'
     description: 'Commit the current transaction, persisting all changes.'
     inputSchema: noArgs do: [:args | self tool_commit: args].
-  registry name: 'refresh'
+  toolRegistry name: 'refresh'
     description: 'Refresh the session view to see changes committed by other sessions (aborts any uncommitted work).'
     inputSchema: noArgs do: [:args | self tool_refresh: args].
   ^self
@@ -497,16 +493,16 @@ registerTestTools
       at: 'selector' put: (self propString: 'Test method selector, e.g. testFoo');
       yourself)
     required: (Array with: 'className' with: 'selector').
-  registry name: 'list_test_classes'
+  toolRegistry name: 'list_test_classes'
     description: 'List all TestCase subclasses in the symbol list.'
     inputSchema: noArgs do: [:args | self tool_list_test_classes: args].
-  registry name: 'run_test_class'
+  toolRegistry name: 'run_test_class'
     description: 'Run all test methods in a TestCase subclass and report the result.'
     inputSchema: classArg do: [:args | self tool_run_test_class: args].
-  registry name: 'run_test_method'
+  toolRegistry name: 'run_test_method'
     description: 'Run a single test method and report the result.'
     inputSchema: methodArg do: [:args | self tool_run_test_method: args].
-  registry name: 'list_failing_tests'
+  toolRegistry name: 'list_failing_tests'
     description: 'Run test classes (a given list, or all TestCase subclasses) and list only the failing/erroring test methods.'
     inputSchema: (self objectSchema:
       (Dictionary new at: 'classNames' put:
@@ -516,15 +512,15 @@ registerTestTools
         yourself)
       required: #())
     do: [:args | self tool_list_failing_tests: args].
-  registry name: 'describe_test_failure'
+  toolRegistry name: 'describe_test_failure'
     description: 'Re-run a single test method and return the failure or error detail.'
     inputSchema: methodArg do: [:args | self tool_describe_test_failure: args].
   ^self
 %
 category: 'accessing'
 method: GsMcpServer
-registry
-  ^registry
+toolRegistry
+  ^toolRegistry
 %
 category: 'private'
 method: GsMcpServer
@@ -540,13 +536,12 @@ runOnPort: aPort
   "Bind a localhost-only listener and run the accept loop until #stop.
    BLOCKING: this is meant to be the gem's main activity (forked GsProcesses
    only run while the gem is actively executing Smalltalk)."
-  port := aPort.
   serverSocket := GsSocket new.
   (serverSocket makeServer: 16 atPort: aPort atAddress: '127.0.0.1')
     ifNil: [^self error: 'makeServer failed on port ' , aPort printString , ': ' , serverSocket lastErrorString].
-  running := true.
+  isRunning := true.
   self log: 'GsMcpServer listening on 127.0.0.1:' , aPort printString.
-  [running] whileTrue: [
+  [isRunning] whileTrue: [
     | client |
     client := serverSocket acceptTimeoutMs: 500.
     client ifNotNil: [self serve: client]].
@@ -569,7 +564,7 @@ serveGetStream: conn
    until the client disconnects (write fails) or the server stops."
   (conn writeSseStreamHeaders) ifNil: [^self].
   (conn writeSseComment: 'connected') ifNil: [^self].
-  [running] whileTrue: [
+  [isRunning] whileTrue: [
     (Delay forSeconds: 15) wait.
     (conn writeSseComment: 'keepalive') ifNil: [^self]]
 %
@@ -589,7 +584,7 @@ category: 'controlling'
 method: GsMcpServer
 stop
   "Request a graceful shutdown; the accept loop exits within one accept timeout."
-  running := false
+  isRunning := false
 %
 category: 'tools - session'
 method: GsMcpServer
