@@ -253,7 +253,7 @@ r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":30,"method":"tools/call","params":{"name":"find_senders","arguments":{"selector":"serveGetStream:"}}}
 JSON
 )
-check "find_senders finds the caller"          'handleConnection:'       "$r"
+check "find_senders finds the caller"          'buildRoutes'       "$r"
 
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":31,"method":"tools/call","params":{"name":"find_references_to","arguments":{"name":"GsMcpTool"}}}
