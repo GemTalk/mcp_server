@@ -76,6 +76,20 @@ buildRoutes
 %
 category: 'private'
 method: GsMcpServer
+classNameFromDefinition: source
+  "The class name in a 'Super subclass: ''Name'' ...' definition: the substring between the
+   first two single quotes, as a Symbol. Returns nil if the source has no quoted literal
+   (e.g. a symbol-form name) — callers then treat it as a plain redefine."
+  | q1 rest q2 |
+  q1 := source indexOf: $'.
+  q1 = 0 ifTrue: [^nil].
+  rest := source copyFrom: q1 + 1 to: source size.
+  q2 := rest indexOf: $'.
+  q2 = 0 ifTrue: [^nil].
+  ^(rest copyFrom: 1 to: q2 - 1) asSymbol
+%
+category: 'private'
+method: GsMcpServer
 dictNamed: aName
   "Find a symbol dictionary by name in the current symbol list, or nil."
   System myUserProfile symbolList do: [:d | d name asString = aName ifTrue: [^d]].
@@ -224,6 +238,43 @@ pythonStatus
     ifTrue: ['Python (Grail) is not installed in this image; eval_python/compile_python are unavailable.']
     ifFalse: ['Grail is present, but native Python delegation is not yet implemented in this server.']
 %
+category: 'private'
+method: GsMcpServer
+recompileMethodsFrom: oldClass into: newClass named: nameSym
+  "Recompile every instance- and class-side method of oldClass onto newClass, preserving
+   category and environmentId. Commit (apply-and-report) and return a report listing any
+   methods that failed to recompile under the new shape (each with its CompileError details,
+   the same descriptor a failed compile_method returns)."
+  | sides failures total nameStr s |
+  failures := OrderedCollection new.
+  total := 0.
+  sides := Array
+    with: (Array with: oldClass with: newClass with: 'instance')
+    with: (Array with: oldClass class with: newClass class with: 'class').
+  sides do: [:triple | | src tgt side |
+    src := triple at: 1. tgt := triple at: 2. side := triple at: 3.
+    src selectors do: [:sel | | errs |
+      total := total + 1.
+      errs := [tgt
+        compileMethod: (src sourceCodeAt: sel)
+        dictionaries: System myUserProfile symbolList
+        category: ((src categoryOfSelector: sel) ifNil: ['other']) asString
+        environmentId: (src compiledMethodAt: sel) environmentId.
+        nil] on: CompileError do: [:ex | ex errorDetails].
+      errs ifNotNil: [failures add: (Array with: side with: sel with: errs)]]].
+  System commitTransaction.
+  nameStr := nameSym asString.
+  s := WriteStream on: String new.
+  s nextPutAll: 'Redefined ' , nameStr , '; recompiled ' , (total - failures size) printString
+    , '/' , total printString , ' methods'.
+  failures isEmpty
+    ifTrue: [s nextPutAll: '; all recompiled. Committed.']
+    ifFalse: [s nextPutAll: '; ' , failures size printString , ' failed (committed anyway):'; nextPut: Character lf.
+      failures do: [:f |
+        s nextPutAll: '  ' , (f at: 1) , ' ' , nameStr , '>>' , (f at: 2) asString , ' — ' , (f at: 3) printString;
+          nextPut: Character lf]].
+  ^s contents
+%
 category: 'tools'
 method: GsMcpServer
 registerBrowsingTools
@@ -344,9 +395,12 @@ registerMutationTools
     (Dictionary new at: 'className' put: (self propString: 'Name of the class'); yourself)
     required: (Array with: 'className').
   registry name: 'compile_class_definition'
-    description: 'Evaluate a class-definition expression (e.g. Object subclass: ... inDictionary: ...), then commit. Creates or updates the class.'
+    description: 'Evaluate a class-definition expression (e.g. Object subclass: ... inDictionary: ...), then commit. On a shape-changing redefinition of an existing class, by default recompiles its existing methods onto the new version (a raw redefine drops them) and reports any that fail; refused if the class has subclasses.'
     inputSchema: (self objectSchema:
-      (Dictionary new at: 'source' put: (self propString: 'Full class-definition Smalltalk expression including the subclass: send and inDictionary:'); yourself)
+      (Dictionary new
+        at: 'source' put: (self propString: 'Full class-definition Smalltalk expression including the subclass: send and inDictionary:');
+        at: 'recompileMethods' put: (self boolProperty: 'Default true: after a shape change, recompile the class existing methods onto the new version and report failures (refused if the class has subclasses). False: redefine raw, dropping all methods.');
+        yourself)
       required: (Array with: 'source'))
     do: [:args | self tool_compile_class_definition: args].
   registry name: 'delete_class'
@@ -566,12 +620,27 @@ tool_commit: args
 category: 'tools - mutation'
 method: GsMcpServer
 tool_compile_class_definition: args
-  | result |
-  result := (args at: 'source') evaluate.
-  System commitTransaction.
-  ^(result isKindOf: Behavior)
-    ifTrue: ['Compiled and committed class: ' , result name asString]
-    ifFalse: ['Evaluated and committed. Result: ' , result printString]
+  "Evaluate a class-definition expression and commit. If recompileMethods is true (default)
+   and this is a shape-changing redefinition of an existing class (which would otherwise drop
+   all its methods), recompile the prior version's methods onto the new version and report any
+   that fail. Refused when the class has subclasses (handle the hierarchy manually, or pass
+   recompileMethods=false to redefine raw)."
+  | source recompile name oldClass newClass |
+  source := args at: 'source'.
+  recompile := (args at: 'recompileMethods' ifAbsent: [true]) ~~ false.
+  name := self classNameFromDefinition: source.
+  oldClass := (recompile and: [name notNil]) ifTrue: [self resolveClass: name] ifFalse: [nil].
+  (recompile and: [oldClass notNil and: [oldClass subclasses isEmpty not]]) ifTrue: [
+    ^'Refused: ' , name asString , ' has subclasses '
+      , (oldClass subclasses collect: [:c | c name asString]) asArray printString
+      , '. Recompiling methods across a subclass hierarchy is unsupported; pass recompileMethods=false to redefine without preserving methods, or update the hierarchy manually.'].
+  newClass := source evaluate.
+  (recompile not or: [oldClass isNil or: [oldClass == newClass]]) ifTrue: [
+    System commitTransaction.
+    ^(newClass isKindOf: Behavior)
+      ifTrue: ['Compiled and committed class: ' , newClass name asString]
+      ifFalse: ['Evaluated and committed. Result: ' , newClass printString]].
+  ^self recompileMethodsFrom: oldClass into: newClass named: name
 %
 category: 'tools - core'
 method: GsMcpServer

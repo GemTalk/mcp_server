@@ -45,11 +45,13 @@ tearDown
   "Force-remove any throwaway fixtures a test created, then commit, so nothing leaks."
   | up dict |
   up := System myUserProfile.
-  (up objectNamed: #GsMcpTestFixture) ifNotNil: [:c |
-    (up dictionaryAndSymbolOf: c) ifNotNil: [:arr | (arr at: 1) removeKey: (arr at: 2) ifAbsent: [nil]]].
+  #(GsMcpTestSub GsMcpTestFixture) do: [:nm |
+    (up objectNamed: nm) ifNotNil: [:c |
+      (up dictionaryAndSymbolOf: c) ifNotNil: [:arr | (arr at: 1) removeKey: (arr at: 2) ifAbsent: [nil]]]].
   dict := up symbolList detect: [:d | d name asString = 'GsMcpTestDict'] ifNone: [nil].
   dict ifNotNil: [up removeDictionaryAt: (up symbolList indexOf: dict)].
   UserGlobals removeKey: #GsMcpTestDict ifAbsent: [nil].
+  UserGlobals removeKey: #GsMcpTestSub ifAbsent: [nil].
   UserGlobals removeKey: #GsMcpTestFixture ifAbsent: [nil].
   System commitTransaction
 %
@@ -79,6 +81,64 @@ testCompileClassDefinition
     'Object subclass: ''GsMcpTestFixture'' instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()').
   self assert: (out includesString: 'committed class: GsMcpTestFixture').
   self assert: (System myUserProfile objectNamed: #GsMcpTestFixture) notNil
+%
+category: 'tools - mutation'
+method: GsMcpToolTest
+testCompileClassDefinitionPreservesMethods
+  "Default recompileMethods=true: a shape change keeps the class's methods."
+  | cls out |
+  cls := Object subclass: 'GsMcpTestFixture' instVarNames: #(a) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #().
+  cls compileMethod: 'getA ^a' dictionaries: System myUserProfile symbolList category: 'acc'.
+  System commitTransaction.
+  out := self mcp tool_compile_class_definition: (self oneArg: 'source' value:
+    'Object subclass: ''GsMcpTestFixture'' instVarNames: #(a b) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()').
+  self assert: (out includesString: 'recompiled 1/1').
+  self assert: ((System myUserProfile objectNamed: #GsMcpTestFixture) canUnderstand: #getA).
+  self assert: ((System myUserProfile objectNamed: #GsMcpTestFixture) instVarNames includes: #b)
+%
+category: 'tools - mutation'
+method: GsMcpToolTest
+testCompileClassDefinitionRawWhenFlagFalse
+  "recompileMethods=false reproduces the raw redefine: methods are dropped."
+  | cls out |
+  cls := Object subclass: 'GsMcpTestFixture' instVarNames: #(a) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #().
+  cls compileMethod: 'getA ^a' dictionaries: System myUserProfile symbolList category: 'acc'.
+  System commitTransaction.
+  out := self mcp tool_compile_class_definition: (Dictionary new
+    at: 'source' put: 'Object subclass: ''GsMcpTestFixture'' instVarNames: #(a b) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()';
+    at: 'recompileMethods' put: false; yourself).
+  self deny: ((System myUserProfile objectNamed: #GsMcpTestFixture) canUnderstand: #getA)
+%
+category: 'tools - mutation'
+method: GsMcpToolTest
+testCompileClassDefinitionRefusesWithSubclasses
+  "With recompile on (default), a class that has subclasses is refused rather than redefined."
+  | cls out |
+  cls := Object subclass: 'GsMcpTestFixture' instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #().
+  cls subclass: 'GsMcpTestSub' instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #().
+  System commitTransaction.
+  out := self mcp tool_compile_class_definition: (self oneArg: 'source' value:
+    'Object subclass: ''GsMcpTestFixture'' instVarNames: #(a) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()').
+  self assert: (out includesString: 'Refused').
+  self assert: (out includesString: 'GsMcpTestSub')
+%
+category: 'tools - mutation'
+method: GsMcpToolTest
+testCompileClassDefinitionReportsRecompileFailure
+  "A method that no longer compiles under the new shape is reported, but the redefinition
+   (and the methods that did recompile) still applies."
+  | cls out |
+  cls := Object subclass: 'GsMcpTestFixture' instVarNames: #(a) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #().
+  cls compileMethod: 'getA ^a' dictionaries: System myUserProfile symbolList category: 'acc'.
+  cls compileMethod: 'withLocal | tmp | tmp := 5. ^tmp' dictionaries: System myUserProfile symbolList category: 'acc'.
+  System commitTransaction.
+  "adding ivar 'tmp' collides with withLocal's temporary -> that one fails to recompile"
+  out := self mcp tool_compile_class_definition: (self oneArg: 'source' value:
+    'Object subclass: ''GsMcpTestFixture'' instVarNames: #(a tmp) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()').
+  self assert: (out includesString: 'failed').
+  self assert: (out includesString: 'withLocal').
+  self deny: ((System myUserProfile objectNamed: #GsMcpTestFixture) canUnderstand: #withLocal).
+  self assert: ((System myUserProfile objectNamed: #GsMcpTestFixture) canUnderstand: #getA)
 %
 category: 'tools - core'
 method: GsMcpToolTest

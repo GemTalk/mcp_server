@@ -84,7 +84,7 @@ pointed at `http://localhost:8000/mcp`.
 | Tool | Arguments | Result |
 |------|-----------|--------|
 | `compile_method` | `className`, `source`, `category?`, `meta?` | compile a method, commit |
-| `compile_class_definition` | `source` | evaluate a class definition, commit |
+| `compile_class_definition` | `source`, `recompileMethods?` | evaluate a class definition, commit; on a shape change, by default recompiles the class's methods onto the new version and reports any that fail (refused if it has subclasses) |
 | `delete_class` | `className` | remove a class, commit *(destructive)* |
 | `delete_method` | `className`, `selector`, `meta?` | remove a method, commit *(destructive)* |
 
