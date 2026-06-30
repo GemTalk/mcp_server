@@ -49,7 +49,7 @@ readRequest
   timeout := 8000.
   buffer := String new.
   [(buffer indexOfSubCollection: crlfcrlf) = 0] whileTrue: [
-    (socket readWillNotBlockWithin: timeout) == true ifFalse: [^nil].
+    (socket readWillNotBlockWithin: timeout) ifFalse: [^nil].
     chunk := socket readString: 4096.
     (chunk isNil or: [chunk isEmpty]) ifTrue: [^nil].
     buffer := buffer , chunk.
@@ -59,7 +59,7 @@ readRequest
   body := buffer copyFrom: headEnd + 4 to: buffer size.
   contentLength := ((req at: 'headers') at: 'content-length' ifAbsent: ['0']) asNumber.
   [body size < contentLength] whileTrue: [
-    (socket readWillNotBlockWithin: timeout) == true ifFalse: [^nil].
+    (socket readWillNotBlockWithin: timeout) ifFalse: [^nil].
     chunk := socket readString: 4096.
     (chunk isNil or: [chunk isEmpty]) ifTrue: [^nil].
     body := body , chunk].
@@ -81,9 +81,8 @@ parseHead: headString
   parts := reqLine subStrings: ' '.
   req at: 'method' put: (parts size >= 1 ifTrue: [parts at: 1] ifFalse: ['']).
   req at: 'path' put: (parts size >= 2 ifTrue: [parts at: 2] ifFalse: ['']).
-  2 to: lines size do: [:i |
-    | line colon key val |
-    line := lines at: i.
+  lines from: 2 to: lines size do: [:line |
+    | colon key val |
     colon := line indexOf: $:.
     colon > 0 ifTrue: [
       key := (line copyFrom: 1 to: colon - 1) asLowercase trimSeparators.
