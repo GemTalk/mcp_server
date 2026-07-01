@@ -157,7 +157,7 @@ initialize
   mutex := Semaphore forMutualExclusion.
   routesTable := self buildRoutes.
   isRunning := false.
-  self registerCoreTools.
+  self registerExecutionTools.
   self registerSessionTools.
   self registerListingTools.
   self registerBrowsingTools.
@@ -300,13 +300,24 @@ registerBrowsingTools
   toolRegistry name: 'export_class_source'
     description: 'Export a class as a Topaz file-in (class definition plus all methods).'
     inputSchema: classArg do: [:args | self tool_export_class_source: args].
+  toolRegistry name: 'describe_class'
+    description: 'Describe a class: superclass, instance variables, and selectors.'
+    inputSchema: classArg do: [:args | self tool_describe_class: args].
+  toolRegistry name: 'get_method_source'
+    description: 'Return the source code of a method. Set meta=true for the class-side method.'
+    inputSchema: (self objectSchema:
+      (Dictionary new
+        at: 'className' put: (self propString: 'Name of the class');
+        at: 'selector' put: (self propString: 'Method selector, e.g. printOn:');
+        yourself)
+      required: (Array with: 'className' with: 'selector'))
+    do: [:args | self tool_get_method_source: args].
   ^self
 %
 category: 'tools'
 method: GsMcpServer
-registerCoreTools
-  "Register the core execution/inspection tools. Handlers live in the 'tools - core'
-   category (tool_execute_code: etc.)."
+registerExecutionTools
+  "Handlers live in the 'tools - execution' category."
   toolRegistry
     name: 'execute_code'
     description: 'Execute GemStone Smalltalk code and return the printString of the result. Accepts a single expression or a sequence of statements.'
@@ -314,43 +325,6 @@ registerCoreTools
         (Dictionary new at: 'code' put: (self propString: 'Smalltalk source to evaluate'); yourself)
         required: (Array with: 'code'))
     do: [:args | self tool_execute_code: args].
-
-  toolRegistry
-    name: 'status'
-    description: 'Report the GemStone session: user, session id, stone, and whether there are uncommitted changes.'
-    inputSchema: (self objectSchema: Dictionary new required: #())
-    do: [:args | self tool_status: args].
-
-  toolRegistry
-    name: 'describe_class'
-    description: 'Describe a class: superclass, instance variables, and selectors.'
-    inputSchema: (self objectSchema:
-        (Dictionary new at: 'className' put: (self propString: 'Name of the class'); yourself)
-        required: (Array with: 'className'))
-    do: [:args | self tool_describe_class: args].
-
-  toolRegistry
-    name: 'get_method_source'
-    description: 'Return the source code of a method. Set meta=true for the class-side method.'
-    inputSchema: (self objectSchema:
-        (Dictionary new
-          at: 'className' put: (self propString: 'Name of the class');
-          at: 'selector' put: (self propString: 'Method selector, e.g. printOn:');
-          yourself)
-        required: (Array with: 'className' with: 'selector'))
-    do: [:args | self tool_get_method_source: args].
-
-  toolRegistry
-    name: 'compile_method'
-    description: 'Compile (add or update) a method on a class, then commit. Set meta=true for class-side. category defaults to "mcp".'
-    inputSchema: (self objectSchema:
-        (Dictionary new
-          at: 'className' put: (self propString: 'Name of the class');
-          at: 'source' put: (self propString: 'Full method source including the selector line');
-          at: 'category' put: (self propString: 'Method category (optional, default mcp)');
-          yourself)
-        required: (Array with: 'className' with: 'source'))
-    do: [:args | self tool_compile_method: args].
   ^self
 %
 category: 'tools'
@@ -412,6 +386,16 @@ registerMutationTools
         yourself)
       required: (Array with: 'className' with: 'selector'))
     do: [:args | self tool_delete_method: args].
+  toolRegistry name: 'compile_method'
+    description: 'Compile (add or update) a method on a class, then commit. Set meta=true for class-side. category defaults to "mcp".'
+    inputSchema: (self objectSchema:
+      (Dictionary new
+        at: 'className' put: (self propString: 'Name of the class');
+        at: 'source' put: (self propString: 'Full method source including the selector line');
+        at: 'category' put: (self propString: 'Method category (optional, default mcp)');
+        yourself)
+      required: (Array with: 'className' with: 'source'))
+    do: [:args | self tool_compile_method: args].
   ^self
 %
 category: 'tools'
@@ -476,6 +460,9 @@ registerSessionTools
   toolRegistry name: 'refresh'
     description: 'Refresh the session view to see changes committed by other sessions (aborts any uncommitted work).'
     inputSchema: noArgs do: [:args | self tool_refresh: args].
+  toolRegistry name: 'status'
+    description: 'Report the GemStone session: user, session id, stone, and whether there are uncommitted changes.'
+    inputSchema: noArgs do: [:args | self tool_status: args].
   ^self
 %
 category: 'tools'
@@ -637,7 +624,7 @@ tool_compile_class_definition: args
       ifFalse: ['Evaluated and committed. Result: ' , newClass printString]].
   ^self recompileMethodsFrom: oldClass into: newClass named: name
 %
-category: 'tools - core'
+category: 'tools - mutation'
 method: GsMcpServer
 tool_compile_method: args
   | cls target errs |
@@ -691,7 +678,7 @@ tool_delete_method: args
           System commitTransaction.
           'Deleted method ' , (args at: 'className') , '>>' , (args at: 'selector') , ' and committed.']]
 %
-category: 'tools - core'
+category: 'tools - browsing'
 method: GsMcpServer
 tool_describe_class: args
   | cls nl |
@@ -723,7 +710,7 @@ method: GsMcpServer
 tool_eval_python: args
   ^self pythonStatus
 %
-category: 'tools - core'
+category: 'tools - execution'
 method: GsMcpServer
 tool_execute_code: args
   "Code is wrapped by GsMcpDispatcher>>handleToolsCall:id: to catch errors"
@@ -784,7 +771,7 @@ tool_get_class_hierarchy: args
       ifFalse: [subs asSortedCollection do: [:n | s nextPutAll: '  '; nextPutAll: n; nextPut: Character lf]].
     s contents]
 %
-category: 'tools - core'
+category: 'tools - browsing'
 method: GsMcpServer
 tool_get_method_source: args
   | cls target src |
@@ -938,7 +925,7 @@ tool_set_class_comment: args
     System commitTransaction.
     'Comment set on ' , cls name asString , ' and committed.']
 %
-category: 'tools - core'
+category: 'tools - session'
 method: GsMcpServer
 tool_status: args
   ^'user=' , System myUserProfile userId ,
