@@ -236,19 +236,19 @@ pythonStatus
 %
 category: 'private'
 method: GsMcpServer
-recompileMethodsFrom: oldClass into: newClass named: nameSym
+recompileMethodsFrom: oldClass into: newClass named: classNameSymbol
   "Recompile every instance- and class-side method of oldClass onto newClass, preserving
    category and environmentId. Commit (apply-and-report) and return a report listing any
    methods that failed to recompile under the new shape (each with its CompileError details,
    the same descriptor a failed compile_method returns)."
-  | sides failures total nameStr s |
+  | sides failures total classNameString s |
   failures := OrderedCollection new.
   total := 0.
   sides := Array
-    with: (Array with: oldClass with: newClass with: 'instance')
-    with: (Array with: oldClass class with: newClass class with: 'class').
-  sides do: [:triple | | src tgt side |
-    src := triple at: 1. tgt := triple at: 2. side := triple at: 3.
+    with: (Array with: 'instance' with: oldClass with: newClass)
+    with: (Array with: 'class' with: oldClass class with: newClass class).
+  sides do: [:triple | | side src tgt |
+    side := triple at: 1. src := triple at: 2. tgt := triple at: 3.
     src selectors do: [:sel | | errs |
       total := total + 1.
       errs := [tgt
@@ -259,15 +259,15 @@ recompileMethodsFrom: oldClass into: newClass named: nameSym
         nil] on: CompileError do: [:ex | ex errorDetails].
       errs ifNotNil: [failures add: (Array with: side with: sel with: errs)]]].
   System commitTransaction.
-  nameStr := nameSym asString.
+  classNameString := classNameSymbol asString.
   s := WriteStream on: String new.
-  s nextPutAll: 'Redefined ' , nameStr , '; recompiled ' , (total - failures size) printString
+  s nextPutAll: 'Redefined ' , classNameString , '; recompiled ' , (total - failures size) printString
     , '/' , total printString , ' methods'.
   failures isEmpty
     ifTrue: [s nextPutAll: '; all recompiled. Committed.']
     ifFalse: [s nextPutAll: '; ' , failures size printString , ' failed (committed anyway):'; nextPut: Character lf.
       failures do: [:f |
-        s nextPutAll: '  ' , (f at: 1) , ' ' , nameStr , '>>' , (f at: 2) asString , ' — ' , (f at: 3) printString;
+        s nextPutAll: '  ' , (f at: 1) , ' ' , classNameString , '>>' , (f at: 2) asString , ' — ' , (f at: 3) printString;
           nextPut: Character lf]].
   ^s contents
 %
@@ -641,7 +641,7 @@ category: 'tools - core'
 method: GsMcpServer
 tool_compile_method: args
   | cls target errs |
-  cls := System myUserProfile objectNamed: (args at: 'className') asSymbol.
+  cls := self resolveClass: (args at: 'className').
   ^cls isNil
     ifTrue: ['Class not found: ' , (args at: 'className')]
     ifFalse: [
@@ -695,7 +695,7 @@ category: 'tools - core'
 method: GsMcpServer
 tool_describe_class: args
   | cls nl |
-  cls := System myUserProfile objectNamed: (args at: 'className') asSymbol.
+  cls := self resolveClass: (args at: 'className').
   nl := String with: Character lf.
   ^cls isNil
     ifTrue: ['Class not found: ' , (args at: 'className')]
@@ -726,6 +726,7 @@ tool_eval_python: args
 category: 'tools - core'
 method: GsMcpServer
 tool_execute_code: args
+  "Code is wrapped by GsMcpDispatcher>>handleToolsCall:id: to catch errors"
   | result |
   result := (args at: 'code') evaluate printString.
   result size > 50000 ifTrue: [result := (result copyFrom: 1 to: 50000) , ' ...[truncated]'].
@@ -787,7 +788,7 @@ category: 'tools - core'
 method: GsMcpServer
 tool_get_method_source: args
   | cls target src |
-  cls := System myUserProfile objectNamed: (args at: 'className') asSymbol.
+  cls := self resolveClass: (args at: 'className').
   ^cls isNil
     ifTrue: ['Class not found: ' , (args at: 'className')]
     ifFalse: [
@@ -917,7 +918,7 @@ tool_search_method_source: args
   hits := OrderedCollection new.
   dicts := (args at: 'dictionaryName' ifAbsent: [nil])
     ifNil: [System myUserProfile symbolList asArray]
-    ifNotNil: [:dn | | d | d := self dictNamed: dn. d isNil ifTrue: [#()] ifFalse: [Array with: d]].
+    ifNotNil: [:dname | | d | d := self dictNamed: dname. d isNil ifTrue: [#()] ifFalse: [Array with: d]].
   dicts do: [:dict | dict values do: [:v | (v isKindOf: Behavior) ifTrue: [
     (Array with: v with: v class) do: [:beh | beh selectors do: [:sel |
       hits size < cap ifTrue: [ | src |
