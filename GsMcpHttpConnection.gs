@@ -73,7 +73,7 @@ readRequest
   timeout := 8000.
   buffer := String new.
   [(buffer indexOfSubCollection: crlfcrlf) = 0] whileTrue: [
-    (socket readWillNotBlockWithin: timeout) ifFalse: [^nil].
+    (socket readWillNotBlockWithin: timeout) == true ifFalse: [^nil].
     chunk := socket readString: 4096.
     (chunk isNil or: [chunk isEmpty]) ifTrue: [^nil].
     buffer := buffer , chunk.
@@ -83,7 +83,7 @@ readRequest
   body := buffer copyFrom: headEnd + 4 to: buffer size.
   contentLength := ((req at: 'headers') at: 'content-length' ifAbsent: ['0']) asNumber.
   [body size < contentLength] whileTrue: [
-    (socket readWillNotBlockWithin: timeout) ifFalse: [^nil].
+    (socket readWillNotBlockWithin: timeout) == true ifFalse: [^nil].
     chunk := socket readString: 4096.
     (chunk isNil or: [chunk isEmpty]) ifTrue: [^nil].
     body := body , chunk].
