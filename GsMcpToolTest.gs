@@ -37,7 +37,10 @@ mcp
 category: 'helpers'
 method: GsMcpToolTest
 oneArg: key value: value
-  ^Dictionary new at: key put: value; yourself
+  | d |
+  d := Dictionary new.
+  d at: key put: value.
+  ^d
 %
 category: 'running'
 method: GsMcpToolTest
