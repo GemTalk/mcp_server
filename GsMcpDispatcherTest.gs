@@ -20,7 +20,7 @@ category: 'helpers'
 method: GsMcpDispatcherTest
 dispatch: requestDict
   "Route requestDict through a fresh dispatcher; answer the response Dictionary (or nil)."
-  ^(GsMcpDispatcher registry: GsMcpServer new registry) handle: requestDict
+  ^(GsMcpDispatcher withToolRegistry: GsMcpServer new toolRegistry) handle: requestDict
 %
 category: 'helpers'
 method: GsMcpDispatcherTest
