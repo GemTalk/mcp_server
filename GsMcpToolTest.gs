@@ -244,10 +244,20 @@ testGetClassDefinition
 category: 'tools - browsing'
 method: GsMcpToolTest
 testGetClassHierarchy
-  | out |
-  out := self mcp tool_get_class_hierarchy: (self oneArg: 'className' value: 'Boolean').
-  self assert: (out includesString: 'Object').
-  self assert: (out includesString: 'FalseClass')
+  "Integer has a fixed hierarchy (its special subclasses can't be extended), so we can
+   assert the tool's full output exactly: superclass chain (2-space indent per level) then
+   sorted direct subclasses."
+  | out lf expected |
+  lf := String with: Character lf.
+  expected := 'Object' , lf ,
+    '  Magnitude' , lf ,
+    '    Number' , lf ,
+    '      Integer' , lf ,
+    'Direct subclasses:' , lf ,
+    '  LargeInteger' , lf ,
+    '  SmallInteger' , lf.
+  out := self mcp tool_get_class_hierarchy: (self oneArg: 'className' value: 'Integer').
+  self assert: out = expected
 %
 category: 'tools - browsing'
 method: GsMcpToolTest
@@ -260,12 +270,19 @@ testGetMethodSource
 category: 'tools - listing'
 method: GsMcpToolTest
 testListAllClasses
-  self assert: ((self mcp tool_list_all_classes: Dictionary new) includesString: 'GsMcpServer  (UserGlobals)')
+  | out |
+  out := self mcp tool_list_all_classes: Dictionary new.
+  self assert: (out includesString: 'GsMcpServer  (UserGlobals)').
+  self assert: (out includesString: 'Boolean  (Globals)')
 %
 category: 'tools - listing'
 method: GsMcpToolTest
 testListClasses
-  self assert: ((self mcp tool_list_classes: (self oneArg: 'dictionaryName' value: 'UserGlobals')) includesString: 'GsMcpServer')
+  | classes |
+  classes := (self mcp tool_list_classes: (self oneArg: 'dictionaryName' value: 'UserGlobals'))
+    subStrings: (String with: Character lf).
+  self assert: (classes includes: 'GsMcpServer').
+  self deny: (classes includes: 'Boolean')
 %
 category: 'tools - listing'
 method: GsMcpToolTest
@@ -275,7 +292,11 @@ testListDictionaries
 category: 'tools - listing'
 method: GsMcpToolTest
 testListDictionaryEntries
-  self assert: ((self mcp tool_list_dictionary_entries: (self oneArg: 'dictionaryName' value: 'UserGlobals')) includesString: '(class)')
+  | entries |
+  entries := (self mcp tool_list_dictionary_entries: (self oneArg: 'dictionaryName' value: 'UserGlobals'))
+    subStrings: (String with: Character lf).
+  self assert: (entries includes: 'GsMcpServer  (class)').
+  self deny: (entries includes: 'Boolean  (class)')
 %
 category: 'tools - testing'
 method: GsMcpToolTest
@@ -286,7 +307,12 @@ testListFailingTests
 category: 'tools - browsing'
 method: GsMcpToolTest
 testListMethods
-  self assert: ((self mcp tool_list_methods: (self oneArg: 'className' value: 'GsMcpServer')) includesString: 'runOnPort:')
+  "Check for an uncommon selector, and ones for both class-side and instance-side."
+  | methods |
+  methods := self mcp tool_list_methods: (self oneArg: 'className' value: 'GsMcpServer').
+  self assert: (methods includesString: 'runOnPort:').
+  self assert: (methods includesString: 'new').
+  self assert: (methods includesString: 'initialize')
 %
 category: 'tools - testing'
 method: GsMcpToolTest
