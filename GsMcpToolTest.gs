@@ -212,7 +212,10 @@ testExecuteCodeMultiStatement
 category: 'tools - browsing'
 method: GsMcpToolTest
 testExportClassSource
-  self assert: ((self mcp tool_export_class_source: (self oneArg: 'className' value: 'GsMcpTool')) includesString: 'set compile_env')
+  | src |
+  src := self mcp tool_export_class_source: (self oneArg: 'className' value: 'GsMcpTool').
+  self assert: (src includesString: 'Object subclass: ''GsMcpTool''').
+  self assert: (src includesString: 'removeallmethods GsMcpTool')
 %
 category: 'tools - search'
 method: GsMcpToolTest
@@ -233,7 +236,10 @@ testFindSenders
 category: 'tools - browsing'
 method: GsMcpToolTest
 testGetClassDefinition
-  self assert: ((self mcp tool_get_class_definition: (self oneArg: 'className' value: 'GsMcpServer')) includesString: 'subclass:')
+  | def |
+  def := self mcp tool_get_class_definition: (self oneArg: 'className' value: 'GsMcpServer').
+  self assert: (def includesString: 'Object subclass: ''GsMcpServer''').
+  self deny: (def includesString: 'removeallmethods GsMcpServer')
 %
 category: 'tools - browsing'
 method: GsMcpToolTest
