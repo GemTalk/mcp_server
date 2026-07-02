@@ -143,7 +143,7 @@ testCompileClassDefinitionReportsRecompileFailure
   self deny: ((System myUserProfile objectNamed: #GsMcpTestFixture) canUnderstand: #withLocal).
   self assert: ((System myUserProfile objectNamed: #GsMcpTestFixture) canUnderstand: #getA)
 %
-category: 'tools - core'
+category: 'tools - mutation'
 method: GsMcpToolTest
 testCompileMethod
   | out |
@@ -180,7 +180,7 @@ testDeleteMethod
   self assert: (out includesString: 'Deleted method').
   self deny: ((System myUserProfile objectNamed: #GsMcpTestFixture) canUnderstand: #answer)
 %
-category: 'tools - core'
+category: 'tools - browsing'
 method: GsMcpToolTest
 testDescribeClass
   | out |
@@ -199,12 +199,12 @@ method: GsMcpToolTest
 testEvalPython
   self assert: ((self mcp tool_eval_python: (self oneArg: 'code' value: 'print(1)')) includesString: 'Grail')
 %
-category: 'tools - core'
+category: 'tools - execution'
 method: GsMcpToolTest
 testExecuteCode
   self assert: (self mcp tool_execute_code: (self oneArg: 'code' value: '3 + 4')) equals: '7'
 %
-category: 'tools - core'
+category: 'tools - execution'
 method: GsMcpToolTest
 testExecuteCodeMultiStatement
   self assert: (self mcp tool_execute_code: (self oneArg: 'code' value: '| x | x := 6. x * 7')) equals: '42'
@@ -249,7 +249,7 @@ testGetClassHierarchy
   self assert: (out includesString: 'Object').
   self assert: (out includesString: 'FalseClass')
 %
-category: 'tools - core'
+category: 'tools - browsing'
 method: GsMcpToolTest
 testGetMethodSource
   | out |
@@ -336,7 +336,7 @@ testSetClassComment
   self assert: (out includesString: 'committed').
   self assert: (System myUserProfile objectNamed: #GsMcpTestFixture) comment equals: 'hello there'
 %
-category: 'tools - core'
+category: 'tools - session'
 method: GsMcpToolTest
 testStatus
   self assert: ((self mcp tool_status: Dictionary new) includesString: 'user=')
