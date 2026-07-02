@@ -48,9 +48,9 @@ tearDown
   "Force-remove any throwaway fixtures a test created, then commit, so nothing leaks."
   | up dict |
   up := System myUserProfile.
-  #(GsMcpTestSub GsMcpTestFixture) do: [:nm |
-    (up objectNamed: nm) ifNotNil: [:c |
-      (up dictionaryAndSymbolOf: c) ifNotNil: [:arr | (arr at: 1) removeKey: (arr at: 2) ifAbsent: [nil]]]].
+  #(GsMcpTestSub GsMcpTestFixture) do: [:sym |
+    (up objectNamed: sym) ifNotNil: [:cls |
+      (up dictionaryAndSymbolOf: cls) ifNotNil: [:arr | (arr at: 1) removeKey: (arr at: 2) ifAbsent: [nil]]]].
   dict := up symbolList detect: [:d | d name asString = 'GsMcpTestDict'] ifNone: [nil].
   dict ifNotNil: [up removeDictionaryAt: (up symbolList indexOf: dict)].
   UserGlobals removeKey: #GsMcpTestDict ifAbsent: [nil].

@@ -157,14 +157,14 @@ initialize
   mutex := Semaphore forMutualExclusion.
   routesTable := self buildRoutes.
   isRunning := false.
-  self registerExecutionTools.
-  self registerSessionTools.
-  self registerListingTools.
   self registerBrowsingTools.
-  self registerSearchTools.
+  self registerExecutionTools.
+  self registerListingTools.
   self registerMutationTools.
-  self registerTestTools.
   self registerPythonTools.
+  self registerSearchTools.
+  self registerSessionTools.
+  self registerTestTools.
   ^self
 %
 category: 'private'
@@ -387,7 +387,7 @@ registerMutationTools
       required: (Array with: 'className' with: 'selector'))
     do: [:args | self tool_delete_method: args].
   toolRegistry name: 'compile_method'
-    description: 'Compile (add or update) a method on a class, then commit. Set meta=true for class-side. category defaults to "mcp".'
+    description: 'Compile (add or update) a method on a class, then commit. Set meta=true for class-side. Category defaults to "mcp".'
     inputSchema: (self objectSchema:
       (Dictionary new
         at: 'className' put: (self propString: 'Name of the class');
