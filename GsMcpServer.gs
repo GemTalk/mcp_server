@@ -279,12 +279,27 @@ registerBrowsingTools
   classArg := self objectSchema:
     (Dictionary new at: 'className' put: (self propString: 'Name of the class'); yourself)
     required: (Array with: 'className').
+  toolRegistry name: 'describe_class'
+    description: 'Describe a class: superclass, instance variables, and selectors.'
+    inputSchema: classArg do: [:args | self tool_describe_class: args].
+  toolRegistry name: 'export_class_source'
+    description: 'Export a class as a Topaz file-in (class definition plus all methods).'
+    inputSchema: classArg do: [:args | self tool_export_class_source: args].
   toolRegistry name: 'get_class_definition'
     description: 'Return the class definition (superclass, instance/class variables, pools) as a source expression.'
     inputSchema: classArg do: [:args | self tool_get_class_definition: args].
   toolRegistry name: 'get_class_hierarchy'
     description: 'Show the superclass chain (top-down, indented) and the direct subclasses of a class.'
     inputSchema: classArg do: [:args | self tool_get_class_hierarchy: args].
+  toolRegistry name: 'get_method_source'
+    description: 'Return the source code of a method. Set meta=true for the class-side method.'
+    inputSchema: (self objectSchema:
+      (Dictionary new
+        at: 'className' put: (self propString: 'Name of the class');
+        at: 'selector' put: (self propString: 'Method selector, e.g. printOn:');
+        yourself)
+      required: (Array with: 'className' with: 'selector'))
+    do: [:args | self tool_get_method_source: args].
   toolRegistry name: 'list_methods'
     description: 'List a class instance-side and class-side method selectors, grouped by category.'
     inputSchema: classArg do: [:args | self tool_list_methods: args].
@@ -297,21 +312,6 @@ registerBrowsingTools
         yourself)
       required: (Array with: 'className' with: 'comment'))
     do: [:args | self tool_set_class_comment: args].
-  toolRegistry name: 'export_class_source'
-    description: 'Export a class as a Topaz file-in (class definition plus all methods).'
-    inputSchema: classArg do: [:args | self tool_export_class_source: args].
-  toolRegistry name: 'describe_class'
-    description: 'Describe a class: superclass, instance variables, and selectors.'
-    inputSchema: classArg do: [:args | self tool_describe_class: args].
-  toolRegistry name: 'get_method_source'
-    description: 'Return the source code of a method. Set meta=true for the class-side method.'
-    inputSchema: (self objectSchema:
-      (Dictionary new
-        at: 'className' put: (self propString: 'Name of the class');
-        at: 'selector' put: (self propString: 'Method selector, e.g. printOn:');
-        yourself)
-      required: (Array with: 'className' with: 'selector'))
-    do: [:args | self tool_get_method_source: args].
   ^self
 %
 category: 'tools'
@@ -336,21 +336,21 @@ registerListingTools
   dictArg := self objectSchema:
     (Dictionary new at: 'dictionaryName' put: (self propString: 'Name of the symbol dictionary'); yourself)
     required: (Array with: 'dictionaryName').
-  toolRegistry name: 'list_dictionaries'
-    description: 'List the symbol dictionaries in the current symbol list, in lookup order.'
-    inputSchema: noArgs do: [:args | self tool_list_dictionaries: args].
-  toolRegistry name: 'list_classes'
-    description: 'List the classes defined in a given symbol dictionary.'
-    inputSchema: dictArg do: [:args | self tool_list_classes: args].
-  toolRegistry name: 'list_dictionary_entries'
-    description: 'List every entry in a symbol dictionary, tagged as (class) or (global).'
-    inputSchema: dictArg do: [:args | self tool_list_dictionary_entries: args].
-  toolRegistry name: 'list_all_classes'
-    description: 'List every class across all dictionaries in the symbol list, tagged with its dictionary.'
-    inputSchema: noArgs do: [:args | self tool_list_all_classes: args].
   toolRegistry name: 'add_dictionary'
     description: 'Create a new symbol dictionary, append it to the user symbol list, and commit.'
     inputSchema: dictArg do: [:args | self tool_add_dictionary: args].
+  toolRegistry name: 'list_all_classes'
+    description: 'List every class across all dictionaries in the symbol list, tagged with its dictionary.'
+    inputSchema: noArgs do: [:args | self tool_list_all_classes: args].
+  toolRegistry name: 'list_classes'
+    description: 'List the classes defined in a given symbol dictionary.'
+    inputSchema: dictArg do: [:args | self tool_list_classes: args].
+  toolRegistry name: 'list_dictionaries'
+    description: 'List the symbol dictionaries in the current symbol list, in lookup order.'
+    inputSchema: noArgs do: [:args | self tool_list_dictionaries: args].
+  toolRegistry name: 'list_dictionary_entries'
+    description: 'List every entry in a symbol dictionary, tagged as (class) or (global).'
+    inputSchema: dictArg do: [:args | self tool_list_dictionary_entries: args].
   toolRegistry name: 'remove_dictionary'
     description: 'Remove a symbol dictionary from the user symbol list and commit. Destructive.'
     inputSchema: dictArg do: [:args | self tool_remove_dictionary: args].
@@ -373,6 +373,16 @@ registerMutationTools
         yourself)
       required: (Array with: 'source'))
     do: [:args | self tool_compile_class_definition: args].
+  toolRegistry name: 'compile_method'
+    description: 'Compile (add or update) a method on a class, then commit. Set meta=true for class-side. Category defaults to "mcp".'
+    inputSchema: (self objectSchema:
+      (Dictionary new
+        at: 'className' put: (self propString: 'Name of the class');
+        at: 'source' put: (self propString: 'Full method source including the selector line');
+        at: 'category' put: (self propString: 'Method category (optional, default mcp)');
+        yourself)
+      required: (Array with: 'className' with: 'source'))
+    do: [:args | self tool_compile_method: args].
   toolRegistry name: 'delete_class'
     description: 'Remove a class from its dictionary and commit. Destructive.'
     inputSchema: classArg do: [:args | self tool_delete_class: args].
@@ -386,16 +396,6 @@ registerMutationTools
         yourself)
       required: (Array with: 'className' with: 'selector'))
     do: [:args | self tool_delete_method: args].
-  toolRegistry name: 'compile_method'
-    description: 'Compile (add or update) a method on a class, then commit. Set meta=true for class-side. Category defaults to "mcp".'
-    inputSchema: (self objectSchema:
-      (Dictionary new
-        at: 'className' put: (self propString: 'Name of the class');
-        at: 'source' put: (self propString: 'Full method source including the selector line');
-        at: 'category' put: (self propString: 'Method category (optional, default mcp)');
-        yourself)
-      required: (Array with: 'className' with: 'source'))
-    do: [:args | self tool_compile_method: args].
   ^self
 %
 category: 'tools'
@@ -406,12 +406,12 @@ registerPythonTools
   codeArg := self objectSchema:
     (Dictionary new at: 'code' put: (self propString: 'Python source code'); yourself)
     required: (Array with: 'code').
-  toolRegistry name: 'eval_python'
-    description: 'Compile and execute Python code (requires the Grail Python transpiler).'
-    inputSchema: codeArg do: [:args | self tool_eval_python: args].
   toolRegistry name: 'compile_python'
     description: 'Transpile Python source to Smalltalk via Grail (requires the Grail Python transpiler).'
     inputSchema: codeArg do: [:args | self tool_compile_python: args].
+  toolRegistry name: 'eval_python'
+    description: 'Compile and execute Python code (requires the Grail Python transpiler).'
+    inputSchema: codeArg do: [:args | self tool_eval_python: args].
   ^self
 %
 category: 'tools'
@@ -425,15 +425,15 @@ registerSearchTools
   toolRegistry name: 'find_implementors'
     description: 'Find all methods that implement a given selector.'
     inputSchema: selectorArg do: [:args | self tool_find_implementors: args].
-  toolRegistry name: 'find_senders'
-    description: 'Find all methods that send a given selector.'
-    inputSchema: selectorArg do: [:args | self tool_find_senders: args].
   toolRegistry name: 'find_references_to'
     description: 'Find all methods that reference a named global (e.g. a class or shared variable).'
     inputSchema: (self objectSchema:
       (Dictionary new at: 'name' put: (self propString: 'Name of the global / class to find references to'); yourself)
       required: (Array with: 'name'))
     do: [:args | self tool_find_references_to: args].
+  toolRegistry name: 'find_senders'
+    description: 'Find all methods that send a given selector.'
+    inputSchema: selectorArg do: [:args | self tool_find_senders: args].
   toolRegistry name: 'search_method_source'
     description: 'Search method source code for a substring. Optionally scope to one dictionary (recommended; searching all dictionaries scans the kernel and can be slow). Capped at 200 hits.'
     inputSchema: (self objectSchema:
@@ -480,15 +480,9 @@ registerTestTools
       at: 'selector' put: (self propString: 'Test method selector, e.g. testFoo');
       yourself)
     required: (Array with: 'className' with: 'selector').
-  toolRegistry name: 'list_test_classes'
-    description: 'List all TestCase subclasses in the symbol list.'
-    inputSchema: noArgs do: [:args | self tool_list_test_classes: args].
-  toolRegistry name: 'run_test_class'
-    description: 'Run all test methods in a TestCase subclass and report the result.'
-    inputSchema: classArg do: [:args | self tool_run_test_class: args].
-  toolRegistry name: 'run_test_method'
-    description: 'Run a single test method and report the result.'
-    inputSchema: methodArg do: [:args | self tool_run_test_method: args].
+  toolRegistry name: 'describe_test_failure'
+    description: 'Re-run a single test method and return the failure or error detail.'
+    inputSchema: methodArg do: [:args | self tool_describe_test_failure: args].
   toolRegistry name: 'list_failing_tests'
     description: 'Run test classes (a given list, or all TestCase subclasses) and list only the failing/erroring test methods.'
     inputSchema: (self objectSchema:
@@ -499,9 +493,15 @@ registerTestTools
         yourself)
       required: #())
     do: [:args | self tool_list_failing_tests: args].
-  toolRegistry name: 'describe_test_failure'
-    description: 'Re-run a single test method and return the failure or error detail.'
-    inputSchema: methodArg do: [:args | self tool_describe_test_failure: args].
+  toolRegistry name: 'list_test_classes'
+    description: 'List all TestCase subclasses in the symbol list.'
+    inputSchema: noArgs do: [:args | self tool_list_test_classes: args].
+  toolRegistry name: 'run_test_class'
+    description: 'Run all test methods in a TestCase subclass and report the result.'
+    inputSchema: classArg do: [:args | self tool_run_test_class: args].
+  toolRegistry name: 'run_test_method'
+    description: 'Run a single test method and report the result.'
+    inputSchema: methodArg do: [:args | self tool_run_test_method: args].
   ^self
 %
 category: 'accessing'
