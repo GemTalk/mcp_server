@@ -220,12 +220,37 @@ testExportClassSource
 category: 'tools - search'
 method: GsMcpToolTest
 testFindImplementors
-  self assert: ((self mcp tool_find_implementors: (self oneArg: 'selector' value: 'runOnPort:')) includesString: 'GsMcpServer>>runOnPort:')
+  "add: has many implementors; confirm more than one distinct result comes back."
+  | impls |
+  impls := (self mcp tool_find_implementors: (self oneArg: 'selector' value: 'add:'))
+    subStrings: (String with: Character lf).
+  self assert: (impls includes: 'Array>>add:  [Adding]').
+  self assert: (impls includes: 'Set>>add:  [Adding]')
+%
+category: 'tools - search'
+method: GsMcpToolTest
+testFindImplementorsNone
+  "No implementors: formatMethodList: returns '(none)'. 'foo-bar:' is not a legal Smalltalk
+   selector, so nothing will ever implement it."
+  self assert: (self mcp tool_find_implementors: (self oneArg: 'selector' value: 'foo-bar:')) = '(none)'
 %
 category: 'tools - search'
 method: GsMcpToolTest
 testFindReferencesTo
-  self assert: ((self mcp tool_find_references_to: (self oneArg: 'name' value: 'GsMcpTool')) includesString: 'GsMcpToolRegistry')
+  "Boolean is referenced by many kernel methods (the tool does not truncate); confirm more
+   than one result via two of Boolean's own, very stable logical-operation methods."
+  | refs |
+  refs := (self mcp tool_find_references_to: (self oneArg: 'name' value: 'Boolean'))
+    subStrings: (String with: Character lf).
+  self assert: (refs includes: 'Boolean>>&  [Logical Operations]').
+  self assert: (refs includes: 'Boolean>>|  [Logical Operations]')
+%
+category: 'tools - search'
+method: GsMcpToolTest
+testFindReferencesToNone
+  "An undefined global: the handler reports 'Global not found:' and never reaches
+   formatMethodList:. 'Foo-Bar' is not a legal identifier, so it will never be defined."
+  self assert: (self mcp tool_find_references_to: (self oneArg: 'name' value: 'Foo-Bar')) = 'Global not found: Foo-Bar'
 %
 category: 'tools - search'
 method: GsMcpToolTest
