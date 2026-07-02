@@ -61,7 +61,17 @@ tearDown
 category: 'tools - session'
 method: GsMcpToolTest
 testAbort
-  self assert: ((self mcp tool_abort: Dictionary new) includesString: 'aborted')
+  "tool_abort must discard uncommitted work. Commit a fixture as a baseline, change its comment
+   without committing, abort, then confirm both the 'aborted' report and that the change reverted.
+   (tearDown removes GsMcpTestFixture.)"
+  | cls out baseline |
+  cls := self createFixtureClass.
+  baseline := cls comment.
+  cls comment: 'uncommitted - should be discarded by abort'.
+  self assert: (cls comment = 'uncommitted - should be discarded by abort').
+  out := self mcp tool_abort: Dictionary new.
+  self assert: (out includesString: 'aborted').
+  self assert: (cls comment = baseline)
 %
 category: 'tools - mutation'
 method: GsMcpToolTest
@@ -74,7 +84,17 @@ testAddDictionary
 category: 'tools - session'
 method: GsMcpToolTest
 testCommit
-  self assert: ((self mcp tool_commit: Dictionary new) includesString: 'committed')
+  "tool_commit must persist changes. Change the fixture's comment, commit via the tool, then
+   abort with the primitive (not tool_abort, so this test doesn't depend on that tool); the
+   change must survive the abort, proving it was committed. (tearDown removes GsMcpTestFixture.)"
+  | cls out changed |
+  cls := self createFixtureClass.
+  changed := 'committed change - should survive abort'.
+  cls comment: changed.
+  out := self mcp tool_commit: Dictionary new.
+  self assert: (out includesString: 'committed').
+  System abortTransaction.
+  self assert: (cls comment = changed)
 %
 category: 'tools - mutation'
 method: GsMcpToolTest
@@ -363,7 +383,19 @@ testListTestClasses
 category: 'tools - session'
 method: GsMcpToolTest
 testRefresh
-  self assert: ((self mcp tool_refresh: Dictionary new) includesString: 'refreshed')
+  "tool_refresh reveals the committed view, discarding uncommitted work (it is
+   System abortTransaction under a friendlier name). Commit a fixture baseline, change its
+   comment without committing, refresh, and confirm the committed comment is restored.
+   A true cross-session refresh (another gem commits, we see it) is an integration concern,
+   not a unit test. (tearDown removes GsMcpTestFixture.)"
+  | cls out baseline |
+  cls := self createFixtureClass.
+  baseline := cls comment.
+  cls comment: 'uncommitted - should be dropped by refresh'.
+  self assert: (cls comment = 'uncommitted - should be dropped by refresh').
+  out := self mcp tool_refresh: Dictionary new.
+  self assert: (out includesString: 'refreshed').
+  self assert: (cls comment = baseline)
 %
 category: 'tools - mutation'
 method: GsMcpToolTest
