@@ -303,15 +303,6 @@ registerBrowsingTools
   toolRegistry name: 'list_methods'
     description: 'List a class instance-side and class-side method selectors, grouped by category.'
     inputSchema: classArg do: [:args | self tool_list_methods: args].
-  toolRegistry name: 'set_class_comment'
-    description: 'Set (replace) the class comment and commit.'
-    inputSchema: (self objectSchema:
-      (Dictionary new
-        at: 'className' put: (self propString: 'Name of the class');
-        at: 'comment' put: (self propString: 'New comment text');
-        yourself)
-      required: (Array with: 'className' with: 'comment'))
-    do: [:args | self tool_set_class_comment: args].
   ^self
 %
 category: 'tools'
@@ -336,9 +327,6 @@ registerListingTools
   dictArg := self objectSchema:
     (Dictionary new at: 'dictionaryName' put: (self propString: 'Name of the symbol dictionary'); yourself)
     required: (Array with: 'dictionaryName').
-  toolRegistry name: 'add_dictionary'
-    description: 'Create a new symbol dictionary, append it to the user symbol list, and commit.'
-    inputSchema: dictArg do: [:args | self tool_add_dictionary: args].
   toolRegistry name: 'list_all_classes'
     description: 'List every class across all dictionaries in the symbol list, tagged with its dictionary.'
     inputSchema: noArgs do: [:args | self tool_list_all_classes: args].
@@ -351,19 +339,22 @@ registerListingTools
   toolRegistry name: 'list_dictionary_entries'
     description: 'List every entry in a symbol dictionary, tagged as (class) or (global).'
     inputSchema: dictArg do: [:args | self tool_list_dictionary_entries: args].
-  toolRegistry name: 'remove_dictionary'
-    description: 'Remove a symbol dictionary from the user symbol list and commit. Destructive.'
-    inputSchema: dictArg do: [:args | self tool_remove_dictionary: args].
   ^self
 %
 category: 'tools'
 method: GsMcpServer
 registerMutationTools
   "Handlers live in the 'tools - mutation' category."
-  | classArg |
+  | classArg dictArg |
   classArg := self objectSchema:
     (Dictionary new at: 'className' put: (self propString: 'Name of the class'); yourself)
     required: (Array with: 'className').
+  dictArg := self objectSchema:
+    (Dictionary new at: 'dictionaryName' put: (self propString: 'Name of the symbol dictionary'); yourself)
+    required: (Array with: 'dictionaryName').
+  toolRegistry name: 'add_dictionary'
+    description: 'Create a new symbol dictionary, append it to the user symbol list, and commit.'
+    inputSchema: dictArg do: [:args | self tool_add_dictionary: args].
   toolRegistry name: 'compile_class_definition'
     description: 'Evaluate a class-definition expression (e.g. Object subclass: ... inDictionary: ...), then commit. On a shape-changing redefinition of an existing class, by default recompiles its existing methods onto the new version (a raw redefine drops them) and reports any that fail; refused if the class has subclasses.'
     inputSchema: (self objectSchema:
@@ -396,6 +387,18 @@ registerMutationTools
         yourself)
       required: (Array with: 'className' with: 'selector'))
     do: [:args | self tool_delete_method: args].
+  toolRegistry name: 'remove_dictionary'
+    description: 'Remove a symbol dictionary from the user symbol list and commit. Destructive.'
+    inputSchema: dictArg do: [:args | self tool_remove_dictionary: args].
+  toolRegistry name: 'set_class_comment'
+    description: 'Set (replace) the class comment and commit.'
+    inputSchema: (self objectSchema:
+      (Dictionary new
+        at: 'className' put: (self propString: 'Name of the class');
+        at: 'comment' put: (self propString: 'New comment text');
+        yourself)
+      required: (Array with: 'className' with: 'comment'))
+    do: [:args | self tool_set_class_comment: args].
   ^self
 %
 category: 'tools'
@@ -579,7 +582,7 @@ tool_abort: args
   System abortTransaction.
   ^'Transaction aborted; view refreshed.'
 %
-category: 'tools - listing'
+category: 'tools - mutation'
 method: GsMcpServer
 tool_add_dictionary: args
   | name up d |
@@ -863,7 +866,7 @@ tool_refresh: args
   System abortTransaction.
   ^'View refreshed.'
 %
-category: 'tools - listing'
+category: 'tools - mutation'
 method: GsMcpServer
 tool_remove_dictionary: args
   | name dict up |
@@ -915,7 +918,7 @@ tool_search_method_source: args
   ^(hits size >= cap ifTrue: ['(truncated at ' , cap printString , ' hits)' , (String with: Character lf)] ifFalse: [''])
     , (self linesFrom: hits)
 %
-category: 'tools - browsing'
+category: 'tools - mutation'
 method: GsMcpServer
 tool_set_class_comment: args
   | cls |

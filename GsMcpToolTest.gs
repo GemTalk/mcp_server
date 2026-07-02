@@ -63,7 +63,7 @@ method: GsMcpToolTest
 testAbort
   self assert: ((self mcp tool_abort: Dictionary new) includesString: 'aborted')
 %
-category: 'tools - listing'
+category: 'tools - mutation'
 method: GsMcpToolTest
 testAddDictionary
   | out |
@@ -324,7 +324,7 @@ method: GsMcpToolTest
 testRefresh
   self assert: ((self mcp tool_refresh: Dictionary new) includesString: 'refreshed')
 %
-category: 'tools - listing'
+category: 'tools - mutation'
 method: GsMcpToolTest
 testRemoveDictionary
   | out |
@@ -352,7 +352,7 @@ testSearchMethodSource
     (Dictionary new at: 'pattern' put: 'writeSseStreamHeaders'; at: 'dictionaryName' put: 'UserGlobals'; yourself).
   self assert: (out includesString: 'serveGetStream:')
 %
-category: 'tools - browsing'
+category: 'tools - mutation'
 method: GsMcpToolTest
 testSetClassComment
   | out |
