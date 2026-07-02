@@ -255,8 +255,24 @@ testFindReferencesToNone
 category: 'tools - search'
 method: GsMcpToolTest
 testFindSenders
-  "serveGetStream: is sent from the GET route block in buildRoutes."
-  self assert: ((self mcp tool_find_senders: (self oneArg: 'selector' value: 'serveGetStream:')) includesString: 'buildRoutes')
+  "serveGetStream: is sent from the GET route block in buildRoutes. Few senders -> not capped."
+  | out |
+  out := self mcp tool_find_senders: (self oneArg: 'selector' value: 'serveGetStream:').
+  self assert: (out includesString: 'buildRoutes').
+  self deny: (out includesString: 'showing first')
+%
+category: 'tools - search'
+method: GsMcpToolTest
+testFindSendersTruncated
+  "= has well over 200 senders, so the output is capped at 200 method lines and prefixed with
+   a count note. Assert the note is present and exactly 200 method lines come back (the note
+   line and any trailing blank have no '>>', so counting '>>' lines is robust)."
+  | out lines methodLines |
+  out := self mcp tool_find_senders: (self oneArg: 'selector' value: '=').
+  self assert: (out includesString: '(showing first 200 of ').
+  lines := out subStrings: (String with: Character lf).
+  methodLines := lines select: [:l | l includesString: '>>'].
+  self assert: methodLines size = 200
 %
 category: 'tools - browsing'
 method: GsMcpToolTest
@@ -376,6 +392,20 @@ testSearchMethodSource
   out := self mcp tool_search_method_source:
     (Dictionary new at: 'pattern' put: 'writeSseStreamHeaders'; at: 'dictionaryName' put: 'UserGlobals'; yourself).
   self assert: (out includesString: 'serveGetStream:')
+%
+category: 'tools - search'
+method: GsMcpToolTest
+testSearchMethodSourceTruncated
+  "'self' appears in far more than 200 kernel methods, so scoping to Globals overflows the cap:
+   the output is prefixed with the truncation note and holds exactly 200 hit lines (the note
+   line has no '>>', so counting '>>' lines is robust)."
+  | out lines hitLines |
+  out := self mcp tool_search_method_source:
+    (Dictionary new at: 'pattern' put: 'self'; at: 'dictionaryName' put: 'Globals'; yourself).
+  self assert: (out includesString: '(truncated at 200 hits)').
+  lines := out subStrings: (String with: Character lf).
+  hitLines := lines select: [:l | l includesString: '>>'].
+  self assert: hitLines size = 200
 %
 category: 'tools - mutation'
 method: GsMcpToolTest

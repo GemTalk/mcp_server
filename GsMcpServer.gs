@@ -93,17 +93,25 @@ dictNamed: aName
 %
 category: 'private'
 method: GsMcpServer
-formatMethodList: aCollection
-  "Format GsNMethods as readable lines: Class>>selector  [category].
-   Accepts a flat collection of GsNMethod (implementorsOf:/referencesToObject:) or a
-   nested collection of collections (sendersOf:), flattening as needed."
-  | methods s |
+flattenMethods: aCollection
+  "Flatten into a flat OrderedCollection of GsNMethod. Accepts a flat collection of GsNMethod
+   (implementorsOf:/referencesToObject:) or a nested collection of collections (sendersOf:)."
+  | methods |
   methods := OrderedCollection new.
   aCollection do: [:e |
     (e isKindOf: GsNMethod)
       ifTrue: [methods add: e]
       ifFalse: [(e isKindOf: Collection) ifTrue: [
         e do: [:m | (m isKindOf: GsNMethod) ifTrue: [methods add: m]]]]].
+  ^methods
+%
+category: 'private'
+method: GsMcpServer
+formatMethodList: aCollection
+  "Format GsNMethods as readable lines: Class>>selector  [category]. Accepts flat or nested
+   collections of GsNMethod (see flattenMethods:)."
+  | methods s |
+  methods := self flattenMethods: aCollection.
   methods isEmpty ifTrue: [^'(none)'].
   s := WriteStream on: String new.
   methods do: [:m | | cat |
@@ -435,7 +443,7 @@ registerSearchTools
       required: (Array with: 'name'))
     do: [:args | self tool_find_references_to: args].
   toolRegistry name: 'find_senders'
-    description: 'Find all methods that send a given selector.'
+    description: 'Find all methods that send a given selector. Capped at 200 results (senders of a common selector can number in the thousands).'
     inputSchema: selectorArg do: [:args | self tool_find_senders: args].
   toolRegistry name: 'search_method_source'
     description: 'Search method source code for a substring. Optionally scope to one dictionary (recommended; searching all dictionaries scans the kernel and can be slow). Capped at 200 hits.'
@@ -746,7 +754,18 @@ tool_find_references_to: args
 category: 'tools - search'
 method: GsMcpServer
 tool_find_senders: args
-  ^self formatMethodList: (ClassOrganizer new sendersOf: (args at: 'selector') asSymbol)
+  "Senders of a common selector can number in the thousands, so cap the output. Unlike
+   search_method_source (which stops scanning at the cap and can't know the total), sendersOf:
+   returns the full set first, so we can report the true total in the truncation note."
+  | cap flat total |
+  cap := 200.
+  flat := self flattenMethods: (ClassOrganizer new sendersOf: (args at: 'selector') asSymbol).
+  total := flat size.
+  total > cap ifTrue: [flat := flat copyFrom: 1 to: cap].
+  ^(total > cap
+      ifTrue: ['(showing first ' , cap printString , ' of ' , total printString , ')' , (String with: Character lf)]
+      ifFalse: [''])
+    , (self formatMethodList: flat)
 %
 category: 'tools - browsing'
 method: GsMcpServer

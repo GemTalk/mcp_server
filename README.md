@@ -75,7 +75,7 @@ pointed at `http://localhost:8000/mcp`.
 | Tool | Arguments | Result |
 |------|-----------|--------|
 | `find_implementors` | `selector` | methods implementing the selector |
-| `find_senders` | `selector` | methods sending the selector |
+| `find_senders` | `selector` | methods sending the selector (capped at 200; note shows the true total) |
 | `find_references_to` | `name` | methods referencing a named global/class |
 | `search_method_source` | `pattern`, `dictionaryName?` | methods whose source contains the substring (capped at 200) |
 
