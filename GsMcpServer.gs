@@ -124,16 +124,17 @@ formatMethodList: aCollection
 category: 'private'
 method: GsMcpServer
 formatTestResult: aTestResult label: aLabel
-  "Summary line plus any failing/erroring test selectors."
+  "Summary line plus any failing/erroring tests. GemStone's TestResult reports each failure or
+   error as a descriptive String (e.g. 'SomeTest debug: #testFoo'), so emit those directly."
   | s |
   s := WriteStream on: String new.
   s nextPutAll: aLabel; nextPutAll: ': '; nextPutAll: aTestResult printString.
   (aTestResult failures isEmpty and: [aTestResult errors isEmpty]) ifFalse: [
     s nextPut: Character lf.
     aTestResult failures do: [:t |
-      s nextPutAll: '  FAIL  '; nextPutAll: t class name asString; nextPutAll: '>>'; nextPutAll: t selector asString; nextPut: Character lf].
+      s nextPutAll: '  FAIL  '; nextPutAll: t asString; nextPut: Character lf].
     aTestResult errors do: [:t |
-      s nextPutAll: '  ERROR '; nextPutAll: t class name asString; nextPutAll: '>>'; nextPutAll: t selector asString; nextPut: Character lf]].
+      s nextPutAll: '  ERROR '; nextPutAll: t asString; nextPut: Character lf]].
   ^s contents
 %
 category: 'running'
@@ -857,8 +858,8 @@ tool_list_failing_tests: args
   out := WriteStream on: String new.
   classes do: [:cls | | res |
     res := cls suite run.
-    res failures do: [:t | out nextPutAll: 'FAIL  '; nextPutAll: t class name asString; nextPutAll: '>>'; nextPutAll: t selector asString; nextPut: Character lf].
-    res errors do: [:t | out nextPutAll: 'ERROR '; nextPutAll: t class name asString; nextPutAll: '>>'; nextPutAll: t selector asString; nextPut: Character lf]].
+    res failures do: [:t | out nextPutAll: 'FAIL  '; nextPutAll: t asString; nextPut: Character lf].
+    res errors do: [:t | out nextPutAll: 'ERROR '; nextPutAll: t asString; nextPut: Character lf]].
   ^out contents isEmpty ifTrue: ['(no failing tests)'] ifFalse: [out contents]
 %
 category: 'tools - browsing'
