@@ -209,6 +209,18 @@ testCompileMethod
   self assert: (self includesCS: 'and committed' in: out).
   self assert: ((System myUserProfile objectNamed: #GsMcpTestFixture) canUnderstand: #answer)
 %
+category: 'tools - mutation'
+method: GsMcpToolTest
+testCompileMethodMeta
+  "meta=true compiles onto the class side, not the instance side."
+  | out cls |
+  cls := self createFixtureClass.
+  out := self mcp tool_compile_method:
+    (Dictionary new at: 'className' put: 'GsMcpTestFixture'; at: 'source' put: 'classAnswer ^42'; at: 'category' put: 'tmp'; at: 'meta' put: true; yourself).
+  self assert: (self includesCS: 'and committed' in: out).
+  self assert: (cls class canUnderstand: #classAnswer).
+  self deny: (cls canUnderstand: #classAnswer)
+%
 category: 'tools - python'
 method: GsMcpToolTest
 testCompilePython
@@ -235,6 +247,19 @@ testDeleteMethod
     (Dictionary new at: 'className' put: 'GsMcpTestFixture'; at: 'selector' put: 'answer'; yourself).
   self assert: (self includesCS: 'Deleted method' in: out).
   self deny: ((System myUserProfile objectNamed: #GsMcpTestFixture) canUnderstand: #answer)
+%
+category: 'tools - mutation'
+method: GsMcpToolTest
+testDeleteMethodMeta
+  "meta=true deletes a class-side method."
+  | out cls |
+  cls := self createFixtureClass.
+  cls class compileMethod: 'classAnswer ^42' dictionaries: System myUserProfile symbolList category: 'tmp'.
+  System commitTransaction.
+  out := self mcp tool_delete_method:
+    (Dictionary new at: 'className' put: 'GsMcpTestFixture'; at: 'selector' put: 'classAnswer'; at: 'meta' put: true; yourself).
+  self assert: (self includesCS: 'Deleted method' in: out).
+  self deny: (cls class canUnderstand: #classAnswer)
 %
 category: 'tools - browsing'
 method: GsMcpToolTest

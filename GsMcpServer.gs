@@ -381,6 +381,7 @@ registerMutationTools
         at: 'className' put: (self propString: 'Name of the class');
         at: 'source' put: (self propString: 'Full method source including the selector line');
         at: 'category' put: (self propString: 'Method category (optional, default mcp)');
+        at: 'meta' put: (self boolProperty: 'true for the class-side method (default false)');
         yourself)
       required: (Array with: 'className' with: 'source'))
     do: [:args | self tool_compile_method: args].
