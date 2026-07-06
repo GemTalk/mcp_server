@@ -306,6 +306,7 @@ registerBrowsingTools
       (Dictionary new
         at: 'className' put: (self propString: 'Name of the class');
         at: 'selector' put: (self propString: 'Method selector, e.g. printOn:');
+        at: 'meta' put: (self boolProperty: 'true for the class-side method (default false)');
         yourself)
       required: (Array with: 'className' with: 'selector'))
     do: [:args | self tool_get_method_source: args].
@@ -805,7 +806,7 @@ tool_get_method_source: args
     ifTrue: ['Class not found: ' , (args at: 'className')]
     ifFalse: [
       target := ((args at: 'meta' ifAbsent: [false]) == true) ifTrue: [cls class] ifFalse: [cls].
-      src := target sourceCodeAt: (args at: 'selector') asSymbol.
+      src := [target sourceCodeAt: (args at: 'selector') asSymbol] on: Error do: [:ex | nil].
       src isNil
         ifTrue: ['No such method: ' , (args at: 'className') , '>>' , (args at: 'selector')]
         ifFalse: [src]]

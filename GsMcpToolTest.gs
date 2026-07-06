@@ -389,6 +389,25 @@ testGetMethodSource
     (Dictionary new at: 'className' put: 'GsMcpTool'; at: 'selector' put: 'name'; yourself).
   self assert: (self includesCS: '^name' in: out)
 %
+category: 'tools - browsing'
+method: GsMcpToolTest
+testGetMethodSourceMeta
+  "meta=true returns the class-side method. GsMcpServer class>>new is class-side only."
+  | out |
+  out := self mcp tool_get_method_source:
+    (Dictionary new at: 'className' put: 'GsMcpServer'; at: 'selector' put: 'new'; at: 'meta' put: true; yourself).
+  self assert: (self includesCS: 'super new initialize' in: out)
+%
+category: 'tools - browsing'
+method: GsMcpToolTest
+testGetMethodSourceMissing
+  "A nonexistent selector reports 'No such method' rather than raising (sourceCodeAt: raises a
+   LookupError for an absent selector, so the handler wraps it)."
+  | out |
+  out := self mcp tool_get_method_source:
+    (Dictionary new at: 'className' put: 'GsMcpServer'; at: 'selector' put: 'noSuchSelectorXyz'; yourself).
+  self assert: (self includesCS: 'No such method' in: out)
+%
 category: 'tools - listing'
 method: GsMcpToolTest
 testListAllClasses
