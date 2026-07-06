@@ -365,7 +365,7 @@ registerMutationTools
     description: 'Create a new symbol dictionary, append it to the user symbol list, and commit.'
     inputSchema: dictArg do: [:args | self tool_add_dictionary: args].
   toolRegistry name: 'compile_class_definition'
-    description: 'Evaluate a class-definition expression (e.g. Object subclass: ... inDictionary: ...), then commit. On a shape-changing redefinition of an existing class, by default recompiles its existing methods onto the new version (a raw redefine drops them) and reports any that fail; refused if the class has subclasses.'
+    description: 'Evaluate a class-definition expression (e.g. Object subclass: ... inDictionary: ...), then commit. The source must evaluate to a class; other expressions are rejected (use execute_code for those). On a shape-changing redefinition of an existing class, by default recompiles its existing methods onto the new version (a raw redefine drops them) and reports any that fail; refused if the class has subclasses.'
     inputSchema: (self objectSchema:
       (Dictionary new
         at: 'source' put: (self propString: 'Full class-definition Smalltalk expression including the subclass: send and inDictionary:');
@@ -629,11 +629,13 @@ tool_compile_class_definition: args
       , (oldClass subclasses collect: [:c | c name asString]) asArray printString
       , '. Recompiling methods across a subclass hierarchy is unsupported; pass recompileMethods=false to redefine without preserving methods, or update the hierarchy manually.'].
   newClass := source evaluate.
+  (newClass isKindOf: Behavior) ifFalse: [
+    System abortTransaction.
+    ^'Source did not evaluate to a class (got ' , newClass class name asString
+      , '). Use execute_code to evaluate arbitrary expressions.'].
   (recompile not or: [oldClass isNil or: [oldClass == newClass]]) ifTrue: [
     System commitTransaction.
-    ^(newClass isKindOf: Behavior)
-      ifTrue: ['Compiled and committed class: ' , newClass name asString]
-      ifFalse: ['Evaluated and committed. Result: ' , newClass printString]].
+    ^'Compiled and committed class: ' , newClass name asString].
   ^self recompileMethodsFrom: oldClass into: newClass named: name
 %
 category: 'tools - mutation'

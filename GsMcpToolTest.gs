@@ -131,6 +131,17 @@ testCompileClassDefinition
 %
 category: 'tools - mutation'
 method: GsMcpToolTest
+testCompileClassDefinitionRejectsNonClass
+  "A source that evaluates to something other than a class is rejected and directed to
+   execute_code, and nothing is committed."
+  | out |
+  out := self mcp tool_compile_class_definition: (self oneArg: 'source' value: '3 + 4').
+  self assert: (self includesCS: 'did not evaluate to a class' in: out).
+  self assert: (self includesCS: 'execute_code' in: out).
+  self deny: (self includesCS: 'committed' in: out)
+%
+category: 'tools - mutation'
+method: GsMcpToolTest
 testCompileClassDefinitionPreservesMethods
   "Default recompileMethods=true: a shape change keeps the class's methods."
   | cls out |
@@ -182,6 +193,7 @@ testCompileClassDefinitionReportsRecompileFailure
   "adding ivar 'tmp' collides with withLocal's temporary -> that one fails to recompile"
   out := self mcp tool_compile_class_definition: (self oneArg: 'source' value:
     'Object subclass: ''GsMcpTestFixture'' instVarNames: #(a tmp) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()').
+  self assert: (self includesCS: 'recompiled 1/2' in: out).
   self assert: (self includesCS: 'failed' in: out).
   self assert: (self includesCS: 'withLocal' in: out).
   self deny: ((System myUserProfile objectNamed: #GsMcpTestFixture) canUnderstand: #withLocal).
