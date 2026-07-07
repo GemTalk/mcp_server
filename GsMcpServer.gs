@@ -280,7 +280,7 @@ recompileMethodsFrom: oldClass into: newClass named: classNameSymbol
           nextPut: Character lf]].
   ^s contents
 %
-category: 'tools'
+category: 'tool registration'
 method: GsMcpServer
 registerBrowsingTools
   "Handlers live in the 'tools - browsing' category."
@@ -315,7 +315,7 @@ registerBrowsingTools
     inputSchema: classArg do: [:args | self tool_list_methods: args].
   ^self
 %
-category: 'tools'
+category: 'tool registration'
 method: GsMcpServer
 registerExecutionTools
   "Handlers live in the 'tools - execution' category."
@@ -328,7 +328,7 @@ registerExecutionTools
     do: [:args | self tool_execute_code: args].
   ^self
 %
-category: 'tools'
+category: 'tool registration'
 method: GsMcpServer
 registerListingTools
   "Handlers live in the 'tools - listing' category."
@@ -351,7 +351,7 @@ registerListingTools
     inputSchema: dictArg do: [:args | self tool_list_dictionary_entries: args].
   ^self
 %
-category: 'tools'
+category: 'tool registration'
 method: GsMcpServer
 registerMutationTools
   "Handlers live in the 'tools - mutation' category."
@@ -412,7 +412,7 @@ registerMutationTools
     do: [:args | self tool_set_class_comment: args].
   ^self
 %
-category: 'tools'
+category: 'tool registration'
 method: GsMcpServer
 registerPythonTools
   "Handlers live in the 'tools - python' category. Grail may be absent (see pythonStatus)."
@@ -428,7 +428,7 @@ registerPythonTools
     inputSchema: codeArg do: [:args | self tool_eval_python: args].
   ^self
 %
-category: 'tools'
+category: 'tool registration'
 method: GsMcpServer
 registerSearchTools
   "Handlers live in the 'tools - search' category."
@@ -459,7 +459,7 @@ registerSearchTools
     do: [:args | self tool_search_method_source: args].
   ^self
 %
-category: 'tools'
+category: 'tool registration'
 method: GsMcpServer
 registerSessionTools
   "Handlers live in the 'tools - session' category."
@@ -479,7 +479,7 @@ registerSessionTools
     inputSchema: noArgs do: [:args | self tool_status: args].
   ^self
 %
-category: 'tools'
+category: 'tool registration'
 method: GsMcpServer
 registerTestTools
   "Handlers live in the 'tools - testing' category."
