@@ -7,7 +7,7 @@ Object subclass: 'GsMcpHttpConnection'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: UserGlobals
+  inDictionary: GsnativeMcpServer
   options: #()
 %
 expectvalue /Class

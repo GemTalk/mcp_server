@@ -7,7 +7,7 @@ GsTestCase subclass: 'GsMcpDispatcherTest'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: UserGlobals
+  inDictionary: GsnativeMcpServer
   options: #()
 
 %

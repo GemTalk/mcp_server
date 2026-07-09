@@ -8,7 +8,7 @@ Object subclass: 'GsMcpMockSocket'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: UserGlobals
+  inDictionary: GsnativeMcpServer
   options: #()
 
 %

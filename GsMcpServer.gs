@@ -8,7 +8,7 @@ Object subclass: 'GsMcpServer'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: UserGlobals
+  inDictionary: GsnativeMcpServer
   options: #()
 
 %

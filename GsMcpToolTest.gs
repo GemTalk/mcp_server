@@ -7,7 +7,7 @@ GsTestCase subclass: 'GsMcpToolTest'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: UserGlobals
+  inDictionary: GsnativeMcpServer
   options: #()
 
 %
