@@ -21,7 +21,7 @@ set gemstone $GS_STONE
 set username $GS_USER
 set password $GS_PASS
 login
-iferr 1 stk
+iferr 1 exit 1
 display oops
 errorcount
 output push load.out only
