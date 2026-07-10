@@ -78,7 +78,7 @@ method: GsMcpServer
 classNameFromDefinition: source
   "The class name in a 'Super subclass: ''Name'' ...' definition: the substring between the
    first two single quotes, as a Symbol. Returns nil if the source has no quoted literal
-   (e.g. a symbol-form name) — callers then treat it as a plain redefine."
+   (e.g. a symbol-form name) -- callers then treat it as a plain redefine."
   | q1 q2 |
   q1 := source indexOf: $' ifAbsent: [^nil].
   q2 := source indexOf: $' startingAt: q1 + 1 ifAbsent: [^nil].
@@ -276,7 +276,7 @@ recompileMethodsFrom: oldClass into: newClass named: classNameSymbol
     ifTrue: [s nextPutAll: '; all recompiled. Committed.']
     ifFalse: [s nextPutAll: '; ' , failures size printString , ' failed (committed anyway):'; nextPut: Character lf.
       failures do: [:f |
-        s nextPutAll: '  ' , (f at: 1) , ' ' , classNameString , '>>' , (f at: 2) asString , ' — ' , (f at: 3) printString;
+        s nextPutAll: '  ' , (f at: 1) , ' ' , classNameString , '>>' , (f at: 2) asString , ' - ' , (f at: 3) printString;
           nextPut: Character lf]].
   ^s contents
 %
@@ -711,15 +711,20 @@ tool_describe_class: args
 category: 'tools - testing'
 method: GsMcpServer
 tool_describe_test_failure: args
-  | cls sel |
+  "Re-run one test in isolation (runCase lets the exception propagate instead of being swallowed
+   by TestCase>>run) and report the failure detail. Uses ex description -- which for a
+   MessageNotUnderstood spells out the error number, the receiver's class, and the missing
+   selector -- rather than ex messageText, which is nil for a DNU."
+  | cls sel label |
   cls := self resolveClass: (args at: 'className').
-  ^cls isNil
-    ifTrue: ['Class not found: ' , (args at: 'className')]
-    ifFalse: [sel := (args at: 'selector') asSymbol.
-      [(cls selector: sel) runCase.
-       (args at: 'className') , '>>' , (args at: 'selector') , ' passed (no failure).']
-        on: Error, TestFailure
-        do: [:ex | (args at: 'className') , '>>' , (args at: 'selector') , ' — ' , ex class name asString , ': ' , (ex messageText ifNil: ['(no message)'])]]
+  cls isNil ifTrue: [^'Class not found: ' , (args at: 'className')].
+  sel := (args at: 'selector') asSymbol.
+  label := (args at: 'className') , '>>' , (args at: 'selector').
+  ^[(cls selector: sel) runCase. label , ' passed (no failure).']
+    on: Error, TestFailure
+    do: [:ex | | detail |
+      detail := [ex description] on: Error do: [:e | ex messageText ifNil: ['(no detail available)']].
+      label , ' - ' , ex class name asString , ': ' , detail asString]
 %
 category: 'tools - python'
 method: GsMcpServer
