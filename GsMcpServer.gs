@@ -125,11 +125,20 @@ category: 'private'
 method: GsMcpServer
 formatTestResult: aTestResult label: aLabel
   "Summary line plus any failing/erroring tests. GemStone's TestResult reports each failure or
-   error as a descriptive String (e.g. 'SomeTest debug: #testFoo'), so emit those directly."
-  | s |
+   error as a descriptive String (e.g. 'SomeTest debug: #testFoo'), so emit those directly.
+   Counts come from passedCount/failureCount/errorCount, NOT aTestResult printString:
+   TestResult>>printOn: varies by SUnit version and in some sends #shouldPass to those String
+   entries, raising a MessageNotUnderstood."
+  | s failed errored |
+  failed := aTestResult failureCount.
+  errored := aTestResult errorCount.
   s := WriteStream on: String new.
-  s nextPutAll: aLabel; nextPutAll: ': '; nextPutAll: aTestResult printString.
-  (aTestResult failures isEmpty and: [aTestResult errors isEmpty]) ifFalse: [
+  s nextPutAll: aLabel; nextPutAll: ': '.
+  s nextPutAll: aTestResult runCount printString; nextPutAll: ' run, '.
+  s nextPutAll: aTestResult passedCount printString; nextPutAll: ' passed, '.
+  s nextPutAll: failed printString; nextPutAll: ' failed, '.
+  s nextPutAll: errored printString; nextPutAll: ' errors'.
+  (failed = 0 and: [errored = 0]) ifFalse: [
     s nextPut: Character lf.
     aTestResult failures do: [:t |
       s nextPutAll: '  FAIL  '; nextPutAll: t asString; nextPut: Character lf].
@@ -152,7 +161,7 @@ handleConnection: aConnection
         ifAbsent: [[:rq :conn | conn writeStatus: 405 reason: 'Method Not Allowed' body: '']].
       handler value: req value: aConnection]
   ] on: Error do: [:ex |
-    self log: 'GsMcpServer handleConnection: error: ' , ex messageText.
+    self log: 'GsMcpServer handleConnection: error: ' , (ex messageText ifNil: [ex description]).
     [aConnection writeStatus: 500 reason: 'Internal Server Error'
        body: '{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Internal error"}}']
       on: Error do: [:e | nil]].

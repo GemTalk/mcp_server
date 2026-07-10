@@ -31,8 +31,9 @@ createFixtureClass
 category: 'helpers'
 method: GsMcpToolTest
 createTestSuiteFixture
-  "Create a throwaway GsTestCase subclass with a passing, a failing, and an erroring test
-   (committed). tearDown removes it."
+  "Create a throwaway GsTestCase subclass with a passing test, a failing test, and two erroring
+   tests: testErrors (a ZeroDivide) and testDnu (a doesNotUnderstand, whose missing selector the
+   describe tool should surface). Committed; tearDown removes it."
   | c |
   c := GsTestCase subclass: 'GsMcpTestSuiteFixture'
     instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #()
@@ -40,6 +41,7 @@ createTestSuiteFixture
   c compileMethod: 'testPasses self assert: true' dictionaries: System myUserProfile symbolList category: 'tests'.
   c compileMethod: 'testFails self assert: false' dictionaries: System myUserProfile symbolList category: 'tests'.
   c compileMethod: 'testErrors 1/0' dictionaries: System myUserProfile symbolList category: 'tests'.
+  c compileMethod: 'testDnu ^self zzzNoSuchSelector' dictionaries: System myUserProfile symbolList category: 'tests'.
   System commitTransaction.
   ^c
 %
@@ -300,6 +302,19 @@ testDescribeTestFailureOnError
   self assert: (self includesCS: 'testErrors' in: out).
   self assert: (self includesCS: 'ZeroDivide' in: out)
 %
+category: 'tools - testing'
+method: GsMcpToolTest
+testDescribeTestFailureNamesMissingSelector
+  "For a doesNotUnderstand, describe_test_failure surfaces the missing selector -- which lives in
+   the exception's description, not its class name and not its (nil) messageText. This exercises
+   the description path the old handler lacked, without depending on our SUnit version: a DNU's
+   description always names the selector, whether or not messageText is populated."
+  | out |
+  self createTestSuiteFixture.
+  out := self mcp tool_describe_test_failure:
+    (Dictionary new at: 'className' put: 'GsMcpTestSuiteFixture'; at: 'selector' put: 'testDnu'; yourself).
+  self assert: (self includesCS: 'zzzNoSuchSelector' in: out)
+%
 category: 'tools - python'
 method: GsMcpToolTest
 testEvalPython
@@ -438,14 +453,14 @@ method: GsMcpToolTest
 testListAllClasses
   | out |
   out := self mcp tool_list_all_classes: Dictionary new.
-  self assert: (self includesCS: 'GsMcpServer  (UserGlobals)' in: out).
+  self assert: (self includesCS: 'GsMcpServer  (GsnativeMcpServer)' in: out).
   self assert: (self includesCS: 'Boolean  (Globals)' in: out)
 %
 category: 'tools - listing'
 method: GsMcpToolTest
 testListClasses
   | classes |
-  classes := (self mcp tool_list_classes: (self oneArg: 'dictionaryName' value: 'UserGlobals'))
+  classes := (self mcp tool_list_classes: (self oneArg: 'dictionaryName' value: 'GsnativeMcpServer'))
     subStrings: (String with: Character lf).
   self assert: (classes includes: 'GsMcpServer').
   self deny: (classes includes: 'Boolean')
@@ -459,7 +474,7 @@ category: 'tools - listing'
 method: GsMcpToolTest
 testListDictionaryEntries
   | entries |
-  entries := (self mcp tool_list_dictionary_entries: (self oneArg: 'dictionaryName' value: 'UserGlobals'))
+  entries := (self mcp tool_list_dictionary_entries: (self oneArg: 'dictionaryName' value: 'GsnativeMcpServer'))
     subStrings: (String with: Character lf).
   self assert: (entries includes: 'GsMcpServer  (class)').
   self deny: (entries includes: 'Boolean  (class)')
@@ -575,7 +590,7 @@ method: GsMcpToolTest
 testSearchMethodSource
   | out |
   out := self mcp tool_search_method_source:
-    (Dictionary new at: 'pattern' put: 'writeSseStreamHeaders'; at: 'dictionaryName' put: 'UserGlobals'; yourself).
+    (Dictionary new at: 'pattern' put: 'writeSseStreamHeaders'; at: 'dictionaryName' put: 'GsnativeMcpServer'; yourself).
   self assert: (self includesCS: 'serveGetStream:' in: out)
 %
 category: 'tools - search'

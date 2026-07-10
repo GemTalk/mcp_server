@@ -73,7 +73,8 @@ handleToolsCall: params id: id
      text := tool callWith: (params at: 'arguments' ifAbsent: [Dictionary new]).
      self resultFor: id with: (self contentText: text isError: false) ]
    on: Error
-   do: [:ex | self resultFor: id with: (self contentText: ex messageText isError: true) ]
+   do: [:ex | self resultFor: id with:
+       (self contentText: ([ex description] on: Error do: [:e | ex messageText ifNil: ['(error)']]) isError: true) ]
 %
 category: 'responses'
 method: GsMcpDispatcher

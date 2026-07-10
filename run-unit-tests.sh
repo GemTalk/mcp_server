@@ -28,9 +28,13 @@ iferr 1 stk
 run
 | s |
 s := WriteStream on: String new.
-#( 'GsMcpToolTest' 'GsMcpDispatcherTest' 'GsMcpTransportTest' ) do: [:nm |
+#( 'GsMcpToolTest' 'GsMcpDispatcherTest' 'GsMcpTransportTest' ) do: [:nm | | res |
+  res := (System myUserProfile objectNamed: nm asSymbol) suite run.
   s nextPutAll: nm; nextPutAll: ': ';
-    nextPutAll: (System myUserProfile objectNamed: nm asSymbol) suite run printString;
+    nextPutAll: res runCount printString; nextPutAll: ' run, ';
+    nextPutAll: res passedCount printString; nextPutAll: ' passed, ';
+    nextPutAll: res failureCount printString; nextPutAll: ' failed, ';
+    nextPutAll: res errorCount printString; nextPutAll: ' errors';
     nextPut: Character lf].
 s contents
 %
