@@ -19,12 +19,15 @@ removeallclassmethods GsMcpToolTest
 category: 'helpers'
 method: GsMcpToolTest
 createFixtureClass
-  "Create the throwaway fixture class (committed). tearDown removes it."
+  "Create the throwaway fixture class in UserGlobals (committed), with one instance-side and one
+   class-side method so the browsing/search tools have something to report. tearDown removes it."
   | c |
   c := Object subclass: 'GsMcpTestFixture'
     instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #()
     inDictionary: UserGlobals options: #().
   c comment: 'Throwaway fixture created by GsMcpToolTest. Safe to remove.'.
+  c compileMethod: 'probeAnswer ^''probeAnswerBody''' dictionaries: System myUserProfile symbolList category: 'probing'.
+  c class compileMethod: 'probeClassSide ^''probeClassBody''' dictionaries: System myUserProfile symbolList category: 'probing'.
   System commitTransaction.
   ^c
 %
@@ -267,8 +270,9 @@ category: 'tools - browsing'
 method: GsMcpToolTest
 testDescribeClass
   | out |
-  out := self mcp tool_describe_class: (self oneArg: 'className' value: 'GsMcpTool').
-  self assert: (self includesCS: 'name=GsMcpTool' in: out).
+  self createFixtureClass.
+  out := self mcp tool_describe_class: (self oneArg: 'className' value: 'GsMcpTestFixture').
+  self assert: (self includesCS: 'name=GsMcpTestFixture' in: out).
   self assert: (self includesCS: 'superclass=Object' in: out)
 %
 category: 'tools - testing'
@@ -334,9 +338,10 @@ category: 'tools - browsing'
 method: GsMcpToolTest
 testExportClassSource
   | src |
-  src := self mcp tool_export_class_source: (self oneArg: 'className' value: 'GsMcpTool').
-  self assert: (self includesCS: 'Object subclass: ''GsMcpTool''' in: src).
-  self assert: (self includesCS: 'removeallmethods GsMcpTool' in: src)
+  self createFixtureClass.
+  src := self mcp tool_export_class_source: (self oneArg: 'className' value: 'GsMcpTestFixture').
+  self assert: (self includesCS: 'Object subclass: ''GsMcpTestFixture''' in: src).
+  self assert: (self includesCS: 'removeallmethods GsMcpTestFixture' in: src)
 %
 category: 'tools - search'
 method: GsMcpToolTest
@@ -399,9 +404,10 @@ category: 'tools - browsing'
 method: GsMcpToolTest
 testGetClassDefinition
   | def |
-  def := self mcp tool_get_class_definition: (self oneArg: 'className' value: 'GsMcpServer').
-  self assert: (self includesCS: 'Object subclass: ''GsMcpServer''' in: def).
-  self deny: (self includesCS: 'removeallmethods GsMcpServer' in: def)
+  self createFixtureClass.
+  def := self mcp tool_get_class_definition: (self oneArg: 'className' value: 'GsMcpTestFixture').
+  self assert: (self includesCS: 'Object subclass: ''GsMcpTestFixture''' in: def).
+  self deny: (self includesCS: 'removeallmethods GsMcpTestFixture' in: def)
 %
 category: 'tools - browsing'
 method: GsMcpToolTest
@@ -425,18 +431,20 @@ category: 'tools - browsing'
 method: GsMcpToolTest
 testGetMethodSource
   | out |
+  self createFixtureClass.
   out := self mcp tool_get_method_source:
-    (Dictionary new at: 'className' put: 'GsMcpTool'; at: 'selector' put: 'name'; yourself).
-  self assert: (self includesCS: '^name' in: out)
+    (Dictionary new at: 'className' put: 'GsMcpTestFixture'; at: 'selector' put: 'probeAnswer'; yourself).
+  self assert: (self includesCS: 'probeAnswerBody' in: out)
 %
 category: 'tools - browsing'
 method: GsMcpToolTest
 testGetMethodSourceMeta
-  "meta=true returns the class-side method. GsMcpServer class>>new is class-side only."
+  "meta=true returns the class-side method (probeClassSide is class-side only)."
   | out |
+  self createFixtureClass.
   out := self mcp tool_get_method_source:
-    (Dictionary new at: 'className' put: 'GsMcpServer'; at: 'selector' put: 'new'; at: 'meta' put: true; yourself).
-  self assert: (self includesCS: 'super new initialize' in: out)
+    (Dictionary new at: 'className' put: 'GsMcpTestFixture'; at: 'selector' put: 'probeClassSide'; at: 'meta' put: true; yourself).
+  self assert: (self includesCS: 'probeClassBody' in: out)
 %
 category: 'tools - browsing'
 method: GsMcpToolTest
@@ -444,25 +452,28 @@ testGetMethodSourceMissing
   "A nonexistent selector reports 'No such method' rather than raising (sourceCodeAt: raises a
    LookupError for an absent selector, so the handler wraps it)."
   | out |
+  self createFixtureClass.
   out := self mcp tool_get_method_source:
-    (Dictionary new at: 'className' put: 'GsMcpServer'; at: 'selector' put: 'noSuchSelectorXyz'; yourself).
+    (Dictionary new at: 'className' put: 'GsMcpTestFixture'; at: 'selector' put: 'noSuchSelectorXyz'; yourself).
   self assert: (self includesCS: 'No such method' in: out)
 %
 category: 'tools - listing'
 method: GsMcpToolTest
 testListAllClasses
   | out |
+  self createFixtureClass.
   out := self mcp tool_list_all_classes: Dictionary new.
-  self assert: (self includesCS: 'GsMcpServer  (GsnativeMcpServer)' in: out).
+  self assert: (self includesCS: 'GsMcpTestFixture  (UserGlobals)' in: out).
   self assert: (self includesCS: 'Boolean  (Globals)' in: out)
 %
 category: 'tools - listing'
 method: GsMcpToolTest
 testListClasses
   | classes |
-  classes := (self mcp tool_list_classes: (self oneArg: 'dictionaryName' value: 'GsnativeMcpServer'))
+  self createFixtureClass.
+  classes := (self mcp tool_list_classes: (self oneArg: 'dictionaryName' value: 'UserGlobals'))
     subStrings: (String with: Character lf).
-  self assert: (classes includes: 'GsMcpServer').
+  self assert: (classes includes: 'GsMcpTestFixture').
   self deny: (classes includes: 'Boolean')
 %
 category: 'tools - listing'
@@ -474,9 +485,10 @@ category: 'tools - listing'
 method: GsMcpToolTest
 testListDictionaryEntries
   | entries |
-  entries := (self mcp tool_list_dictionary_entries: (self oneArg: 'dictionaryName' value: 'GsnativeMcpServer'))
+  self createFixtureClass.
+  entries := (self mcp tool_list_dictionary_entries: (self oneArg: 'dictionaryName' value: 'UserGlobals'))
     subStrings: (String with: Character lf).
-  self assert: (entries includes: 'GsMcpServer  (class)').
+  self assert: (entries includes: 'GsMcpTestFixture  (class)').
   self deny: (entries includes: 'Boolean  (class)')
 %
 category: 'tools - testing'
@@ -502,12 +514,12 @@ testListFailingTestsNone
 category: 'tools - browsing'
 method: GsMcpToolTest
 testListMethods
-  "Check for an uncommon selector, and ones for both class-side and instance-side."
+  "list_methods shows both instance-side and class-side selectors."
   | methods |
-  methods := self mcp tool_list_methods: (self oneArg: 'className' value: 'GsMcpServer').
-  self assert: (self includesCS: 'runOnPort:' in: methods).
-  self assert: (self includesCS: 'new' in: methods).
-  self assert: (self includesCS: 'initialize' in: methods)
+  self createFixtureClass.
+  methods := self mcp tool_list_methods: (self oneArg: 'className' value: 'GsMcpTestFixture').
+  self assert: (self includesCS: 'probeAnswer' in: methods).
+  self assert: (self includesCS: 'probeClassSide' in: methods)
 %
 category: 'tools - testing'
 method: GsMcpToolTest
@@ -589,9 +601,10 @@ category: 'tools - search'
 method: GsMcpToolTest
 testSearchMethodSource
   | out |
+  self createFixtureClass.
   out := self mcp tool_search_method_source:
-    (Dictionary new at: 'pattern' put: 'writeSseStreamHeaders'; at: 'dictionaryName' put: 'GsnativeMcpServer'; yourself).
-  self assert: (self includesCS: 'serveGetStream:' in: out)
+    (Dictionary new at: 'pattern' put: 'probeAnswerBody'; at: 'dictionaryName' put: 'UserGlobals'; yourself).
+  self assert: (self includesCS: 'GsMcpTestFixture>>probeAnswer' in: out)
 %
 category: 'tools - search'
 method: GsMcpToolTest
