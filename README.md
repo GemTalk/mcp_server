@@ -32,12 +32,11 @@ pointed at `http://localhost:8000/mcp`.
 
 ## Tools (33)
 
-**Core / execution**
+**Execution**
 
 | Tool | Arguments | Result |
 |------|-----------|--------|
 | `execute_code` | `code` | `printString` of evaluating the Smalltalk source |
-| `status` | – | session user, id, stone, uncommitted-changes flag |
 
 **Session / transaction**
 
@@ -46,64 +45,65 @@ pointed at `http://localhost:8000/mcp`.
 | `abort` | – | abort the transaction, refresh the view |
 | `commit` | – | commit the transaction |
 | `refresh` | – | refresh the view to see other sessions' commits |
+| `status` | – | session user, id, stone, uncommitted-changes flag |
 
 **Listing**
 
 | Tool | Arguments | Result |
 |------|-----------|--------|
-| `list_dictionaries` | – | symbol dictionaries in lookup order |
-| `list_classes` | `dictionaryName` | classes in a dictionary |
-| `list_dictionary_entries` | `dictionaryName` | every entry, tagged (class)/(global) |
 | `list_all_classes` | – | every class across all dictionaries |
-| `add_dictionary` | `dictionaryName` | create + append a dictionary, commit |
-| `remove_dictionary` | `dictionaryName` | remove a dictionary, commit *(destructive)* |
+| `list_classes` | `dictionaryName` | classes in a dictionary |
+| `list_dictionaries` | – | symbol dictionaries in lookup order |
+| `list_dictionary_entries` | `dictionaryName` | every entry, tagged (class)/(global) |
 
 **Browsing**
 
 | Tool | Arguments | Result |
 |------|-----------|--------|
 | `describe_class` | `className` | superclass, instance vars, selectors |
+| `export_class_source` | `className` | full Topaz file-in (definition + methods) |
 | `get_class_definition` | `className` | class-definition source expression |
 | `get_class_hierarchy` | `className` | superclass chain + direct subclasses |
-| `list_methods` | `className` | instance + class selectors grouped by category |
 | `get_method_source` | `className`, `selector`, `meta?` | method source |
-| `set_class_comment` | `className`, `comment` | set the class comment, commit |
-| `export_class_source` | `className` | full Topaz file-in (definition + methods) |
+| `list_methods` | `className` | instance + class selectors grouped by category |
 
 **Search**
 
 | Tool | Arguments | Result |
 |------|-----------|--------|
 | `find_implementors` | `selector` | methods implementing the selector |
-| `find_senders` | `selector` | methods sending the selector (capped at 200; note shows the true total) |
 | `find_references_to` | `name` | methods referencing a named global/class |
+| `find_senders` | `selector` | methods sending the selector (capped at 200; note shows the true total) |
 | `search_method_source` | `pattern`, `dictionaryName?` | methods whose source contains the substring (capped at 200) |
 
 **Mutation**
 
 | Tool | Arguments | Result |
 |------|-----------|--------|
+| `add_dictionary` | `dictionaryName` | create + append a dictionary, commit |
+| `compile_class_definition` | `source`, `recompileMethods?` | evaluate a class-definition expression, commit; the source must evaluate to a class (other expressions are rejected — use `execute_code`); on a shape change, by default recompiles the class's methods onto the new version and reports any that fail (refused if it has subclasses) |
 | `compile_method` | `className`, `source`, `category?`, `meta?` | compile a method, commit |
-| `compile_class_definition` | `source`, `recompileMethods?` | evaluate a class definition, commit; on a shape change, by default recompiles the class's methods onto the new version and reports any that fail (refused if it has subclasses) |
 | `delete_class` | `className` | remove a class, commit *(destructive)* |
 | `delete_method` | `className`, `selector`, `meta?` | remove a method, commit *(destructive)* |
+| `remove_dictionary` | `dictionaryName` | remove a dictionary, commit *(destructive)* |
+| `set_class_comment` | `className`, `comment` | set the class comment, commit |
 
 **Testing (SUnit)**
 
 | Tool | Arguments | Result |
 |------|-----------|--------|
+| `describe_test_failure` | `className`, `selector` | re-run one test in isolation, return the failure/error detail (exception class + `description`) |
+| `list_failing_tests` | `classNames?` | failing/erroring methods (given classes, or all) |
 | `list_test_classes` | – | all `TestCase` subclasses |
 | `run_test_class` | `className` | run a test class, summary + failures |
 | `run_test_method` | `className`, `selector` | run one test method |
-| `list_failing_tests` | `classNames?` | failing/erroring methods (given classes, or all) |
-| `describe_test_failure` | `className`, `selector` | re-run one test, return the failure/error detail |
 
 **Python (stubs — require the Grail transpiler)**
 
 | Tool | Arguments | Result |
 |------|-----------|--------|
-| `eval_python` | `code` | reports Grail unavailable until it is installed |
-| `compile_python` | `code` | reports Grail unavailable until it is installed |
+| `compile_python` | `code` | stub: reports native Python delegation not yet implemented (or that Grail is absent) |
+| `eval_python` | `code` | stub: reports native Python delegation not yet implemented (or that Grail is absent) |
 
 ## Architecture
 
@@ -145,9 +145,11 @@ Two complementary suites:
 
 **Unit tests (in-image, no socket)** — `./run-unit-tests.sh` logs in via topaz and runs three
 `GsTestCase` suites against the server's logic directly (milliseconds, no network):
-- `GsMcpToolTest` — every `tool_*` handler called directly (one+ test per tool, grouped by
-  the `tools - *` categories). Mutating-tool tests create a throwaway, commented fixture
-  (`GsMcpTestFixture` / `GsMcpTestDict`) and clean it up in `tearDown`.
+- `GsMcpToolTest` — every `tool_*` handler called directly (grouped by the `tools - *`
+  categories). Tests operate on throwaway fixtures rather than on the production classes: a
+  plain `GsMcpTestFixture` and a `GsMcpTestSuiteFixture` (a `GsTestCase` subclass with passing/
+  failing/erroring tests, for the test-runner tools), both classes in `UserGlobals`, plus a
+  `GsMcpTestDict` symbol dictionary of its own. All are cleaned up in `tearDown`.
 - `GsMcpDispatcherTest` — JSON-RPC routing/envelope: initialize, tools/list (33, alphabetical),
   success + error wrapping, `-32601`/`-32602`/`-32700`, notifications → nil.
 - `GsMcpTransportTest` — `handleConnection:` driven over a **`GsMcpMockSocket`** wrapped in a
@@ -155,7 +157,7 @@ Two complementary suites:
   GET→SSE, DELETE→200, unknown verb→405, malformed body, chunked delivery, EOF.
 
 Run a single suite while a server is up via the `run_test_class` tool (e.g. `run_test_class
-GsMcpToolTest`), or all three via `./run-unit-tests.sh` (exit 0 = all passed). 51 tests total.
+GsMcpToolTest`), or all three via `./run-unit-tests.sh` (exit 0 = all passed). 69 tests total.
 
 > Note: a test helper must never reuse a SUnit framework selector (`run:`, `setUp`, …) — doing
 > so shadows the framework method and silently breaks `suite run`. The transport helper is named
@@ -188,8 +190,10 @@ stays consistent across concurrent handlers.
 
 ## Status
 
-v1: Streamable HTTP transport (POST→JSON, GET→SSE stream, DELETE), 5 core tools,
-per-connection forking + read timeout. Verified end-to-end with curl: initialize /
-tools/list / tools/call / notifications, the SSE GET stream, DELETE, and concurrent +
-stalled-connection load. Future work: full ~31-tool parity with Jasper, server-initiated
-messages pushed over the SSE stream, session ids, auth.
+Streamable HTTP transport (POST→JSON, GET→SSE stream, DELETE), 33 tools across eight
+categories (execution, session, listing, browsing, search, mutation, testing, python),
+per-connection forking + read timeout, mutex-serialized dispatch. Verified end-to-end with
+curl (initialize / tools/list / tools/call / notifications, the SSE GET stream, DELETE, and
+concurrent + stalled-connection load) and by 69 in-image unit tests. Future work:
+server-initiated messages pushed over the SSE stream, session ids, auth, and real Python
+(Grail) delegation.
