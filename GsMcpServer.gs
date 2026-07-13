@@ -75,6 +75,15 @@ buildRoutes
 %
 category: 'private'
 method: GsMcpServer
+capResult: aString
+  "Cap an arbitrary tool result at 50000 characters so a huge value can't swamp the
+   client. Shared by execute_code, eval_python, and compile_python."
+  ^aString size > 50000
+    ifTrue: [(aString copyFrom: 1 to: 50000) , ' ...[truncated]']
+    ifFalse: [aString]
+%
+category: 'private'
+method: GsMcpServer
 classNameFromDefinition: source
   "The class name in a 'Super subclass: ''Name'' ...' definition: the substring between the
    first two single quotes, as a Symbol. Returns nil if the source has no quoted literal
@@ -243,14 +252,6 @@ propString: aDescription
   d at: 'type' put: 'string'.
   d at: 'description' put: aDescription.
   ^d
-%
-category: 'private'
-method: GsMcpServer
-pythonStatus
-  "Python tools require the Grail transpiler, which may not be installed."
-  ^(System myUserProfile objectNamed: #Grail) isNil
-    ifTrue: ['Python (Grail) is not installed in this image; eval_python/compile_python are unavailable.']
-    ifFalse: ['Grail is present, but native Python delegation is not yet implemented in this server.']
 %
 category: 'private'
 method: GsMcpServer
@@ -424,16 +425,18 @@ registerMutationTools
 category: 'tool registration'
 method: GsMcpServer
 registerPythonTools
-  "Handlers live in the 'tools - python' category. Grail may be absent (see pythonStatus)."
+  "Handlers live in the 'tools - python' category. These require an image with
+   GemStone-Python (Grail/ModuleAst) whose parser raises exceptions on syntax errors
+   rather than crashing the gem; no capability check is performed."
   | codeArg |
   codeArg := self objectSchema:
     (Dictionary new at: 'code' put: (self propString: 'Python source code'); yourself)
     required: (Array with: 'code').
   toolRegistry name: 'compile_python'
-    description: 'Transpile Python source to Smalltalk via Grail (requires the Grail Python transpiler).'
+    description: 'Transpile Python source to Smalltalk via Grail (ModuleAst) and return the generated Smalltalk source. Requires GemStone-Python in the image.'
     inputSchema: codeArg do: [:args | self tool_compile_python: args].
   toolRegistry name: 'eval_python'
-    description: 'Compile and execute Python code (requires the Grail Python transpiler).'
+    description: 'Evaluate Python source via Grail (ModuleAst) and return the printString of the result. Requires GemStone-Python in the image.'
     inputSchema: codeArg do: [:args | self tool_eval_python: args].
   ^self
 %
@@ -669,7 +672,9 @@ tool_compile_method: args
 category: 'tools - python'
 method: GsMcpServer
 tool_compile_python: args
-  ^self pythonStatus
+  "Transpile Python source to Smalltalk via Grail and answer the generated source.
+   See tool_eval_python: for the image requirements and error-handling contract."
+  ^self capResult: (ModuleAst parseSource: (args at: 'code')) smalltalkSource
 %
 category: 'tools - mutation'
 method: GsMcpServer
@@ -738,16 +743,18 @@ tool_describe_test_failure: args
 category: 'tools - python'
 method: GsMcpServer
 tool_eval_python: args
-  ^self pythonStatus
+  "Evaluate Python source via Grail and answer the printString of the result.
+   No ModuleAst capability check and no own error handling: errors propagate to
+   GsMcpDispatcher>>handleToolsCall:id: (as with execute_code). Requires an image
+   with GemStone-Python (ModuleAst) whose parser raises on syntax errors rather
+   than crashing the gem."
+  ^self capResult: (ModuleAst evaluateSource: (args at: 'code')) printString
 %
 category: 'tools - execution'
 method: GsMcpServer
 tool_execute_code: args
   "Code is wrapped by GsMcpDispatcher>>handleToolsCall:id: to catch errors"
-  | result |
-  result := (args at: 'code') evaluate printString.
-  result size > 50000 ifTrue: [result := (result copyFrom: 1 to: 50000) , ' ...[truncated]'].
-  ^result
+  ^self capResult: (args at: 'code') evaluate printString
 %
 category: 'tools - browsing'
 method: GsMcpServer

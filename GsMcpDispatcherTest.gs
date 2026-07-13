@@ -80,6 +80,19 @@ testToolsCallWrapsErrorsAsIsError
 %
 category: 'tests'
 method: GsMcpDispatcherTest
+testToolsCallWrapsPythonErrorAsIsError
+  "A Python *semantic* error (undefined name) reaches Grail and raises a catchable
+   CompileError, which the dispatcher wraps as isError -- confirming the python tools
+   have no own error handling and rely on handleToolsCall:id:. Uses a semantic error,
+   never a syntax error (which crashes the gem until Grail is fixed). Requires
+   GemStone-Python (ModuleAst) in the image."
+  | result |
+  result := (self dispatch: (self toolCall: 'eval_python' args: (Dictionary new at: 'code' put: 'undefined_xyz'; yourself))) at: 'result'.
+  self assert: (result at: 'isError').
+  self assert: (((result at: 'content') first at: 'text') includesString: 'undefined')
+%
+category: 'tests'
+method: GsMcpDispatcherTest
 testToolsListIsAlphabeticalAnd33
   | tools names |
   tools := ((self dispatch: (self request: 'tools/list' params: nil)) at: 'result') at: 'tools'.

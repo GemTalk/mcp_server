@@ -98,12 +98,19 @@ pointed at `http://localhost:8000/mcp`.
 | `run_test_class` | `className` | run a test class, summary + failures |
 | `run_test_method` | `className`, `selector` | run one test method |
 
-**Python (stubs — require the Grail transpiler)**
+**Python (require GemStone-Python / Grail in the image)**
 
 | Tool | Arguments | Result |
 |------|-----------|--------|
-| `compile_python` | `code` | stub: reports native Python delegation not yet implemented (or that Grail is absent) |
-| `eval_python` | `code` | stub: reports native Python delegation not yet implemented (or that Grail is absent) |
+| `compile_python` | `code` | transpile Python source to Smalltalk via Grail (`ModuleAst`), return the generated source |
+| `eval_python` | `code` | evaluate Python source via Grail (`ModuleAst`), return the `printString` of the result |
+
+> **Requirement:** these two tools call Grail's `ModuleAst` directly with no capability
+> check. They only work in an image that has GemStone-Python installed **and** where Grail
+> raises an exception on a Python *syntax* error rather than crashing the gem (older Grail
+> parsers crash the session on malformed input; a Grail fix for this is in progress). Valid
+> Python and *semantic* errors (e.g. an undefined name) are already handled cleanly — the
+> latter surface as a normal `isError` result.
 
 ## Architecture
 
@@ -151,13 +158,14 @@ Two complementary suites:
   failing/erroring tests, for the test-runner tools), both classes in `UserGlobals`, plus a
   `GsMcpTestDict` symbol dictionary of its own. All are cleaned up in `tearDown`.
 - `GsMcpDispatcherTest` — JSON-RPC routing/envelope: initialize, tools/list (33, alphabetical),
-  success + error wrapping, `-32601`/`-32602`/`-32700`, notifications → nil.
+  success + error wrapping (including a Python semantic error → `isError`), `-32601`/`-32602`/`-32700`,
+  notifications → nil.
 - `GsMcpTransportTest` — `handleConnection:` driven over a **`GsMcpMockSocket`** wrapped in a
   real `GsMcpHttpConnection`, so the genuine HTTP parsing/writing runs with no TCP: POST→JSON,
   GET→SSE, DELETE→200, unknown verb→405, malformed body, chunked delivery, EOF.
 
 Run a single suite while a server is up via the `run_test_class` tool (e.g. `run_test_class
-GsMcpToolTest`), or all three via `./run-unit-tests.sh` (exit 0 = all passed). 69 tests total.
+GsMcpToolTest`), or all three via `./run-unit-tests.sh` (exit 0 = all passed). 71 tests total.
 
 > Note: a test helper must never reuse a SUnit framework selector (`run:`, `setUp`, …) — doing
 > so shadows the framework method and silently breaks `suite run`. The transport helper is named
@@ -194,6 +202,7 @@ Streamable HTTP transport (POST→JSON, GET→SSE stream, DELETE), 33 tools acro
 categories (execution, session, listing, browsing, search, mutation, testing, python),
 per-connection forking + read timeout, mutex-serialized dispatch. Verified end-to-end with
 curl (initialize / tools/list / tools/call / notifications, the SSE GET stream, DELETE, and
-concurrent + stalled-connection load) and by 69 in-image unit tests. Future work:
-server-initiated messages pushed over the SSE stream, session ids, auth, and real Python
-(Grail) delegation.
+concurrent + stalled-connection load) and by 71 in-image unit tests. The Python tools
+(`eval_python` / `compile_python`) delegate to Grail's `ModuleAst` and require a Grail-equipped
+image (see the Python note above). Future work: server-initiated messages pushed over the SSE
+stream, session ids, and auth.
