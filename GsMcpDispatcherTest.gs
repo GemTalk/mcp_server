@@ -15,6 +15,16 @@ GsTestCase subclass: 'GsMcpDispatcherTest'
 removeallmethods GsMcpDispatcherTest
 removeallclassmethods GsMcpDispatcherTest
 ! ------------------- Class methods for GsMcpDispatcherTest
+category: 'enablement'
+classmethod: GsMcpDispatcherTest
+pythonSyntaxErrorsThrow
+  "Whether Grail raises a catchable exception on a Python *syntax* error instead of crashing
+   the gem. Currently false: `def (:` and similar malformed input crash the session below the
+   Smalltalk exception layer (a Grail parser bug; a fix is in progress). Flip to true once
+   Grail is fixed to activate testToolsCallWrapsPythonSyntaxErrorAsIsError.
+   WARNING: returning true while the bug remains will crash the server gem when that test runs."
+  ^false
+%
 ! ------------------- Instance methods for GsMcpDispatcherTest
 category: 'helpers'
 method: GsMcpDispatcherTest
@@ -86,10 +96,44 @@ testToolsCallWrapsPythonErrorAsIsError
    have no own error handling and rely on handleToolsCall:id:. Uses a semantic error,
    never a syntax error (which crashes the gem until Grail is fixed). Requires
    GemStone-Python (ModuleAst) in the image."
-  | result |
+  | result text |
   result := (self dispatch: (self toolCall: 'eval_python' args: (Dictionary new at: 'code' put: 'undefined_xyz'; yourself))) at: 'result'.
   self assert: (result at: 'isError').
-  self assert: (((result at: 'content') first at: 'text') includesString: 'undefined')
+  text := (result at: 'content') first at: 'text'.
+  self assert: (text includesString: 'CompileError').
+  self assert: (text includesString: 'undefined_xyz')
+%
+category: 'tests'
+method: GsMcpDispatcherTest
+testToolsCallWrapsPythonImproperOperationAsIsError
+  "A different Python error path: print() writes to GsFile stdout, whose transient
+   session state the dispatcher's `System abortTransaction` (handleToolsCall:id:) has
+   just discarded, so it raises ImproperOperation (error 2364) -- not a CompileError.
+   The dispatcher wraps that as isError too. This confirms the python tools surface a
+   non-CompileError exception as well. The abort happens through the real dispatch path,
+   so the transient-state loss is triggered deterministically. Requires GemStone-Python
+   (ModuleAst) in the image."
+  | result text |
+  result := (self dispatch: (self toolCall: 'eval_python' args: (Dictionary new at: 'code' put: 'print(6 * 7)'; yourself))) at: 'result'.
+  self assert: (result at: 'isError').
+  text := (result at: 'content') first at: 'text'.
+  self assert: (text includesString: 'ImproperOperation')
+%
+category: 'tests'
+method: GsMcpDispatcherTest
+testToolsCallWrapsPythonSyntaxErrorAsIsError
+  "Tripwire for the day Grail stops crashing on malformed Python. Guarded by
+   GsMcpDispatcherTest class>>pythonSyntaxErrorsThrow (currently false), so today it no-ops:
+   a Python *syntax* error still crashes the gem and must never be sent through a live suite.
+   Once Grail raises instead, flip pythonSyntaxErrorsThrow to true and this verifies a syntax
+   error surfaces as isError, like the CompileError and ImproperOperation paths. When it first
+   runs for real, tighten the text check to whatever exception a fixed Grail actually raises."
+  | result text |
+  self class pythonSyntaxErrorsThrow ifFalse: [^self].
+  result := (self dispatch: (self toolCall: 'eval_python' args: (Dictionary new at: 'code' put: 'def (:'; yourself))) at: 'result'.
+  self assert: (result at: 'isError').
+  text := (result at: 'content') first at: 'text'.
+  self assert: text isEmpty not
 %
 category: 'tests'
 method: GsMcpDispatcherTest
