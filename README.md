@@ -158,18 +158,19 @@ Two complementary suites:
   failing/erroring tests, for the test-runner tools), both classes in `UserGlobals`, plus a
   `GsMcpTestDict` symbol dictionary of its own. All are cleaned up in `tearDown`.
 - `GsMcpDispatcherTest` — JSON-RPC routing/envelope: initialize, tools/list (33, alphabetical),
-  success + error wrapping (including two Python error paths → `isError`: a semantic error →
-  `CompileError`, and `print` → `ImproperOperation`), `-32601`/`-32602`/`-32700`, notifications → nil.
-  Also carries a guarded tripwire test for the pending Grail fix — `testToolsCallWrapsPythonSyntaxErrorAsIsError`
-  no-ops until `GsMcpDispatcherTest class>>pythonSyntaxErrorsThrow` is flipped to true (a Python
-  syntax error still crashes the gem today, so it must not run in a live suite yet).
+  success + error wrapping (a Python semantic error → `CompileError` → `isError`), a pin that
+  Python `print` now succeeds → `None`, `-32601`/`-32602`/`-32700`, notifications → nil. Plus two
+  guarded tripwires for the pending Grail fix — `testToolsCallWrapsPythonSyntaxErrorAsIsError` and
+  `testToolsCallWrapsPythonRuntimeErrorAsIsError` no-op until their `…Throw` class-side switches
+  (`pythonSyntaxErrorsThrow` / `pythonRuntimeErrorsThrow`) are flipped to true (a Python syntax
+  error *and* a runtime exception both still crash the gem today, so neither may run live yet).
 - `GsMcpTransportTest` — `handleConnection:` driven over a **`GsMcpMockSocket`** wrapped in a
   real `GsMcpHttpConnection`, so the genuine HTTP parsing/writing runs with no TCP: POST→JSON,
   GET→SSE, DELETE→200, unknown verb→405, malformed body, chunked delivery, EOF.
 
 Run a single suite while a server is up via the `run_test_class` tool (e.g. `run_test_class
-GsMcpToolTest`), or all three via `./run-unit-tests.sh` (exit 0 = all passed). 73 tests total
-(one, the guarded syntax-error tripwire above, no-ops until Grail is fixed).
+GsMcpToolTest`), or all three via `./run-unit-tests.sh` (exit 0 = all passed). 74 tests total
+(two, the guarded syntax-error and runtime-error tripwires above, no-op until Grail is fixed).
 
 > Note: a test helper must never reuse a SUnit framework selector (`run:`, `setUp`, …) — doing
 > so shadows the framework method and silently breaks `suite run`. The transport helper is named
@@ -206,7 +207,7 @@ Streamable HTTP transport (POST→JSON, GET→SSE stream, DELETE), 33 tools acro
 categories (execution, session, listing, browsing, search, mutation, testing, python),
 per-connection forking + read timeout, mutex-serialized dispatch. Verified end-to-end with
 curl (initialize / tools/list / tools/call / notifications, the SSE GET stream, DELETE, and
-concurrent + stalled-connection load) and by 73 in-image unit tests. The Python tools
+concurrent + stalled-connection load) and by 74 in-image unit tests. The Python tools
 (`eval_python` / `compile_python`) delegate to Grail's `ModuleAst` and require a Grail-equipped
 image (see the Python note above). Future work: server-initiated messages pushed over the SSE
 stream, session ids, and auth.
