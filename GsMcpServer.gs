@@ -77,7 +77,7 @@ category: 'private'
 method: GsMcpServer
 capResult: aString
   "Cap an arbitrary tool result at 50000 characters so a huge value can't swamp the
-   client. Shared by execute_code, eval_python, and compile_python."
+   client. Shared by execute_code (and by eval_python/compile_python in GsMcpServerWithGrail)."
   ^aString size > 50000
     ifTrue: [(aString copyFrom: 1 to: 50000) , ' ...[truncated]']
     ifFalse: [aString]
@@ -188,7 +188,6 @@ initialize
   self registerExecutionTools.
   self registerListingTools.
   self registerMutationTools.
-  self registerPythonTools.
   self registerSearchTools.
   self registerSessionTools.
   self registerTestTools.
@@ -424,24 +423,6 @@ registerMutationTools
 %
 category: 'tool registration'
 method: GsMcpServer
-registerPythonTools
-  "Handlers live in the 'tools - python' category. These require an image with
-   GemStone-Python (Grail/ModuleAst) whose parser raises exceptions on syntax errors
-   rather than crashing the gem; no capability check is performed."
-  | codeArg |
-  codeArg := self objectSchema:
-    (Dictionary new at: 'code' put: (self propString: 'Python source code'); yourself)
-    required: (Array with: 'code').
-  toolRegistry name: 'compile_python'
-    description: 'Transpile Python source to Smalltalk via Grail (ModuleAst) and return the generated Smalltalk source. Requires GemStone-Python in the image.'
-    inputSchema: codeArg do: [:args | self tool_compile_python: args].
-  toolRegistry name: 'eval_python'
-    description: 'Evaluate Python source via Grail (ModuleAst) and return the printString of the result. Requires GemStone-Python in the image.'
-    inputSchema: codeArg do: [:args | self tool_eval_python: args].
-  ^self
-%
-category: 'tool registration'
-method: GsMcpServer
 registerSearchTools
   "Handlers live in the 'tools - search' category."
   | selectorArg |
@@ -669,13 +650,6 @@ tool_compile_method: args
         ifTrue: [System commitTransaction. 'Compiled ' , (args at: 'className') , ' and committed.']
         ifFalse: [System abortTransaction. 'Compile errors: ' , errs printString]]
 %
-category: 'tools - python'
-method: GsMcpServer
-tool_compile_python: args
-  "Transpile Python source to Smalltalk via Grail and answer the generated source.
-   See tool_eval_python: for the image requirements and error-handling contract."
-  ^self capResult: (ModuleAst parseSource: (args at: 'code')) smalltalkSource
-%
 category: 'tools - mutation'
 method: GsMcpServer
 tool_delete_class: args
@@ -739,16 +713,6 @@ tool_describe_test_failure: args
     do: [:ex | | detail |
       detail := [ex description] on: Error do: [:e | ex messageText ifNil: ['(no detail available)']].
       label , ' - ' , ex class name asString , ': ' , detail asString]
-%
-category: 'tools - python'
-method: GsMcpServer
-tool_eval_python: args
-  "Evaluate Python source via Grail and answer the printString of the result.
-   No ModuleAst capability check and no own error handling: errors propagate to
-   GsMcpDispatcher>>handleToolsCall:id: (as with execute_code). Requires an image
-   with GemStone-Python (ModuleAst) whose parser raises on syntax errors rather
-   than crashing the gem."
-  ^self capResult: (ModuleAst evaluateSource: (args at: 'code')) printString
 %
 category: 'tools - execution'
 method: GsMcpServer

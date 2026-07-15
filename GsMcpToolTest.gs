@@ -226,14 +226,6 @@ testCompileMethodMeta
   self assert: (cls class canUnderstand: #classAnswer).
   self deny: (cls canUnderstand: #classAnswer)
 %
-category: 'tools - python'
-method: GsMcpToolTest
-testCompilePython
-  "Transpile a Python assignment to Smalltalk. Requires GemStone-Python (ModuleAst)
-   in the image; we assume it is present (see GsMcpServer>>registerPythonTools)."
-  self assert: (self includesCS: '__mul__'
-    in: (self mcp tool_compile_python: (self oneArg: 'code' value: 'x = 6 * 7')))
-%
 category: 'tools - mutation'
 method: GsMcpToolTest
 testDeleteClass
@@ -322,14 +314,6 @@ testDescribeTestFailureNamesMissingSelector
     (Dictionary new at: 'className' put: 'GsMcpTestSuiteFixture'; at: 'selector' put: 'testDnu'; yourself).
   self assert: (self includesCS: 'zzzNoSuchSelector' in: out)
 %
-category: 'tools - python'
-method: GsMcpToolTest
-testEvalPython
-  "Evaluate a Python expression and get the printString of the result. Requires
-   GemStone-Python (ModuleAst) in the image; we assume it is present (see
-   GsMcpServer>>registerPythonTools)."
-  self assert: (self mcp tool_eval_python: (self oneArg: 'code' value: '6 * 7')) equals: '42'
-%
 category: 'tools - execution'
 method: GsMcpToolTest
 testExecuteCode
@@ -346,7 +330,7 @@ testExecuteCodeTruncates
   "Oversized results are capped by GsMcpServer>>capResult: at 50000 chars plus a marker.
    capResult: is shared by execute_code and the python tools, so this guards all three."
   | out |
-  out := self mcp tool_execute_code: (self oneArg: 'code' value: '(String new: 60000 withAll: $x)').
+  out := self mcp tool_execute_code: (self oneArg: 'code' value: '(String new: 60000)').
   self assert: (self includesCS: '...[truncated]' in: out).
   self assert: out size equals: 50000 + ' ...[truncated]' size
 %

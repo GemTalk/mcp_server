@@ -19,6 +19,10 @@ GS_USER="${GS_USER:-DataCurator}"
 GS_PASS="${GS_PASS:-swordfish}"
 TOPAZ="$GEMSTONE/bin/topaz"
 
+# NOTE (macOS bash 3.2): this heredoc runs inside $( ... ), whose command-substitution scanner
+# treats '#' in the body as a comment. A body line that STARTS with '(' whose matching ')' sits
+# after a '#...symbol' is miscounted -> "bad substitution: no closing )". Keep such expressions
+# off the start of a line (assign to a temp first, as with grailTest below).
 OUT="$("$TOPAZ" -l <<TPZ
 set gemstone $GS_STONE
 set username $GS_USER
@@ -26,9 +30,12 @@ set password $GS_PASS
 login
 iferr 1 stk
 run
-| s |
+| s classes grailTest |
+classes := #( 'GsMcpToolTest' 'GsMcpDispatcherTest' 'GsMcpTransportTest' ) asOrderedCollection.
+grailTest := System myUserProfile objectNamed: #GsMcpServerWithGrailTest.
+grailTest ifNotNil: [classes add: 'GsMcpServerWithGrailTest'].
 s := WriteStream on: String new.
-#( 'GsMcpToolTest' 'GsMcpDispatcherTest' 'GsMcpTransportTest' ) do: [:nm | | res |
+classes do: [:nm | | res |
   res := (System myUserProfile objectNamed: nm asSymbol) suite run.
   s nextPutAll: nm; nextPutAll: ': ';
     nextPutAll: res runCount printString; nextPutAll: ' run, ';

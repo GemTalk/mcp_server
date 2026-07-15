@@ -30,7 +30,10 @@ set password $GS_PASS
 login
 iferr 1 stk
 run
-GsMcpServer runOnPort: $GS_MCP_PORT
+"Boot the most capable installed server: the Grail subclass if its file was loaded, else base."
+((System myUserProfile objectNamed: #GsMcpServerWithGrail)
+   ifNil: [GsMcpServer]
+   ifNotNil: [:cls | cls]) runOnPort: $GS_MCP_PORT
 %
 logout
 exit
