@@ -187,7 +187,7 @@ JSON
 )
 # count name fields that are string values (tool names), not nested 'name' properties
 n=$(printf '%s' "$r" | grep -o '"name":"' | wc -l | tr -d ' ')
-check "tools/list reports 33 tools (got $n)"  "33"                       "$n"
+check "tools/list reports 31 tools (got $n)"  "31"                       "$n"
 
 # --- session/transaction ---
 for t in abort commit refresh; do
@@ -328,13 +328,6 @@ r=$(post <<'JSON'
 JSON
 )
 check "delete_class removes the class"         'Deleted class'           "$r"
-
-# --- python stub (Grail not installed here) ---
-r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":43,"method":"tools/call","params":{"name":"eval_python","arguments":{"code":"print(1)"}}}
-JSON
-)
-check "eval_python reports Grail status"       'Grail'                   "$r"
 
 # --- transport: SSE GET stream ---
 r=$(curl -s -i -N -m 3 "$URL" 2>&1 | head -12)
