@@ -7,7 +7,7 @@ GsTestCase subclass: 'GsMcpServerWithGrailTest'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: GsnativeMcpServer
+  inDictionary: Published
   options: #()
 %
 expectvalue /Class

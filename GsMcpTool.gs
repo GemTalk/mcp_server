@@ -7,7 +7,7 @@ Object subclass: 'GsMcpTool'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: GsnativeMcpServer
+  inDictionary: Published
   options: #()
 %
 expectvalue /Class

@@ -8,9 +8,13 @@ Object subclass: 'GsMcpMockSocket'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: GsnativeMcpServer
+  inDictionary: Published
   options: #()
 
+%
+expectvalue /Class
+doit
+GsMcpMockSocket category: 'GsMcp'
 %
 ! ------------------- Remove existing behavior from GsMcpMockSocket
 removeallmethods GsMcpMockSocket

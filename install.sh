@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Install the native GemStone MCP server classes into the image.
-# Logs in via topaz, files in the base GsMcp* classes, and commits. Pass --grail (or set
+# Logs in via topaz, ensures the Published dictionary exists, files in the base GsMcp*
+# classes, and commits. Pass --grail (or set
 # GS_MCP_WITH_GRAIL=1) to additionally load the optional Grail/Python tools -- only valid on
 # an image that has GemStone-Python (Grail/ModuleAst).
 #
@@ -31,6 +32,22 @@ set username $GS_USER
 set password $GS_PASS
 login
 iferr 1 exit 1
+run
+"Ensure the Published dictionary exists (self-referenced + inserted into the symbol list) so
+ the classes' 'inDictionary: Published' resolves during file-in. Create it only if absent --
+ Published is standard in most images, so this is usually a no-op."
+| up existing d |
+up := System myUserProfile.
+existing := up resolveSymbol: #Published.
+existing isNil
+  ifTrue: [
+    d := SymbolDictionary new.
+    d at: #Published put: d.
+    up insertDictionary: d at: up symbolList size + 1.
+    System commitTransaction.
+    'Published created' ]
+  ifFalse: [ 'Published already exists' ].
+%
 display oops
 errorcount
 output push load.out only
