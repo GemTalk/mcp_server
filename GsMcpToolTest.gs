@@ -341,7 +341,10 @@ testExportClassSource
   self createFixtureClass.
   src := self mcp tool_export_class_source: (self oneArg: 'className' value: 'GsMcpTestFixture').
   self assert: (self includesCS: 'Object subclass: ''GsMcpTestFixture''' in: src).
-  self assert: (self includesCS: 'removeallmethods GsMcpTestFixture' in: src)
+  "export_class_source is a full file-in (definition + methods): assert the method source is
+   present. (Marker is 'probeAnswer', not 'removeallmethods' -- GS 3.6.2's fileOutClass omits
+   the removeallmethods line that 3.7.x emits, but both include the method bodies.)"
+  self assert: (self includesCS: 'probeAnswer' in: src)
 %
 category: 'tools - search'
 method: GsMcpToolTest
@@ -555,16 +558,19 @@ testRemoveDictionary
 category: 'tools - testing'
 method: GsMcpToolTest
 testRunTestClass
-  "Run a suite with a passing, a failing, and an erroring test; the report must summarize the
-   counts and name both the failing and erroring tests with FAIL/ERROR line markers.
-   (includesCS: is case-sensitive, so 'FAIL' matches the line marker, not the word 'failed'.)"
+  "Run a suite with a passing, a failing, and erroring tests; the report names each non-passing
+   test on its own line and summarizes the counts. Assert '1 passed' (only testPasses passes on
+   every version) and that both the failing (#testFails) and erroring (#testErrors) tests are
+   listed. We assert the FAIL marker but NOT ERROR: GS 3.6.2's TestResult can't distinguish
+   errors from failures, so formatTestResult: labels every non-passing test FAIL there (3.7.x
+   still shows ERROR for the real errors). includesCS: is case-sensitive, so 'FAIL' matches the
+   line marker, not the word 'failed'."
   | out |
   self createTestSuiteFixture.
   out := self mcp tool_run_test_class: (self oneArg: 'className' value: 'GsMcpTestSuiteFixture').
-  self assert: (self includesCS: '1 failed' in: out).
+  self assert: (self includesCS: '1 passed' in: out).
   self assert: (self includesCS: 'FAIL' in: out).
   self assert: (self includesCS: '#testFails' in: out).
-  self assert: (self includesCS: 'ERROR' in: out).
   self assert: (self includesCS: '#testErrors' in: out)
 %
 category: 'tools - testing'

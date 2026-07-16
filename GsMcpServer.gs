@@ -133,26 +133,30 @@ formatMethodList: aCollection
 category: 'private'
 method: GsMcpServer
 formatTestResult: aTestResult label: aLabel
-  "Summary line plus any failing/erroring tests. GemStone's TestResult reports each failure or
-   error as a descriptive String (e.g. 'SomeTest debug: #testFoo'), so emit those directly.
-   Counts come from passedCount/failureCount/errorCount, NOT aTestResult printString:
-   TestResult>>printOn: varies by SUnit version and in some sends #shouldPass to those String
-   entries, raising a MessageNotUnderstood."
-  | s failed errored |
-  failed := aTestResult failureCount.
-  errored := aTestResult errorCount.
+  "Summary line plus one line per non-passing test. GemStone's TestResult reports each failure/
+   error as a descriptive String (e.g. 'SomeTest debug: #testFoo'); emit those.
+   Cross-version: GS 3.6.2's TestResult returns the SAME set from #failures and #errors (and an
+   inflated #runCount), so label #failures FAIL and only the #errors NOT already in #failures as
+   ERROR, and derive run = passed + failed + errorOnly. (Neither collection repeats a test
+   internally, so the reject: is the only de-duplication needed.) On 3.7.x the two sets are
+   disjoint, so output is unchanged there; on 3.6.2 (where everything lands in #failures) all
+   non-passing tests read as FAIL. Never use aTestResult printString: its printOn: varies by
+   SUnit version and can send #shouldPass to the String entries, raising an MNU."
+  | failed errorOnly passed s |
+  failed := aTestResult failures collect: [:t | t asString].
+  errorOnly := (aTestResult errors collect: [:t | t asString])
+    reject: [:k | failed includes: k].
+  passed := aTestResult passedCount.
   s := WriteStream on: String new.
   s nextPutAll: aLabel; nextPutAll: ': '.
-  s nextPutAll: aTestResult runCount printString; nextPutAll: ' run, '.
-  s nextPutAll: aTestResult passedCount printString; nextPutAll: ' passed, '.
-  s nextPutAll: failed printString; nextPutAll: ' failed, '.
-  s nextPutAll: errored printString; nextPutAll: ' errors'.
-  (failed = 0 and: [errored = 0]) ifFalse: [
+  s nextPutAll: (passed + failed size + errorOnly size) printString; nextPutAll: ' run, '.
+  s nextPutAll: passed printString; nextPutAll: ' passed, '.
+  s nextPutAll: failed size printString; nextPutAll: ' failed, '.
+  s nextPutAll: errorOnly size printString; nextPutAll: ' errors'.
+  (failed isEmpty and: [errorOnly isEmpty]) ifFalse: [
     s nextPut: Character lf.
-    aTestResult failures do: [:t |
-      s nextPutAll: '  FAIL  '; nextPutAll: t asString; nextPut: Character lf].
-    aTestResult errors do: [:t |
-      s nextPutAll: '  ERROR '; nextPutAll: t asString; nextPut: Character lf]].
+    failed asSortedCollection do: [:k | s nextPutAll: '  FAIL  '; nextPutAll: k; nextPut: Character lf].
+    errorOnly asSortedCollection do: [:k | s nextPutAll: '  ERROR '; nextPutAll: k; nextPut: Character lf]].
   ^s contents
 %
 category: 'running'
@@ -239,9 +243,16 @@ objectSchema: propsDict required: requiredArray
 category: 'private'
 method: GsMcpServer
 parseBody: aString
-  "Parse a JSON-RPC request body, or nil if empty/malformed."
+  "Parse a JSON-RPC request body to its Dictionary, or nil if empty/malformed.
+   Cross-version: GS 3.7.x's JsonParser raises on bad input, but 3.6.2's (PetitParser-based)
+   returns a PPFailure instead of raising -- so reject any non-Dictionary result, not just
+   exceptions. A valid JSON-RPC request is always an object, so nil here -> the dispatcher
+   answers -32700 Parse error."
   (aString isNil or: [aString isEmpty]) ifTrue: [^nil].
-  ^[JsonParser parse: aString] on: Error do: [:ex | nil]
+  ^[ | parsed |
+     parsed := JsonParser parse: aString.
+     (parsed isKindOf: Dictionary) ifTrue: [parsed] ifFalse: [nil] ]
+   on: Error do: [:ex | nil]
 %
 category: 'schema building'
 method: GsMcpServer
