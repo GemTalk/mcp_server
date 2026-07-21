@@ -50,6 +50,56 @@ runOnPort: aPort
    the main activity of a dedicated gem."
   ^self new runOnPort: aPort
 %
+category: 'forking'
+classmethod: GsMcpServer
+forkOnPort: aPort
+  "Start the server in a SEPARATE, INDEPENDENT gem instead of blocking this session. A plain
+   GsProcess fork would freeze whenever this session goes idle (a forked GsProcess only runs
+   while its gem is executing Smalltalk), so spawn a real gem via GsTsExternalSession and run the
+   blocking accept loop there. The child logs in as the current user via a one-time password (no
+   embedded credential) and boots the most capable installed server (the Grail subclass if
+   present, else base), like run-server.sh.
+   Uses forkAndDetachString:, which runs the loop DETACHED -- the child keeps serving after this
+   session logs out, so it is an independent server, NOT tied to the launcher (hence we log our
+   own handle out immediately). Stop it with `GsMcpServer stopForked` (this session), or from
+   anywhere via `System stopSession: <id>` or `kill <pid>` (both printed below); logout will NOT
+   stop it. Answers a status string. Requires GsTsExternalSession (standard in GS 3.x)."
+  | extClass es sid pid s |
+  extClass := System myUserProfile objectNamed: #GsTsExternalSession.
+  extClass isNil ifTrue: [^'GsTsExternalSession is not available in this image; use runOnPort: or run-server.sh.'].
+  es := extClass newDefaultForGemHost: 'localhost'.
+  es useOnetimePassword.
+  es login.
+  "Capture the child's id/pid BEFORE launching the loop -- once the non-blocking call is running
+   the external session rejects further queries (GciError 'operation in progress')."
+  sid := es stoneSessionId.
+  pid := [(System descriptionOfSession: sid) at: 2] on: Error do: [:e | nil].
+  es forkAndDetachString: '((System myUserProfile objectNamed: #GsMcpServerWithGrail) ifNil: [GsMcpServer] ifNotNil: [:c | c]) runOnPort: ' , aPort printString.
+  [es logout] on: Error do: [:e | nil].  "release our handle; the detached server keeps running on its own"
+  SessionTemps current at: #GsMcpForkedServerSession put: sid.  "child session id, for stopForked"
+  s := WriteStream on: String new.
+  s nextPutAll: 'MCP server forked into gem session '; nextPutAll: sid printString.
+  pid ifNotNil: [:p | s nextPutAll: ' (host pid '; nextPutAll: p printString; nextPutAll: ')'].
+  s nextPutAll: ', listening on port '; nextPutAll: aPort printString; nextPutAll: ' (independent; survives logout).'.
+  s nextPut: Character lf; nextPutAll: 'To stop:  GsMcpServer stopForked   (from this session)'.
+  s nextPut: Character lf; nextPutAll: '     or:  System stopSession: '; nextPutAll: sid printString; nextPutAll: '   (from any session)'.
+  pid ifNotNil: [:p | s nextPut: Character lf; nextPutAll: '     or:  kill '; nextPutAll: p printString; nextPutAll: '   (shell)'].
+  ^s contents
+%
+category: 'forking'
+classmethod: GsMcpServer
+stopForked
+  "Stop the server this session started with forkOnPort:. It is detached/independent, so a logout
+   would NOT stop it -- we terminate its session directly with System stopSession:. For a server
+   forked by another session, use `System stopSession: <id>` with the id printed at fork."
+  | sid |
+  sid := SessionTemps current at: #GsMcpForkedServerSession otherwise: nil.
+  sid isNil ifTrue: [^'No forked server recorded in this session; use System stopSession: <id>.'].
+  [System stopSession: sid] on: Error do: [:e |
+    ^'System stopSession: ' , sid printString , ' failed: ' , ([e description] on: Error do: [:x | e class name asString])].
+  SessionTemps current removeKey: #GsMcpForkedServerSession otherwise: nil.
+  ^'Stopped the forked MCP server (System stopSession: ' , sid printString , ').'
+%
 ! ------------------- Instance methods for GsMcpServer
 category: 'schema building'
 method: GsMcpServer

@@ -134,9 +134,19 @@ Built on existing image facilities: `GsSocket` (TCP), `JsonParser parse:` and
 Forked `GsProcess`es **only run while the gem is actively executing Smalltalk**. A
 GCI-driven session (like the Jasper VS Code session) is parked in the C client between
 commands, so a background accept loop forked there would be frozen and never serve
-requests. Therefore the server runs as the **blocking main activity of a dedicated gem**:
-`GsMcpServer runOnPort:` does not return until `stop`. `run-server.sh` launches such a gem,
-booting `GsMcpServerWithGrail` when its file is loaded, otherwise the base server.
+requests. Therefore the server runs as the **blocking main activity of a dedicated gem**.
+
+Two class-side entry points start that gem:
+- **`GsMcpServer runOnPort: aPort`** — runs the accept loop as the *calling* session's blocking
+  activity; never returns until `stop`. Use it to run the server in a foreground topaz.
+- **`GsMcpServer forkOnPort: aPort`** — spawns a *separate* gem via `GsTsExternalSession` and runs
+  the loop there **detached** (`forkAndDetachString:`), returning immediately. The forked server
+  is **independent** — it keeps serving after the launching session logs out. Stop it with
+  `GsMcpServer stopForked` (from the launching session) or, from anywhere, `System stopSession:
+  <id>` / `kill <pid>` (both printed at fork). `run-server.sh` uses this.
+
+Either entry point boots the most capable installed class — the Grail subclass if its file was
+loaded, otherwise the base server.
 
 ## Install & run
 
@@ -146,14 +156,15 @@ export GS_USER=DataCurator GS_PASS=...         # GemStone credentials
 
 ./install.sh                 # file in the base classes and commit
 ./install.sh --grail         # ...and the optional Grail/Python tools (Grail image only)
-GS_MCP_PORT=8000 ./run-server.sh   # start the server gem (blocks)
+GS_MCP_PORT=8000 ./run-server.sh   # fork a detached, independent server gem and return
 ```
 
 `install.sh` and `run-server.sh` use topaz; set `GEMSTONE`, `GS_STONE`, `GS_USER`,
 `GS_PASS` to match your environment. `install.sh --grail` (or `GS_MCP_WITH_GRAIL=1 ./install.sh`)
 loads `load-grail.gs` — the base classes plus `GsMcpServerWithGrail`; plain `install.sh` loads
-only the base `load.gs`. `run-server.sh` then boots whichever server class is installed — the
-Grail subclass if its file was loaded, else the base — chosen inline in the launch script.
+only the base `load.gs`. `run-server.sh` calls `GsMcpServer forkOnPort:`, which launches a
+detached, independent server gem (the Grail subclass if installed, else base) and returns; it
+prints a `System stopSession: <id>` / `kill <pid>` line for stopping it later.
 
 ## Test
 
