@@ -32,32 +32,14 @@ withToolRegistry: aRegistry
   ^self new setRegistry: aRegistry
 %
 ! ------------------- Instance methods for McpDispatcher
-category: 'responses'
+category: 'initialization'
 method: McpDispatcher
-contentText: aString isError: aBool
-  "Build the MCP tools/call result envelope: {content:[{type:text,text:...}], isError:bool}."
-  | item content d |
-  item := Dictionary new.
-  item at: 'type' put: 'text'.
-  item at: 'text' put: (aString ifNil: ['']).
-  content := Array with: item.
-  d := Dictionary new.
-  d at: 'content' put: content.
-  d at: 'isError' put: aBool.
-  ^d
-%
-category: 'responses'
-method: McpDispatcher
-errorFor: id code: aCode message: aMessage
-  | d err |
-  err := Dictionary new.
-  err at: 'code' put: aCode.
-  err at: 'message' put: aMessage.
-  d := Dictionary new.
-  d at: 'jsonrpc' put: '2.0'.
-  d at: 'id' put: id.
-  d at: 'error' put: err.
-  ^d
+setRegistry: aRegistry
+  toolRegistry := aRegistry.
+  protocolVersion := '2024-11-05'.
+  serverName := 'gemstone-mcp'.
+  serverVersion := '0.1.0'.
+  ^self
 %
 category: 'dispatch'
 method: McpDispatcher
@@ -96,6 +78,43 @@ handleToolsCall: params id: id
 %
 category: 'responses'
 method: McpDispatcher
+resultFor: id with: resultObj
+  | d |
+  d := Dictionary new.
+  d at: 'jsonrpc' put: '2.0'.
+  d at: 'id' put: id.
+  d at: 'result' put: resultObj.
+  ^d
+%
+category: 'responses'
+method: McpDispatcher
+errorFor: id code: aCode message: aMessage
+  | d err |
+  err := Dictionary new.
+  err at: 'code' put: aCode.
+  err at: 'message' put: aMessage.
+  d := Dictionary new.
+  d at: 'jsonrpc' put: '2.0'.
+  d at: 'id' put: id.
+  d at: 'error' put: err.
+  ^d
+%
+category: 'responses'
+method: McpDispatcher
+contentText: aString isError: aBool
+  "Build the MCP tools/call result envelope: {content:[{type:text,text:...}], isError:bool}."
+  | item content d |
+  item := Dictionary new.
+  item at: 'type' put: 'text'.
+  item at: 'text' put: (aString ifNil: ['']).
+  content := Array with: item.
+  d := Dictionary new.
+  d at: 'content' put: content.
+  d at: 'isError' put: aBool.
+  ^d
+%
+category: 'responses'
+method: McpDispatcher
 initializeResult
   | caps tools info d |
   tools := Dictionary new.
@@ -109,25 +128,6 @@ initializeResult
   d at: 'capabilities' put: caps.
   d at: 'serverInfo' put: info.
   ^d
-%
-category: 'responses'
-method: McpDispatcher
-resultFor: id with: resultObj
-  | d |
-  d := Dictionary new.
-  d at: 'jsonrpc' put: '2.0'.
-  d at: 'id' put: id.
-  d at: 'result' put: resultObj.
-  ^d
-%
-category: 'initialization'
-method: McpDispatcher
-setRegistry: aRegistry
-  toolRegistry := aRegistry.
-  protocolVersion := '2024-11-05'.
-  serverName := 'gemstone-mcp'.
-  serverVersion := '0.1.0'.
-  ^self
 %
 category: 'responses'
 method: McpDispatcher
