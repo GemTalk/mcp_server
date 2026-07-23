@@ -1,8 +1,8 @@
 set compile_env: 0
-! ------------------- Class definition for GsMcpToolTest
+! ------------------- Class definition for McpToolTest
 expectvalue /Class
 doit
-GsTestCase subclass: 'GsMcpToolTest'
+GsTestCase subclass: 'McpToolTest'
   instVarNames: #()
   classVars: #()
   classInstVars: #()
@@ -11,34 +11,34 @@ GsTestCase subclass: 'GsMcpToolTest'
   options: #()
 
 %
-! ------------------- Remove existing behavior from GsMcpToolTest
-removeallmethods GsMcpToolTest
-removeallclassmethods GsMcpToolTest
-! ------------------- Class methods for GsMcpToolTest
-! ------------------- Instance methods for GsMcpToolTest
+! ------------------- Remove existing behavior from McpToolTest
+removeallmethods McpToolTest
+removeallclassmethods McpToolTest
+! ------------------- Class methods for McpToolTest
+! ------------------- Instance methods for McpToolTest
 category: 'helpers'
-method: GsMcpToolTest
+method: McpToolTest
 createFixtureClass
   "Create the throwaway fixture class in UserGlobals (committed), with one instance-side and one
    class-side method so the browsing/search tools have something to report. tearDown removes it."
   | c |
-  c := Object subclass: 'GsMcpTestFixture'
+  c := Object subclass: 'McpTestFixture'
     instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #()
     inDictionary: UserGlobals options: #().
-  c comment: 'Throwaway fixture created by GsMcpToolTest. Safe to remove.'.
+  c comment: 'Throwaway fixture created by McpToolTest. Safe to remove.'.
   c compileMethod: 'probeAnswer ^''probeAnswerBody''' dictionaries: System myUserProfile symbolList category: 'probing'.
   c class compileMethod: 'probeClassSide ^''probeClassBody''' dictionaries: System myUserProfile symbolList category: 'probing'.
   System commitTransaction.
   ^c
 %
 category: 'helpers'
-method: GsMcpToolTest
+method: McpToolTest
 createTestSuiteFixture
   "Create a throwaway GsTestCase subclass with a passing test, a failing test, and two erroring
    tests: testErrors (a ZeroDivide) and testDnu (a doesNotUnderstand, whose missing selector the
    describe tool should surface). Committed; tearDown removes it."
   | c |
-  c := GsTestCase subclass: 'GsMcpTestSuiteFixture'
+  c := GsTestCase subclass: 'McpTestSuiteFixture'
     instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #()
     inDictionary: UserGlobals options: #().
   c compileMethod: 'testPasses self assert: true' dictionaries: System myUserProfile symbolList category: 'tests'.
@@ -49,13 +49,13 @@ createTestSuiteFixture
   ^c
 %
 category: 'helpers'
-method: GsMcpToolTest
+method: McpToolTest
 mcp
   "A fresh server whose tool_* handlers we exercise directly (no socket)."
-  ^GsMcpServer new
+  ^McpServer new
 %
 category: 'helpers'
-method: GsMcpToolTest
+method: McpToolTest
 oneArg: key value: value
   | d |
   d := Dictionary new.
@@ -63,7 +63,7 @@ oneArg: key value: value
   ^d
 %
 category: 'helpers'
-method: GsMcpToolTest
+method: McpToolTest
 includesCS: aSubstring in: aString
   "Case-sensitive substring test. GemStone's String>>includesString: is case-INsensitive
    (e.g. 'FAIL' matches the 'fail' in 'failed'), so use findString:startingAt: (which is
@@ -71,28 +71,28 @@ includesCS: aSubstring in: aString
   ^(aString findString: aSubstring startingAt: 1) > 0
 %
 category: 'running'
-method: GsMcpToolTest
+method: McpToolTest
 tearDown
   "Force-remove any throwaway fixtures a test created, then commit, so nothing leaks."
   | up dict |
   up := System myUserProfile.
-  #(GsMcpTestSub GsMcpTestFixture GsMcpTestSuiteFixture) do: [:sym |
+  #(McpTestSub McpTestFixture McpTestSuiteFixture) do: [:sym |
     (up objectNamed: sym) ifNotNil: [:cls |
       (up dictionaryAndSymbolOf: cls) ifNotNil: [:arr | (arr at: 1) removeKey: (arr at: 2) ifAbsent: [nil]]]].
-  dict := up symbolList detect: [:d | d name asString = 'GsMcpTestDict'] ifNone: [nil].
+  dict := up symbolList detect: [:d | d name asString = 'McpTestDict'] ifNone: [nil].
   dict ifNotNil: [up removeDictionaryAt: (up symbolList indexOf: dict)].
-  UserGlobals removeKey: #GsMcpTestDict ifAbsent: [nil].
-  UserGlobals removeKey: #GsMcpTestSub ifAbsent: [nil].
-  UserGlobals removeKey: #GsMcpTestFixture ifAbsent: [nil].
-  UserGlobals removeKey: #GsMcpTestSuiteFixture ifAbsent: [nil].
+  UserGlobals removeKey: #McpTestDict ifAbsent: [nil].
+  UserGlobals removeKey: #McpTestSub ifAbsent: [nil].
+  UserGlobals removeKey: #McpTestFixture ifAbsent: [nil].
+  UserGlobals removeKey: #McpTestSuiteFixture ifAbsent: [nil].
   System commitTransaction
 %
 category: 'tools - session'
-method: GsMcpToolTest
+method: McpToolTest
 testAbort
   "tool_abort must discard uncommitted work. Commit a fixture as a baseline, change its comment
    without committing, abort, then confirm both the 'aborted' report and that the change reverted.
-   (tearDown removes GsMcpTestFixture.)"
+   (tearDown removes McpTestFixture.)"
   | cls out baseline |
   cls := self createFixtureClass.
   baseline := cls comment.
@@ -103,19 +103,19 @@ testAbort
   self assert: (cls comment = baseline)
 %
 category: 'tools - mutation'
-method: GsMcpToolTest
+method: McpToolTest
 testAddDictionary
   | out |
-  out := self mcp tool_add_dictionary: (self oneArg: 'dictionaryName' value: 'GsMcpTestDict').
+  out := self mcp tool_add_dictionary: (self oneArg: 'dictionaryName' value: 'McpTestDict').
   self assert: (self includesCS: 'Created dictionary' in: out).
-  self assert: (self includesCS: 'GsMcpTestDict' in: (self mcp tool_list_dictionaries: Dictionary new))
+  self assert: (self includesCS: 'McpTestDict' in: (self mcp tool_list_dictionaries: Dictionary new))
 %
 category: 'tools - session'
-method: GsMcpToolTest
+method: McpToolTest
 testCommit
   "tool_commit must persist changes. Change the fixture's comment, commit via the tool, then
    abort with the primitive (not tool_abort, so this test doesn't depend on that tool); the
-   change must survive the abort, proving it was committed. (tearDown removes GsMcpTestFixture.)"
+   change must survive the abort, proving it was committed. (tearDown removes McpTestFixture.)"
   | cls out changed |
   cls := self createFixtureClass.
   changed := 'committed change - should survive abort'.
@@ -126,16 +126,16 @@ testCommit
   self assert: (cls comment = changed)
 %
 category: 'tools - mutation'
-method: GsMcpToolTest
+method: McpToolTest
 testCompileClassDefinition
   | out |
   out := self mcp tool_compile_class_definition: (self oneArg: 'source' value:
-    'Object subclass: ''GsMcpTestFixture'' instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()').
-  self assert: (self includesCS: 'committed class: GsMcpTestFixture' in: out).
-  self assert: (System myUserProfile objectNamed: #GsMcpTestFixture) notNil
+    'Object subclass: ''McpTestFixture'' instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()').
+  self assert: (self includesCS: 'committed class: McpTestFixture' in: out).
+  self assert: (System myUserProfile objectNamed: #McpTestFixture) notNil
 %
 category: 'tools - mutation'
-method: GsMcpToolTest
+method: McpToolTest
 testCompileClassDefinitionRejectsNonClass
   "A source that evaluates to something other than a class is rejected and directed to
    execute_code, and nothing is committed."
@@ -146,110 +146,110 @@ testCompileClassDefinitionRejectsNonClass
   self deny: (self includesCS: 'committed' in: out)
 %
 category: 'tools - mutation'
-method: GsMcpToolTest
+method: McpToolTest
 testCompileClassDefinitionPreservesMethods
   "Default recompileMethods=true: a shape change keeps the class's methods."
   | cls out |
-  cls := Object subclass: 'GsMcpTestFixture' instVarNames: #(a) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #().
+  cls := Object subclass: 'McpTestFixture' instVarNames: #(a) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #().
   cls compileMethod: 'getA ^a' dictionaries: System myUserProfile symbolList category: 'acc'.
   System commitTransaction.
   out := self mcp tool_compile_class_definition: (self oneArg: 'source' value:
-    'Object subclass: ''GsMcpTestFixture'' instVarNames: #(a b) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()').
+    'Object subclass: ''McpTestFixture'' instVarNames: #(a b) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()').
   self assert: (self includesCS: 'recompiled 1/1' in: out).
-  self assert: ((System myUserProfile objectNamed: #GsMcpTestFixture) canUnderstand: #getA).
-  self assert: ((System myUserProfile objectNamed: #GsMcpTestFixture) instVarNames includes: #b)
+  self assert: ((System myUserProfile objectNamed: #McpTestFixture) canUnderstand: #getA).
+  self assert: ((System myUserProfile objectNamed: #McpTestFixture) instVarNames includes: #b)
 %
 category: 'tools - mutation'
-method: GsMcpToolTest
+method: McpToolTest
 testCompileClassDefinitionRawWhenFlagFalse
   "recompileMethods=false reproduces the raw redefine: methods are dropped."
   | cls out |
-  cls := Object subclass: 'GsMcpTestFixture' instVarNames: #(a) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #().
+  cls := Object subclass: 'McpTestFixture' instVarNames: #(a) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #().
   cls compileMethod: 'getA ^a' dictionaries: System myUserProfile symbolList category: 'acc'.
   System commitTransaction.
   out := self mcp tool_compile_class_definition: (Dictionary new
-    at: 'source' put: 'Object subclass: ''GsMcpTestFixture'' instVarNames: #(a b) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()';
+    at: 'source' put: 'Object subclass: ''McpTestFixture'' instVarNames: #(a b) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()';
     at: 'recompileMethods' put: false; yourself).
-  self deny: ((System myUserProfile objectNamed: #GsMcpTestFixture) canUnderstand: #getA)
+  self deny: ((System myUserProfile objectNamed: #McpTestFixture) canUnderstand: #getA)
 %
 category: 'tools - mutation'
-method: GsMcpToolTest
+method: McpToolTest
 testCompileClassDefinitionRefusesWithSubclasses
   "With recompile on (default), a class that has subclasses is refused rather than redefined."
   | cls out |
-  cls := Object subclass: 'GsMcpTestFixture' instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #().
-  cls subclass: 'GsMcpTestSub' instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #().
+  cls := Object subclass: 'McpTestFixture' instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #().
+  cls subclass: 'McpTestSub' instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #().
   System commitTransaction.
   out := self mcp tool_compile_class_definition: (self oneArg: 'source' value:
-    'Object subclass: ''GsMcpTestFixture'' instVarNames: #(a) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()').
+    'Object subclass: ''McpTestFixture'' instVarNames: #(a) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()').
   self assert: (self includesCS: 'Refused' in: out).
-  self assert: (self includesCS: 'GsMcpTestSub' in: out)
+  self assert: (self includesCS: 'McpTestSub' in: out)
 %
 category: 'tools - mutation'
-method: GsMcpToolTest
+method: McpToolTest
 testCompileClassDefinitionReportsRecompileFailure
   "A method that no longer compiles under the new shape is reported, but the redefinition
    (and the methods that did recompile) still applies."
   | cls out |
-  cls := Object subclass: 'GsMcpTestFixture' instVarNames: #(a) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #().
+  cls := Object subclass: 'McpTestFixture' instVarNames: #(a) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #().
   cls compileMethod: 'getA ^a' dictionaries: System myUserProfile symbolList category: 'acc'.
   cls compileMethod: 'withLocal | tmp | tmp := 5. ^tmp' dictionaries: System myUserProfile symbolList category: 'acc'.
   System commitTransaction.
   "adding ivar 'tmp' collides with withLocal's temporary -> that one fails to recompile"
   out := self mcp tool_compile_class_definition: (self oneArg: 'source' value:
-    'Object subclass: ''GsMcpTestFixture'' instVarNames: #(a tmp) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()').
+    'Object subclass: ''McpTestFixture'' instVarNames: #(a tmp) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()').
   self assert: (self includesCS: 'recompiled 1/2' in: out).
   self assert: (self includesCS: 'failed' in: out).
   self assert: (self includesCS: 'withLocal' in: out).
-  self deny: ((System myUserProfile objectNamed: #GsMcpTestFixture) canUnderstand: #withLocal).
-  self assert: ((System myUserProfile objectNamed: #GsMcpTestFixture) canUnderstand: #getA)
+  self deny: ((System myUserProfile objectNamed: #McpTestFixture) canUnderstand: #withLocal).
+  self assert: ((System myUserProfile objectNamed: #McpTestFixture) canUnderstand: #getA)
 %
 category: 'tools - mutation'
-method: GsMcpToolTest
+method: McpToolTest
 testCompileMethod
   | out |
   self createFixtureClass.
   out := self mcp tool_compile_method:
-    (Dictionary new at: 'className' put: 'GsMcpTestFixture'; at: 'source' put: 'answer ^42'; at: 'category' put: 'tmp'; yourself).
+    (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'source' put: 'answer ^42'; at: 'category' put: 'tmp'; yourself).
   self assert: (self includesCS: 'and committed' in: out).
-  self assert: ((System myUserProfile objectNamed: #GsMcpTestFixture) canUnderstand: #answer)
+  self assert: ((System myUserProfile objectNamed: #McpTestFixture) canUnderstand: #answer)
 %
 category: 'tools - mutation'
-method: GsMcpToolTest
+method: McpToolTest
 testCompileMethodMeta
   "meta=true compiles onto the class side, not the instance side."
   | out cls |
   cls := self createFixtureClass.
   out := self mcp tool_compile_method:
-    (Dictionary new at: 'className' put: 'GsMcpTestFixture'; at: 'source' put: 'classAnswer ^42'; at: 'category' put: 'tmp'; at: 'meta' put: true; yourself).
+    (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'source' put: 'classAnswer ^42'; at: 'category' put: 'tmp'; at: 'meta' put: true; yourself).
   self assert: (self includesCS: 'and committed' in: out).
   self assert: (cls class canUnderstand: #classAnswer).
   self deny: (cls canUnderstand: #classAnswer)
 %
 category: 'tools - mutation'
-method: GsMcpToolTest
+method: McpToolTest
 testDeleteClass
   | out |
   self createFixtureClass.
-  out := self mcp tool_delete_class: (self oneArg: 'className' value: 'GsMcpTestFixture').
+  out := self mcp tool_delete_class: (self oneArg: 'className' value: 'McpTestFixture').
   self assert: (self includesCS: 'Deleted class' in: out).
-  self assert: (System myUserProfile objectNamed: #GsMcpTestFixture) isNil
+  self assert: (System myUserProfile objectNamed: #McpTestFixture) isNil
 %
 category: 'tools - mutation'
-method: GsMcpToolTest
+method: McpToolTest
 testDeleteMethod
   | out |
   self createFixtureClass.
-  (System myUserProfile objectNamed: #GsMcpTestFixture)
+  (System myUserProfile objectNamed: #McpTestFixture)
     compileMethod: 'answer ^42' dictionaries: System myUserProfile symbolList category: 'tmp'.
   System commitTransaction.
   out := self mcp tool_delete_method:
-    (Dictionary new at: 'className' put: 'GsMcpTestFixture'; at: 'selector' put: 'answer'; yourself).
+    (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'selector' put: 'answer'; yourself).
   self assert: (self includesCS: 'Deleted method' in: out).
-  self deny: ((System myUserProfile objectNamed: #GsMcpTestFixture) canUnderstand: #answer)
+  self deny: ((System myUserProfile objectNamed: #McpTestFixture) canUnderstand: #answer)
 %
 category: 'tools - mutation'
-method: GsMcpToolTest
+method: McpToolTest
 testDeleteMethodMeta
   "meta=true deletes a class-side method."
   | out cls |
@@ -257,21 +257,21 @@ testDeleteMethodMeta
   cls class compileMethod: 'classAnswer ^42' dictionaries: System myUserProfile symbolList category: 'tmp'.
   System commitTransaction.
   out := self mcp tool_delete_method:
-    (Dictionary new at: 'className' put: 'GsMcpTestFixture'; at: 'selector' put: 'classAnswer'; at: 'meta' put: true; yourself).
+    (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'selector' put: 'classAnswer'; at: 'meta' put: true; yourself).
   self assert: (self includesCS: 'Deleted method' in: out).
   self deny: (cls class canUnderstand: #classAnswer)
 %
 category: 'tools - browsing'
-method: GsMcpToolTest
+method: McpToolTest
 testDescribeClass
   | out |
   self createFixtureClass.
-  out := self mcp tool_describe_class: (self oneArg: 'className' value: 'GsMcpTestFixture').
-  self assert: (self includesCS: 'name=GsMcpTestFixture' in: out).
+  out := self mcp tool_describe_class: (self oneArg: 'className' value: 'McpTestFixture').
+  self assert: (self includesCS: 'name=McpTestFixture' in: out).
   self assert: (self includesCS: 'superclass=Object' in: out)
 %
 category: 'tools - testing'
-method: GsMcpToolTest
+method: McpToolTest
 testDescribeTestFailureOnPassingTest
   | out |
   out := self mcp tool_describe_test_failure:
@@ -279,30 +279,30 @@ testDescribeTestFailureOnPassingTest
   self assert: out = 'SUnitTest>>testAssert passed (no failure).'
 %
 category: 'tools - testing'
-method: GsMcpToolTest
+method: McpToolTest
 testDescribeTestFailureOnFailingTest
   "A failing test reports the failure detail, not 'passed'."
   | out |
   self createTestSuiteFixture.
   out := self mcp tool_describe_test_failure:
-    (Dictionary new at: 'className' put: 'GsMcpTestSuiteFixture'; at: 'selector' put: 'testFails'; yourself).
+    (Dictionary new at: 'className' put: 'McpTestSuiteFixture'; at: 'selector' put: 'testFails'; yourself).
   self assert: (self includesCS: 'testFails' in: out).
   self assert: (self includesCS: 'TestFailure' in: out).
   self deny: (self includesCS: 'passed' in: out)
 %
 category: 'tools - testing'
-method: GsMcpToolTest
+method: McpToolTest
 testDescribeTestFailureOnError
   "An erroring test reports the error class and message."
   | out |
   self createTestSuiteFixture.
   out := self mcp tool_describe_test_failure:
-    (Dictionary new at: 'className' put: 'GsMcpTestSuiteFixture'; at: 'selector' put: 'testErrors'; yourself).
+    (Dictionary new at: 'className' put: 'McpTestSuiteFixture'; at: 'selector' put: 'testErrors'; yourself).
   self assert: (self includesCS: 'testErrors' in: out).
   self assert: (self includesCS: 'ZeroDivide' in: out)
 %
 category: 'tools - testing'
-method: GsMcpToolTest
+method: McpToolTest
 testDescribeTestFailureNamesMissingSelector
   "For a doesNotUnderstand, describe_test_failure surfaces the missing selector -- which lives in
    the exception's description, not its class name and not its (nil) messageText. This exercises
@@ -311,23 +311,23 @@ testDescribeTestFailureNamesMissingSelector
   | out |
   self createTestSuiteFixture.
   out := self mcp tool_describe_test_failure:
-    (Dictionary new at: 'className' put: 'GsMcpTestSuiteFixture'; at: 'selector' put: 'testDnu'; yourself).
+    (Dictionary new at: 'className' put: 'McpTestSuiteFixture'; at: 'selector' put: 'testDnu'; yourself).
   self assert: (self includesCS: 'zzzNoSuchSelector' in: out)
 %
 category: 'tools - execution'
-method: GsMcpToolTest
+method: McpToolTest
 testExecuteCode
   self assert: (self mcp tool_execute_code: (self oneArg: 'code' value: '3 + 4')) equals: '7'
 %
 category: 'tools - execution'
-method: GsMcpToolTest
+method: McpToolTest
 testExecuteCodeMultiStatement
   self assert: (self mcp tool_execute_code: (self oneArg: 'code' value: '| x | x := 6. x * 7')) equals: '42'
 %
 category: 'tools - execution'
-method: GsMcpToolTest
+method: McpToolTest
 testExecuteCodeTruncates
-  "Oversized results are capped by GsMcpServer>>capResult: at 50000 chars plus a marker.
+  "Oversized results are capped by McpServer>>capResult: at 50000 chars plus a marker.
    capResult: is shared by execute_code and the python tools, so this guards all three."
   | out |
   out := self mcp tool_execute_code: (self oneArg: 'code' value: '(String new: 60000)').
@@ -335,19 +335,19 @@ testExecuteCodeTruncates
   self assert: out size equals: 50000 + ' ...[truncated]' size
 %
 category: 'tools - browsing'
-method: GsMcpToolTest
+method: McpToolTest
 testExportClassSource
   | src |
   self createFixtureClass.
-  src := self mcp tool_export_class_source: (self oneArg: 'className' value: 'GsMcpTestFixture').
-  self assert: (self includesCS: 'Object subclass: ''GsMcpTestFixture''' in: src).
+  src := self mcp tool_export_class_source: (self oneArg: 'className' value: 'McpTestFixture').
+  self assert: (self includesCS: 'Object subclass: ''McpTestFixture''' in: src).
   "export_class_source is a full file-in (definition + methods): assert the method source is
    present. (Marker is 'probeAnswer', not 'removeallmethods' -- GS 3.6.2's fileOutClass omits
    the removeallmethods line that 3.7.x emits, but both include the method bodies.)"
   self assert: (self includesCS: 'probeAnswer' in: src)
 %
 category: 'tools - search'
-method: GsMcpToolTest
+method: McpToolTest
 testFindImplementors
   "add: has many implementors; confirm more than one distinct result comes back."
   | impls |
@@ -357,14 +357,14 @@ testFindImplementors
   self assert: (impls includes: 'Set>>add:  [Adding]')
 %
 category: 'tools - search'
-method: GsMcpToolTest
+method: McpToolTest
 testFindImplementorsNone
   "No implementors: formatMethodList: returns '(none)'. 'foo-bar:' is not a legal Smalltalk
    selector, so nothing will ever implement it."
   self assert: (self mcp tool_find_implementors: (self oneArg: 'selector' value: 'foo-bar:')) = '(none)'
 %
 category: 'tools - search'
-method: GsMcpToolTest
+method: McpToolTest
 testFindReferencesTo
   "Boolean is referenced by many kernel methods (the tool does not truncate); confirm more
    than one result via two of Boolean's own, very stable logical-operation methods."
@@ -375,14 +375,14 @@ testFindReferencesTo
   self assert: (refs includes: 'Boolean>>|  [Logical Operations]')
 %
 category: 'tools - search'
-method: GsMcpToolTest
+method: McpToolTest
 testFindReferencesToNone
   "An undefined global: the handler reports 'Global not found:' and never reaches
    formatMethodList:. 'Foo-Bar' is not a legal identifier, so it will never be defined."
   self assert: (self mcp tool_find_references_to: (self oneArg: 'name' value: 'Foo-Bar')) = 'Global not found: Foo-Bar'
 %
 category: 'tools - search'
-method: GsMcpToolTest
+method: McpToolTest
 testFindSenders
   "serveGetStream: is sent from the GET route block in buildRoutes. Few senders -> not capped."
   | out |
@@ -391,7 +391,7 @@ testFindSenders
   self deny: (self includesCS: 'showing first' in: out)
 %
 category: 'tools - search'
-method: GsMcpToolTest
+method: McpToolTest
 testFindSendersTruncated
   "= has well over 200 senders, so the output is capped at 200 method lines and prefixed with
    a count note. Assert the note is present and exactly 200 method lines come back (the note
@@ -404,16 +404,16 @@ testFindSendersTruncated
   self assert: methodLines size = 200
 %
 category: 'tools - browsing'
-method: GsMcpToolTest
+method: McpToolTest
 testGetClassDefinition
   | def |
   self createFixtureClass.
-  def := self mcp tool_get_class_definition: (self oneArg: 'className' value: 'GsMcpTestFixture').
-  self assert: (self includesCS: 'Object subclass: ''GsMcpTestFixture''' in: def).
-  self deny: (self includesCS: 'removeallmethods GsMcpTestFixture' in: def)
+  def := self mcp tool_get_class_definition: (self oneArg: 'className' value: 'McpTestFixture').
+  self assert: (self includesCS: 'Object subclass: ''McpTestFixture''' in: def).
+  self deny: (self includesCS: 'removeallmethods McpTestFixture' in: def)
 %
 category: 'tools - browsing'
-method: GsMcpToolTest
+method: McpToolTest
 testGetClassHierarchy
   "Integer has a fixed hierarchy (its special subclasses can't be extended), so we can
    assert the tool's full output exactly: superclass chain (2-space indent per level) then
@@ -431,112 +431,112 @@ testGetClassHierarchy
   self assert: out = expected
 %
 category: 'tools - browsing'
-method: GsMcpToolTest
+method: McpToolTest
 testGetMethodSource
   | out |
   self createFixtureClass.
   out := self mcp tool_get_method_source:
-    (Dictionary new at: 'className' put: 'GsMcpTestFixture'; at: 'selector' put: 'probeAnswer'; yourself).
+    (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'selector' put: 'probeAnswer'; yourself).
   self assert: (self includesCS: 'probeAnswerBody' in: out)
 %
 category: 'tools - browsing'
-method: GsMcpToolTest
+method: McpToolTest
 testGetMethodSourceMeta
   "meta=true returns the class-side method (probeClassSide is class-side only)."
   | out |
   self createFixtureClass.
   out := self mcp tool_get_method_source:
-    (Dictionary new at: 'className' put: 'GsMcpTestFixture'; at: 'selector' put: 'probeClassSide'; at: 'meta' put: true; yourself).
+    (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'selector' put: 'probeClassSide'; at: 'meta' put: true; yourself).
   self assert: (self includesCS: 'probeClassBody' in: out)
 %
 category: 'tools - browsing'
-method: GsMcpToolTest
+method: McpToolTest
 testGetMethodSourceMissing
   "A nonexistent selector reports 'No such method' rather than raising (sourceCodeAt: raises a
    LookupError for an absent selector, so the handler wraps it)."
   | out |
   self createFixtureClass.
   out := self mcp tool_get_method_source:
-    (Dictionary new at: 'className' put: 'GsMcpTestFixture'; at: 'selector' put: 'noSuchSelectorXyz'; yourself).
+    (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'selector' put: 'noSuchSelectorXyz'; yourself).
   self assert: (self includesCS: 'No such method' in: out)
 %
 category: 'tools - listing'
-method: GsMcpToolTest
+method: McpToolTest
 testListAllClasses
   | out |
   self createFixtureClass.
   out := self mcp tool_list_all_classes: Dictionary new.
-  self assert: (self includesCS: 'GsMcpTestFixture  (UserGlobals)' in: out).
+  self assert: (self includesCS: 'McpTestFixture  (UserGlobals)' in: out).
   self assert: (self includesCS: 'Boolean  (Globals)' in: out)
 %
 category: 'tools - listing'
-method: GsMcpToolTest
+method: McpToolTest
 testListClasses
   | classes |
   self createFixtureClass.
   classes := (self mcp tool_list_classes: (self oneArg: 'dictionaryName' value: 'UserGlobals'))
     subStrings: (String with: Character lf).
-  self assert: (classes includes: 'GsMcpTestFixture').
+  self assert: (classes includes: 'McpTestFixture').
   self deny: (classes includes: 'Boolean')
 %
 category: 'tools - listing'
-method: GsMcpToolTest
+method: McpToolTest
 testListDictionaries
   self assert: (self includesCS: 'UserGlobals' in: (self mcp tool_list_dictionaries: Dictionary new))
 %
 category: 'tools - listing'
-method: GsMcpToolTest
+method: McpToolTest
 testListDictionaryEntries
   | entries |
   self createFixtureClass.
   entries := (self mcp tool_list_dictionary_entries: (self oneArg: 'dictionaryName' value: 'UserGlobals'))
     subStrings: (String with: Character lf).
-  self assert: (entries includes: 'GsMcpTestFixture  (class)').
+  self assert: (entries includes: 'McpTestFixture  (class)').
   self deny: (entries includes: 'Boolean  (class)')
 %
 category: 'tools - testing'
-method: GsMcpToolTest
+method: McpToolTest
 testListFailingTests
   "Scoped to the fixture, the report lists its failing and erroring tests."
   | out |
   self createTestSuiteFixture.
   out := self mcp tool_list_failing_tests:
-    (self oneArg: 'classNames' value: (Array with: 'GsMcpTestSuiteFixture')).
+    (self oneArg: 'classNames' value: (Array with: 'McpTestSuiteFixture')).
   self assert: (self includesCS: 'FAIL' in: out).
   self assert: (self includesCS: '#testFails' in: out).
   self assert: (self includesCS: 'ERROR' in: out).
   self assert: (self includesCS: '#testErrors' in: out)
 %
 category: 'tools - testing'
-method: GsMcpToolTest
+method: McpToolTest
 testListFailingTestsNone
   "A suite with no failures yields the empty-result sentinel."
   self assert: (self includesCS: 'no failing tests' in: (self mcp tool_list_failing_tests:
     (self oneArg: 'classNames' value: (Array with: 'SUnitTest'))))
 %
 category: 'tools - browsing'
-method: GsMcpToolTest
+method: McpToolTest
 testListMethods
   "list_methods shows both instance-side and class-side selectors."
   | methods |
   self createFixtureClass.
-  methods := self mcp tool_list_methods: (self oneArg: 'className' value: 'GsMcpTestFixture').
+  methods := self mcp tool_list_methods: (self oneArg: 'className' value: 'McpTestFixture').
   self assert: (self includesCS: 'probeAnswer' in: methods).
   self assert: (self includesCS: 'probeClassSide' in: methods)
 %
 category: 'tools - testing'
-method: GsMcpToolTest
+method: McpToolTest
 testListTestClasses
   self assert: (self includesCS: 'SUnitTest' in: (self mcp tool_list_test_classes: Dictionary new))
 %
 category: 'tools - session'
-method: GsMcpToolTest
+method: McpToolTest
 testRefresh
   "tool_refresh reveals the committed view, discarding uncommitted work (it is
    System abortTransaction under a friendlier name). Commit a fixture baseline, change its
    comment without committing, refresh, and confirm the committed comment is restored.
    A true cross-session refresh (another gem commits, we see it) is an integration concern,
-   not a unit test. (tearDown removes GsMcpTestFixture.)"
+   not a unit test. (tearDown removes McpTestFixture.)"
   | cls out baseline |
   cls := self createFixtureClass.
   baseline := cls comment.
@@ -547,16 +547,16 @@ testRefresh
   self assert: (cls comment = baseline)
 %
 category: 'tools - mutation'
-method: GsMcpToolTest
+method: McpToolTest
 testRemoveDictionary
   | out |
-  self mcp tool_add_dictionary: (self oneArg: 'dictionaryName' value: 'GsMcpTestDict').
-  out := self mcp tool_remove_dictionary: (self oneArg: 'dictionaryName' value: 'GsMcpTestDict').
+  self mcp tool_add_dictionary: (self oneArg: 'dictionaryName' value: 'McpTestDict').
+  out := self mcp tool_remove_dictionary: (self oneArg: 'dictionaryName' value: 'McpTestDict').
   self assert: (self includesCS: 'Removed dictionary' in: out).
-  self deny: (self includesCS: 'GsMcpTestDict' in: (self mcp tool_list_dictionaries: Dictionary new))
+  self deny: (self includesCS: 'McpTestDict' in: (self mcp tool_list_dictionaries: Dictionary new))
 %
 category: 'tools - testing'
-method: GsMcpToolTest
+method: McpToolTest
 testRunTestClass
   "Run a suite with a passing, a failing, and erroring tests; the report names each non-passing
    test on its own line and summarizes the counts. Assert '1 passed' (only testPasses passes on
@@ -567,14 +567,14 @@ testRunTestClass
    line marker, not the word 'failed'."
   | out |
   self createTestSuiteFixture.
-  out := self mcp tool_run_test_class: (self oneArg: 'className' value: 'GsMcpTestSuiteFixture').
+  out := self mcp tool_run_test_class: (self oneArg: 'className' value: 'McpTestSuiteFixture').
   self assert: (self includesCS: '1 passed' in: out).
   self assert: (self includesCS: 'FAIL' in: out).
   self assert: (self includesCS: '#testFails' in: out).
   self assert: (self includesCS: '#testErrors' in: out)
 %
 category: 'tools - testing'
-method: GsMcpToolTest
+method: McpToolTest
 testRunTestMethod
   "A passing method reports a pass with no FAIL line; a failing method reports a FAIL line.
    includesCS: is case-sensitive, so the deny of 'FAIL' on the passing run is correct: it does
@@ -582,17 +582,17 @@ testRunTestMethod
   | pass fail |
   self createTestSuiteFixture.
   pass := self mcp tool_run_test_method:
-    (Dictionary new at: 'className' put: 'GsMcpTestSuiteFixture'; at: 'selector' put: 'testPasses'; yourself).
+    (Dictionary new at: 'className' put: 'McpTestSuiteFixture'; at: 'selector' put: 'testPasses'; yourself).
   self assert: (self includesCS: '1 passed' in: pass).
   self deny: (self includesCS: 'FAIL' in: pass).
   fail := self mcp tool_run_test_method:
-    (Dictionary new at: 'className' put: 'GsMcpTestSuiteFixture'; at: 'selector' put: 'testFails'; yourself).
+    (Dictionary new at: 'className' put: 'McpTestSuiteFixture'; at: 'selector' put: 'testFails'; yourself).
   self assert: (self includesCS: '1 failed' in: fail).
   self assert: (self includesCS: 'FAIL' in: fail).
   self assert: (self includesCS: '#testFails' in: fail)
 %
 category: 'tools - testing'
-method: GsMcpToolTest
+method: McpToolTest
 testTestingToolsClassNotFound
   "The testing tools that resolve a class name report 'Class not found:' for an unknown class
    rather than erroring. 'Foo-Bar' is not a legal identifier, so it can never resolve."
@@ -604,16 +604,16 @@ testTestingToolsClassNotFound
   self assert: (self mcp tool_describe_test_failure: badMethod) = 'Class not found: Foo-Bar'
 %
 category: 'tools - search'
-method: GsMcpToolTest
+method: McpToolTest
 testSearchMethodSource
   | out |
   self createFixtureClass.
   out := self mcp tool_search_method_source:
     (Dictionary new at: 'pattern' put: 'probeAnswerBody'; at: 'dictionaryName' put: 'UserGlobals'; yourself).
-  self assert: (self includesCS: 'GsMcpTestFixture>>probeAnswer' in: out)
+  self assert: (self includesCS: 'McpTestFixture>>probeAnswer' in: out)
 %
 category: 'tools - search'
-method: GsMcpToolTest
+method: McpToolTest
 testSearchMethodSourceTruncated
   "'self' appears in far more than 200 kernel methods, so scoping to Globals overflows the cap:
    the output is prefixed with the truncation note and holds exactly 200 hit lines (the note
@@ -627,17 +627,17 @@ testSearchMethodSourceTruncated
   self assert: hitLines size = 200
 %
 category: 'tools - mutation'
-method: GsMcpToolTest
+method: McpToolTest
 testSetClassComment
   | out |
   self createFixtureClass.
   out := self mcp tool_set_class_comment:
-    (Dictionary new at: 'className' put: 'GsMcpTestFixture'; at: 'comment' put: 'hello there'; yourself).
+    (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'comment' put: 'hello there'; yourself).
   self assert: (self includesCS: 'committed' in: out).
-  self assert: (System myUserProfile objectNamed: #GsMcpTestFixture) comment equals: 'hello there'
+  self assert: (System myUserProfile objectNamed: #McpTestFixture) comment equals: 'hello there'
 %
 category: 'tools - session'
-method: GsMcpToolTest
+method: McpToolTest
 testStatus
   self assert: (self includesCS: 'user=' in: (self mcp tool_status: Dictionary new))
 %

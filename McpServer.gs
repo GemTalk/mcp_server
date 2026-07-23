@@ -1,8 +1,8 @@
 set compile_env: 0
-! ------------------- Class definition for GsMcpServer
+! ------------------- Class definition for McpServer
 expectvalue /Class
 doit
-GsMcpBase subclass: 'GsMcpServer'
+McpBase subclass: 'McpServer'
   instVarNames: #( dispatcher toolRegistry )
   classVars: #()
   classInstVars: #()
@@ -13,50 +13,50 @@ GsMcpBase subclass: 'GsMcpServer'
 %
 expectvalue /Class
 doit
-GsMcpServer comment:
+McpServer comment:
 'Per-client MCP worker: the single-client GemStone MCP server. Owns a tool registry and a
 JSON-RPC dispatcher and implements every tool_* handler; parses a JSON-RPC request and answers
 the JSON response string via handleJsonString:.
 
 One instance runs in each per-client worker gem -- built lazily and cached in SessionTemps by the
-class-side handleJsonString:, and driven by the front end GsMcpRouter over a GsTsExternalSession.
+class-side handleJsonString:, and driven by the front end McpRouter over a GsTsExternalSession.
 This class has NO socket and knows nothing about HTTP or sessions: the transport and the per-client
-session routing live in GsMcpRouter. The Grail subclass GsMcpServerWithGrail adds the Python tools;
+session routing live in McpRouter. The Grail subclass McpServerWithGrail adds the Python tools;
 the class-side handleJsonString: builds the most capable installed class.
 
-To start the server, see GsMcpRouter (runOnPort: / forkOnPort:).'
+To start the server, see McpRouter (runOnPort: / forkOnPort:).'
 %
 expectvalue /Class
 doit
-GsMcpServer category: 'GsMcp'
+McpServer category: 'MCPServer'
 %
-! ------------------- Remove existing behavior from GsMcpServer
-removeallmethods GsMcpServer
-removeallclassmethods GsMcpServer
-! ------------------- Class methods for GsMcpServer
+! ------------------- Remove existing behavior from McpServer
+removeallmethods McpServer
+removeallclassmethods McpServer
+! ------------------- Class methods for McpServer
 category: 'instance creation'
-classmethod: GsMcpServer
+classmethod: McpServer
 new
   ^super new initialize
 %
 category: 'worker'
-classmethod: GsMcpServer
+classmethod: McpServer
 handleJsonString: aRawJsonString
-  "Worker-gem entry the front end drives (via GsMcpSession>>forward:, a blocking executeString:).
+  "Worker-gem entry the front end drives (via McpSession>>forward:, a blocking executeString:).
    Lazily builds ONE worker instance per worker gem, cached in SessionTemps, to own the tool
    registry + dispatcher, then handles the request in this session. Builds the most capable
    installed class (the Grail subclass if present, else base). Answers the JSON response string
    ('' for a notification)."
   | srv |
-  srv := SessionTemps current at: #GsMcpServer otherwise: nil.
+  srv := SessionTemps current at: #McpServer otherwise: nil.
   srv isNil ifTrue: [
-    srv := ((System myUserProfile objectNamed: #GsMcpServerWithGrail) ifNil: [GsMcpServer] ifNotNil: [:c | c]) new.
-    SessionTemps current at: #GsMcpServer put: srv].
+    srv := ((System myUserProfile objectNamed: #McpServerWithGrail) ifNil: [McpServer] ifNotNil: [:c | c]) new.
+    SessionTemps current at: #McpServer put: srv].
   ^srv handleJsonString: aRawJsonString
 %
-! ------------------- Instance methods for GsMcpServer
+! ------------------- Instance methods for McpServer
 category: 'schema building'
-method: GsMcpServer
+method: McpServer
 boolProperty: aDescription
   | d |
   d := Dictionary new.
@@ -65,16 +65,16 @@ boolProperty: aDescription
   ^d
 %
 category: 'private'
-method: GsMcpServer
+method: McpServer
 capResult: aString
   "Cap an arbitrary tool result at 50000 characters so a huge value can't swamp the
-   client. Shared by execute_code (and by eval_python/compile_python in GsMcpServerWithGrail)."
+   client. Shared by execute_code (and by eval_python/compile_python in McpServerWithGrail)."
   ^aString size > 50000
     ifTrue: [(aString copyFrom: 1 to: 50000) , ' ...[truncated]']
     ifFalse: [aString]
 %
 category: 'private'
-method: GsMcpServer
+method: McpServer
 classNameFromDefinition: source
   "The class name in a 'Super subclass: ''Name'' ...' definition: the substring between the
    first two single quotes, as a Symbol. Returns nil if the source has no quoted literal
@@ -85,14 +85,14 @@ classNameFromDefinition: source
   ^(source copyFrom: q1 + 1 to: q2 - 1) asSymbol
 %
 category: 'private'
-method: GsMcpServer
+method: McpServer
 dictNamed: aName
   "Find a symbol dictionary by name in the current symbol list, or nil."
   System myUserProfile symbolList do: [:d | d name asString = aName ifTrue: [^d]].
   ^nil
 %
 category: 'private'
-method: GsMcpServer
+method: McpServer
 flattenMethods: aCollection
   "Flatten into a flat OrderedCollection of GsNMethod. Accepts a flat collection of GsNMethod
    (implementorsOf:/referencesToObject:) or a nested collection of collections (sendersOf:)."
@@ -106,7 +106,7 @@ flattenMethods: aCollection
   ^methods
 %
 category: 'private'
-method: GsMcpServer
+method: McpServer
 formatMethodList: aCollection
   "Format GsNMethods as readable lines: Class>>selector  [category]. Accepts flat or nested
    collections of GsNMethod (see flattenMethods:)."
@@ -122,7 +122,7 @@ formatMethodList: aCollection
   ^s contents
 %
 category: 'private'
-method: GsMcpServer
+method: McpServer
 formatTestResult: aTestResult label: aLabel
   "Summary line plus one line per non-passing test. GemStone's TestResult reports each failure/
    error as a descriptive String (e.g. 'SomeTest debug: #testFoo'); emit those.
@@ -151,23 +151,23 @@ formatTestResult: aTestResult label: aLabel
   ^s contents
 %
 category: 'protocol'
-method: GsMcpServer
+method: McpServer
 handleJsonString: aRawJsonString
   "Worker-gem entry (see the per-client-sessions design): parse a JSON-RPC request body, dispatch
    it in THIS session, and answer the JSON response string -- or '' for a notification (no
    response). No mutex: a worker gem serves one client, whose requests the front end already
-   serializes onto it. The class-side handleJsonString: (invoked by GsMcpRouter via
-   GsMcpSession>>forward:) relays this answer to the client."
+   serializes onto it. The class-side handleJsonString: (invoked by McpRouter via
+   McpSession>>forward:) relays this answer to the client."
   | parsed response |
   parsed := self parseBody: aRawJsonString.
   response := dispatcher handle: parsed.
   ^response isNil ifTrue: [''] ifFalse: [response asJson]
 %
 category: 'initialization'
-method: GsMcpServer
+method: McpServer
 initialize
-  toolRegistry := GsMcpToolRegistry new.
-  dispatcher := GsMcpDispatcher withToolRegistry: toolRegistry.
+  toolRegistry := McpToolRegistry new.
+  dispatcher := McpDispatcher withToolRegistry: toolRegistry.
   self registerBrowsingTools.
   self registerExecutionTools.
   self registerListingTools.
@@ -178,7 +178,7 @@ initialize
   ^self
 %
 category: 'private'
-method: GsMcpServer
+method: McpServer
 linesFrom: aCollectionOfStrings
   "Sort the strings and join them one per line; '(none)' if empty."
   | s |
@@ -189,7 +189,7 @@ linesFrom: aCollectionOfStrings
   ^s contents
 %
 category: 'private'
-method: GsMcpServer
+method: McpServer
 methodsReportFor: aBehavior label: aLabel
   "Group aBehavior's selectors by category into a readable report."
   | byCat s |
@@ -205,7 +205,7 @@ methodsReportFor: aBehavior label: aLabel
   ^s contents
 %
 category: 'schema building'
-method: GsMcpServer
+method: McpServer
 objectSchema: propsDict required: requiredArray
   | d |
   d := Dictionary new.
@@ -215,7 +215,7 @@ objectSchema: propsDict required: requiredArray
   ^d
 %
 category: 'schema building'
-method: GsMcpServer
+method: McpServer
 propString: aDescription
   | d |
   d := Dictionary new.
@@ -224,7 +224,7 @@ propString: aDescription
   ^d
 %
 category: 'private'
-method: GsMcpServer
+method: McpServer
 recompileMethodsFrom: oldClass into: newClass named: classNameSymbol
   "Recompile every instance- and class-side method of oldClass onto newClass, preserving
    category and environmentId. Commit (apply-and-report) and return a report listing any
@@ -261,7 +261,7 @@ recompileMethodsFrom: oldClass into: newClass named: classNameSymbol
   ^s contents
 %
 category: 'tool registration'
-method: GsMcpServer
+method: McpServer
 registerBrowsingTools
   "Handlers live in the 'tools - browsing' category."
   | classArg |
@@ -296,7 +296,7 @@ registerBrowsingTools
   ^self
 %
 category: 'tool registration'
-method: GsMcpServer
+method: McpServer
 registerExecutionTools
   "Handlers live in the 'tools - execution' category."
   toolRegistry
@@ -309,7 +309,7 @@ registerExecutionTools
   ^self
 %
 category: 'tool registration'
-method: GsMcpServer
+method: McpServer
 registerListingTools
   "Handlers live in the 'tools - listing' category."
   | noArgs dictArg |
@@ -332,7 +332,7 @@ registerListingTools
   ^self
 %
 category: 'tool registration'
-method: GsMcpServer
+method: McpServer
 registerMutationTools
   "Handlers live in the 'tools - mutation' category."
   | classArg dictArg |
@@ -393,7 +393,7 @@ registerMutationTools
   ^self
 %
 category: 'tool registration'
-method: GsMcpServer
+method: McpServer
 registerSearchTools
   "Handlers live in the 'tools - search' category."
   | selectorArg |
@@ -424,7 +424,7 @@ registerSearchTools
   ^self
 %
 category: 'tool registration'
-method: GsMcpServer
+method: McpServer
 registerSessionTools
   "Handlers live in the 'tools - session' category."
   | noArgs |
@@ -444,7 +444,7 @@ registerSessionTools
   ^self
 %
 category: 'tool registration'
-method: GsMcpServer
+method: McpServer
 registerTestTools
   "Handlers live in the 'tools - testing' category."
   | noArgs classArg methodArg |
@@ -483,12 +483,12 @@ registerTestTools
   ^self
 %
 category: 'accessing'
-method: GsMcpServer
+method: McpServer
 toolRegistry
   ^toolRegistry
 %
 category: 'private'
-method: GsMcpServer
+method: McpServer
 resolveClass: aName
   "Resolve a class by name in the current symbol list, or nil if not a class."
   | obj |
@@ -496,13 +496,13 @@ resolveClass: aName
   ^(obj isKindOf: Behavior) ifTrue: [obj] ifFalse: [nil]
 %
 category: 'tools - session'
-method: GsMcpServer
+method: McpServer
 tool_abort: args
   System abortTransaction.
   ^'Transaction aborted; view refreshed.'
 %
 category: 'tools - mutation'
-method: GsMcpServer
+method: McpServer
 tool_add_dictionary: args
   | name up d |
   name := args at: 'dictionaryName'.
@@ -515,14 +515,14 @@ tool_add_dictionary: args
       'Created dictionary: ' , name]
 %
 category: 'tools - session'
-method: GsMcpServer
+method: McpServer
 tool_commit: args
   ^System commitTransaction
     ifTrue: ['Transaction committed.']
     ifFalse: ['Commit failed due to conflicts; the transaction is still open.']
 %
 category: 'tools - mutation'
-method: GsMcpServer
+method: McpServer
 tool_compile_class_definition: args
   "Evaluate a class-definition expression and commit. If recompileMethods is true (default)
    and this is a shape-changing redefinition of an existing class (which would otherwise drop
@@ -549,7 +549,7 @@ tool_compile_class_definition: args
   ^self recompileMethodsFrom: oldClass into: newClass named: name
 %
 category: 'tools - mutation'
-method: GsMcpServer
+method: McpServer
 tool_compile_method: args
   | cls target errs |
   cls := self resolveClass: (args at: 'className').
@@ -566,7 +566,7 @@ tool_compile_method: args
         ifFalse: [System abortTransaction. 'Compile errors: ' , errs printString]]
 %
 category: 'tools - mutation'
-method: GsMcpServer
+method: McpServer
 tool_delete_class: args
   | cls arr dict |
   cls := self resolveClass: (args at: 'className').
@@ -582,7 +582,7 @@ tool_delete_class: args
           'Deleted class ' , (args at: 'className') , ' from ' , dict name asString , ' and committed.']]
 %
 category: 'tools - mutation'
-method: GsMcpServer
+method: McpServer
 tool_delete_method: args
   | cls target sel |
   cls := self resolveClass: (args at: 'className').
@@ -598,7 +598,7 @@ tool_delete_method: args
           'Deleted method ' , (args at: 'className') , '>>' , (args at: 'selector') , ' and committed.']]
 %
 category: 'tools - browsing'
-method: GsMcpServer
+method: McpServer
 tool_describe_class: args
   | cls nl |
   cls := self resolveClass: (args at: 'className').
@@ -612,7 +612,7 @@ tool_describe_class: args
       'selectors=' , (cls selectors asSortedCollection asArray) printString]
 %
 category: 'tools - testing'
-method: GsMcpServer
+method: McpServer
 tool_describe_test_failure: args
   "Re-run one test in isolation (runCase lets the exception propagate instead of being swallowed
    by TestCase>>run) and report the failure detail. Uses ex description -- which for a
@@ -630,25 +630,25 @@ tool_describe_test_failure: args
       label , ' - ' , ex class name asString , ': ' , detail asString]
 %
 category: 'tools - execution'
-method: GsMcpServer
+method: McpServer
 tool_execute_code: args
-  "Code is wrapped by GsMcpDispatcher>>handleToolsCall:id: to catch errors"
+  "Code is wrapped by McpDispatcher>>handleToolsCall:id: to catch errors"
   ^self capResult: (args at: 'code') evaluate printString
 %
 category: 'tools - browsing'
-method: GsMcpServer
+method: McpServer
 tool_export_class_source: args
   | cls |
   cls := self resolveClass: (args at: 'className').
   ^cls isNil ifTrue: ['Class not found: ' , (args at: 'className')] ifFalse: [cls fileOutClass]
 %
 category: 'tools - search'
-method: GsMcpServer
+method: McpServer
 tool_find_implementors: args
   ^self formatMethodList: (ClassOrganizer new implementorsOf: (args at: 'selector') asSymbol)
 %
 category: 'tools - search'
-method: GsMcpServer
+method: McpServer
 tool_find_references_to: args
   | obj |
   obj := System myUserProfile objectNamed: (args at: 'name') asSymbol.
@@ -657,7 +657,7 @@ tool_find_references_to: args
     ifFalse: [self formatMethodList: (ClassOrganizer new referencesToObject: obj)]
 %
 category: 'tools - search'
-method: GsMcpServer
+method: McpServer
 tool_find_senders: args
   "Senders of a common selector can number in the thousands, so cap the output. Unlike
    search_method_source (which stops scanning at the cap and can't know the total), sendersOf:
@@ -673,14 +673,14 @@ tool_find_senders: args
     , (self formatMethodList: flat)
 %
 category: 'tools - browsing'
-method: GsMcpServer
+method: McpServer
 tool_get_class_definition: args
   | cls |
   cls := self resolveClass: (args at: 'className').
   ^cls isNil ifTrue: ['Class not found: ' , (args at: 'className')] ifFalse: [cls definition]
 %
 category: 'tools - browsing'
-method: GsMcpServer
+method: McpServer
 tool_get_class_hierarchy: args
   | cls s chain c subs |
   cls := self resolveClass: (args at: 'className').
@@ -699,7 +699,7 @@ tool_get_class_hierarchy: args
     s contents]
 %
 category: 'tools - browsing'
-method: GsMcpServer
+method: McpServer
 tool_get_method_source: args
   | cls target src |
   cls := self resolveClass: (args at: 'className').
@@ -713,7 +713,7 @@ tool_get_method_source: args
         ifFalse: [src]]
 %
 category: 'tools - listing'
-method: GsMcpServer
+method: McpServer
 tool_list_all_classes: args
   | names |
   names := OrderedCollection new.
@@ -722,7 +722,7 @@ tool_list_all_classes: args
   ^self linesFrom: names
 %
 category: 'tools - listing'
-method: GsMcpServer
+method: McpServer
 tool_list_classes: args
   | dict |
   dict := self dictNamed: (args at: 'dictionaryName').
@@ -731,7 +731,7 @@ tool_list_classes: args
     ifFalse: [self linesFrom: ((dict values select: [:v | v isKindOf: Behavior]) collect: [:c | c name asString])]
 %
 category: 'tools - listing'
-method: GsMcpServer
+method: McpServer
 tool_list_dictionaries: args
   | s |
   s := WriteStream on: String new.
@@ -739,7 +739,7 @@ tool_list_dictionaries: args
   ^s contents
 %
 category: 'tools - listing'
-method: GsMcpServer
+method: McpServer
 tool_list_dictionary_entries: args
   | dict lines |
   dict := self dictNamed: (args at: 'dictionaryName').
@@ -751,7 +751,7 @@ tool_list_dictionary_entries: args
       self linesFrom: lines]
 %
 category: 'tools - testing'
-method: GsMcpServer
+method: McpServer
 tool_list_failing_tests: args
   | names classes out |
   classes := OrderedCollection new.
@@ -767,7 +767,7 @@ tool_list_failing_tests: args
   ^out contents isEmpty ifTrue: ['(no failing tests)'] ifFalse: [out contents]
 %
 category: 'tools - browsing'
-method: GsMcpServer
+method: McpServer
 tool_list_methods: args
   | cls |
   cls := self resolveClass: (args at: 'className').
@@ -776,7 +776,7 @@ tool_list_methods: args
       , (self methodsReportFor: cls class label: 'Class')]
 %
 category: 'tools - testing'
-method: GsMcpServer
+method: McpServer
 tool_list_test_classes: args
   | tc |
   tc := System myUserProfile objectNamed: #TestCase.
@@ -785,13 +785,13 @@ tool_list_test_classes: args
     ifFalse: [self linesFrom: ((ClassOrganizer new allSubclassesOf: tc) collect: [:c | c name asString])]
 %
 category: 'tools - session'
-method: GsMcpServer
+method: McpServer
 tool_refresh: args
   System abortTransaction.
   ^'View refreshed.'
 %
 category: 'tools - mutation'
-method: GsMcpServer
+method: McpServer
 tool_remove_dictionary: args
   | name dict up |
   name := args at: 'dictionaryName'.
@@ -805,7 +805,7 @@ tool_remove_dictionary: args
       'Removed dictionary: ' , name]
 %
 category: 'tools - testing'
-method: GsMcpServer
+method: McpServer
 tool_run_test_class: args
   | cls |
   cls := self resolveClass: (args at: 'className').
@@ -814,7 +814,7 @@ tool_run_test_class: args
     ifFalse: [self formatTestResult: cls suite run label: cls name asString]
 %
 category: 'tools - testing'
-method: GsMcpServer
+method: McpServer
 tool_run_test_method: args
   | cls |
   cls := self resolveClass: (args at: 'className').
@@ -824,7 +824,7 @@ tool_run_test_method: args
       label: (args at: 'className') , '>>' , (args at: 'selector')]
 %
 category: 'tools - search'
-method: GsMcpServer
+method: McpServer
 tool_search_method_source: args
   | pattern cap hits dicts |
   pattern := args at: 'pattern'.
@@ -843,7 +843,7 @@ tool_search_method_source: args
     , (self linesFrom: hits)
 %
 category: 'tools - mutation'
-method: GsMcpServer
+method: McpServer
 tool_set_class_comment: args
   | cls |
   cls := self resolveClass: (args at: 'className').
@@ -853,7 +853,7 @@ tool_set_class_comment: args
     'Comment set on ' , cls name asString , ' and committed.']
 %
 category: 'tools - session'
-method: GsMcpServer
+method: McpServer
 tool_status: args
   ^'user=' , System myUserProfile userId ,
    ' session=' , System session printString ,

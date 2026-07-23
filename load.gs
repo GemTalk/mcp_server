@@ -2,19 +2,19 @@
 ! Run from an already-logged-in topaz session:  topaz> input load.gs
 ! (or use install.sh, which logs in, runs this, and commits).
 
-input GsMcpTool.gs
-input GsMcpToolRegistry.gs
-input GsMcpHttpConnection.gs
-input GsMcpDispatcher.gs
-input GsMcpBase.gs
-input GsMcpServer.gs
-input GsMcpSession.gs
-input GsMcpRouter.gs
+input McpTool.gs
+input McpToolRegistry.gs
+input McpHttpConnection.gs
+input McpDispatcher.gs
+input McpBase.gs
+input McpServer.gs
+input McpSession.gs
+input McpRouter.gs
 
 ! Unit-test classes (GsTestCase subclasses) + their mock transport.
-input GsMcpMockSocket.gs
-input GsMcpToolTest.gs
-input GsMcpDispatcherTest.gs
-input GsMcpTransportTest.gs
+input McpMockSocket.gs
+input McpToolTest.gs
+input McpDispatcherTest.gs
+input McpTransportTest.gs
 
 commit

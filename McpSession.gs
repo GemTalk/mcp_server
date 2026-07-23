@@ -1,8 +1,8 @@
 set compile_env: 0
-! ------------------- Class definition for GsMcpSession
+! ------------------- Class definition for McpSession
 expectvalue /Class
 doit
-Object subclass: 'GsMcpSession'
+Object subclass: 'McpSession'
   instVarNames: #( id worker lastActivitySeconds userId)
   classVars: #()
   classInstVars: #()
@@ -12,32 +12,32 @@ Object subclass: 'GsMcpSession'
 %
 expectvalue /Class
 doit
-GsMcpSession comment:
+McpSession comment:
 'One MCP client''s isolated worker: a GsTsExternalSession gem (its own transaction view) plus the
-client''s session id, last-activity time, and (future) userId. The front end (GsMcpRouter) keeps
-an id -> GsMcpSession map and routes each request through #forward:, which runs it in this worker
+client''s session id, last-activity time, and (future) userId. The front end (McpRouter) keeps
+an id -> McpSession map and routes each request through #forward:, which runs it in this worker
 via a BLOCKING executeString: -- reliable; forwarding is serialized (true cross-client concurrency
 is a deferred follow-up). Idle sessions are reaped after a timeout. Workers log in as the current
 user for now; userId is reserved for later per-user auth.'
 %
 expectvalue /Class
 doit
-GsMcpSession category: 'GsMcp'
+McpSession category: 'MCPServer'
 %
-! ------------------- Remove existing behavior from GsMcpSession
-removeallmethods GsMcpSession
-removeallclassmethods GsMcpSession
-! ------------------- Class methods for GsMcpSession
+! ------------------- Remove existing behavior from McpSession
+removeallmethods McpSession
+removeallclassmethods McpSession
+! ------------------- Class methods for McpSession
 category: 'instance creation'
-classmethod: GsMcpSession
+classmethod: McpSession
 startWithId: anId
   "Spawn a worker gem (current user, one-time password) and answer a started session with the
    given client id."
   ^self new startWithId: anId
 %
-! ------------------- Instance methods for GsMcpSession
+! ------------------- Instance methods for McpSession
 category: 'lifecycle'
-method: GsMcpSession
+method: McpSession
 close
   "Terminate the worker gem. It is attached (the front end drives it via executeString:), so a
    logout stops it."
@@ -45,31 +45,31 @@ close
   ^self
 %
 category: 'accessing'
-method: GsMcpSession
+method: McpSession
 id
   ^id
 %
 category: 'activity'
-method: GsMcpSession
+method: McpSession
 idleSeconds
   ^System timeGmt - lastActivitySeconds
 %
 category: 'routing'
-method: GsMcpSession
+method: McpSession
 forward: aRawJsonString
   "Run a JSON-RPC request in this client's worker gem (an isolated session) and answer the JSON
    response string ('' for a notification). BLOCKING executeString: -- reliable; forwarding is
    serialized (concurrency deferred). The request is embedded via printString for safe quoting."
   self touch.
-  ^worker executeString: 'GsMcpServer handleJsonString: ' , aRawJsonString printString
+  ^worker executeString: 'McpServer handleJsonString: ' , aRawJsonString printString
 %
 category: 'accessing'
-method: GsMcpSession
+method: McpSession
 lastActivitySeconds
   ^lastActivitySeconds
 %
 category: 'initialization'
-method: GsMcpSession
+method: McpSession
 startWithId: anId
   "Log in a fresh worker gem for this client. Uses GsTsExternalSession (looked up dynamically so
    this class compiles on images without it); same user as the server, one-time password."
@@ -85,14 +85,14 @@ startWithId: anId
   ^self
 %
 category: 'activity'
-method: GsMcpSession
+method: McpSession
 touch
   "Record now (GMT seconds) as the last activity, for idle-timeout reaping."
   lastActivitySeconds := System timeGmt.
   ^self
 %
 category: 'accessing'
-method: GsMcpSession
+method: McpSession
 userId
   ^userId
 %

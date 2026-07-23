@@ -1,8 +1,8 @@
 set compile_env: 0
-! ------------------- Class definition for GsMcpDispatcherTest
+! ------------------- Class definition for McpDispatcherTest
 expectvalue /Class
 doit
-GsTestCase subclass: 'GsMcpDispatcherTest'
+GsTestCase subclass: 'McpDispatcherTest'
   instVarNames: #()
   classVars: #()
   classInstVars: #()
@@ -11,19 +11,19 @@ GsTestCase subclass: 'GsMcpDispatcherTest'
   options: #()
 
 %
-! ------------------- Remove existing behavior from GsMcpDispatcherTest
-removeallmethods GsMcpDispatcherTest
-removeallclassmethods GsMcpDispatcherTest
-! ------------------- Class methods for GsMcpDispatcherTest
-! ------------------- Instance methods for GsMcpDispatcherTest
+! ------------------- Remove existing behavior from McpDispatcherTest
+removeallmethods McpDispatcherTest
+removeallclassmethods McpDispatcherTest
+! ------------------- Class methods for McpDispatcherTest
+! ------------------- Instance methods for McpDispatcherTest
 category: 'helpers'
-method: GsMcpDispatcherTest
+method: McpDispatcherTest
 dispatch: requestDict
   "Route requestDict through a fresh dispatcher; answer the response Dictionary (or nil)."
-  ^(GsMcpDispatcher withToolRegistry: GsMcpServer new toolRegistry) handle: requestDict
+  ^(McpDispatcher withToolRegistry: McpServer new toolRegistry) handle: requestDict
 %
 category: 'helpers'
-method: GsMcpDispatcherTest
+method: McpDispatcherTest
 notification: methodName
   "A JSON-RPC notification (no id)."
   | d |
@@ -33,7 +33,7 @@ notification: methodName
   ^d
 %
 category: 'helpers'
-method: GsMcpDispatcherTest
+method: McpDispatcherTest
 request: methodName params: paramsDict
   | d |
   d := Dictionary new.
@@ -44,17 +44,17 @@ request: methodName params: paramsDict
   ^d
 %
 category: 'tests'
-method: GsMcpDispatcherTest
+method: McpDispatcherTest
 testHandleJsonString
-  "The worker entry (GsMcpServer class>>handleJsonString:) parses + dispatches a raw JSON-RPC
+  "The worker entry (McpServer class>>handleJsonString:) parses + dispatches a raw JSON-RPC
    request in a per-gem worker instance and answers the response string; a notification -> ''."
   | out |
-  out := GsMcpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'.
+  out := McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'.
   self assert: (out includesString: '"tools"').
-  self assert: (GsMcpServer handleJsonString: '{"jsonrpc":"2.0","method":"notifications/initialized"}') isEmpty
+  self assert: (McpServer handleJsonString: '{"jsonrpc":"2.0","method":"notifications/initialized"}') isEmpty
 %
 category: 'tests'
-method: GsMcpDispatcherTest
+method: McpDispatcherTest
 testInitialize
   | result |
   result := (self dispatch: (self request: 'initialize' params: Dictionary new)) at: 'result'.
@@ -63,17 +63,17 @@ testInitialize
   self assert: ((result at: 'capabilities') includesKey: 'tools')
 %
 category: 'tests'
-method: GsMcpDispatcherTest
+method: McpDispatcherTest
 testNilRequestReturnsParseError
   self assert: (((self dispatch: nil) at: 'error') at: 'code') equals: -32700
 %
 category: 'tests'
-method: GsMcpDispatcherTest
+method: McpDispatcherTest
 testNotificationReturnsNil
   self assert: (self dispatch: (self notification: 'notifications/initialized')) isNil
 %
 category: 'tests'
-method: GsMcpDispatcherTest
+method: McpDispatcherTest
 testToolsCallSuccessEnvelope
   | result |
   result := (self dispatch: (self toolCall: 'execute_code' args: (Dictionary new at: 'code' put: '3 + 4'; yourself))) at: 'result'.
@@ -81,7 +81,7 @@ testToolsCallSuccessEnvelope
   self assert: ((result at: 'content') first at: 'text') equals: '7'
 %
 category: 'tests'
-method: GsMcpDispatcherTest
+method: McpDispatcherTest
 testToolsCallWrapsErrorsAsIsError
   | result |
   result := (self dispatch: (self toolCall: 'execute_code' args: (Dictionary new at: 'code' put: '1/0'; yourself))) at: 'result'.
@@ -89,7 +89,7 @@ testToolsCallWrapsErrorsAsIsError
   self assert: (((result at: 'content') first at: 'text') includesString: 'ZeroDivide')
 %
 category: 'tests'
-method: GsMcpDispatcherTest
+method: McpDispatcherTest
 testToolsListIsAlphabeticalAnd31
   | tools names |
   tools := ((self dispatch: (self request: 'tools/list' params: nil)) at: 'result') at: 'tools'.
@@ -98,21 +98,21 @@ testToolsListIsAlphabeticalAnd31
   self assert: names equals: names asSortedCollection asArray
 %
 category: 'tests'
-method: GsMcpDispatcherTest
+method: McpDispatcherTest
 testUnknownMethodReturns32601
   | resp |
   resp := self dispatch: (self request: 'no/such/method' params: nil).
   self assert: ((resp at: 'error') at: 'code') equals: -32601
 %
 category: 'tests'
-method: GsMcpDispatcherTest
+method: McpDispatcherTest
 testUnknownToolReturns32602
   | resp |
   resp := self dispatch: (self toolCall: 'does_not_exist' args: Dictionary new).
   self assert: ((resp at: 'error') at: 'code') equals: -32602
 %
 category: 'helpers'
-method: GsMcpDispatcherTest
+method: McpDispatcherTest
 toolCall: toolName args: argsDict
   ^self request: 'tools/call' params:
     (Dictionary new at: 'name' put: toolName; at: 'arguments' put: argsDict; yourself)

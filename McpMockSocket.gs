@@ -1,8 +1,8 @@
 set compile_env: 0
-! ------------------- Class definition for GsMcpMockSocket
+! ------------------- Class definition for McpMockSocket
 expectvalue /Class
 doit
-Object subclass: 'GsMcpMockSocket'
+Object subclass: 'McpMockSocket'
   instVarNames: #( input pos chunkSize
                     outStream closed)
   classVars: #()
@@ -14,43 +14,43 @@ Object subclass: 'GsMcpMockSocket'
 %
 expectvalue /Class
 doit
-GsMcpMockSocket category: 'GsMcp'
+McpMockSocket category: 'MCPServer'
 %
-! ------------------- Remove existing behavior from GsMcpMockSocket
-removeallmethods GsMcpMockSocket
-removeallclassmethods GsMcpMockSocket
-! ------------------- Class methods for GsMcpMockSocket
+! ------------------- Remove existing behavior from McpMockSocket
+removeallmethods McpMockSocket
+removeallclassmethods McpMockSocket
+! ------------------- Class methods for McpMockSocket
 category: 'instance creation'
-classmethod: GsMcpMockSocket
+classmethod: McpMockSocket
 on: aRequestString
   "A mock socket pre-loaded with a raw HTTP request, delivering it in one chunk."
   ^self on: aRequestString chunkSize: 1000000
 %
 category: 'instance creation'
-classmethod: GsMcpMockSocket
+classmethod: McpMockSocket
 on: aRequestString chunkSize: anInteger
   "chunkSize caps each readString: result, to exercise multi-read / partial-read paths."
   ^self new setInput: aRequestString chunkSize: anInteger
 %
-! ------------------- Instance methods for GsMcpMockSocket
+! ------------------- Instance methods for McpMockSocket
 category: 'socket protocol'
-method: GsMcpMockSocket
+method: McpMockSocket
 close
   closed := true
 %
 category: 'accessing'
-method: GsMcpMockSocket
+method: McpMockSocket
 isClosed
   ^closed
 %
 category: 'accessing'
-method: GsMcpMockSocket
+method: McpMockSocket
 output
   "The raw bytes the server wrote back (the HTTP response)."
   ^outStream contents
 %
 category: 'socket protocol'
-method: GsMcpMockSocket
+method: McpMockSocket
 readString: maxBytes
   "Return up to (maxBytes min: chunkSize) bytes from the remaining input, or '' at EOF."
   | avail take s |
@@ -62,13 +62,13 @@ readString: maxBytes
   ^s
 %
 category: 'socket protocol'
-method: GsMcpMockSocket
+method: McpMockSocket
 readWillNotBlockWithin: ms
   "Data is always 'ready' in the mock (or we are at EOF, where readString: returns empty)."
   ^true
 %
 category: 'initialization'
-method: GsMcpMockSocket
+method: McpMockSocket
 setInput: aRequestString chunkSize: anInteger
   input := aRequestString.
   pos := 1.
@@ -78,7 +78,7 @@ setInput: aRequestString chunkSize: anInteger
   ^self
 %
 category: 'socket protocol'
-method: GsMcpMockSocket
+method: McpMockSocket
 write: aString
   outStream nextPutAll: aString.
   ^aString size

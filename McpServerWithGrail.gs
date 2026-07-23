@@ -1,8 +1,8 @@
 set compile_env: 0
-! ------------------- Class definition for GsMcpServerWithGrail
+! ------------------- Class definition for McpServerWithGrail
 expectvalue /Class
 doit
-GsMcpServer subclass: 'GsMcpServerWithGrail'
+McpServer subclass: 'McpServerWithGrail'
   instVarNames: #()
   classVars: #()
   classInstVars: #()
@@ -12,28 +12,28 @@ GsMcpServer subclass: 'GsMcpServerWithGrail'
 %
 expectvalue /Class
 doit
-GsMcpServerWithGrail comment:
-'A GsMcpServer that additionally registers the GemStone-Python (Grail) tools -- eval_python
+McpServerWithGrail comment:
+'A McpServer that additionally registers the GemStone-Python (Grail) tools -- eval_python
 and compile_python. Kept as an optional subclass so the base server loads and runs on images
 without Grail/ModuleAst: load this file only into a Grail-equipped image. run-server.sh boots
 this class when its file has been loaded, otherwise the base server.
 
 The two tools call ModuleAst directly with no capability check and no own error handling
-(errors propagate to GsMcpDispatcher>>handleToolsCall:id:, as with execute_code). They require
+(errors propagate to McpDispatcher>>handleToolsCall:id:, as with execute_code). They require
 an image where Grail raises exceptions on Python syntax/runtime errors rather than crashing the
 gem.'
 %
 expectvalue /Class
 doit
-GsMcpServerWithGrail category: 'GsMcp'
+McpServerWithGrail category: 'MCPServer'
 %
-! ------------------- Remove existing behavior from GsMcpServerWithGrail
-removeallmethods GsMcpServerWithGrail
-removeallclassmethods GsMcpServerWithGrail
-! ------------------- Class methods for GsMcpServerWithGrail
-! ------------------- Instance methods for GsMcpServerWithGrail
+! ------------------- Remove existing behavior from McpServerWithGrail
+removeallmethods McpServerWithGrail
+removeallclassmethods McpServerWithGrail
+! ------------------- Class methods for McpServerWithGrail
+! ------------------- Instance methods for McpServerWithGrail
 category: 'initialization'
-method: GsMcpServerWithGrail
+method: McpServerWithGrail
 initialize
   "Register the base tools (super), then add the Grail-powered python tools."
   super initialize.
@@ -41,7 +41,7 @@ initialize
   ^self
 %
 category: 'tool registration'
-method: GsMcpServerWithGrail
+method: McpServerWithGrail
 registerPythonTools
   "Handlers live in the 'tools - python' category. These require an image with
    GemStone-Python (Grail/ModuleAst) whose parser raises exceptions on syntax errors
@@ -59,18 +59,18 @@ registerPythonTools
   ^self
 %
 category: 'tools - python'
-method: GsMcpServerWithGrail
+method: McpServerWithGrail
 tool_compile_python: args
   "Transpile Python source to Smalltalk via Grail and answer the generated source.
    See tool_eval_python: for the image requirements and error-handling contract."
   ^self capResult: (ModuleAst parseSource: (args at: 'code')) smalltalkSource
 %
 category: 'tools - python'
-method: GsMcpServerWithGrail
+method: McpServerWithGrail
 tool_eval_python: args
   "Evaluate Python source via Grail and answer the printString of the result.
    No ModuleAst capability check and no own error handling: errors propagate to
-   GsMcpDispatcher>>handleToolsCall:id: (as with execute_code). Requires an image
+   McpDispatcher>>handleToolsCall:id: (as with execute_code). Requires an image
    with GemStone-Python (ModuleAst) whose parser raises on syntax/runtime errors rather
    than crashing the gem."
   ^self capResult: (ModuleAst evaluateSource: (args at: 'code')) printString

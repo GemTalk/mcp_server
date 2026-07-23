@@ -31,9 +31,9 @@ login
 iferr 1 stk
 run
 | s classes grailTest |
-classes := #( 'GsMcpToolTest' 'GsMcpDispatcherTest' 'GsMcpTransportTest' ) asOrderedCollection.
-grailTest := System myUserProfile objectNamed: #GsMcpServerWithGrailTest.
-grailTest ifNotNil: [classes add: 'GsMcpServerWithGrailTest'].
+classes := #( 'McpToolTest' 'McpDispatcherTest' 'McpTransportTest' ) asOrderedCollection.
+grailTest := System myUserProfile objectNamed: #McpServerWithGrailTest.
+grailTest ifNotNil: [classes add: 'McpServerWithGrailTest'].
 s := WriteStream on: String new.
 classes do: [:nm | | res |
   res := (System myUserProfile objectNamed: nm asSymbol) suite run.

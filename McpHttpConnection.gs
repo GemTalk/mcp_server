@@ -1,8 +1,8 @@
 set compile_env: 0
-! ------------------- Class definition for GsMcpHttpConnection
+! ------------------- Class definition for McpHttpConnection
 expectvalue /Class
 doit
-Object subclass: 'GsMcpHttpConnection'
+Object subclass: 'McpHttpConnection'
   instVarNames: #( socket)
   classVars: #()
   classInstVars: #()
@@ -12,32 +12,32 @@ Object subclass: 'GsMcpHttpConnection'
 %
 expectvalue /Class
 doit
-GsMcpHttpConnection comment:
+McpHttpConnection comment:
 'Wraps a single accepted client GsSocket and speaks just enough HTTP/1.1 to serve
 the MCP transport: read one request (request line + headers + Content-Length body)
 and write a single application/json response with Connection: close. No keep-alive.'
 %
 expectvalue /Class
 doit
-GsMcpHttpConnection category: 'GsMcp'
+McpHttpConnection category: 'MCPServer'
 %
-! ------------------- Remove existing behavior from GsMcpHttpConnection
-removeallmethods GsMcpHttpConnection
-removeallclassmethods GsMcpHttpConnection
-! ------------------- Class methods for GsMcpHttpConnection
+! ------------------- Remove existing behavior from McpHttpConnection
+removeallmethods McpHttpConnection
+removeallclassmethods McpHttpConnection
+! ------------------- Class methods for McpHttpConnection
 category: 'instance creation'
-classmethod: GsMcpHttpConnection
+classmethod: McpHttpConnection
 on: aSocket
   ^self new setSocket: aSocket
 %
-! ------------------- Instance methods for GsMcpHttpConnection
+! ------------------- Instance methods for McpHttpConnection
 category: 'closing'
-method: GsMcpHttpConnection
+method: McpHttpConnection
 close
   socket ifNotNil: [socket close]
 %
 category: 'reading'
-method: GsMcpHttpConnection
+method: McpHttpConnection
 parseHead: headString
   "Parse the request line + header lines (no trailing blank line) into a Dictionary."
   | lines reqLine parts headers req sep |
@@ -62,7 +62,7 @@ parseHead: headString
   ^req
 %
 category: 'reading'
-method: GsMcpHttpConnection
+method: McpHttpConnection
 readRequest
   "Read one HTTP/1.1 request. Returns a Dictionary with keys
    'method' 'path' 'headers' (lowercased keys) and 'body', or nil on EOF/error/timeout.
@@ -91,26 +91,26 @@ readRequest
   ^req
 %
 category: 'initialization'
-method: GsMcpHttpConnection
+method: McpHttpConnection
 setSocket: aSocket
   socket := aSocket.
   ^self
 %
 category: 'writing'
-method: GsMcpHttpConnection
+method: McpHttpConnection
 writeJson: aJsonString
   "Write a 200 response carrying aJsonString as application/json."
   ^self writeJson: aJsonString sessionId: nil
 %
 category: 'writing'
-method: GsMcpHttpConnection
+method: McpHttpConnection
 writeJson: aJsonString sessionId: anIdOrNil
   "Write a 200 JSON response, adding the Mcp-Session-Id header when anIdOrNil is non-nil (the
    initialize response, so the client echoes the id on later requests)."
   ^self writeStatus: 200 reason: 'OK' body: aJsonString sessionId: anIdOrNil
 %
 category: 'writing-sse'
-method: GsMcpHttpConnection
+method: McpHttpConnection
 writeSseComment: aString
   "Write an SSE comment line (used for keepalives). Returns nil if the write fails
    (e.g. the client disconnected)."
@@ -119,7 +119,7 @@ writeSseComment: aString
   ^socket write: ': ' , aString , lf , lf
 %
 category: 'writing-sse'
-method: GsMcpHttpConnection
+method: McpHttpConnection
 writeSseData: aJsonString
   "Write one SSE 'message' event carrying aJsonString. Returns nil on write failure."
   | lf |
@@ -127,7 +127,7 @@ writeSseData: aJsonString
   ^socket write: 'event: message' , lf , 'data: ' , aJsonString , lf , lf
 %
 category: 'writing-sse'
-method: GsMcpHttpConnection
+method: McpHttpConnection
 writeSseStreamHeaders
   "Begin a text/event-stream response (no Content-Length; the stream stays open)."
   | crlf resp |
@@ -139,13 +139,13 @@ writeSseStreamHeaders
   ^socket write: resp
 %
 category: 'writing'
-method: GsMcpHttpConnection
+method: McpHttpConnection
 writeStatus: code reason: reasonString body: aBodyString
   "Write a complete HTTP/1.1 response with no Mcp-Session-Id header."
   ^self writeStatus: code reason: reasonString body: aBodyString sessionId: nil
 %
 category: 'writing'
-method: GsMcpHttpConnection
+method: McpHttpConnection
 writeStatus: code reason: reasonString body: aBodyString sessionId: anIdOrNil
   "The single place a complete HTTP/1.1 JSON response is built. Adds the Mcp-Session-Id header
    when anIdOrNil is non-nil (the initialize response, so the client echoes the id on later

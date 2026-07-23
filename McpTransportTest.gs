@@ -1,8 +1,8 @@
 set compile_env: 0
-! ------------------- Class definition for GsMcpTransportTest
+! ------------------- Class definition for McpTransportTest
 expectvalue /Class
 doit
-GsTestCase subclass: 'GsMcpTransportTest'
+GsTestCase subclass: 'McpTransportTest'
   instVarNames: #( server)
   classVars: #()
   classInstVars: #()
@@ -11,13 +11,13 @@ GsTestCase subclass: 'GsMcpTransportTest'
   options: #()
 
 %
-! ------------------- Remove existing behavior from GsMcpTransportTest
-removeallmethods GsMcpTransportTest
-removeallclassmethods GsMcpTransportTest
-! ------------------- Class methods for GsMcpTransportTest
-! ------------------- Instance methods for GsMcpTransportTest
+! ------------------- Remove existing behavior from McpTransportTest
+removeallmethods McpTransportTest
+removeallclassmethods McpTransportTest
+! ------------------- Class methods for McpTransportTest
+! ------------------- Instance methods for McpTransportTest
 category: 'helpers'
-method: GsMcpTransportTest
+method: McpTransportTest
 bodyOf: response
   "The body bytes of an HTTP response (everything after the blank line)."
   | sep idx |
@@ -26,12 +26,12 @@ bodyOf: response
   ^idx = 0 ifTrue: [''] ifFalse: [response copyFrom: idx + 4 to: response size]
 %
 category: 'helpers'
-method: GsMcpTransportTest
+method: McpTransportTest
 crlf
   ^String with: Character cr with: Character lf
 %
 category: 'helpers'
-method: GsMcpTransportTest
+method: McpTransportTest
 postRequest: body
   "A raw HTTP POST /mcp request carrying body as application/json."
   | crlf |
@@ -41,30 +41,30 @@ postRequest: body
    'Content-Length: ' , body size printString , crlf , crlf , body
 %
 category: 'helpers'
-method: GsMcpTransportTest
+method: McpTransportTest
 runRequest: rawRequest
   "Drive handleConnection: with rawRequest; answer the mock (whose #output holds the
    captured response). Named runRequest: (NOT run:) to avoid shadowing TestCase>>run:."
   ^self runRequest: rawRequest chunkSize: 1000000
 %
 category: 'helpers'
-method: GsMcpTransportTest
+method: McpTransportTest
 runRequest: rawRequest chunkSize: n
   "The router is a stack local so the framework's between-test instance-variable
    nilling cannot disturb it."
   | mock |
-  mock := GsMcpMockSocket on: rawRequest chunkSize: n.
-  GsMcpRouter new handleConnection: (GsMcpHttpConnection on: mock).
+  mock := McpMockSocket on: rawRequest chunkSize: n.
+  McpRouter new handleConnection: (McpHttpConnection on: mock).
   ^mock
 %
 category: 'running'
-method: GsMcpTransportTest
+method: McpTransportTest
 setUp
   "No per-test state: each helper builds its own server as a stack local."
   ^self
 %
 category: 'helpers'
-method: GsMcpTransportTest
+method: McpTransportTest
 simpleRequest: httpMethod
   "A raw HTTP request with the given verb, no body."
   | crlf |
@@ -72,7 +72,7 @@ simpleRequest: httpMethod
   ^httpMethod , ' /mcp HTTP/1.1' , crlf , 'Host: localhost' , crlf , crlf
 %
 category: 'tests'
-method: GsMcpTransportTest
+method: McpTransportTest
 testChunkedDeliveryParses
   "Even when the request arrives a few bytes at a time, readRequest must reassemble it. Uses a
    session-less tools/list so no worker gem is spawned -- the routed -32600 proves the body was
@@ -82,7 +82,7 @@ testChunkedDeliveryParses
   self assert: (out includesString: '-32600')
 %
 category: 'tests'
-method: GsMcpTransportTest
+method: McpTransportTest
 testContentLengthMatchesBody
   | out body lines clenLine clenValue |
   out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":4,"method":"tools/list"}')) output.
@@ -94,21 +94,21 @@ testContentLengthMatchesBody
   self assert: clenValue equals: body size
 %
 category: 'tests'
-method: GsMcpTransportTest
+method: McpTransportTest
 testDeleteReturns200
   self assert: ((self runRequest: (self simpleRequest: 'DELETE')) output includesString: 'HTTP/1.1 200 OK')
 %
 category: 'tests'
-method: GsMcpTransportTest
+method: McpTransportTest
 testEofClosesConnectionWithoutResponse
   | mock |
-  mock := GsMcpMockSocket on: ''.
-  GsMcpRouter new handleConnection: (GsMcpHttpConnection on: mock).
+  mock := McpMockSocket on: ''.
+  McpRouter new handleConnection: (McpHttpConnection on: mock).
   self assert: mock isClosed.
   self assert: mock output isEmpty
 %
 category: 'tests'
-method: GsMcpTransportTest
+method: McpTransportTest
 testGetOpensSseStream
   | out |
   out := (self runRequest: (self simpleRequest: 'GET')) output.
@@ -116,14 +116,14 @@ testGetOpensSseStream
   self assert: (out includesString: ': connected')
 %
 category: 'tests'
-method: GsMcpTransportTest
+method: McpTransportTest
 testMalformedBodyReturnsParseError
   | out |
   out := (self runRequest: (self postRequest: 'this is not json')) output.
   self assert: (out includesString: '-32700')
 %
 category: 'tests'
-method: GsMcpTransportTest
+method: McpTransportTest
 testPostWithoutSessionReturnsError
   "A non-initialize POST with no Mcp-Session-Id is refused with a JSON-RPC error, and no worker
    gem is spawned. initialize + a routed tool call require a real worker session, so they are
@@ -135,7 +135,7 @@ testPostWithoutSessionReturnsError
   self assert: (out includesString: 'Mcp-Session-Id')
 %
 category: 'tests'
-method: GsMcpTransportTest
+method: McpTransportTest
 testUnknownVerbReturns405
   self assert: ((self runRequest: (self simpleRequest: 'PUT')) output includesString: '405 Method Not Allowed')
 %

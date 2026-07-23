@@ -1,8 +1,8 @@
 set compile_env: 0
-! ------------------- Class definition for GsMcpTool
+! ------------------- Class definition for McpTool
 expectvalue /Class
 doit
-Object subclass: 'GsMcpTool'
+Object subclass: 'McpTool'
   instVarNames: #( name description schema handler)
   classVars: #()
   classInstVars: #()
@@ -12,30 +12,30 @@ Object subclass: 'GsMcpTool'
 %
 expectvalue /Class
 doit
-GsMcpTool comment:
+McpTool comment:
 'A single MCP tool: a name, human description, JSON-Schema (a Dictionary) for its
 arguments, and a one-argument handler block [:argsDict | aString] that performs the
-work and returns a String. Part of the native GemStone MCP server (see GsMcpServer).'
+work and returns a String. Part of the native GemStone MCP server (see McpServer).'
 %
 expectvalue /Class
 doit
-GsMcpTool category: 'GsMcp'
+McpTool category: 'MCPServer'
 %
-! ------------------- Remove existing behavior from GsMcpTool
-removeallmethods GsMcpTool
-removeallclassmethods GsMcpTool
-! ------------------- Class methods for GsMcpTool
+! ------------------- Remove existing behavior from McpTool
+removeallmethods McpTool
+removeallclassmethods McpTool
+! ------------------- Class methods for McpTool
 category: 'instance creation'
-classmethod: GsMcpTool
+classmethod: McpTool
 name: aName description: aDescription inputSchema: aSchema handler: aBlock
   "aSchema is a Dictionary describing the JSON Schema of the tool's arguments.
    aBlock is a one-argument block [:argsDict | ...] returning a String result."
   ^self new
     setName: aName description: aDescription inputSchema: aSchema handler: aBlock
 %
-! ------------------- Instance methods for GsMcpTool
+! ------------------- Instance methods for McpTool
 category: 'initialization'
-method: GsMcpTool
+method: McpTool
 setName: aName description: aDescription inputSchema: aSchema handler: aBlock
   name := aName.
   description := aDescription.
@@ -44,12 +44,12 @@ setName: aName description: aDescription inputSchema: aSchema handler: aBlock
   ^self
 %
 category: 'accessing'
-method: GsMcpTool
+method: McpTool
 name
   ^name
 %
 category: 'converting'
-method: GsMcpTool
+method: McpTool
 descriptor
   "The MCP tools/list entry for this tool."
   | d |
@@ -60,7 +60,7 @@ descriptor
   ^d
 %
 category: 'evaluating'
-method: GsMcpTool
+method: McpTool
 callWith: argsDict
   "Invoke the handler with the supplied arguments Dictionary (may be nil).
    Returns a String. Any error raised propagates to the dispatcher."

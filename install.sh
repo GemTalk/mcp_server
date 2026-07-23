@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Install the native GemStone MCP server classes into the image.
-# Logs in via topaz, ensures the Published dictionary exists, files in the base GsMcp*
+# Logs in via topaz, ensures the Published dictionary exists, files in the base Mcp*
 # classes, and commits. Pass --grail (or set
 # GS_MCP_WITH_GRAIL=1) to additionally load the optional Grail/Python tools -- only valid on
 # an image that has GemStone-Python (Grail/ModuleAst).
@@ -59,4 +59,4 @@ commit
 logout
 exit
 TPZ
-echo "GsMcp* classes installed and committed (loaded: $LOAD_FILE)."
+echo "Mcp* classes installed and committed (loaded: $LOAD_FILE)."

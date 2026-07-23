@@ -3,11 +3,11 @@
 ! Run from an already-logged-in topaz session:  topaz> input load-grail.gs
 ! (or use `GS_MCP_WITH_GRAIL=1 ./install.sh`, or `./install.sh --grail`).
 
-! Base classes + base test suites (loads GsMcpServer before its subclass).
+! Base classes + base test suites (loads McpServer before its subclass).
 input load.gs
 
-! Optional Grail subclass + its test suite (must load after GsMcpServer / the base tests).
-input GsMcpServerWithGrail.gs
-input GsMcpServerWithGrailTest.gs
+! Optional Grail subclass + its test suite (must load after McpServer / the base tests).
+input McpServerWithGrail.gs
+input McpServerWithGrailTest.gs
 
 commit

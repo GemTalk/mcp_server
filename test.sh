@@ -125,38 +125,38 @@ echo "      server session: $(printf '%s' "$r" | grep -oE 'session=[0-9]+')"
 
 # --- describe_class / get_method_source ---
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"describe_class","arguments":{"className":"GsMcpServer"}}}
+{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"describe_class","arguments":{"className":"McpServer"}}}
 JSON
 )
-check "describe_class GsMcpServer"            'superclass='              "$r"
+check "describe_class McpServer"            'superclass='              "$r"
 
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"get_method_source","arguments":{"className":"GsMcpRouter","selector":"stop"}}}
+{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"get_method_source","arguments":{"className":"McpRouter","selector":"stop"}}}
 JSON
 )
-check "get_method_source GsMcpRouter>>stop"   'isRunning := false'       "$r"
+check "get_method_source McpRouter>>stop"   'isRunning := false'       "$r"
 
 # --- compile_method round-trip on a throwaway class, then clean up ---
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"| c | c := (System myUserProfile objectNamed: #GsMcpSmokeClass) ifNil: [Object subclass: 'GsMcpSmokeClass' instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()]. c comment: 'Artifact of an aborted GsMcp server test (gs-mcp/test.sh). Safe to remove.'. System commitTransaction. 'ready'"}}}
+{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"| c | c := (System myUserProfile objectNamed: #McpSmokeClass) ifNil: [Object subclass: 'McpSmokeClass' instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()]. c comment: 'Artifact of an aborted Mcp server test (gs-mcp/test.sh). Safe to remove.'. System commitTransaction. 'ready'"}}}
 JSON
 )
 check "create throwaway test class"           'ready'                    "$r"
 
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"compile_method","arguments":{"className":"GsMcpSmokeClass","source":"answer\n  ^42","category":"smoke"}}}
+{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"compile_method","arguments":{"className":"McpSmokeClass","source":"answer\n  ^42","category":"smoke"}}}
 JSON
 )
 check "compile_method commits"                'and committed'            "$r"
 
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"GsMcpSmokeClass new answer"}}}
+{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"McpSmokeClass new answer"}}}
 JSON
 )
 check "compiled method runs => 42"            '"text":"42"'              "$r"
 
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"UserGlobals removeKey: #GsMcpSmokeClass ifAbsent: [nil]. System commitTransaction. 'cleaned'"}}}
+{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"UserGlobals removeKey: #McpSmokeClass ifAbsent: [nil]. System commitTransaction. 'cleaned'"}}}
 JSON
 )
 check "cleanup throwaway test class"          'cleaned'                  "$r"
@@ -213,35 +213,35 @@ r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":23,"method":"tools/call","params":{"name":"list_classes","arguments":{"dictionaryName":"Published"}}}
 JSON
 )
-check "list_classes(Published) has GsMcpServer" 'GsMcpServer'            "$r"
+check "list_classes(Published) has McpServer" 'McpServer'            "$r"
 
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":24,"method":"tools/call","params":{"name":"list_all_classes","arguments":{}}}
 JSON
 )
-check "list_all_classes tags dictionary"      'GsMcpServer  (Published)' "$r"
+check "list_all_classes tags dictionary"      'McpServer  (Published)' "$r"
 
 # --- browsing ---
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":25,"method":"tools/call","params":{"name":"get_class_definition","arguments":{"className":"GsMcpServer"}}}
+{"jsonrpc":"2.0","id":25,"method":"tools/call","params":{"name":"get_class_definition","arguments":{"className":"McpServer"}}}
 JSON
 )
 check "get_class_definition is a subclass: expr" 'subclass:'             "$r"
 
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":26,"method":"tools/call","params":{"name":"get_class_hierarchy","arguments":{"className":"GsMcpServer"}}}
+{"jsonrpc":"2.0","id":26,"method":"tools/call","params":{"name":"get_class_hierarchy","arguments":{"className":"McpServer"}}}
 JSON
 )
 check "get_class_hierarchy shows Object"       'Object'                  "$r"
 
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":27,"method":"tools/call","params":{"name":"list_methods","arguments":{"className":"GsMcpRouter"}}}
+{"jsonrpc":"2.0","id":27,"method":"tools/call","params":{"name":"list_methods","arguments":{"className":"McpRouter"}}}
 JSON
 )
 check "list_methods shows runOnPort:"          'runOnPort:'              "$r"
 
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":28,"method":"tools/call","params":{"name":"export_class_source","arguments":{"className":"GsMcpTool"}}}
+{"jsonrpc":"2.0","id":28,"method":"tools/call","params":{"name":"export_class_source","arguments":{"className":"McpTool"}}}
 JSON
 )
 check "export_class_source is file-in format"  'set compile_env'         "$r"
@@ -251,7 +251,7 @@ r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":29,"method":"tools/call","params":{"name":"find_implementors","arguments":{"selector":"runOnPort:"}}}
 JSON
 )
-check "find_implementors finds runOnPort:"     'GsMcpRouter>>runOnPort:' "$r"
+check "find_implementors finds runOnPort:"     'McpRouter>>runOnPort:' "$r"
 
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":30,"method":"tools/call","params":{"name":"find_senders","arguments":{"selector":"serveGetStream:"}}}
@@ -260,10 +260,10 @@ JSON
 check "find_senders finds the caller"          'buildRoutes'       "$r"
 
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":31,"method":"tools/call","params":{"name":"find_references_to","arguments":{"name":"GsMcpTool"}}}
+{"jsonrpc":"2.0","id":31,"method":"tools/call","params":{"name":"find_references_to","arguments":{"name":"McpTool"}}}
 JSON
 )
-check "find_references_to GsMcpTool"           'GsMcpToolRegistry'       "$r"
+check "find_references_to McpTool"           'McpToolRegistry'       "$r"
 
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":32,"method":"tools/call","params":{"name":"search_method_source","arguments":{"pattern":"writeSseStreamHeaders","dictionaryName":"Published"}}}
@@ -286,49 +286,49 @@ check "run_test_class SUnitTest reports passed" 'passed'                 "$r"
 
 # --- mutation + failing-test path on a throwaway TestCase, then clean up ---
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":35,"method":"tools/call","params":{"name":"compile_class_definition","arguments":{"source":"TestCase subclass: 'GsMcpParityTest' instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()"}}}
+{"jsonrpc":"2.0","id":35,"method":"tools/call","params":{"name":"compile_class_definition","arguments":{"source":"TestCase subclass: 'McpParityTest' instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()"}}}
 JSON
 )
-check "compile_class_definition creates class" 'committed class: GsMcpParityTest' "$r"
+check "compile_class_definition creates class" 'committed class: McpParityTest' "$r"
 
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":36,"method":"tools/call","params":{"name":"compile_method","arguments":{"className":"GsMcpParityTest","source":"testWillFail self assert: 1 = 2","category":"tests"}}}
+{"jsonrpc":"2.0","id":36,"method":"tools/call","params":{"name":"compile_method","arguments":{"className":"McpParityTest","source":"testWillFail self assert: 1 = 2","category":"tests"}}}
 JSON
 )
 check "compile_method onto parity class"       'and committed'           "$r"
 
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":37,"method":"tools/call","params":{"name":"run_test_method","arguments":{"className":"GsMcpParityTest","selector":"testWillFail"}}}
+{"jsonrpc":"2.0","id":37,"method":"tools/call","params":{"name":"run_test_method","arguments":{"className":"McpParityTest","selector":"testWillFail"}}}
 JSON
 )
 check "run_test_method reports the failure"    '1 failed'                "$r"
 
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":38,"method":"tools/call","params":{"name":"describe_test_failure","arguments":{"className":"GsMcpParityTest","selector":"testWillFail"}}}
+{"jsonrpc":"2.0","id":38,"method":"tools/call","params":{"name":"describe_test_failure","arguments":{"className":"McpParityTest","selector":"testWillFail"}}}
 JSON
 )
 check "describe_test_failure gives detail"     'Assertion failed'        "$r"
 
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":39,"method":"tools/call","params":{"name":"list_failing_tests","arguments":{"classNames":["GsMcpParityTest"]}}}
+{"jsonrpc":"2.0","id":39,"method":"tools/call","params":{"name":"list_failing_tests","arguments":{"classNames":["McpParityTest"]}}}
 JSON
 )
-check "list_failing_tests lists the failure"   'GsMcpParityTest'          "$r"
+check "list_failing_tests lists the failure"   'McpParityTest'          "$r"
 
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":40,"method":"tools/call","params":{"name":"set_class_comment","arguments":{"className":"GsMcpParityTest","comment":"throwaway parity test"}}}
+{"jsonrpc":"2.0","id":40,"method":"tools/call","params":{"name":"set_class_comment","arguments":{"className":"McpParityTest","comment":"throwaway parity test"}}}
 JSON
 )
 check "set_class_comment commits"              'and committed'           "$r"
 
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":41,"method":"tools/call","params":{"name":"delete_method","arguments":{"className":"GsMcpParityTest","selector":"testWillFail"}}}
+{"jsonrpc":"2.0","id":41,"method":"tools/call","params":{"name":"delete_method","arguments":{"className":"McpParityTest","selector":"testWillFail"}}}
 JSON
 )
 check "delete_method removes the method"       'Deleted method'          "$r"
 
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":42,"method":"tools/call","params":{"name":"delete_class","arguments":{"className":"GsMcpParityTest"}}}
+{"jsonrpc":"2.0","id":42,"method":"tools/call","params":{"name":"delete_class","arguments":{"className":"McpParityTest"}}}
 JSON
 )
 check "delete_class removes the class"         'Deleted class'           "$r"
