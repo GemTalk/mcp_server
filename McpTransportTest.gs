@@ -148,3 +148,16 @@ method: McpTransportTest
 testUnknownVerbReturns405
   self assert: (self includesCS: '405 Method Not Allowed' in: (self runRequest: (self simpleRequest: 'PUT')) output)
 %
+category: 'tests'
+method: McpTransportTest
+testSessionIdIsRandomHex
+  "Session ids are cryptographically-random 128-bit tokens (32 hex chars), not sequential.
+   nextSessionId reads `sessions` (empty on a fresh router) and spawns no worker gem."
+  | r a b |
+  r := McpRouter new.
+  a := r nextSessionId.
+  b := r nextSessionId.
+  self assert: a size equals: 32.
+  self deny: a = b.
+  self assert: ((a asUppercase reject: [:c | '0123456789ABCDEF' includes: c]) isEmpty)
+%

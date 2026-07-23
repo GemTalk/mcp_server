@@ -3,7 +3,7 @@ set compile_env: 0
 expectvalue /Class
 doit
 McpBase subclass: 'McpRouter'
-  instVarNames: #( isRunning mutex routesTable serverSocket sessions sessionCounter )
+  instVarNames: #( isRunning mutex routesTable serverSocket sessions )
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -148,7 +148,6 @@ initialize
   routesTable := self buildRoutes.
   isRunning := false.
   sessions := Dictionary new.
-  sessionCounter := 0.
   ^self
 %
 category: 'running'
@@ -284,9 +283,25 @@ openSession
 category: 'sessions'
 method: McpRouter
 nextSessionId
-  "A unique-per-server session id (caller holds the mutex)."
-  sessionCounter := sessionCounter + 1.
-  ^'s' , sessionCounter printString
+  "A unique, cryptographically-secure session id: a 128-bit random token (32 hex chars).
+   Regenerates on the astronomically-unlikely chance of colliding with a live session. Caller
+   holds the mutex (this reads `sessions`)."
+  | id |
+  [id := self randomSessionToken. sessions includesKey: id] whileTrue: [].
+  ^id
+%
+category: 'sessions'
+method: McpRouter
+randomSessionToken
+  "128 bits from the OS CSPRNG (/dev/urandom), hex-encoded to 32 visible-ASCII chars (satisfies the
+   MCP spec: session ids SHOULD be cryptographically secure). Fail closed -- raise if /dev/urandom
+   is unreadable rather than fall back to a guessable source (never use Random, a PRNG). Not itself
+   uniqueness-checked; nextSessionId does that."
+  | f bytes |
+  f := GsFile openReadOnServer: '/dev/urandom'.
+  f isNil ifTrue: [^self error: 'cannot open /dev/urandom for session-id entropy'].
+  bytes := [f next: 16] ensure: [f close].
+  ^bytes asHexString
 %
 category: 'sessions'
 method: McpRouter
