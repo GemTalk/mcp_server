@@ -32,6 +32,14 @@ crlf
 %
 category: 'helpers'
 method: McpTransportTest
+includesCS: aSubstring in: aString
+  "Case-sensitive substring test. GemStone's String>>includesString: is case-INsensitive
+   (e.g. 'FAIL' matches the 'fail' in 'failed'), so use findString:startingAt: (which is
+   case-sensitive) for assert:/deny: substring checks."
+  ^(aString findString: aSubstring startingAt: 1) > 0
+%
+category: 'helpers'
+method: McpTransportTest
 postRequest: body
   "A raw HTTP POST /mcp request carrying body as application/json."
   | crlf |
@@ -79,7 +87,7 @@ testChunkedDeliveryParses
    reassembled and dispatched."
   | out |
   out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":3,"method":"tools/list"}') chunkSize: 7) output.
-  self assert: (out includesString: '-32600')
+  self assert: (self includesCS: '-32600' in: out)
 %
 category: 'tests'
 method: McpTransportTest
@@ -96,7 +104,7 @@ testContentLengthMatchesBody
 category: 'tests'
 method: McpTransportTest
 testDeleteReturns200
-  self assert: ((self runRequest: (self simpleRequest: 'DELETE')) output includesString: 'HTTP/1.1 200 OK')
+  self assert: (self includesCS: 'HTTP/1.1 200 OK' in: (self runRequest: (self simpleRequest: 'DELETE')) output)
 %
 category: 'tests'
 method: McpTransportTest
@@ -112,30 +120,31 @@ method: McpTransportTest
 testGetOpensSseStream
   | out |
   out := (self runRequest: (self simpleRequest: 'GET')) output.
-  self assert: (out includesString: 'text/event-stream').
-  self assert: (out includesString: ': connected')
+  self assert: (self includesCS: 'text/event-stream' in: out).
+  self assert: (self includesCS: ': connected' in: out)
 %
 category: 'tests'
 method: McpTransportTest
 testMalformedBodyReturnsParseError
   | out |
   out := (self runRequest: (self postRequest: 'this is not json')) output.
-  self assert: (out includesString: '-32700')
+  self assert: (self includesCS: 'HTTP/1.1 400 Bad Request' in: out).
+  self assert: (self includesCS: '-32700' in: out)
 %
 category: 'tests'
 method: McpTransportTest
 testPostWithoutSessionReturnsError
-  "A non-initialize POST with no Mcp-Session-Id is refused with a JSON-RPC error, and no worker
+  "A non-initialize POST with no MCP-Session-Id is refused with a JSON-RPC error, and no worker
    gem is spawned. initialize + a routed tool call require a real worker session, so they are
    exercised end-to-end by the integration test (test.sh) rather than here."
   | out |
   out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')) output.
-  self assert: (out includesString: 'HTTP/1.1 400 Bad Request').
-  self assert: (out includesString: '-32600').
-  self assert: (out includesString: 'Mcp-Session-Id')
+  self assert: (self includesCS: 'HTTP/1.1 400 Bad Request' in: out).
+  self assert: (self includesCS: '-32600' in: out).
+  self assert: (self includesCS: 'MCP-Session-Id' in: out)
 %
 category: 'tests'
 method: McpTransportTest
 testUnknownVerbReturns405
-  self assert: ((self runRequest: (self simpleRequest: 'PUT')) output includesString: '405 Method Not Allowed')
+  self assert: (self includesCS: '405 Method Not Allowed' in: (self runRequest: (self simpleRequest: 'PUT')) output)
 %

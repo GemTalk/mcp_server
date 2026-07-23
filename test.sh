@@ -54,7 +54,7 @@ check() {
 }
 
 # post  -- reads a JSON-RPC body from stdin, returns the response body (carries the session id)
-post() { curl -s -m 10 "$URL" -H "Mcp-Session-Id: $SID" --data-binary @-; }
+post() { curl -s -m 10 "$URL" -H "MCP-Session-Id: $SID" --data-binary @-; }
 
 echo "=== GemStone MCP server integration test ==="
 echo "Stone=$GS_STONE  User=$GS_USER  Port=$PORT"
@@ -76,7 +76,7 @@ echo
 # ---------------------------------------------------------------------------
 echo "[2/3] Driving requests from the client (session B) ..."
 
-# --- handshake: initialize establishes this client's session id (Mcp-Session-Id) ---
+# --- handshake: initialize establishes this client's session id (MCP-Session-Id) ---
 r=$(curl -s -i -m 10 "$URL" --data-binary @- <<'JSON'
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test-client","version":"1.0"}}}
 JSON
@@ -84,10 +84,10 @@ JSON
 SID=$(printf '%s' "$r" | grep -i '^mcp-session-id:' | tr -d '\r' | awk '{print $2}')
 check "initialize returns protocolVersion"    '"protocolVersion"'        "$r"
 check "initialize returns serverInfo name"    '"name":"gemstone-mcp"'    "$r"
-check "initialize assigns Mcp-Session-Id"     'Mcp-Session-Id'           "$r"
+check "initialize assigns MCP-Session-Id"     'MCP-Session-Id'           "$r"
 echo "  session id: $SID"
 
-code=$(curl -s -m 10 -o /dev/null -w '%{http_code}' "$URL" -H "Mcp-Session-Id: $SID" --data-binary @- <<'JSON'
+code=$(curl -s -m 10 -o /dev/null -w '%{http_code}' "$URL" -H "MCP-Session-Id: $SID" --data-binary @- <<'JSON'
 {"jsonrpc":"2.0","method":"notifications/initialized"}
 JSON
 )

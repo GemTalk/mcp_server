@@ -105,7 +105,7 @@ writeJson: aJsonString
 category: 'writing'
 method: McpHttpConnection
 writeJson: aJsonString sessionId: anIdOrNil
-  "Write a 200 JSON response, adding the Mcp-Session-Id header when anIdOrNil is non-nil (the
+  "Write a 200 JSON response, adding the MCP-Session-Id header when anIdOrNil is non-nil (the
    initialize response, so the client echoes the id on later requests)."
   ^self writeStatus: 200 reason: 'OK' body: aJsonString sessionId: anIdOrNil
 %
@@ -141,19 +141,19 @@ writeSseStreamHeaders
 category: 'writing'
 method: McpHttpConnection
 writeStatus: code reason: reasonString body: aBodyString
-  "Write a complete HTTP/1.1 response with no Mcp-Session-Id header."
+  "Write a complete HTTP/1.1 response with no MCP-Session-Id header."
   ^self writeStatus: code reason: reasonString body: aBodyString sessionId: nil
 %
 category: 'writing'
 method: McpHttpConnection
 writeStatus: code reason: reasonString body: aBodyString sessionId: anIdOrNil
-  "The single place a complete HTTP/1.1 JSON response is built. Adds the Mcp-Session-Id header
+  "The single place a complete HTTP/1.1 JSON response is built. Adds the MCP-Session-Id header
    when anIdOrNil is non-nil (the initialize response, so the client echoes the id on later
    requests). Content-Length is the byte size of the body; GemStone Strings are byte-oriented,
    so for ASCII/UTF-8 JSON size = byte count."
   | crlf hdr resp |
   crlf := String with: Character cr with: Character lf.
-  hdr := anIdOrNil isNil ifTrue: [''] ifFalse: ['Mcp-Session-Id: ' , anIdOrNil , crlf].
+  hdr := anIdOrNil isNil ifTrue: [''] ifFalse: ['MCP-Session-Id: ' , anIdOrNil , crlf].
   resp := 'HTTP/1.1 ' , code printString , ' ' , reasonString , crlf ,
     'Content-Type: application/json' , crlf , hdr ,
     'Content-Length: ' , aBodyString size printString , crlf ,

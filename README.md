@@ -12,25 +12,25 @@ sessions** — each client gets its own isolated worker gem (see [Per-client ses
 
 - **POST `/mcp`** — body is a JSON-RPC 2.0 request; reply is an `application/json` JSON-RPC
   response (notifications get `202 Accepted`, no body).
-  - `initialize` opens a session and returns its id in the **`Mcp-Session-Id`** response header.
+  - `initialize` opens a session and returns its id in the **`MCP-Session-Id`** response header.
   - Every other request must send that header back; a missing id → **`400`**, an unknown/expired
     id → **`404`** (a compliant client then re-initializes).
 - **GET `/mcp`** — opens the standalone server→client SSE stream (`text/event-stream`),
   held open with keepalive comments. No server-initiated messages yet, so it carries only keepalives.
-- **DELETE `/mcp`** — ends the session named by `Mcp-Session-Id` (closes its worker); returns `200`.
+- **DELETE `/mcp`** — ends the session named by `MCP-Session-Id` (closes its worker); returns `200`.
 - Any other method → `405`.
 
 ```
-# initialize -- the response carries an Mcp-Session-Id header
+# initialize -- the response carries an MCP-Session-Id header
 curl -si localhost:8000/mcp -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
 
 # subsequent calls echo that id back
-curl -s localhost:8000/mcp -H 'Mcp-Session-Id: <id>' \
+curl -s localhost:8000/mcp -H 'MCP-Session-Id: <id>' \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
 ```
 
 Works with the **MCP Inspector** / any MCP SDK client using the *Streamable HTTP* transport
-pointed at `http://localhost:8000/mcp` (such clients manage the `Mcp-Session-Id` automatically).
+pointed at `http://localhost:8000/mcp` (such clients manage the `MCP-Session-Id` automatically).
 
 ## Tools (31 base + 2 optional Grail)
 
@@ -122,11 +122,11 @@ These live on the optional `McpServerWithGrail` subclass, loaded only via `load-
 | Class | Role |
 |-------|------|
 | `McpBase` | abstract superclass of the router + worker; holds only the two shared helpers (`parseBody:`, `log:`) |
-| `McpRouter` | front end: accept loop, HTTP, routing, the `Mcp-Session-Id → McpSession` map, and the idle reaper. Owns the socket; never runs a tool |
+| `McpRouter` | front end: accept loop, HTTP, routing, the `MCP-Session-Id → McpSession` map, and the idle reaper. Owns the socket; never runs a tool |
 | `McpServer` | per-client worker: the single-client MCP server (JSON-RPC dispatch + the 31 base tool definitions) that runs inside each worker gem. No socket |
 | `McpServerWithGrail` | optional worker subclass: `super initialize` then registers the 2 Grail/Python tools; each worker gem loads it (in `handleJsonString:`) when its file is installed |
 | `McpSession` | one client's isolated worker handle: a `GsTsExternalSession` gem + session id + last-activity; `forward:` runs a request in it (`McpServer handleJsonString: …`), `close` stops it |
-| `McpHttpConnection` | reads one HTTP/1.1 request, writes one JSON response (incl. `Mcp-Session-Id`) |
+| `McpHttpConnection` | reads one HTTP/1.1 request, writes one JSON response (incl. `MCP-Session-Id`) |
 | `McpDispatcher` | JSON-RPC 2.0 / MCP routing (`initialize`, `tools/list`, `tools/call`) |
 | `McpToolRegistry` | name → `McpTool` map; produces `tools/list` descriptors |
 | `McpTool` | one tool: name, description, JSON Schema, handler block |
@@ -162,7 +162,7 @@ tools itself (those run in the per-client `McpServer` workers):
 
 - **`initialize`** → the front end opens a `McpSession` (a `GsTsExternalSession` worker gem,
   logged in as the current user via a one-time password), assigns a server-side id, and returns it
-  in the **`Mcp-Session-Id`** response header.
+  in the **`MCP-Session-Id`** response header.
 - **Every other request** must carry that header. The front end looks up the worker (map guarded
   by a mutex) and **forwards the raw JSON-RPC body** to it — `worker executeString: 'McpServer
   handleJsonString: ' , body printString` — the worker runs the tool in its own session and
@@ -232,7 +232,7 @@ are the guarded tripwires that no-op until Grail is fixed).
 > `runRequest:` for this reason.
 
 **Integration test (real socket)** — `./test.sh` starts the server in its own gem and drives the
-full Streamable HTTP transport with `curl`: it `initialize`s, captures the `Mcp-Session-Id`, and
+full Streamable HTTP transport with `curl`: it `initialize`s, captures the `MCP-Session-Id`, and
 sends it on every subsequent request (tools/list of the 31 base tools, every core tool, a
 compile_method/commit round-trip, error paths, the SSE GET stream, DELETE), then shuts the server
 down. It targets the **base** server — run it against a base install. Uses port `8011` by default
@@ -256,18 +256,18 @@ client cannot block the accept loop (the forked handlers run during the loop's a
 waits). `McpHttpConnection>>readRequest` also bails after an 8s read timeout, so a client
 that connects but never sends a complete request is dropped rather than wedging the server.
 Each client's requests run in its own worker gem (a separate session), so there's no shared
-transaction to protect; a `Semaphore` (mutex) guards only the `Mcp-Session-Id → session` map.
+transaction to protect; a `Semaphore` (mutex) guards only the `MCP-Session-Id → session` map.
 Forwarding to a worker is a blocking call, so forwarding across clients is serialized for now —
 true concurrent cross-client execution is deferred.
 
 ## Status
 
 Streamable HTTP transport (POST→JSON, GET→SSE stream, DELETE) with **per-client sessions** — each
-client gets its own isolated worker gem, routed by `Mcp-Session-Id` (missing→400, unknown→404),
+client gets its own isolated worker gem, routed by `MCP-Session-Id` (missing→400, unknown→404),
 reaped after 5 min idle. **31 base tools** across seven categories (execution, session, listing,
 browsing, search, mutation, testing) — **plus 2 Python tools** on the optional `McpServerWithGrail`
 subclass (loaded via `install.sh --grail`); per-connection forking + read timeout. Verified
-end-to-end with curl (initialize / `Mcp-Session-Id` routing / tools/call / two-client isolation /
+end-to-end with curl (initialize / `MCP-Session-Id` routing / tools/call / two-client isolation /
 400 / 404 / SSE GET / DELETE, and stalled-connection load) and by the in-image unit tests (68 base,
 +7 with Grail). The Python tools delegate to Grail's `ModuleAst` and require a Grail-equipped image
 (see the Python note above). Future work: true concurrent cross-client forwarding, per-user worker

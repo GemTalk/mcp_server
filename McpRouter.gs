@@ -17,7 +17,7 @@ McpRouter comment:
 'Native GemStone MCP front end. Runs a blocking HTTP/1.1 accept loop on localhost that speaks the
 MCP Streamable HTTP transport (single /mcp endpoint), and gives EACH client its own worker gem
 (an isolated GemStone session) so clients never share uncommitted changes. It routes by the
-Mcp-Session-Id header: `initialize` opens a worker (a McpSession) and returns its id; every
+MCP-Session-Id header: `initialize` opens a worker (a McpSession) and returns its id; every
 other request is forwarded to that client''s worker. The worker runs the actual tools
 (McpServer, per gem). This class owns only the socket, the id -> McpSession map (mutex-guarded)
 and the idle-session reaper -- it never parses a tool call itself.
@@ -194,7 +194,7 @@ category: 'running'
 method: McpRouter
 servePost: req on: conn
   "Front-end router (per-client sessions). `initialize` opens a per-client worker gem and returns
-   its id in the Mcp-Session-Id header; every other request is routed by that id to the client's
+   its id in the MCP-Session-Id header; every other request is routed by that id to the client's
    worker (an isolated session). A valid id is required for non-initialize requests. Forwarding is
    a blocking executeString: to the worker -- reliable and serialized (concurrency is a deferred
    follow-up); the id -> session map is guarded by the mutex. Only enough of the body is parsed
@@ -210,25 +210,27 @@ servePost: req on: conn
 category: 'routing'
 method: McpRouter
 sessionIdOf: req
-  "The Mcp-Session-Id request header (header keys are lower-cased by parseHead:), or nil."
+  "The MCP-Session-Id request header (header keys are lower-cased by parseHead:), or nil."
   ^(req at: 'headers' ifAbsent: [Dictionary new]) at: 'mcp-session-id' ifAbsent: [nil]
 %
 category: 'routing'
 method: McpRouter
 writeParseError: conn
-  "Malformed or empty JSON body: answer a JSON-RPC -32700 Parse error (HTTP 200), matching the
-   reply a worker's dispatcher would give. The front end validates only enough to route."
+  "Malformed or empty JSON body the front end cannot accept: answer HTTP 400 with a JSON-RPC
+   -32700 Parse error body (id null). Per the MCP Streamable HTTP spec, input the server cannot
+   accept MUST get an HTTP error status; the body MAY carry a JSON-RPC error with no id. The
+   front end validates only enough to route."
   | err |
   err := Dictionary new.
   err at: 'jsonrpc' put: '2.0'; at: 'id' put: nil.
   err at: 'error' put: (Dictionary new at: 'code' put: -32700; at: 'message' put: 'Parse error'; yourself).
-  conn writeJson: err asJson
+  conn writeStatus: 400 reason: 'Bad Request' body: err asJson
 %
 category: 'routing'
 method: McpRouter
 serveInitialize: body on: conn
   "Open a new client session (worker gem), forward the initialize request to it, and answer with
-   the worker's response plus the Mcp-Session-Id header the client echoes on later requests."
+   the worker's response plus the MCP-Session-Id header the client echoes on later requests."
   | sess |
   sess := self openSession.
   conn writeJson: (sess forward: body) sessionId: sess id
@@ -239,7 +241,7 @@ serveRouted: body sessionId: sid on: conn
   "Route a non-initialize request to the client's worker by session id (required). Relay the
    worker's JSON response, or 202 for a notification (empty response)."
   | sess resp |
-  sid isNil ifTrue: [^self writeSessionError: 'Missing Mcp-Session-Id header (call initialize first)' code: 400 reason: 'Bad Request' on: conn].
+  sid isNil ifTrue: [^self writeSessionError: 'Missing MCP-Session-Id header (call initialize first)' code: 400 reason: 'Bad Request' on: conn].
   sess := mutex critical: [sessions at: sid ifAbsent: [nil]].
   sess isNil ifTrue: [^self writeSessionError: 'Unknown or expired session: ' , sid code: 404 reason: 'Not Found' on: conn].
   resp := sess forward: body.
@@ -250,7 +252,7 @@ serveRouted: body sessionId: sid on: conn
 category: 'routing'
 method: McpRouter
 serveDelete: req on: conn
-  "MCP session end: close and unmap the worker for the Mcp-Session-Id header, if present."
+  "MCP session end: close and unmap the worker for the MCP-Session-Id header, if present."
   | sid sess |
   sid := self sessionIdOf: req.
   sess := sid isNil ifTrue: [nil] ifFalse: [mutex critical: [sessions removeKey: sid ifAbsent: [nil]]].
@@ -260,7 +262,7 @@ serveDelete: req on: conn
 category: 'routing'
 method: McpRouter
 writeSessionError: aMessage code: httpCode reason: reasonString on: conn
-  "A routing error the MCP client can act on: 400 when the Mcp-Session-Id header is missing, 404
+  "A routing error the MCP client can act on: 400 when the MCP-Session-Id header is missing, 404
    when the session is unknown/expired (per the Streamable HTTP spec, a 404 tells the client to
    re-initialize). The body carries a JSON-RPC -32600 error for humans."
   | err |
