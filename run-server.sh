@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Launch the native GemStone MCP server in a DEDICATED, DETACHED gem, then return.
 #
-# GsMcpServer forkOnPort: spawns a separate gem (via GsTsExternalSession) whose blocking main
+# GsMcpRouter forkOnPort: spawns a separate gem (via GsTsExternalSession) whose blocking main
 # activity is the accept loop, and detaches it -- so the server keeps running after this script's
 # topaz session logs out. (A background GsProcess fork inside a GCI session would freeze when the
-# session goes idle; a dedicated gem's own activity does not.) forkOnPort: boots the most capable
-# installed class: the Grail subclass if its file was loaded, otherwise the base server.
+# session goes idle; a dedicated gem's own activity does not.) The front end is always GsMcpRouter;
+# each per-client worker gem independently loads the most capable installed worker class (the Grail
+# subclass if its file was loaded, otherwise the base GsMcpServer).
 #
 # This script does NOT block -- it returns once the server is forked. To stop the server, use the
 # `System stopSession: <id>` line it prints (from any GemStone session), or kill the printed pid.
@@ -26,7 +27,7 @@ GS_PASS="${GS_PASS:-swordfish}"
 GS_MCP_PORT="${GS_MCP_PORT:-8000}"
 TOPAZ="$GEMSTONE/bin/topaz"
 
-echo "Forking GsMcpServer onto 127.0.0.1:$GS_MCP_PORT (detached; this script returns)..."
+echo "Forking GsMcpRouter onto 127.0.0.1:$GS_MCP_PORT (detached; this script returns)..."
 "$TOPAZ" -l <<TPZ
 set gemstone $GS_STONE
 set username $GS_USER
@@ -34,7 +35,7 @@ set password $GS_PASS
 login
 iferr 1 stk
 run
-GsMcpServer forkOnPort: $GS_MCP_PORT
+GsMcpRouter forkOnPort: $GS_MCP_PORT
 %
 logout
 exit

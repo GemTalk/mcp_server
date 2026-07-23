@@ -7,28 +7,30 @@ server with one that any MCP client can reach over plain HTTP.
 
 ## Transport
 
-A single endpoint, `/mcp`, implementing the MCP **Streamable HTTP** transport (stateless,
-no session id):
+A single endpoint, `/mcp`, implementing the MCP **Streamable HTTP** transport with **per-client
+sessions** — each client gets its own isolated worker gem (see [Per-client sessions](#per-client-sessions)):
 
 - **POST `/mcp`** — body is a JSON-RPC 2.0 request; reply is an `application/json` JSON-RPC
   response (notifications get `202 Accepted`, no body).
+  - `initialize` opens a session and returns its id in the **`Mcp-Session-Id`** response header.
+  - Every other request must send that header back; a missing id → **`400`**, an unknown/expired
+    id → **`404`** (a compliant client then re-initializes).
 - **GET `/mcp`** — opens the standalone server→client SSE stream (`text/event-stream`),
-  held open with keepalive comments. This server emits no server-initiated messages yet,
-  so the stream currently carries only keepalives.
-- **DELETE `/mcp`** — session end; returns `200`.
+  held open with keepalive comments. No server-initiated messages yet, so it carries only keepalives.
+- **DELETE `/mcp`** — ends the session named by `Mcp-Session-Id` (closes its worker); returns `200`.
 - Any other method → `405`.
 
 ```
-# tool call over POST
-curl -s localhost:8000/mcp \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+# initialize -- the response carries an Mcp-Session-Id header
+curl -si localhost:8000/mcp -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
 
-# observe the SSE stream
-curl -N localhost:8000/mcp
+# subsequent calls echo that id back
+curl -s localhost:8000/mcp -H 'Mcp-Session-Id: <id>' \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
 ```
 
 Works with the **MCP Inspector** / any MCP SDK client using the *Streamable HTTP* transport
-pointed at `http://localhost:8000/mcp`.
+pointed at `http://localhost:8000/mcp` (such clients manage the `Mcp-Session-Id` automatically).
 
 ## Tools (31 base + 2 optional Grail)
 
@@ -119,9 +121,12 @@ These live on the optional `GsMcpServerWithGrail` subclass, loaded only via `loa
 
 | Class | Role |
 |-------|------|
-| `GsMcpServer` | lifecycle + blocking accept loop; registers the 31 base tools (grouped by category) |
-| `GsMcpServerWithGrail` | optional subclass: `super initialize` then registers the 2 Grail/Python tools; `run-server.sh` boots it when its file is loaded |
-| `GsMcpHttpConnection` | reads one HTTP/1.1 request, writes one JSON response |
+| `GsMcpBase` | abstract superclass of the router + worker; holds only the two shared helpers (`parseBody:`, `log:`) |
+| `GsMcpRouter` | front end: accept loop, HTTP, routing, the `Mcp-Session-Id → GsMcpSession` map, and the idle reaper. Owns the socket; never runs a tool |
+| `GsMcpServer` | per-client worker: the single-client MCP server (JSON-RPC dispatch + the 31 base tool definitions) that runs inside each worker gem. No socket |
+| `GsMcpServerWithGrail` | optional worker subclass: `super initialize` then registers the 2 Grail/Python tools; each worker gem loads it (in `handleJsonString:`) when its file is installed |
+| `GsMcpSession` | one client's isolated worker handle: a `GsTsExternalSession` gem + session id + last-activity; `forward:` runs a request in it (`GsMcpServer handleJsonString: …`), `close` stops it |
+| `GsMcpHttpConnection` | reads one HTTP/1.1 request, writes one JSON response (incl. `Mcp-Session-Id`) |
 | `GsMcpDispatcher` | JSON-RPC 2.0 / MCP routing (`initialize`, `tools/list`, `tools/call`) |
 | `GsMcpToolRegistry` | name → `GsMcpTool` map; produces `tools/list` descriptors |
 | `GsMcpTool` | one tool: name, description, JSON Schema, handler block |
@@ -136,17 +141,41 @@ GCI-driven session (like the Jasper VS Code session) is parked in the C client b
 commands, so a background accept loop forked there would be frozen and never serve
 requests. Therefore the server runs as the **blocking main activity of a dedicated gem**.
 
-Two class-side entry points start that gem:
-- **`GsMcpServer runOnPort: aPort`** — runs the accept loop as the *calling* session's blocking
+Two class-side entry points on the front end start that gem:
+- **`GsMcpRouter runOnPort: aPort`** — runs the accept loop as the *calling* session's blocking
   activity; never returns until `stop`. Use it to run the server in a foreground topaz.
-- **`GsMcpServer forkOnPort: aPort`** — spawns a *separate* gem via `GsTsExternalSession` and runs
+- **`GsMcpRouter forkOnPort: aPort`** — spawns a *separate* gem via `GsTsExternalSession` and runs
   the loop there **detached** (`forkAndDetachString:`), returning immediately. The forked server
   is **independent** — it keeps serving after the launching session logs out. Stop it with
-  `GsMcpServer stopForked` (from the launching session) or, from anywhere, `System stopSession:
+  `GsMcpRouter stopForked` (from the launching session) or, from anywhere, `System stopSession:
   <id>` / `kill <pid>` (both printed at fork). `run-server.sh` uses this.
 
-Either entry point boots the most capable installed class — the Grail subclass if its file was
-loaded, otherwise the base server.
+The front end is always `GsMcpRouter`; Grail is not a boot-time choice. Each **per-client worker
+gem** independently loads the most capable installed worker class (the Grail subclass if its file
+was installed, otherwise the base `GsMcpServer`) in its own `handleJsonString:`.
+
+## Per-client sessions
+
+Each MCP client gets its **own worker gem** so clients don't share uncommitted changes or
+transaction views. The port-owning gem runs `GsMcpRouter`, a **front end / router**; it never runs
+tools itself (those run in the per-client `GsMcpServer` workers):
+
+- **`initialize`** → the front end opens a `GsMcpSession` (a `GsTsExternalSession` worker gem,
+  logged in as the current user via a one-time password), assigns a server-side id, and returns it
+  in the **`Mcp-Session-Id`** response header.
+- **Every other request** must carry that header. The front end looks up the worker (map guarded
+  by a mutex) and **forwards the raw JSON-RPC body** to it — `worker executeString: 'GsMcpServer
+  handleJsonString: ' , body printString` — the worker runs the tool in its own session and
+  returns the response, which the front end relays. Missing id → `400`; unknown/expired → `404`
+  (a compliant client re-initializes).
+- **DELETE** closes the worker; and an **idle reaper** (a background `GsProcess`) closes any
+  session idle beyond **5 minutes** (`sessionIdleTimeoutSeconds`), so abandoned test gems don't
+  pile up.
+
+Isolation comes from each worker being a separate gem = a separate transaction view. Forwarding is
+**blocking / serialized** for now (a single front-end gem can't overlap blocking GCI calls, and the
+non-blocking poll path corrupts results); true cross-client concurrency is a deferred follow-up.
+All workers run as the current user today; per-user auth is a future extension (`GsMcpSession userId`).
 
 ## Install & run
 
@@ -162,9 +191,9 @@ GS_MCP_PORT=8000 ./run-server.sh   # fork a detached, independent server gem and
 `install.sh` and `run-server.sh` use topaz; set `GEMSTONE`, `GS_STONE`, `GS_USER`,
 `GS_PASS` to match your environment. `install.sh --grail` (or `GS_MCP_WITH_GRAIL=1 ./install.sh`)
 loads `load-grail.gs` — the base classes plus `GsMcpServerWithGrail`; plain `install.sh` loads
-only the base `load.gs`. `run-server.sh` calls `GsMcpServer forkOnPort:`, which launches a
-detached, independent server gem (the Grail subclass if installed, else base) and returns; it
-prints a `System stopSession: <id>` / `kill <pid>` line for stopping it later.
+only the base `load.gs`. `run-server.sh` calls `GsMcpRouter forkOnPort:`, which launches a
+detached, independent front-end gem and returns; it prints a `System stopSession: <id>` /
+`kill <pid>` line for stopping it later. (Grail, if installed, is picked up per worker gem.)
 
 ## Test
 
@@ -179,10 +208,13 @@ suite when `GsMcpServerWithGrail` is installed:
   failing/erroring tests, for the test-runner tools), both classes in `UserGlobals`, plus a
   `GsMcpTestDict` symbol dictionary of its own. All are cleaned up in `tearDown`.
 - `GsMcpDispatcherTest` — JSON-RPC routing/envelope: initialize, tools/list (31, alphabetical),
-  success + error wrapping, `-32601`/`-32602`/`-32700`, notifications → nil.
+  success + error wrapping, `-32601`/`-32602`/`-32700`, notifications → nil, and the per-worker
+  entry `handleJsonString:`.
 - `GsMcpTransportTest` — `handleConnection:` driven over a **`GsMcpMockSocket`** wrapped in a
-  real `GsMcpHttpConnection`, so the genuine HTTP parsing/writing runs with no TCP: POST→JSON,
-  GET→SSE, DELETE→200, unknown verb→405, malformed body, chunked delivery, EOF.
+  real `GsMcpHttpConnection`, so the genuine HTTP parsing/writing runs with no TCP. Covers the
+  paths that spawn **no** worker gem: GET→SSE, DELETE→200, unknown verb→405, malformed→`-32700`,
+  a session-less POST→`400`, chunked delivery, EOF, Content-Length. (initialize and a routed tool
+  call spawn a real worker, so they're exercised by the integration test instead.)
 - `GsMcpServerWithGrailTest` *(Grail images only)* — the optional Grail/Python tools:
   `eval_python`→`42`, `compile_python`→`__mul__`, `print`→`None`, a semantic error →
   `CompileError`→`isError`, a 33-tool `tools/list` check, and two guarded tripwires
@@ -200,10 +232,11 @@ are the guarded tripwires that no-op until Grail is fixed).
 > `runRequest:` for this reason.
 
 **Integration test (real socket)** — `./test.sh` starts the server in its own gem and drives the
-full Streamable HTTP transport with `curl` (initialize, notification, tools/list of the 31 base
-tools, every core tool, a compile_method/commit round-trip, error paths, the SSE GET stream,
-DELETE), then shuts the server down. It targets the **base** server — run it against a base
-install. Uses port `8011` by default (set `GS_MCP_PORT`). Exit status 0 = all passed.
+full Streamable HTTP transport with `curl`: it `initialize`s, captures the `Mcp-Session-Id`, and
+sends it on every subsequent request (tools/list of the 31 base tools, every core tool, a
+compile_method/commit round-trip, error paths, the SSE GET stream, DELETE), then shuts the server
+down. It targets the **base** server — run it against a base install. Uses port `8011` by default
+(set `GS_MCP_PORT`). Exit status 0 = all passed.
 
 ## Adding a tool
 
@@ -222,17 +255,20 @@ Each accepted connection is handled in its own forked `GsProcess`, so a slow or 
 client cannot block the accept loop (the forked handlers run during the loop's accept
 waits). `GsMcpHttpConnection>>readRequest` also bails after an 8s read timeout, so a client
 that connects but never sends a complete request is dropped rather than wedging the server.
-Tool dispatch is serialized with a `Semaphore` (mutex) so the shared session transaction
-stays consistent across concurrent handlers.
+Each client's requests run in its own worker gem (a separate session), so there's no shared
+transaction to protect; a `Semaphore` (mutex) guards only the `Mcp-Session-Id → session` map.
+Forwarding to a worker is a blocking call, so forwarding across clients is serialized for now —
+true concurrent cross-client execution is deferred.
 
 ## Status
 
-Streamable HTTP transport (POST→JSON, GET→SSE stream, DELETE), **31 base tools** across seven
-categories (execution, session, listing, browsing, search, mutation, testing) — **plus 2 Python
-tools** on the optional `GsMcpServerWithGrail` subclass (loaded via `install.sh --grail`),
-per-connection forking + read timeout, mutex-serialized dispatch. Verified end-to-end with
-curl (initialize / tools/list / tools/call / notifications, the SSE GET stream, DELETE, and
-concurrent + stalled-connection load) and by the in-image unit tests (68 base, +7 with Grail).
-The Python tools delegate to Grail's `ModuleAst` and require a Grail-equipped image (see the
-Python note above). Future work: server-initiated messages pushed over the SSE stream, session
-ids, and auth.
+Streamable HTTP transport (POST→JSON, GET→SSE stream, DELETE) with **per-client sessions** — each
+client gets its own isolated worker gem, routed by `Mcp-Session-Id` (missing→400, unknown→404),
+reaped after 5 min idle. **31 base tools** across seven categories (execution, session, listing,
+browsing, search, mutation, testing) — **plus 2 Python tools** on the optional `GsMcpServerWithGrail`
+subclass (loaded via `install.sh --grail`); per-connection forking + read timeout. Verified
+end-to-end with curl (initialize / `Mcp-Session-Id` routing / tools/call / two-client isolation /
+400 / 404 / SSE GET / DELETE, and stalled-connection load) and by the in-image unit tests (68 base,
++7 with Grail). The Python tools delegate to Grail's `ModuleAst` and require a Grail-equipped image
+(see the Python note above). Future work: true concurrent cross-client forwarding, per-user worker
+auth (`GsMcpSession userId`), server-initiated SSE messages.

@@ -45,6 +45,16 @@ request: methodName params: paramsDict
 %
 category: 'tests'
 method: GsMcpDispatcherTest
+testHandleJsonString
+  "The worker entry (GsMcpServer class>>handleJsonString:) parses + dispatches a raw JSON-RPC
+   request in a per-gem worker instance and answers the response string; a notification -> ''."
+  | out |
+  out := GsMcpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'.
+  self assert: (out includesString: '"tools"').
+  self assert: (GsMcpServer handleJsonString: '{"jsonrpc":"2.0","method":"notifications/initialized"}') isEmpty
+%
+category: 'tests'
+method: GsMcpDispatcherTest
 testInitialize
   | result |
   result := (self dispatch: (self request: 'initialize' params: Dictionary new)) at: 'result'.

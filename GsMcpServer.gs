@@ -2,9 +2,8 @@ set compile_env: 0
 ! ------------------- Class definition for GsMcpServer
 expectvalue /Class
 doit
-Object subclass: 'GsMcpServer'
-  instVarNames: #( dispatcher isRunning mutex
-                    routesTable serverSocket toolRegistry )
+GsMcpBase subclass: 'GsMcpServer'
+  instVarNames: #( dispatcher toolRegistry )
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -14,21 +13,18 @@ Object subclass: 'GsMcpServer'
 %
 expectvalue /Class
 doit
-GsMcpServer comment: 
-'Native GemStone MCP server. Runs a blocking HTTP/1.1 accept loop on localhost that
-speaks JSON-RPC 2.0 / MCP (single POST /mcp endpoint), dispatching tool calls to
-direct in-image Smalltalk execution. Replaces the Node.js + GCI/FFI bridge.
+GsMcpServer comment:
+'Per-client MCP worker: the single-client GemStone MCP server. Owns a tool registry and a
+JSON-RPC dispatcher and implements every tool_* handler; parses a JSON-RPC request and answers
+the JSON response string via handleJsonString:.
 
-IMPORTANT: runOnPort: is BLOCKING and is meant to be the main activity of a
-dedicated gem. Forked GsProcesses only run while the gem is actively executing
-Smalltalk, so a background fork in an idle GCI session would never serve requests.
+One instance runs in each per-client worker gem -- built lazily and cached in SessionTemps by the
+class-side handleJsonString:, and driven by the front end GsMcpRouter over a GsTsExternalSession.
+This class has NO socket and knows nothing about HTTP or sessions: the transport and the per-client
+session routing live in GsMcpRouter. The Grail subclass GsMcpServerWithGrail adds the Python tools;
+the class-side handleJsonString: builds the most capable installed class.
 
-Start (from a dedicated gem / topaz session):
-    GsMcpServer runOnPort: 8000
-
-Test it:
-    curl -s localhost:8000/mcp -d ''{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}''
-'
+To start the server, see GsMcpRouter (runOnPort: / forkOnPort:).'
 %
 expectvalue /Class
 doit
@@ -43,62 +39,20 @@ classmethod: GsMcpServer
 new
   ^super new initialize
 %
-category: 'instance creation'
+category: 'worker'
 classmethod: GsMcpServer
-runOnPort: aPort
-  "Convenience: create a server and run its (blocking) accept loop. Intended as
-   the main activity of a dedicated gem."
-  ^self new runOnPort: aPort
-%
-category: 'forking'
-classmethod: GsMcpServer
-forkOnPort: aPort
-  "Start the server in a SEPARATE, INDEPENDENT gem instead of blocking this session. A plain
-   GsProcess fork would freeze whenever this session goes idle (a forked GsProcess only runs
-   while its gem is executing Smalltalk), so spawn a real gem via GsTsExternalSession and run the
-   blocking accept loop there. The child logs in as the current user via a one-time password (no
-   embedded credential) and boots the most capable installed server (the Grail subclass if
-   present, else base), like run-server.sh.
-   Uses forkAndDetachString:, which runs the loop DETACHED -- the child keeps serving after this
-   session logs out, so it is an independent server, NOT tied to the launcher (hence we log our
-   own handle out immediately). Stop it with `GsMcpServer stopForked` (this session), or from
-   anywhere via `System stopSession: <id>` or `kill <pid>` (both printed below); logout will NOT
-   stop it. Answers a status string. Requires GsTsExternalSession (standard in GS 3.x)."
-  | extClass es sid pid s |
-  extClass := System myUserProfile objectNamed: #GsTsExternalSession.
-  extClass isNil ifTrue: [^'GsTsExternalSession is not available in this image; use runOnPort: or run-server.sh.'].
-  es := extClass newDefaultForGemHost: 'localhost'.
-  es useOnetimePassword.
-  es login.
-  "Capture the child's id/pid BEFORE launching the loop -- once the non-blocking call is running
-   the external session rejects further queries (GciError 'operation in progress')."
-  sid := es stoneSessionId.
-  pid := [(System descriptionOfSession: sid) at: 2] on: Error do: [:e | nil].
-  es forkAndDetachString: '((System myUserProfile objectNamed: #GsMcpServerWithGrail) ifNil: [GsMcpServer] ifNotNil: [:c | c]) runOnPort: ' , aPort printString.
-  [es logout] on: Error do: [:e | nil].  "release our handle; the detached server keeps running on its own"
-  SessionTemps current at: #GsMcpForkedServerSession put: sid.  "child session id, for stopForked"
-  s := WriteStream on: String new.
-  s nextPutAll: 'MCP server forked into gem session '; nextPutAll: sid printString.
-  pid ifNotNil: [:p | s nextPutAll: ' (host pid '; nextPutAll: p printString; nextPutAll: ')'].
-  s nextPutAll: ', listening on port '; nextPutAll: aPort printString; nextPutAll: ' (independent; survives logout).'.
-  s nextPut: Character lf; nextPutAll: 'To stop:  GsMcpServer stopForked   (from this session)'.
-  s nextPut: Character lf; nextPutAll: '     or:  System stopSession: '; nextPutAll: sid printString; nextPutAll: '   (from any session)'.
-  pid ifNotNil: [:p | s nextPut: Character lf; nextPutAll: '     or:  kill '; nextPutAll: p printString; nextPutAll: '   (shell)'].
-  ^s contents
-%
-category: 'forking'
-classmethod: GsMcpServer
-stopForked
-  "Stop the server this session started with forkOnPort:. It is detached/independent, so a logout
-   would NOT stop it -- we terminate its session directly with System stopSession:. For a server
-   forked by another session, use `System stopSession: <id>` with the id printed at fork."
-  | sid |
-  sid := SessionTemps current at: #GsMcpForkedServerSession otherwise: nil.
-  sid isNil ifTrue: [^'No forked server recorded in this session; use System stopSession: <id>.'].
-  [System stopSession: sid] on: Error do: [:e |
-    ^'System stopSession: ' , sid printString , ' failed: ' , ([e description] on: Error do: [:x | e class name asString])].
-  SessionTemps current removeKey: #GsMcpForkedServerSession otherwise: nil.
-  ^'Stopped the forked MCP server (System stopSession: ' , sid printString , ').'
+handleJsonString: aRawJsonString
+  "Worker-gem entry the front end drives (via GsMcpSession>>forward:, a blocking executeString:).
+   Lazily builds ONE worker instance per worker gem, cached in SessionTemps, to own the tool
+   registry + dispatcher, then handles the request in this session. Builds the most capable
+   installed class (the Grail subclass if present, else base). Answers the JSON response string
+   ('' for a notification)."
+  | srv |
+  srv := SessionTemps current at: #GsMcpServer otherwise: nil.
+  srv isNil ifTrue: [
+    srv := ((System myUserProfile objectNamed: #GsMcpServerWithGrail) ifNil: [GsMcpServer] ifNotNil: [:c | c]) new.
+    SessionTemps current at: #GsMcpServer put: srv].
+  ^srv handleJsonString: aRawJsonString
 %
 ! ------------------- Instance methods for GsMcpServer
 category: 'schema building'
@@ -108,19 +62,6 @@ boolProperty: aDescription
   d := Dictionary new.
   d at: 'type' put: 'boolean'.
   d at: 'description' put: aDescription.
-  ^d
-%
-category: 'running'
-method: GsMcpServer
-buildRoutes
-  "HTTP method -> [:req :conn | ...] handler table for the Streamable HTTP transport.
-   Built once in initialize and cached in `routesTable`. Unknown methods get a 405 in
-   handleConnection: (the at:ifAbsent: branch)."
-  | d |
-  d := Dictionary new.
-  d at: 'POST'   put: [:req :conn | self servePost: req on: conn].
-  d at: 'GET'    put: [:req :conn | self serveGetStream: conn].
-  d at: 'DELETE' put: [:req :conn | conn writeStatus: 200 reason: 'OK' body: ''].
   ^d
 %
 category: 'private'
@@ -209,35 +150,24 @@ formatTestResult: aTestResult label: aLabel
     errorOnly asSortedCollection do: [:k | s nextPutAll: '  ERROR '; nextPutAll: k; nextPut: Character lf]].
   ^s contents
 %
-category: 'running'
+category: 'protocol'
 method: GsMcpServer
-handleConnection: aConnection
-  "Streamable HTTP routing for one connection: POST = JSON-RPC, GET = standalone SSE
-   stream, DELETE = session end. The verb is looked up in the cached `routesTable` dictionary;
-   unknown verbs fall through to 405. Runs in its own GsProcess; errors are contained."
-  [ | req httpMethod handler |
-    req := aConnection readRequest.
-    req isNil ifFalse: [
-      httpMethod := (req at: 'method' ifAbsent: ['']) asUppercase.
-      handler := routesTable
-        at: httpMethod
-        ifAbsent: [[:rq :conn | conn writeStatus: 405 reason: 'Method Not Allowed' body: '']].
-      handler value: req value: aConnection]
-  ] on: Error do: [:ex |
-    self log: 'GsMcpServer handleConnection: error: ' , (ex messageText ifNil: [ex description]).
-    [aConnection writeStatus: 500 reason: 'Internal Server Error'
-       body: '{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Internal error"}}']
-      on: Error do: [:e | nil]].
-  aConnection close
+handleJsonString: aRawJsonString
+  "Worker-gem entry (see the per-client-sessions design): parse a JSON-RPC request body, dispatch
+   it in THIS session, and answer the JSON response string -- or '' for a notification (no
+   response). No mutex: a worker gem serves one client, whose requests the front end already
+   serializes onto it. The class-side handleJsonString: (invoked by GsMcpRouter via
+   GsMcpSession>>forward:) relays this answer to the client."
+  | parsed response |
+  parsed := self parseBody: aRawJsonString.
+  response := dispatcher handle: parsed.
+  ^response isNil ifTrue: [''] ifFalse: [response asJson]
 %
 category: 'initialization'
 method: GsMcpServer
 initialize
   toolRegistry := GsMcpToolRegistry new.
   dispatcher := GsMcpDispatcher withToolRegistry: toolRegistry.
-  mutex := Semaphore forMutualExclusion.
-  routesTable := self buildRoutes.
-  isRunning := false.
   self registerBrowsingTools.
   self registerExecutionTools.
   self registerListingTools.
@@ -257,12 +187,6 @@ linesFrom: aCollectionOfStrings
   (aCollectionOfStrings asSortedCollection asArray) do: [:n |
     s nextPutAll: n asString; nextPut: Character lf].
   ^s contents
-%
-category: 'private'
-method: GsMcpServer
-log: aString
-  "Best-effort logging to the gem's log file; never fails the caller."
-  [GsFile gciLogServer: aString] on: Error do: [:ex | nil]
 %
 category: 'private'
 method: GsMcpServer
@@ -289,20 +213,6 @@ objectSchema: propsDict required: requiredArray
   d at: 'properties' put: propsDict.
   d at: 'required' put: requiredArray.
   ^d
-%
-category: 'private'
-method: GsMcpServer
-parseBody: aString
-  "Parse a JSON-RPC request body to its Dictionary, or nil if empty/malformed.
-   Cross-version: GS 3.7.x's JsonParser raises on bad input, but 3.6.2's (PetitParser-based)
-   returns a PPFailure instead of raising -- so reject any non-Dictionary result, not just
-   exceptions. A valid JSON-RPC request is always an object, so nil here -> the dispatcher
-   answers -32700 Parse error."
-  (aString isNil or: [aString isEmpty]) ifTrue: [^nil].
-  ^[ | parsed |
-     parsed := JsonParser parse: aString.
-     (parsed isKindOf: Dictionary) ifTrue: [parsed] ifFalse: [nil] ]
-   on: Error do: [:ex | nil]
 %
 category: 'schema building'
 method: GsMcpServer
@@ -584,62 +494,6 @@ resolveClass: aName
   | obj |
   obj := System myUserProfile objectNamed: aName asSymbol.
   ^(obj isKindOf: Behavior) ifTrue: [obj] ifFalse: [nil]
-%
-category: 'running'
-method: GsMcpServer
-runOnPort: aPort
-  "Bind a localhost-only listener and run the accept loop until #stop.
-   BLOCKING: this is meant to be the gem's main activity (forked GsProcesses
-   only run while the gem is actively executing Smalltalk)."
-  serverSocket := GsSocket new.
-  (serverSocket makeServer: 16 atPort: aPort atAddress: '127.0.0.1')
-    ifNil: [^self error: 'makeServer failed on port ' , aPort printString , ': ' , serverSocket lastErrorString].
-  isRunning := true.
-  self log: 'GsMcpServer listening on 127.0.0.1:' , aPort printString.
-  [isRunning] whileTrue: [
-    | client |
-    client := serverSocket acceptTimeoutMs: 500.
-    client ifNotNil: [self serve: client]].
-  serverSocket close.
-  self log: 'GsMcpServer stopped.'.
-  ^self
-%
-category: 'running'
-method: GsMcpServer
-serve: aClientSocket
-  "Handle each connection in its own GsProcess so a slow or stalled client cannot
-   block the accept loop. The forked process runs during the loop's accept waits."
-  [self handleConnection: (GsMcpHttpConnection on: aClientSocket)] fork
-%
-category: 'running'
-method: GsMcpServer
-serveGetStream: conn
-  "Open the standalone MCP SSE stream (server -> client). This server currently emits no
-   server-initiated messages, so the stream stays open with periodic keepalive comments
-   until the client disconnects (write fails) or the server stops."
-  (conn writeSseStreamHeaders) ifNil: [^self].
-  (conn writeSseComment: 'connected') ifNil: [^self].
-  [isRunning] whileTrue: [
-    (Delay forSeconds: 15) wait.
-    (conn writeSseComment: 'keepalive') ifNil: [^self]]
-%
-category: 'running'
-method: GsMcpServer
-servePost: req on: conn
-  "Handle a JSON-RPC POST. Dispatch is serialized via the mutex so the shared session
-   transaction stays consistent across concurrent connections."
-  | parsed response |
-  parsed := self parseBody: (req at: 'body' ifAbsent: ['']).
-  response := mutex critical: [dispatcher handle: parsed].
-  response isNil
-    ifTrue: [conn writeStatus: 202 reason: 'Accepted' body: '']
-    ifFalse: [conn writeJson: response asJson]
-%
-category: 'controlling'
-method: GsMcpServer
-stop
-  "Request a graceful shutdown; the accept loop exits within one accept timeout."
-  isRunning := false
 %
 category: 'tools - session'
 method: GsMcpServer

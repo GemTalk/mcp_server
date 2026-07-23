@@ -50,11 +50,11 @@ runRequest: rawRequest
 category: 'helpers'
 method: GsMcpTransportTest
 runRequest: rawRequest chunkSize: n
-  "The server is a stack local so the framework's between-test instance-variable
+  "The router is a stack local so the framework's between-test instance-variable
    nilling cannot disturb it."
   | mock |
   mock := GsMcpMockSocket on: rawRequest chunkSize: n.
-  GsMcpServer new handleConnection: (GsMcpHttpConnection on: mock).
+  GsMcpRouter new handleConnection: (GsMcpHttpConnection on: mock).
   ^mock
 %
 category: 'running'
@@ -74,10 +74,12 @@ simpleRequest: httpMethod
 category: 'tests'
 method: GsMcpTransportTest
 testChunkedDeliveryParses
-  "Even when the request arrives a few bytes at a time, readRequest must reassemble it."
+  "Even when the request arrives a few bytes at a time, readRequest must reassemble it. Uses a
+   session-less tools/list so no worker gem is spawned -- the routed -32600 proves the body was
+   reassembled and dispatched."
   | out |
-  out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":3,"method":"initialize","params":{}}') chunkSize: 7) output.
-  self assert: (out includesString: '"protocolVersion"')
+  out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":3,"method":"tools/list"}') chunkSize: 7) output.
+  self assert: (out includesString: '-32600')
 %
 category: 'tests'
 method: GsMcpTransportTest
@@ -101,7 +103,7 @@ method: GsMcpTransportTest
 testEofClosesConnectionWithoutResponse
   | mock |
   mock := GsMcpMockSocket on: ''.
-  GsMcpServer new handleConnection: (GsMcpHttpConnection on: mock).
+  GsMcpRouter new handleConnection: (GsMcpHttpConnection on: mock).
   self assert: mock isClosed.
   self assert: mock output isEmpty
 %
@@ -122,21 +124,15 @@ testMalformedBodyReturnsParseError
 %
 category: 'tests'
 method: GsMcpTransportTest
-testPostInitialize
+testPostWithoutSessionReturnsError
+  "A non-initialize POST with no Mcp-Session-Id is refused with a JSON-RPC error, and no worker
+   gem is spawned. initialize + a routed tool call require a real worker session, so they are
+   exercised end-to-end by the integration test (test.sh) rather than here."
   | out |
-  out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}')) output.
-  self assert: (out includesString: 'HTTP/1.1 200 OK').
-  self assert: (out includesString: 'application/json').
-  self assert: (out includesString: '"protocolVersion"').
-  self assert: (out includesString: '"serverInfo"')
-%
-category: 'tests'
-method: GsMcpTransportTest
-testPostToolCall
-  | out |
-  out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"6 * 7"}}}')) output.
-  self assert: (out includesString: '"text":"42"').
-  self assert: (out includesString: '"isError":false')
+  out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')) output.
+  self assert: (out includesString: 'HTTP/1.1 400 Bad Request').
+  self assert: (out includesString: '-32600').
+  self assert: (out includesString: 'Mcp-Session-Id')
 %
 category: 'tests'
 method: GsMcpTransportTest

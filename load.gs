@@ -6,7 +6,10 @@ input GsMcpTool.gs
 input GsMcpToolRegistry.gs
 input GsMcpHttpConnection.gs
 input GsMcpDispatcher.gs
+input GsMcpBase.gs
 input GsMcpServer.gs
+input GsMcpSession.gs
+input GsMcpRouter.gs
 
 ! Unit-test classes (GsTestCase subclasses) + their mock transport.
 input GsMcpMockSocket.gs

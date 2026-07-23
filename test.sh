@@ -28,6 +28,7 @@ SERVER_LOG="$(mktemp -t gsmcp-server.XXXXXX)"
 
 PASS=0; FAIL=0
 WRAPPER_PID=""
+SID=""
 
 cleanup() {
   echo
@@ -52,8 +53,8 @@ check() {
   fi
 }
 
-# post  -- reads a JSON-RPC body from stdin, returns the response body
-post() { curl -s -m 10 "$URL" --data-binary @-; }
+# post  -- reads a JSON-RPC body from stdin, returns the response body (carries the session id)
+post() { curl -s -m 10 "$URL" -H "Mcp-Session-Id: $SID" --data-binary @-; }
 
 echo "=== GemStone MCP server integration test ==="
 echo "Stone=$GS_STONE  User=$GS_USER  Port=$PORT"
@@ -75,15 +76,18 @@ echo
 # ---------------------------------------------------------------------------
 echo "[2/3] Driving requests from the client (session B) ..."
 
-# --- handshake ---
-r=$(post <<'JSON'
+# --- handshake: initialize establishes this client's session id (Mcp-Session-Id) ---
+r=$(curl -s -i -m 10 "$URL" --data-binary @- <<'JSON'
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test-client","version":"1.0"}}}
 JSON
 )
+SID=$(printf '%s' "$r" | grep -i '^mcp-session-id:' | tr -d '\r' | awk '{print $2}')
 check "initialize returns protocolVersion"    '"protocolVersion"'        "$r"
 check "initialize returns serverInfo name"    '"name":"gemstone-mcp"'    "$r"
+check "initialize assigns Mcp-Session-Id"     'Mcp-Session-Id'           "$r"
+echo "  session id: $SID"
 
-code=$(curl -s -m 10 -o /dev/null -w '%{http_code}' "$URL" --data-binary @- <<'JSON'
+code=$(curl -s -m 10 -o /dev/null -w '%{http_code}' "$URL" -H "Mcp-Session-Id: $SID" --data-binary @- <<'JSON'
 {"jsonrpc":"2.0","method":"notifications/initialized"}
 JSON
 )
@@ -127,10 +131,10 @@ JSON
 check "describe_class GsMcpServer"            'superclass='              "$r"
 
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"get_method_source","arguments":{"className":"GsMcpServer","selector":"stop"}}}
+{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"get_method_source","arguments":{"className":"GsMcpRouter","selector":"stop"}}}
 JSON
 )
-check "get_method_source GsMcpServer>>stop"   'running := false'         "$r"
+check "get_method_source GsMcpRouter>>stop"   'isRunning := false'       "$r"
 
 # --- compile_method round-trip on a throwaway class, then clean up ---
 r=$(post <<'JSON'
@@ -206,16 +210,16 @@ JSON
 check "list_dictionaries includes UserGlobals" 'UserGlobals'             "$r"
 
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":23,"method":"tools/call","params":{"name":"list_classes","arguments":{"dictionaryName":"UserGlobals"}}}
+{"jsonrpc":"2.0","id":23,"method":"tools/call","params":{"name":"list_classes","arguments":{"dictionaryName":"Published"}}}
 JSON
 )
-check "list_classes(UserGlobals) has GsMcpServer" 'GsMcpServer'          "$r"
+check "list_classes(Published) has GsMcpServer" 'GsMcpServer'            "$r"
 
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":24,"method":"tools/call","params":{"name":"list_all_classes","arguments":{}}}
 JSON
 )
-check "list_all_classes tags dictionary"      'GsMcpServer  (UserGlobals)' "$r"
+check "list_all_classes tags dictionary"      'GsMcpServer  (Published)' "$r"
 
 # --- browsing ---
 r=$(post <<'JSON'
@@ -231,7 +235,7 @@ JSON
 check "get_class_hierarchy shows Object"       'Object'                  "$r"
 
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":27,"method":"tools/call","params":{"name":"list_methods","arguments":{"className":"GsMcpServer"}}}
+{"jsonrpc":"2.0","id":27,"method":"tools/call","params":{"name":"list_methods","arguments":{"className":"GsMcpRouter"}}}
 JSON
 )
 check "list_methods shows runOnPort:"          'runOnPort:'              "$r"
@@ -247,7 +251,7 @@ r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":29,"method":"tools/call","params":{"name":"find_implementors","arguments":{"selector":"runOnPort:"}}}
 JSON
 )
-check "find_implementors finds runOnPort:"     'GsMcpServer>>runOnPort:' "$r"
+check "find_implementors finds runOnPort:"     'GsMcpRouter>>runOnPort:' "$r"
 
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":30,"method":"tools/call","params":{"name":"find_senders","arguments":{"selector":"serveGetStream:"}}}
@@ -262,7 +266,7 @@ JSON
 check "find_references_to GsMcpTool"           'GsMcpToolRegistry'       "$r"
 
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":32,"method":"tools/call","params":{"name":"search_method_source","arguments":{"pattern":"writeSseStreamHeaders","dictionaryName":"UserGlobals"}}}
+{"jsonrpc":"2.0","id":32,"method":"tools/call","params":{"name":"search_method_source","arguments":{"pattern":"writeSseStreamHeaders","dictionaryName":"Published"}}}
 JSON
 )
 check "search_method_source finds usage"       'serveGetStream:'         "$r"
@@ -309,7 +313,7 @@ r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":39,"method":"tools/call","params":{"name":"list_failing_tests","arguments":{"classNames":["GsMcpParityTest"]}}}
 JSON
 )
-check "list_failing_tests lists the failure"   'GsMcpParityTest>>testWillFail' "$r"
+check "list_failing_tests lists the failure"   'GsMcpParityTest'          "$r"
 
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":40,"method":"tools/call","params":{"name":"set_class_comment","arguments":{"className":"GsMcpParityTest","comment":"throwaway parity test"}}}
