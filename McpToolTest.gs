@@ -50,6 +50,14 @@ createTestSuiteFixture
 %
 category: 'helpers'
 method: McpToolTest
+includesCS: aSubstring in: aString
+  "Case-sensitive substring test. GemStone's String>>includesString: is case-INsensitive
+   (e.g. 'FAIL' matches the 'fail' in 'failed'), so use findString:startingAt: (which is
+   case-sensitive) for assert:/deny: substring checks."
+  ^(aString findString: aSubstring startingAt: 1) > 0
+%
+category: 'helpers'
+method: McpToolTest
 mcp
   "A fresh server whose tool_* handlers we exercise directly (no socket)."
   ^McpServer new
@@ -61,14 +69,6 @@ oneArg: key value: value
   d := Dictionary new.
   d at: key put: value.
   ^d
-%
-category: 'helpers'
-method: McpToolTest
-includesCS: aSubstring in: aString
-  "Case-sensitive substring test. GemStone's String>>includesString: is case-INsensitive
-   (e.g. 'FAIL' matches the 'fail' in 'failed'), so use findString:startingAt: (which is
-   case-sensitive) for assert:/deny: substring checks."
-  ^(aString findString: aSubstring startingAt: 1) > 0
 %
 category: 'running'
 method: McpToolTest
@@ -136,17 +136,6 @@ testCompileClassDefinition
 %
 category: 'tools - mutation'
 method: McpToolTest
-testCompileClassDefinitionRejectsNonClass
-  "A source that evaluates to something other than a class is rejected and directed to
-   execute_code, and nothing is committed."
-  | out |
-  out := self mcp tool_compile_class_definition: (self oneArg: 'source' value: '3 + 4').
-  self assert: (self includesCS: 'did not evaluate to a class' in: out).
-  self assert: (self includesCS: 'execute_code' in: out).
-  self deny: (self includesCS: 'committed' in: out)
-%
-category: 'tools - mutation'
-method: McpToolTest
 testCompileClassDefinitionPreservesMethods
   "Default recompileMethods=true: a shape change keeps the class's methods."
   | cls out |
@@ -184,6 +173,17 @@ testCompileClassDefinitionRefusesWithSubclasses
     'Object subclass: ''McpTestFixture'' instVarNames: #(a) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()').
   self assert: (self includesCS: 'Refused' in: out).
   self assert: (self includesCS: 'McpTestSub' in: out)
+%
+category: 'tools - mutation'
+method: McpToolTest
+testCompileClassDefinitionRejectsNonClass
+  "A source that evaluates to something other than a class is rejected and directed to
+   execute_code, and nothing is committed."
+  | out |
+  out := self mcp tool_compile_class_definition: (self oneArg: 'source' value: '3 + 4').
+  self assert: (self includesCS: 'did not evaluate to a class' in: out).
+  self assert: (self includesCS: 'execute_code' in: out).
+  self deny: (self includesCS: 'committed' in: out)
 %
 category: 'tools - mutation'
 method: McpToolTest
@@ -272,11 +272,27 @@ testDescribeClass
 %
 category: 'tools - testing'
 method: McpToolTest
-testDescribeTestFailureOnPassingTest
+testDescribeTestFailureNamesMissingSelector
+  "For a doesNotUnderstand, describe_test_failure surfaces the missing selector -- which lives in
+   the exception's description, not its class name and not its (nil) messageText. This exercises
+   the description path the old handler lacked, without depending on our SUnit version: a DNU's
+   description always names the selector, whether or not messageText is populated."
   | out |
+  self createTestSuiteFixture.
   out := self mcp tool_describe_test_failure:
-    (Dictionary new at: 'className' put: 'SUnitTest'; at: 'selector' put: 'testAssert'; yourself).
-  self assert: out = 'SUnitTest>>testAssert passed (no failure).'
+    (Dictionary new at: 'className' put: 'McpTestSuiteFixture'; at: 'selector' put: 'testDnu'; yourself).
+  self assert: (self includesCS: 'zzzNoSuchSelector' in: out)
+%
+category: 'tools - testing'
+method: McpToolTest
+testDescribeTestFailureOnError
+  "An erroring test reports the error class and message."
+  | out |
+  self createTestSuiteFixture.
+  out := self mcp tool_describe_test_failure:
+    (Dictionary new at: 'className' put: 'McpTestSuiteFixture'; at: 'selector' put: 'testErrors'; yourself).
+  self assert: (self includesCS: 'testErrors' in: out).
+  self assert: (self includesCS: 'ZeroDivide' in: out)
 %
 category: 'tools - testing'
 method: McpToolTest
@@ -292,27 +308,11 @@ testDescribeTestFailureOnFailingTest
 %
 category: 'tools - testing'
 method: McpToolTest
-testDescribeTestFailureOnError
-  "An erroring test reports the error class and message."
+testDescribeTestFailureOnPassingTest
   | out |
-  self createTestSuiteFixture.
   out := self mcp tool_describe_test_failure:
-    (Dictionary new at: 'className' put: 'McpTestSuiteFixture'; at: 'selector' put: 'testErrors'; yourself).
-  self assert: (self includesCS: 'testErrors' in: out).
-  self assert: (self includesCS: 'ZeroDivide' in: out)
-%
-category: 'tools - testing'
-method: McpToolTest
-testDescribeTestFailureNamesMissingSelector
-  "For a doesNotUnderstand, describe_test_failure surfaces the missing selector -- which lives in
-   the exception's description, not its class name and not its (nil) messageText. This exercises
-   the description path the old handler lacked, without depending on our SUnit version: a DNU's
-   description always names the selector, whether or not messageText is populated."
-  | out |
-  self createTestSuiteFixture.
-  out := self mcp tool_describe_test_failure:
-    (Dictionary new at: 'className' put: 'McpTestSuiteFixture'; at: 'selector' put: 'testDnu'; yourself).
-  self assert: (self includesCS: 'zzzNoSuchSelector' in: out)
+    (Dictionary new at: 'className' put: 'SUnitTest'; at: 'selector' put: 'testAssert'; yourself).
+  self assert: out = 'SUnitTest>>testAssert passed (no failure).'
 %
 category: 'tools - execution'
 method: McpToolTest
@@ -591,18 +591,6 @@ testRunTestMethod
   self assert: (self includesCS: 'FAIL' in: fail).
   self assert: (self includesCS: '#testFails' in: fail)
 %
-category: 'tools - testing'
-method: McpToolTest
-testTestingToolsClassNotFound
-  "The testing tools that resolve a class name report 'Class not found:' for an unknown class
-   rather than erroring. 'Foo-Bar' is not a legal identifier, so it can never resolve."
-  | badClass badMethod |
-  badClass := self oneArg: 'className' value: 'Foo-Bar'.
-  badMethod := Dictionary new at: 'className' put: 'Foo-Bar'; at: 'selector' put: 'testAnything'; yourself.
-  self assert: (self mcp tool_run_test_class: badClass) = 'Class not found: Foo-Bar'.
-  self assert: (self mcp tool_run_test_method: badMethod) = 'Class not found: Foo-Bar'.
-  self assert: (self mcp tool_describe_test_failure: badMethod) = 'Class not found: Foo-Bar'
-%
 category: 'tools - search'
 method: McpToolTest
 testSearchMethodSource
@@ -640,4 +628,16 @@ category: 'tools - session'
 method: McpToolTest
 testStatus
   self assert: (self includesCS: 'user=' in: (self mcp tool_status: Dictionary new))
+%
+category: 'tools - testing'
+method: McpToolTest
+testTestingToolsClassNotFound
+  "The testing tools that resolve a class name report 'Class not found:' for an unknown class
+   rather than erroring. 'Foo-Bar' is not a legal identifier, so it can never resolve."
+  | badClass badMethod |
+  badClass := self oneArg: 'className' value: 'Foo-Bar'.
+  badMethod := Dictionary new at: 'className' put: 'Foo-Bar'; at: 'selector' put: 'testAnything'; yourself.
+  self assert: (self mcp tool_run_test_class: badClass) = 'Class not found: Foo-Bar'.
+  self assert: (self mcp tool_run_test_method: badMethod) = 'Class not found: Foo-Bar'.
+  self assert: (self mcp tool_describe_test_failure: badMethod) = 'Class not found: Foo-Bar'
 %

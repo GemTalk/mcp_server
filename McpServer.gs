@@ -34,11 +34,6 @@ McpServer category: 'MCPServer'
 removeallmethods McpServer
 removeallclassmethods McpServer
 ! ------------------- Class methods for McpServer
-category: 'instance creation'
-classmethod: McpServer
-new
-  ^super new initialize
-%
 category: 'worker'
 classmethod: McpServer
 handleJsonString: aRawJsonString
@@ -53,6 +48,11 @@ handleJsonString: aRawJsonString
     srv := ((System myUserProfile objectNamed: #McpServerWithGrail) ifNil: [McpServer] ifNotNil: [:c | c]) new.
     SessionTemps current at: #McpServer put: srv].
   ^srv handleJsonString: aRawJsonString
+%
+category: 'instance creation'
+classmethod: McpServer
+new
+  ^super new initialize
 %
 ! ------------------- Instance methods for McpServer
 category: 'schema building'

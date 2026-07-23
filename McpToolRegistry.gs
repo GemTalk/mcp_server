@@ -30,24 +30,6 @@ new
   ^super new initialize
 %
 ! ------------------- Instance methods for McpToolRegistry
-category: 'initialization'
-method: McpToolRegistry
-initialize
-  tools := Dictionary new
-%
-category: 'registration'
-method: McpToolRegistry
-register: aTool
-  tools at: aTool name put: aTool.
-  ^aTool
-%
-category: 'registration'
-method: McpToolRegistry
-name: aName description: aDescription inputSchema: aSchema do: aBlock
-  "Convenience: build and register a tool in one line."
-  ^self register:
-    (McpTool name: aName description: aDescription inputSchema: aSchema handler: aBlock)
-%
 category: 'accessing'
 method: McpToolRegistry
 at: aName
@@ -59,4 +41,22 @@ method: McpToolRegistry
 descriptors
   "An Array of MCP tool descriptors for tools/list, sorted alphabetically by tool name."
   ^(tools keys asSortedCollection asArray) collect: [:toolName | (tools at: toolName) descriptor]
+%
+category: 'initialization'
+method: McpToolRegistry
+initialize
+  tools := Dictionary new
+%
+category: 'registration'
+method: McpToolRegistry
+name: aName description: aDescription inputSchema: aSchema do: aBlock
+  "Convenience: build and register a tool in one line."
+  ^self register:
+    (McpTool name: aName description: aDescription inputSchema: aSchema handler: aBlock)
+%
+category: 'registration'
+method: McpToolRegistry
+register: aTool
+  tools at: aTool name put: aTool.
+  ^aTool
 %

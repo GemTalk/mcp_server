@@ -34,19 +34,12 @@ name: aName description: aDescription inputSchema: aSchema handler: aBlock
     setName: aName description: aDescription inputSchema: aSchema handler: aBlock
 %
 ! ------------------- Instance methods for McpTool
-category: 'initialization'
+category: 'evaluating'
 method: McpTool
-setName: aName description: aDescription inputSchema: aSchema handler: aBlock
-  name := aName.
-  description := aDescription.
-  schema := aSchema.
-  handler := aBlock.
-  ^self
-%
-category: 'accessing'
-method: McpTool
-name
-  ^name
+callWith: argsDict
+  "Invoke the handler with the supplied arguments Dictionary (may be nil).
+   Returns a String. Any error raised propagates to the dispatcher."
+  ^handler value: (argsDict ifNil: [Dictionary new])
 %
 category: 'converting'
 method: McpTool
@@ -59,10 +52,17 @@ descriptor
   d at: 'inputSchema' put: schema.
   ^d
 %
-category: 'evaluating'
+category: 'accessing'
 method: McpTool
-callWith: argsDict
-  "Invoke the handler with the supplied arguments Dictionary (may be nil).
-   Returns a String. Any error raised propagates to the dispatcher."
-  ^handler value: (argsDict ifNil: [Dictionary new])
+name
+  ^name
+%
+category: 'initialization'
+method: McpTool
+setName: aName description: aDescription inputSchema: aSchema handler: aBlock
+  name := aName.
+  description := aDescription.
+  schema := aSchema.
+  handler := aBlock.
+  ^self
 %

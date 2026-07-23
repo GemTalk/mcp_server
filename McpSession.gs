@@ -44,6 +44,15 @@ close
   [worker logout] on: Error do: [:e | nil].
   ^self
 %
+category: 'routing'
+method: McpSession
+forward: aRawJsonString
+  "Run a JSON-RPC request in this client's worker gem (an isolated session) and answer the JSON
+   response string ('' for a notification). BLOCKING executeString: -- reliable; forwarding is
+   serialized (concurrency deferred). The request is embedded via printString for safe quoting."
+  self touch.
+  ^worker executeString: 'McpServer handleJsonString: ' , aRawJsonString printString
+%
 category: 'accessing'
 method: McpSession
 id
@@ -53,15 +62,6 @@ category: 'activity'
 method: McpSession
 idleSeconds
   ^System timeGmt - lastActivitySeconds
-%
-category: 'routing'
-method: McpSession
-forward: aRawJsonString
-  "Run a JSON-RPC request in this client's worker gem (an isolated session) and answer the JSON
-   response string ('' for a notification). BLOCKING executeString: -- reliable; forwarding is
-   serialized (concurrency deferred). The request is embedded via printString for safe quoting."
-  self touch.
-  ^worker executeString: 'McpServer handleJsonString: ' , aRawJsonString printString
 %
 category: 'accessing'
 method: McpSession

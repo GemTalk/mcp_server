@@ -85,12 +85,6 @@ request: methodName params: paramsDict
   paramsDict ifNotNil: [d at: 'params' put: paramsDict].
   ^d
 %
-category: 'helpers'
-method: McpServerWithGrailTest
-toolCall: toolName args: argsDict
-  ^self request: 'tools/call' params:
-    (Dictionary new at: 'name' put: toolName; at: 'arguments' put: argsDict; yourself)
-%
 category: 'tests'
 method: McpServerWithGrailTest
 testCompilePython
@@ -174,4 +168,10 @@ testToolsListHasPythonToolsAnd33
   self assert: names equals: names asSortedCollection asArray.
   self assert: (names includes: 'eval_python').
   self assert: (names includes: 'compile_python')
+%
+category: 'helpers'
+method: McpServerWithGrailTest
+toolCall: toolName args: argsDict
+  ^self request: 'tools/call' params:
+    (Dictionary new at: 'name' put: toolName; at: 'arguments' put: argsDict; yourself)
 %

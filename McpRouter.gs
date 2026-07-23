@@ -107,16 +107,6 @@ stopForked
   ^'Stopped the forked MCP front end (System stopSession: ' , sid printString , ').'
 %
 ! ------------------- Instance methods for McpRouter
-category: 'initialization'
-method: McpRouter
-initialize
-  mutex := Semaphore forMutualExclusion.
-  routesTable := self buildRoutes.
-  isRunning := false.
-  sessions := Dictionary new.
-  sessionCounter := 0.
-  ^self
-%
 category: 'running'
 method: McpRouter
 buildRoutes
@@ -150,6 +140,16 @@ handleConnection: aConnection
        body: '{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Internal error"}}']
       on: Error do: [:e | nil]].
   aConnection close
+%
+category: 'initialization'
+method: McpRouter
+initialize
+  mutex := Semaphore forMutualExclusion.
+  routesTable := self buildRoutes.
+  isRunning := false.
+  sessions := Dictionary new.
+  sessionCounter := 0.
+  ^self
 %
 category: 'running'
 method: McpRouter
@@ -209,6 +209,12 @@ servePost: req on: conn
 %
 category: 'routing'
 method: McpRouter
+sessionIdOf: req
+  "The Mcp-Session-Id request header (header keys are lower-cased by parseHead:), or nil."
+  ^(req at: 'headers' ifAbsent: [Dictionary new]) at: 'mcp-session-id' ifAbsent: [nil]
+%
+category: 'routing'
+method: McpRouter
 writeParseError: conn
   "Malformed or empty JSON body: answer a JSON-RPC -32700 Parse error (HTTP 200), matching the
    reply a worker's dispatcher would give. The front end validates only enough to route."
@@ -217,12 +223,6 @@ writeParseError: conn
   err at: 'jsonrpc' put: '2.0'; at: 'id' put: nil.
   err at: 'error' put: (Dictionary new at: 'code' put: -32700; at: 'message' put: 'Parse error'; yourself).
   conn writeJson: err asJson
-%
-category: 'routing'
-method: McpRouter
-sessionIdOf: req
-  "The Mcp-Session-Id request header (header keys are lower-cased by parseHead:), or nil."
-  ^(req at: 'headers' ifAbsent: [Dictionary new]) at: 'mcp-session-id' ifAbsent: [nil]
 %
 category: 'routing'
 method: McpRouter
