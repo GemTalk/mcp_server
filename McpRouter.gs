@@ -5,7 +5,7 @@ doit
 McpBase subclass: 'McpRouter'
   instVarNames: #( isRunning mutex routesTable serverSocket sessions )
   classVars: #()
-  classInstVars: #()
+  classInstVars: #( allowedOriginHosts )
   poolDictionaries: #()
   inDictionary: Published
   options: #()
@@ -43,6 +43,27 @@ McpRouter category: 'MCPServer'
 removeallmethods McpRouter
 removeallclassmethods McpRouter
 ! ------------------- Class methods for McpRouter
+category: 'origin allowlist'
+classmethod: McpRouter
+allowedOriginHosts
+  "Origin-host allowlist for DNS-rebinding protection (MCP Streamable HTTP security). Defaults to
+   loopback hosts; set via allowedOriginHosts: (commit to persist) to permit a browser app's
+   origin host."
+  ^allowedOriginHosts ifNil: [allowedOriginHosts := self defaultAllowedOriginHosts]
+%
+category: 'origin allowlist'
+classmethod: McpRouter
+allowedOriginHosts: aCollectionOfHostStrings
+  "Replace the Origin-host allowlist. Hosts are compared lower-cased; include loopback if you
+   still want local browsers to connect. Commit to persist across sessions."
+  allowedOriginHosts := aCollectionOfHostStrings
+%
+category: 'origin allowlist'
+classmethod: McpRouter
+defaultAllowedOriginHosts
+  "Loopback hosts only -- a page served from any other origin is a DNS-rebinding attempt."
+  ^#('localhost' '127.0.0.1' '[::1]')
+%
 category: 'forking'
 classmethod: McpRouter
 forkOnPort: aPort
@@ -129,11 +150,14 @@ handleConnection: aConnection
   [ | req httpMethod handler |
     req := aConnection readRequest.
     req isNil ifFalse: [
-      httpMethod := (req at: 'method' ifAbsent: ['']) asUppercase.
-      handler := routesTable
-        at: httpMethod
-        ifAbsent: [[:rq :conn | conn writeStatus: 405 reason: 'Method Not Allowed' body: '']].
-      handler value: req value: aConnection]
+      (self originAllowed: req)
+        ifFalse: [self writeSessionError: 'Origin not allowed (DNS-rebinding protection)' code: 403 reason: 'Forbidden' on: aConnection]
+        ifTrue: [
+          httpMethod := (req at: 'method' ifAbsent: ['']) asUppercase.
+          handler := routesTable
+            at: httpMethod
+            ifAbsent: [[:rq :conn | conn writeStatus: 405 reason: 'Method Not Allowed' body: '']].
+          handler value: req value: aConnection]]
   ] on: Error do: [:ex |
     self log: 'McpRouter handleConnection: error: ' , (ex messageText ifNil: [ex description]).
     [aConnection writeStatus: 500 reason: 'Internal Server Error'
@@ -211,6 +235,35 @@ method: McpRouter
 sessionIdOf: req
   "The MCP-Session-Id request header (header keys are lower-cased by parseHead:), or nil."
   ^(req at: 'headers' ifAbsent: [Dictionary new]) at: 'mcp-session-id' ifAbsent: [nil]
+%
+category: 'routing'
+method: McpRouter
+originAllowed: req
+  "MCP Streamable HTTP security: validate the Origin header to prevent DNS-rebinding attacks. An
+   absent Origin (non-browser clients -- curl, Claude Code) is allowed; a present Origin is allowed
+   only if its host is in the allowlist (loopback by default). Header keys are lower-cased by
+   parseHead:."
+  | origin |
+  origin := (req at: 'headers' ifAbsent: [Dictionary new]) at: 'origin' ifAbsent: [nil].
+  origin isNil ifTrue: [^true].
+  ^self class allowedOriginHosts includes: (self hostOfOrigin: origin) asLowercase
+%
+category: 'routing'
+method: McpRouter
+hostOfOrigin: aString
+  "The host component of an Origin value (scheme://host[:port]); handles bracketed IPv6. Answers
+   '' for the opaque 'null' origin (or a value with no host) so it fails the allowlist check."
+  | idx rest close cut |
+  aString = 'null' ifTrue: [^''].
+  idx := aString indexOfSubCollection: '://'.
+  rest := idx > 0 ifTrue: [aString copyFrom: idx + 3 to: aString size] ifFalse: [aString].
+  (rest notEmpty and: [(rest at: 1) = $[]) ifTrue: [
+    close := rest indexOf: $].
+    ^close = 0 ifTrue: [rest] ifFalse: [rest copyFrom: 1 to: close]].
+  cut := rest size + 1.
+  (rest indexOf: $:) > 0 ifTrue: [cut := cut min: (rest indexOf: $:)].
+  (rest indexOf: $/) > 0 ifTrue: [cut := cut min: (rest indexOf: $/)].
+  ^rest copyFrom: 1 to: cut - 1
 %
 category: 'routing'
 method: McpRouter

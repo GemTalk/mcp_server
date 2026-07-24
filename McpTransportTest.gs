@@ -41,10 +41,17 @@ includesCS: aSubstring in: aString
 category: 'helpers'
 method: McpTransportTest
 postRequest: body
-  "A raw HTTP POST /mcp request carrying body as application/json."
-  | crlf |
+  "A raw HTTP POST /mcp request carrying body as application/json (no Origin header)."
+  ^self postRequest: body origin: nil
+%
+category: 'helpers'
+method: McpTransportTest
+postRequest: body origin: originOrNil
+  "A raw HTTP POST /mcp request as application/json, with an optional Origin header (nil = none)."
+  | crlf originLine |
   crlf := self crlf.
-  ^'POST /mcp HTTP/1.1' , crlf , 'Host: localhost' , crlf ,
+  originLine := originOrNil isNil ifTrue: [''] ifFalse: ['Origin: ' , originOrNil , crlf].
+  ^'POST /mcp HTTP/1.1' , crlf , 'Host: localhost' , crlf , originLine ,
    'Content-Type: application/json' , crlf ,
    'Content-Length: ' , body size printString , crlf , crlf , body
 %
@@ -78,6 +85,15 @@ simpleRequest: httpMethod
   | crlf |
   crlf := self crlf.
   ^httpMethod , ' /mcp HTTP/1.1' , crlf , 'Host: localhost' , crlf , crlf
+%
+category: 'tests'
+method: McpTransportTest
+testAbsentOriginServed
+  "No Origin header (non-browser clients like curl / Claude Code) passes the check -- routed, not 403."
+  | out |
+  out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' origin: nil)) output.
+  self deny: (self includesCS: '403' in: out).
+  self assert: (self includesCS: '-32600' in: out)
 %
 category: 'tests'
 method: McpTransportTest
@@ -117,11 +133,29 @@ testEofClosesConnectionWithoutResponse
 %
 category: 'tests'
 method: McpTransportTest
+testForeignOriginReturns403
+  "A non-loopback Origin (DNS-rebinding attempt) is refused with 403 before any routing."
+  | out |
+  out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' origin: 'http://evil.example.com')) output.
+  self assert: (self includesCS: 'HTTP/1.1 403 Forbidden' in: out)
+%
+category: 'tests'
+method: McpTransportTest
 testGetOpensSseStream
   | out |
   out := (self runRequest: (self simpleRequest: 'GET')) output.
   self assert: (self includesCS: 'text/event-stream' in: out).
   self assert: (self includesCS: ': connected' in: out)
+%
+category: 'tests'
+method: McpTransportTest
+testLoopbackOriginServed
+  "A loopback Origin passes the DNS-rebinding check, so the request is routed (session-less
+   tools/list -> the routed -32600, NOT a 403)."
+  | out |
+  out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' origin: 'http://localhost:3000')) output.
+  self deny: (self includesCS: '403' in: out).
+  self assert: (self includesCS: '-32600' in: out)
 %
 category: 'tests'
 method: McpTransportTest
@@ -145,11 +179,6 @@ testPostWithoutSessionReturnsError
 %
 category: 'tests'
 method: McpTransportTest
-testUnknownVerbReturns405
-  self assert: (self includesCS: '405 Method Not Allowed' in: (self runRequest: (self simpleRequest: 'PUT')) output)
-%
-category: 'tests'
-method: McpTransportTest
 testSessionIdIsRandomHex
   "Session ids are cryptographically-random 128-bit tokens (32 hex chars), not sequential.
    nextSessionId reads `sessions` (empty on a fresh router) and spawns no worker gem."
@@ -160,4 +189,9 @@ testSessionIdIsRandomHex
   self assert: a size equals: 32.
   self deny: a = b.
   self assert: ((a asUppercase reject: [:c | '0123456789ABCDEF' includes: c]) isEmpty)
+%
+category: 'tests'
+method: McpTransportTest
+testUnknownVerbReturns405
+  self assert: (self includesCS: '405 Method Not Allowed' in: (self runRequest: (self simpleRequest: 'PUT')) output)
 %

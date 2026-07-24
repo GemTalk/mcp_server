@@ -20,6 +20,13 @@ sessions** — each client gets its own isolated worker gem (see [Per-client ses
 - **DELETE `/mcp`** — ends the session named by `MCP-Session-Id` (closes its worker); returns `200`.
 - Any other method → `405`.
 
+**Security (per the MCP spec):** the server binds only to `127.0.0.1`, session ids are
+cryptographically-random 128-bit tokens, and every request's `Origin` header is validated to
+prevent DNS-rebinding — a present `Origin` whose host is not loopback (`localhost`/`127.0.0.1`/`[::1]`)
+gets **`403`**; an absent `Origin` (non-browser clients like curl) is allowed. Add a browser app's
+origin host with `McpRouter allowedOriginHosts: #(...)` (commit to persist). Client authentication
+is a planned addition (see `../../.claude/plans/mcp-spec-compliance.md`).
+
 ```
 # initialize -- the response carries an MCP-Session-Id header
 curl -si localhost:8000/mcp -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
