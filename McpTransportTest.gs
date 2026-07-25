@@ -57,6 +57,17 @@ postRequest: body origin: originOrNil
 %
 category: 'helpers'
 method: McpTransportTest
+postRequest: body protocolVersion: versionOrNil
+  "A raw HTTP POST /mcp request as application/json, with an optional MCP-Protocol-Version header."
+  | crlf verLine |
+  crlf := self crlf.
+  verLine := versionOrNil isNil ifTrue: [''] ifFalse: ['MCP-Protocol-Version: ' , versionOrNil , crlf].
+  ^'POST /mcp HTTP/1.1' , crlf , 'Host: localhost' , crlf , verLine ,
+   'Content-Type: application/json' , crlf ,
+   'Content-Length: ' , body size printString , crlf , crlf , body
+%
+category: 'helpers'
+method: McpTransportTest
 runRequest: rawRequest
   "Drive handleConnection: with rawRequest; answer the mock (whose #output holds the
    captured response). Named runRequest: (NOT run:) to avoid shadowing TestCase>>run:."
@@ -138,6 +149,25 @@ testForeignOriginReturns403
   | out |
   out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' origin: 'http://evil.example.com')) output.
   self assert: (self includesCS: 'HTTP/1.1 403 Forbidden' in: out)
+%
+category: 'tests'
+method: McpTransportTest
+testUnsupportedProtocolVersionReturns400
+  "A request with an unknown MCP-Protocol-Version is rejected with 400 (spec MUST), before routing."
+  | out |
+  out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' protocolVersion: '1999-01-01')) output.
+  self assert: (self includesCS: 'HTTP/1.1 400 Bad Request' in: out).
+  self assert: (self includesCS: 'Unsupported MCP-Protocol-Version' in: out)
+%
+category: 'tests'
+method: McpTransportTest
+testSupportedProtocolVersionServed
+  "A supported (negotiated) version passes the version gate; the request reaches routing (a
+   session-less tools/list -> -32600), NOT a version 400."
+  | out |
+  out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' protocolVersion: '2024-11-05')) output.
+  self deny: (self includesCS: 'Unsupported MCP-Protocol-Version' in: out).
+  self assert: (self includesCS: '-32600' in: out)
 %
 category: 'tests'
 method: McpTransportTest

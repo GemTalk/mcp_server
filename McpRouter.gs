@@ -144,26 +144,35 @@ buildRoutes
 category: 'running'
 method: McpRouter
 handleConnection: aConnection
-  "Streamable HTTP routing for one connection: POST = JSON-RPC, GET = standalone SSE
-   stream, DELETE = session end. The verb is looked up in the cached `routesTable` dictionary;
-   unknown verbs fall through to 405. Runs in its own GsProcess; errors are contained."
-  [ | req httpMethod handler |
+  "Read one HTTP/1.1 request and dispatch it (see route:on:). Runs in its own GsProcess; any error
+   is contained and answered with 500, and the connection is always closed."
+  [ | req |
     req := aConnection readRequest.
-    req isNil ifFalse: [
-      (self originAllowed: req)
-        ifFalse: [self writeSessionError: 'Origin not allowed (DNS-rebinding protection)' code: 403 reason: 'Forbidden' on: aConnection]
-        ifTrue: [
-          httpMethod := (req at: 'method' ifAbsent: ['']) asUppercase.
-          handler := routesTable
-            at: httpMethod
-            ifAbsent: [[:rq :conn | conn writeStatus: 405 reason: 'Method Not Allowed' body: '']].
-          handler value: req value: aConnection]]
+    req isNil ifFalse: [self route: req on: aConnection]
   ] on: Error do: [:ex |
     self log: 'McpRouter handleConnection: error: ' , (ex messageText ifNil: [ex description]).
     [aConnection writeStatus: 500 reason: 'Internal Server Error'
        body: '{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Internal error"}}']
       on: Error do: [:e | nil]].
   aConnection close
+%
+category: 'running'
+method: McpRouter
+route: req on: conn
+  "Apply the transport gates, then dispatch by HTTP verb. Gates (MCP Streamable HTTP spec): Origin
+   validation (DNS-rebinding -> 403) then MCP-Protocol-Version validation (unsupported -> 400).
+   POST = JSON-RPC, GET = SSE stream, DELETE = session end; unknown verb -> 405. Early returns are
+   fine -- handleConnection: still closes the connection."
+  | httpMethod handler |
+  (self originAllowed: req) ifFalse: [
+    ^self writeSessionError: 'Origin not allowed (DNS-rebinding protection)' code: 403 reason: 'Forbidden' on: conn].
+  (self protocolVersionAllowed: req) ifFalse: [
+    ^self writeSessionError: 'Unsupported MCP-Protocol-Version' code: 400 reason: 'Bad Request' on: conn].
+  httpMethod := (req at: 'method' ifAbsent: ['']) asUppercase.
+  handler := routesTable
+    at: httpMethod
+    ifAbsent: [[:rq :c | c writeStatus: 405 reason: 'Method Not Allowed' body: '']].
+  handler value: req value: conn
 %
 category: 'initialization'
 method: McpRouter
@@ -264,6 +273,24 @@ hostOfOrigin: aString
   (rest indexOf: $:) > 0 ifTrue: [cut := cut min: (rest indexOf: $:)].
   (rest indexOf: $/) > 0 ifTrue: [cut := cut min: (rest indexOf: $/)].
   ^rest copyFrom: 1 to: cut - 1
+%
+category: 'routing'
+method: McpRouter
+protocolVersionAllowed: req
+  "MCP spec: a request carrying an unsupported MCP-Protocol-Version MUST be rejected (400). An
+   absent header is allowed -- the spec says to assume 2025-03-26, and the initialize request
+   legitimately carries no version yet. Header keys are lower-cased by parseHead:."
+  | version |
+  version := (req at: 'headers' ifAbsent: [Dictionary new]) at: 'mcp-protocol-version' ifAbsent: [nil].
+  ^version isNil or: [self supportedProtocolVersions includes: version]
+%
+category: 'routing'
+method: McpRouter
+supportedProtocolVersions
+  "MCP protocol versions accepted in the MCP-Protocol-Version header. Includes the version our
+   initialize negotiates ('2024-11-05') plus every later published revision, so a compliant
+   client's echoed version is accepted while an unknown value is rejected (spec MUST)."
+  ^#('2024-11-05' '2025-03-26' '2025-06-18' '2025-11-25' '2026-07-28')
 %
 category: 'routing'
 method: McpRouter
