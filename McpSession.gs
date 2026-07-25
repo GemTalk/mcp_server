@@ -3,16 +3,18 @@ set compile_env: 0
 expectvalue /Class
 doit
 Object subclass: 'McpSession'
-  instVarNames: #( id worker lastActivitySeconds userId)
+  instVarNames: #( id worker lastActivitySeconds
+                    userId)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
   inDictionary: Published
   options: #()
+
 %
 expectvalue /Class
 doit
-McpSession comment:
+McpSession comment: 
 'One MCP client''s isolated worker: a GsTsExternalSession gem (its own transaction view) plus the
 client''s session id, last-activity time, and (future) userId. The front end (McpRouter) keeps
 an id -> McpSession map and routes each request through #forward:, which runs it in this worker

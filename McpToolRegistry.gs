@@ -9,10 +9,11 @@ Object subclass: 'McpToolRegistry'
   poolDictionaries: #()
   inDictionary: Published
   options: #()
+
 %
 expectvalue /Class
 doit
-McpToolRegistry comment:
+McpToolRegistry comment: 
 'Holds the set of McpTool instances keyed by tool name. Produces the descriptor
 list for MCP tools/list and looks up tools for tools/call.'
 %

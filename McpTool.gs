@@ -3,16 +3,18 @@ set compile_env: 0
 expectvalue /Class
 doit
 Object subclass: 'McpTool'
-  instVarNames: #( name description schema handler)
+  instVarNames: #( name description schema
+                    handler)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
   inDictionary: Published
   options: #()
+
 %
 expectvalue /Class
 doit
-McpTool comment:
+McpTool comment: 
 'A single MCP tool: a name, human description, JSON-Schema (a Dictionary) for its
 arguments, and a one-argument handler block [:argsDict | aString] that performs the
 work and returns a String. Part of the native GemStone MCP server (see McpServer).'

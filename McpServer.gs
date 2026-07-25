@@ -3,7 +3,7 @@ set compile_env: 0
 expectvalue /Class
 doit
 McpBase subclass: 'McpServer'
-  instVarNames: #( dispatcher toolRegistry )
+  instVarNames: #( dispatcher toolRegistry)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -13,7 +13,7 @@ McpBase subclass: 'McpServer'
 %
 expectvalue /Class
 doit
-McpServer comment:
+McpServer comment: 
 'Per-client MCP worker: the single-client GemStone MCP server. Owns a tool registry and a
 JSON-RPC dispatcher and implements every tool_* handler; parses a JSON-RPC request and answers
 the JSON response string via handleJsonString:.
@@ -482,11 +482,6 @@ registerTestTools
     inputSchema: methodArg do: [:args | self tool_run_test_method: args].
   ^self
 %
-category: 'accessing'
-method: McpServer
-toolRegistry
-  ^toolRegistry
-%
 category: 'private'
 method: McpServer
 resolveClass: aName
@@ -494,6 +489,11 @@ resolveClass: aName
   | obj |
   obj := System myUserProfile objectNamed: aName asSymbol.
   ^(obj isKindOf: Behavior) ifTrue: [obj] ifFalse: [nil]
+%
+category: 'accessing'
+method: McpServer
+toolRegistry
+  ^toolRegistry
 %
 category: 'tools - session'
 method: McpServer

@@ -3,16 +3,18 @@ set compile_env: 0
 expectvalue /Class
 doit
 Object subclass: 'McpDispatcher'
-  instVarNames: #( toolRegistry serverName serverVersion protocolVersion)
+  instVarNames: #( toolRegistry serverName serverVersion
+                    protocolVersion)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
   inDictionary: Published
   options: #()
+
 %
 expectvalue /Class
 doit
-McpDispatcher comment:
+McpDispatcher comment: 
 'The JSON-RPC 2.0 / MCP routing layer. Given a parsed request Dictionary it routes
 initialize / tools/list / tools/call and notifications, invokes tools via the
 registry, and returns a response Dictionary (or nil for notifications). Aborts the

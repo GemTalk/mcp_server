@@ -9,10 +9,11 @@ Object subclass: 'McpHttpConnection'
   poolDictionaries: #()
   inDictionary: Published
   options: #()
+
 %
 expectvalue /Class
 doit
-McpHttpConnection comment:
+McpHttpConnection comment: 
 'Wraps a single accepted client GsSocket and speaks just enough HTTP/1.1 to serve
 the MCP transport: read one request (request line + headers + Content-Length body)
 and write a single application/json response with Connection: close. No keep-alive.'

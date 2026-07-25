@@ -3,9 +3,10 @@ set compile_env: 0
 expectvalue /Class
 doit
 McpBase subclass: 'McpRouter'
-  instVarNames: #( isRunning mutex routesTable serverSocket sessions )
+  instVarNames: #( isRunning mutex routesTable
+                    serverSocket sessions)
   classVars: #()
-  classInstVars: #( allowedOriginHosts )
+  classInstVars: #( allowedOriginHosts)
   poolDictionaries: #()
   inDictionary: Published
   options: #()
@@ -13,7 +14,7 @@ McpBase subclass: 'McpRouter'
 %
 expectvalue /Class
 doit
-McpRouter comment:
+McpRouter comment: 
 'Native GemStone MCP front end. Runs a blocking HTTP/1.1 accept loop on localhost that speaks the
 MCP Streamable HTTP transport (single /mcp endpoint), and gives EACH client its own worker gem
 (an isolated GemStone session) so clients never share uncommitted changes. It routes by the
@@ -141,6 +142,17 @@ buildRoutes
   d at: 'DELETE' put: [:req :conn | self serveDelete: req on: conn].
   ^d
 %
+category: 'sessions'
+method: McpRouter
+forkReaper
+  "Fork the background reaper GsProcess: every reaperIntervalSeconds, reap idle sessions. Runs
+   during the accept loop's waits (like the per-connection handlers) and exits when the server
+   stops."
+  [[isRunning] whileTrue: [
+     (Delay forSeconds: self reaperIntervalSeconds) wait.
+     [self reapIdleSessions] on: Error do: [:e |
+       self log: 'reapIdleSessions error: ' , ([e description] on: Error do: [:x | e class name asString])]]] fork
+%
 category: 'running'
 method: McpRouter
 handleConnection: aConnection
@@ -155,6 +167,109 @@ handleConnection: aConnection
        body: '{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Internal error"}}']
       on: Error do: [:e | nil]].
   aConnection close
+%
+category: 'routing'
+method: McpRouter
+hostOfOrigin: aString
+  "The host component of an Origin value (scheme://host[:port]); handles bracketed IPv6. Answers
+   '' for the opaque 'null' origin (or a value with no host) so it fails the allowlist check."
+  | idx rest close cut |
+  aString = 'null' ifTrue: [^''].
+  idx := aString indexOfSubCollection: '://'.
+  rest := idx > 0 ifTrue: [aString copyFrom: idx + 3 to: aString size] ifFalse: [aString].
+  (rest notEmpty and: [(rest at: 1) = $[]) ifTrue: [
+    close := rest indexOf: $].
+    ^close = 0 ifTrue: [rest] ifFalse: [rest copyFrom: 1 to: close]].
+  cut := rest size + 1.
+  (rest indexOf: $:) > 0 ifTrue: [cut := cut min: (rest indexOf: $:)].
+  (rest indexOf: $/) > 0 ifTrue: [cut := cut min: (rest indexOf: $/)].
+  ^rest copyFrom: 1 to: cut - 1
+%
+category: 'initialization'
+method: McpRouter
+initialize
+  mutex := Semaphore forMutualExclusion.
+  routesTable := self buildRoutes.
+  isRunning := false.
+  sessions := Dictionary new.
+  ^self
+%
+category: 'sessions'
+method: McpRouter
+nextSessionId
+  "A unique, cryptographically-secure session id: a 128-bit random token (32 hex chars).
+   Regenerates on the astronomically-unlikely chance of colliding with a live session. Caller
+   holds the mutex (this reads `sessions`)."
+  | id |
+  [id := self randomSessionToken. sessions includesKey: id] whileTrue: [].
+  ^id
+%
+category: 'sessions'
+method: McpRouter
+openSession
+  "Create + register a new client session (a worker gem) with a fresh id."
+  | newId sess |
+  newId := mutex critical: [self nextSessionId].
+  sess := McpSession startWithId: newId.
+  mutex critical: [sessions at: newId put: sess].
+  ^sess
+%
+category: 'routing'
+method: McpRouter
+originAllowed: req
+  "MCP Streamable HTTP security: validate the Origin header to prevent DNS-rebinding attacks. An
+   absent Origin (non-browser clients -- curl, Claude Code) is allowed; a present Origin is allowed
+   only if its host is in the allowlist (loopback by default). Header keys are lower-cased by
+   parseHead:."
+  | origin |
+  origin := (req at: 'headers' ifAbsent: [Dictionary new]) at: 'origin' ifAbsent: [nil].
+  origin isNil ifTrue: [^true].
+  ^self class allowedOriginHosts includes: (self hostOfOrigin: origin) asLowercase
+%
+category: 'routing'
+method: McpRouter
+protocolVersionAllowed: req
+  "MCP spec: a request carrying an unsupported MCP-Protocol-Version MUST be rejected (400). An
+   absent header is allowed -- the spec says to assume 2025-03-26, and the initialize request
+   legitimately carries no version yet. Header keys are lower-cased by parseHead:."
+  | version |
+  version := (req at: 'headers' ifAbsent: [Dictionary new]) at: 'mcp-protocol-version' ifAbsent: [nil].
+  ^version isNil or: [self supportedProtocolVersions includes: version]
+%
+category: 'sessions'
+method: McpRouter
+randomSessionToken
+  "128 bits from the OS CSPRNG (/dev/urandom), hex-encoded to 32 visible-ASCII chars (satisfies the
+   MCP spec: session ids SHOULD be cryptographically secure). Fail closed -- raise if /dev/urandom
+   is unreadable rather than fall back to a guessable source (never use Random, a PRNG). Not itself
+   uniqueness-checked; nextSessionId does that."
+  | f bytes |
+  f := GsFile openReadOnServer: '/dev/urandom'.
+  f isNil ifTrue: [^self error: 'cannot open /dev/urandom for session-id entropy'].
+  bytes := [f next: 16] ensure: [f close].
+  ^bytes asHexString
+%
+category: 'sessions'
+method: McpRouter
+reaperIntervalSeconds
+  "How often (seconds) the reaper checks for idle sessions."
+  ^60
+%
+category: 'sessions'
+method: McpRouter
+reapIdleSessions
+  "Close and unmap client sessions idle longer than sessionIdleTimeoutSeconds. Collect + unmap
+   under the mutex; close (a blocking logout) outside it. Answers the number reaped."
+  | expired timeout |
+  timeout := self sessionIdleTimeoutSeconds.
+  expired := mutex critical: [
+    | old |
+    old := sessions values select: [:s | s idleSeconds > timeout].
+    old do: [:s | sessions removeKey: s id ifAbsent: [nil]].
+    old].
+  expired do: [:s | [s close] on: Error do: [:e | nil]].
+  expired isEmpty ifFalse: [self log: 'Reaped ' , expired size printString , ' idle MCP session(s).'].
+  ^expired size
 %
 category: 'running'
 method: McpRouter
@@ -173,15 +288,6 @@ route: req on: conn
     at: httpMethod
     ifAbsent: [[:rq :c | c writeStatus: 405 reason: 'Method Not Allowed' body: '']].
   handler value: req value: conn
-%
-category: 'initialization'
-method: McpRouter
-initialize
-  mutex := Semaphore forMutualExclusion.
-  routesTable := self buildRoutes.
-  isRunning := false.
-  sessions := Dictionary new.
-  ^self
 %
 category: 'running'
 method: McpRouter
@@ -210,6 +316,16 @@ serve: aClientSocket
    block the accept loop. The forked process runs during the loop's accept waits."
   [self handleConnection: (McpHttpConnection on: aClientSocket)] fork
 %
+category: 'routing'
+method: McpRouter
+serveDelete: req on: conn
+  "MCP session end: close and unmap the worker for the MCP-Session-Id header, if present."
+  | sid sess |
+  sid := self sessionIdOf: req.
+  sess := sid isNil ifTrue: [nil] ifFalse: [mutex critical: [sessions removeKey: sid ifAbsent: [nil]]].
+  sess ifNotNil: [:s | s close].
+  conn writeStatus: 200 reason: 'OK' body: ''
+%
 category: 'running'
 method: McpRouter
 serveGetStream: conn
@@ -221,6 +337,15 @@ serveGetStream: conn
   [isRunning] whileTrue: [
     (Delay forSeconds: 15) wait.
     (conn writeSseComment: 'keepalive') ifNil: [^self]]
+%
+category: 'routing'
+method: McpRouter
+serveInitialize: body on: conn
+  "Open a new client session (worker gem), forward the initialize request to it, and answer with
+   the worker's response plus the MCP-Session-Id header the client echoes on later requests."
+  | sess |
+  sess := self openSession.
+  conn writeJson: (sess forward: body) sessionId: sess id
 %
 category: 'running'
 method: McpRouter
@@ -241,48 +366,35 @@ servePost: req on: conn
 %
 category: 'routing'
 method: McpRouter
+serveRouted: body sessionId: sid on: conn
+  "Route a non-initialize request to the client's worker by session id (required). Relay the
+   worker's JSON response, or 202 for a notification (empty response)."
+  | sess resp |
+  sid isNil ifTrue: [^self writeSessionError: 'Missing MCP-Session-Id header (call initialize first)' code: 400 reason: 'Bad Request' on: conn].
+  sess := mutex critical: [sessions at: sid ifAbsent: [nil]].
+  sess isNil ifTrue: [^self writeSessionError: 'Unknown or expired session: ' , sid code: 404 reason: 'Not Found' on: conn].
+  resp := sess forward: body.
+  resp isEmpty
+    ifTrue: [conn writeStatus: 202 reason: 'Accepted' body: '']
+    ifFalse: [conn writeJson: resp]
+%
+category: 'sessions'
+method: McpRouter
+sessionIdleTimeoutSeconds
+  "Idle time (seconds) before a client session's worker gem is reaped. 5 minutes."
+  ^300
+%
+category: 'routing'
+method: McpRouter
 sessionIdOf: req
   "The MCP-Session-Id request header (header keys are lower-cased by parseHead:), or nil."
   ^(req at: 'headers' ifAbsent: [Dictionary new]) at: 'mcp-session-id' ifAbsent: [nil]
 %
-category: 'routing'
+category: 'controlling'
 method: McpRouter
-originAllowed: req
-  "MCP Streamable HTTP security: validate the Origin header to prevent DNS-rebinding attacks. An
-   absent Origin (non-browser clients -- curl, Claude Code) is allowed; a present Origin is allowed
-   only if its host is in the allowlist (loopback by default). Header keys are lower-cased by
-   parseHead:."
-  | origin |
-  origin := (req at: 'headers' ifAbsent: [Dictionary new]) at: 'origin' ifAbsent: [nil].
-  origin isNil ifTrue: [^true].
-  ^self class allowedOriginHosts includes: (self hostOfOrigin: origin) asLowercase
-%
-category: 'routing'
-method: McpRouter
-hostOfOrigin: aString
-  "The host component of an Origin value (scheme://host[:port]); handles bracketed IPv6. Answers
-   '' for the opaque 'null' origin (or a value with no host) so it fails the allowlist check."
-  | idx rest close cut |
-  aString = 'null' ifTrue: [^''].
-  idx := aString indexOfSubCollection: '://'.
-  rest := idx > 0 ifTrue: [aString copyFrom: idx + 3 to: aString size] ifFalse: [aString].
-  (rest notEmpty and: [(rest at: 1) = $[]) ifTrue: [
-    close := rest indexOf: $].
-    ^close = 0 ifTrue: [rest] ifFalse: [rest copyFrom: 1 to: close]].
-  cut := rest size + 1.
-  (rest indexOf: $:) > 0 ifTrue: [cut := cut min: (rest indexOf: $:)].
-  (rest indexOf: $/) > 0 ifTrue: [cut := cut min: (rest indexOf: $/)].
-  ^rest copyFrom: 1 to: cut - 1
-%
-category: 'routing'
-method: McpRouter
-protocolVersionAllowed: req
-  "MCP spec: a request carrying an unsupported MCP-Protocol-Version MUST be rejected (400). An
-   absent header is allowed -- the spec says to assume 2025-03-26, and the initialize request
-   legitimately carries no version yet. Header keys are lower-cased by parseHead:."
-  | version |
-  version := (req at: 'headers' ifAbsent: [Dictionary new]) at: 'mcp-protocol-version' ifAbsent: [nil].
-  ^version isNil or: [self supportedProtocolVersions includes: version]
+stop
+  "Request a graceful shutdown; the accept loop exits within one accept timeout."
+  isRunning := false
 %
 category: 'routing'
 method: McpRouter
@@ -307,39 +419,6 @@ writeParseError: conn
 %
 category: 'routing'
 method: McpRouter
-serveInitialize: body on: conn
-  "Open a new client session (worker gem), forward the initialize request to it, and answer with
-   the worker's response plus the MCP-Session-Id header the client echoes on later requests."
-  | sess |
-  sess := self openSession.
-  conn writeJson: (sess forward: body) sessionId: sess id
-%
-category: 'routing'
-method: McpRouter
-serveRouted: body sessionId: sid on: conn
-  "Route a non-initialize request to the client's worker by session id (required). Relay the
-   worker's JSON response, or 202 for a notification (empty response)."
-  | sess resp |
-  sid isNil ifTrue: [^self writeSessionError: 'Missing MCP-Session-Id header (call initialize first)' code: 400 reason: 'Bad Request' on: conn].
-  sess := mutex critical: [sessions at: sid ifAbsent: [nil]].
-  sess isNil ifTrue: [^self writeSessionError: 'Unknown or expired session: ' , sid code: 404 reason: 'Not Found' on: conn].
-  resp := sess forward: body.
-  resp isEmpty
-    ifTrue: [conn writeStatus: 202 reason: 'Accepted' body: '']
-    ifFalse: [conn writeJson: resp]
-%
-category: 'routing'
-method: McpRouter
-serveDelete: req on: conn
-  "MCP session end: close and unmap the worker for the MCP-Session-Id header, if present."
-  | sid sess |
-  sid := self sessionIdOf: req.
-  sess := sid isNil ifTrue: [nil] ifFalse: [mutex critical: [sessions removeKey: sid ifAbsent: [nil]]].
-  sess ifNotNil: [:s | s close].
-  conn writeStatus: 200 reason: 'OK' body: ''
-%
-category: 'routing'
-method: McpRouter
 writeSessionError: aMessage code: httpCode reason: reasonString on: conn
   "A routing error the MCP client can act on: 400 when the MCP-Session-Id header is missing, 404
    when the session is unknown/expired (per the Streamable HTTP spec, a 404 tells the client to
@@ -349,82 +428,4 @@ writeSessionError: aMessage code: httpCode reason: reasonString on: conn
   err at: 'jsonrpc' put: '2.0'; at: 'id' put: nil.
   err at: 'error' put: (Dictionary new at: 'code' put: -32600; at: 'message' put: aMessage; yourself).
   conn writeStatus: httpCode reason: reasonString body: err asJson
-%
-category: 'sessions'
-method: McpRouter
-openSession
-  "Create + register a new client session (a worker gem) with a fresh id."
-  | newId sess |
-  newId := mutex critical: [self nextSessionId].
-  sess := McpSession startWithId: newId.
-  mutex critical: [sessions at: newId put: sess].
-  ^sess
-%
-category: 'sessions'
-method: McpRouter
-nextSessionId
-  "A unique, cryptographically-secure session id: a 128-bit random token (32 hex chars).
-   Regenerates on the astronomically-unlikely chance of colliding with a live session. Caller
-   holds the mutex (this reads `sessions`)."
-  | id |
-  [id := self randomSessionToken. sessions includesKey: id] whileTrue: [].
-  ^id
-%
-category: 'sessions'
-method: McpRouter
-randomSessionToken
-  "128 bits from the OS CSPRNG (/dev/urandom), hex-encoded to 32 visible-ASCII chars (satisfies the
-   MCP spec: session ids SHOULD be cryptographically secure). Fail closed -- raise if /dev/urandom
-   is unreadable rather than fall back to a guessable source (never use Random, a PRNG). Not itself
-   uniqueness-checked; nextSessionId does that."
-  | f bytes |
-  f := GsFile openReadOnServer: '/dev/urandom'.
-  f isNil ifTrue: [^self error: 'cannot open /dev/urandom for session-id entropy'].
-  bytes := [f next: 16] ensure: [f close].
-  ^bytes asHexString
-%
-category: 'sessions'
-method: McpRouter
-sessionIdleTimeoutSeconds
-  "Idle time (seconds) before a client session's worker gem is reaped. 5 minutes."
-  ^300
-%
-category: 'sessions'
-method: McpRouter
-reaperIntervalSeconds
-  "How often (seconds) the reaper checks for idle sessions."
-  ^60
-%
-category: 'sessions'
-method: McpRouter
-reapIdleSessions
-  "Close and unmap client sessions idle longer than sessionIdleTimeoutSeconds. Collect + unmap
-   under the mutex; close (a blocking logout) outside it. Answers the number reaped."
-  | expired timeout |
-  timeout := self sessionIdleTimeoutSeconds.
-  expired := mutex critical: [
-    | old |
-    old := sessions values select: [:s | s idleSeconds > timeout].
-    old do: [:s | sessions removeKey: s id ifAbsent: [nil]].
-    old].
-  expired do: [:s | [s close] on: Error do: [:e | nil]].
-  expired isEmpty ifFalse: [self log: 'Reaped ' , expired size printString , ' idle MCP session(s).'].
-  ^expired size
-%
-category: 'sessions'
-method: McpRouter
-forkReaper
-  "Fork the background reaper GsProcess: every reaperIntervalSeconds, reap idle sessions. Runs
-   during the accept loop's waits (like the per-connection handlers) and exits when the server
-   stops."
-  [[isRunning] whileTrue: [
-     (Delay forSeconds: self reaperIntervalSeconds) wait.
-     [self reapIdleSessions] on: Error do: [:e |
-       self log: 'reapIdleSessions error: ' , ([e description] on: Error do: [:x | e class name asString])]]] fork
-%
-category: 'controlling'
-method: McpRouter
-stop
-  "Request a graceful shutdown; the accept loop exits within one accept timeout."
-  isRunning := false
 %

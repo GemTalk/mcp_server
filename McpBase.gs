@@ -13,7 +13,7 @@ Object subclass: 'McpBase'
 %
 expectvalue /Class
 doit
-McpBase comment:
+McpBase comment: 
 'Abstract superclass for the native MCP server pair: the front end McpRouter (HTTP transport +
 per-client session routing) and the per-client worker McpServer (JSON-RPC dispatch + tools).
 Holds only the two helpers both roles share -- JSON-RPC request-body parsing and best-effort
@@ -26,6 +26,7 @@ McpBase category: 'MCPServer'
 ! ------------------- Remove existing behavior from McpBase
 removeallmethods McpBase
 removeallclassmethods McpBase
+! ------------------- Class methods for McpBase
 ! ------------------- Instance methods for McpBase
 category: 'private'
 method: McpBase

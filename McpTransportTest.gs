@@ -152,25 +152,6 @@ testForeignOriginReturns403
 %
 category: 'tests'
 method: McpTransportTest
-testUnsupportedProtocolVersionReturns400
-  "A request with an unknown MCP-Protocol-Version is rejected with 400 (spec MUST), before routing."
-  | out |
-  out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' protocolVersion: '1999-01-01')) output.
-  self assert: (self includesCS: 'HTTP/1.1 400 Bad Request' in: out).
-  self assert: (self includesCS: 'Unsupported MCP-Protocol-Version' in: out)
-%
-category: 'tests'
-method: McpTransportTest
-testSupportedProtocolVersionServed
-  "A supported (negotiated) version passes the version gate; the request reaches routing (a
-   session-less tools/list -> -32600), NOT a version 400."
-  | out |
-  out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' protocolVersion: '2024-11-05')) output.
-  self deny: (self includesCS: 'Unsupported MCP-Protocol-Version' in: out).
-  self assert: (self includesCS: '-32600' in: out)
-%
-category: 'tests'
-method: McpTransportTest
 testGetOpensSseStream
   | out |
   out := (self runRequest: (self simpleRequest: 'GET')) output.
@@ -222,6 +203,25 @@ testSessionIdIsRandomHex
 %
 category: 'tests'
 method: McpTransportTest
+testSupportedProtocolVersionServed
+  "A supported (negotiated) version passes the version gate; the request reaches routing (a
+   session-less tools/list -> -32600), NOT a version 400."
+  | out |
+  out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' protocolVersion: '2024-11-05')) output.
+  self deny: (self includesCS: 'Unsupported MCP-Protocol-Version' in: out).
+  self assert: (self includesCS: '-32600' in: out)
+%
+category: 'tests'
+method: McpTransportTest
 testUnknownVerbReturns405
   self assert: (self includesCS: '405 Method Not Allowed' in: (self runRequest: (self simpleRequest: 'PUT')) output)
+%
+category: 'tests'
+method: McpTransportTest
+testUnsupportedProtocolVersionReturns400
+  "A request with an unknown MCP-Protocol-Version is rejected with 400 (spec MUST), before routing."
+  | out |
+  out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' protocolVersion: '1999-01-01')) output.
+  self assert: (self includesCS: 'HTTP/1.1 400 Bad Request' in: out).
+  self assert: (self includesCS: 'Unsupported MCP-Protocol-Version' in: out)
 %
