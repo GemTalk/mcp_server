@@ -56,11 +56,31 @@ testHandleJsonString
 category: 'tests'
 method: McpDispatcherTest
 testInitialize
+  "With no requested protocolVersion, initialize answers our preferred (latest) supported version."
   | result |
   result := (self dispatch: (self request: 'initialize' params: Dictionary new)) at: 'result'.
-  self assert: (result at: 'protocolVersion') equals: '2024-11-05'.
+  self assert: (result at: 'protocolVersion') equals: '2025-11-25'.
   self assert: ((result at: 'serverInfo') at: 'name') equals: 'gemstone-mcp'.
   self assert: ((result at: 'capabilities') includesKey: 'tools')
+%
+category: 'tests'
+method: McpDispatcherTest
+testInitializeFallsBackForUnsupportedVersion
+  "An unsupported requested protocolVersion falls back to our preferred (latest) version. 2025-03-26
+   is unsupported on purpose: it mandates receiving JSON-RPC batches, which we don't handle."
+  | result |
+  result := (self dispatch: (self request: 'initialize' params:
+    (Dictionary new at: 'protocolVersion' put: '2025-03-26'; yourself))) at: 'result'.
+  self assert: (result at: 'protocolVersion') equals: '2025-11-25'
+%
+category: 'tests'
+method: McpDispatcherTest
+testInitializeNegotiatesRequestedVersion
+  "A supported requested protocolVersion is echoed back (MCP version negotiation)."
+  | result |
+  result := (self dispatch: (self request: 'initialize' params:
+    (Dictionary new at: 'protocolVersion' put: '2025-06-18'; yourself))) at: 'result'.
+  self assert: (result at: 'protocolVersion') equals: '2025-06-18'
 %
 category: 'tests'
 method: McpDispatcherTest

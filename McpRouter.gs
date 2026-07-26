@@ -234,7 +234,7 @@ protocolVersionAllowed: req
    legitimately carries no version yet. Header keys are lower-cased by parseHead:."
   | version |
   version := (req at: 'headers' ifAbsent: [Dictionary new]) at: 'mcp-protocol-version' ifAbsent: [nil].
-  ^version isNil or: [self supportedProtocolVersions includes: version]
+  ^version isNil or: [McpDispatcher supportedProtocolVersions includes: version]
 %
 category: 'sessions'
 method: McpRouter
@@ -395,14 +395,6 @@ method: McpRouter
 stop
   "Request a graceful shutdown; the accept loop exits within one accept timeout."
   isRunning := false
-%
-category: 'routing'
-method: McpRouter
-supportedProtocolVersions
-  "MCP protocol versions accepted in the MCP-Protocol-Version header. Includes the version our
-   initialize negotiates ('2024-11-05') plus every later published revision, so a compliant
-   client's echoed version is accepted while an unknown value is rejected (spec MUST)."
-  ^#('2024-11-05' '2025-03-26' '2025-06-18' '2025-11-25' '2026-07-28')
 %
 category: 'routing'
 method: McpRouter

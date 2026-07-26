@@ -3,8 +3,7 @@ set compile_env: 0
 expectvalue /Class
 doit
 Object subclass: 'McpDispatcher'
-  instVarNames: #( toolRegistry serverName serverVersion
-                    protocolVersion)
+  instVarNames: #( toolRegistry serverName serverVersion)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -28,6 +27,24 @@ McpDispatcher category: 'MCPServer'
 removeallmethods McpDispatcher
 removeallclassmethods McpDispatcher
 ! ------------------- Class methods for McpDispatcher
+category: 'protocol versions'
+classmethod: McpDispatcher
+preferredProtocolVersion
+  "The version answered at initialize when the client's requested version is not one we support.
+   Our latest supported revision; must be a member of supportedProtocolVersions."
+  ^'2025-11-25'
+%
+category: 'protocol versions'
+classmethod: McpDispatcher
+supportedProtocolVersions
+  "The single source of truth for the MCP protocol versions this server speaks: the
+   Streamable-HTTP transport revisions we actually implement. Used for BOTH initialize
+   negotiation (here) and the MCP-Protocol-Version header check (McpRouter delegates to this),
+   so the two can never drift. 2025-03-26 is deliberately excluded: a 2025-03-26 server MUST
+   support receiving JSON-RPC batches (a client MAY send them), which our single-object parseBody:
+   does not -- 2025-06-18 removed batching, so 2025-06-18 and later are safe."
+  ^#('2025-06-18' '2025-11-25')
+%
 category: 'instance creation'
 classmethod: McpDispatcher
 withToolRegistry: aRegistry
@@ -71,7 +88,7 @@ handle: requestDict
   method := requestDict at: 'method' ifAbsent: [nil].
   id := requestDict at: 'id' ifAbsent: [nil].
   method isNil ifTrue: [^self errorFor: id code: -32600 message: 'Invalid Request'].
-  method = 'initialize' ifTrue: [^self resultFor: id with: self initializeResult].
+  method = 'initialize' ifTrue: [^self resultFor: id with: (self initializeResultFor: (requestDict at: 'params' ifAbsent: [Dictionary new]))].
   method = 'tools/list' ifTrue: [^self resultFor: id with: self toolsListResult].
   method = 'tools/call' ifTrue: [
     ^self handleToolsCall: (requestDict at: 'params' ifAbsent: [Dictionary new]) id: id].
@@ -98,8 +115,17 @@ handleToolsCall: params id: id
 %
 category: 'responses'
 method: McpDispatcher
-initializeResult
-  | caps tools info d |
+initializeResultFor: params
+  "Build the initialize result, negotiating the protocol version per the MCP lifecycle: echo the
+   client's requested protocolVersion if we support it, else answer our preferred (latest) version.
+   The client then sends the negotiated version in the MCP-Protocol-Version header on later
+   requests, which McpRouter validates against the SAME supportedProtocolVersions -- so whatever we
+   negotiate here is always a value the header check accepts."
+  | requested negotiated caps tools info d |
+  requested := params at: 'protocolVersion' ifAbsent: [nil].
+  negotiated := (self class supportedProtocolVersions includes: requested)
+    ifTrue: [requested]
+    ifFalse: [self class preferredProtocolVersion].
   tools := Dictionary new.
   caps := Dictionary new.
   caps at: 'tools' put: tools.
@@ -107,7 +133,7 @@ initializeResult
   info at: 'name' put: serverName.
   info at: 'version' put: serverVersion.
   d := Dictionary new.
-  d at: 'protocolVersion' put: protocolVersion.
+  d at: 'protocolVersion' put: negotiated.
   d at: 'capabilities' put: caps.
   d at: 'serverInfo' put: info.
   ^d
@@ -126,7 +152,6 @@ category: 'initialization'
 method: McpDispatcher
 setRegistry: aRegistry
   toolRegistry := aRegistry.
-  protocolVersion := '2024-11-05'.
   serverName := 'gemstone-mcp'.
   serverVersion := '0.1.0'.
   ^self

@@ -207,7 +207,7 @@ testSupportedProtocolVersionServed
   "A supported (negotiated) version passes the version gate; the request reaches routing (a
    session-less tools/list -> -32600), NOT a version 400."
   | out |
-  out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' protocolVersion: '2024-11-05')) output.
+  out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' protocolVersion: '2025-11-25')) output.
   self deny: (self includesCS: 'Unsupported MCP-Protocol-Version' in: out).
   self assert: (self includesCS: '-32600' in: out)
 %

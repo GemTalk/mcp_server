@@ -78,7 +78,7 @@ echo "[2/3] Driving requests from the client (session B) ..."
 
 # --- handshake: initialize establishes this client's session id (MCP-Session-Id) ---
 r=$(curl -s -i -m 10 "$URL" --data-binary @- <<'JSON'
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test-client","version":"1.0"}}}
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"test-client","version":"1.0"}}}
 JSON
 )
 SID=$(printf '%s' "$r" | grep -i '^mcp-session-id:' | tr -d '\r' | awk '{print $2}')
