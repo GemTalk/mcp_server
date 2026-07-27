@@ -37,6 +37,13 @@ startWithId: anId
    given client id."
   ^self new startWithId: anId
 %
+category: 'instance creation'
+classmethod: McpSession
+startWithId: anId user: aUserId jwt: aJwtString
+  "Spawn a JWT-authenticated worker gem for aUserId and answer a started session with the given
+   client id. See the instance-side method."
+  ^self new startWithId: anId user: aUserId jwt: aJwtString
+%
 ! ------------------- Instance methods for McpSession
 category: 'lifecycle'
 method: McpSession
@@ -72,16 +79,39 @@ lastActivitySeconds
 %
 category: 'initialization'
 method: McpSession
-startWithId: anId
-  "Log in a fresh worker gem for this client. Uses GsTsExternalSession (looked up dynamically so
-   this class compiles on images without it); same user as the server, one-time password."
+newWorkerSession
+  "A fresh, not-yet-logged-in GsTsExternalSession worker gem on localhost. GsTsExternalSession is
+   looked up dynamically so this class compiles on images that lack it."
   | extClass |
   extClass := System myUserProfile objectNamed: #GsTsExternalSession.
   extClass isNil ifTrue: [^self error: 'GsTsExternalSession is not available in this image'].
+  ^extClass newDefaultForGemHost: 'localhost'
+%
+category: 'initialization'
+method: McpSession
+startWithId: anId
+  "Log in a fresh worker gem as the current (server) user via a one-time password. Used by the
+   local, unauthenticated front end (McpRouter)."
   id := anId.
   userId := System myUserProfile userId.
-  worker := extClass newDefaultForGemHost: 'localhost'.
+  worker := self newWorkerSession.
   worker useOnetimePassword.
+  worker login.
+  self touch.
+  ^self
+%
+category: 'initialization'
+method: McpSession
+startWithId: anId user: aUserId jwt: aJwtString
+  "Log in a fresh worker gem authenticated by a JWT (an OAuth/OIDC access token), for the
+   network-facing authenticated front end (McpAuthRouter). The caller has already validated the
+   token and derived aUserId from its claims; GemStone re-validates the JWT's signature (against
+   its trusted keys) and claims when the worker logs in -- a bad/expired token fails the login."
+  id := anId.
+  userId := aUserId.
+  worker := self newWorkerSession.
+  worker username: aUserId.
+  worker jwtPassword: aJwtString.
   worker login.
   self touch.
   ^self
