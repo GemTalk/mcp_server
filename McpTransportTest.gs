@@ -83,6 +83,18 @@ runRequest: rawRequest chunkSize: n
   McpRouter new handleConnection: (McpHttpConnection on: mock).
   ^mock
 %
+category: 'helpers'
+method: McpTransportTest
+savingTlsConfigDo: aBlock
+  "Run aBlock with the class-side TLS config saved and ALWAYS restored (no commit), so a test can
+   toggle TLS without leaking state into other tests or a running server."
+  | cert key |
+  cert := McpRouter tlsCertificateFile.
+  key := McpRouter tlsPrivateKeyFile.
+  ^[aBlock value] ensure: [
+    McpRouter tlsCertificateFile: cert.
+    McpRouter tlsPrivateKeyFile: key]
+%
 category: 'running'
 method: McpTransportTest
 setUp
@@ -210,6 +222,28 @@ testSupportedProtocolVersionServed
   out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' protocolVersion: '2025-11-25')) output.
   self deny: (self includesCS: 'Unsupported MCP-Protocol-Version' in: out).
   self assert: (self includesCS: '-32600' in: out)
+%
+category: 'tests'
+method: McpTransportTest
+testTlsDisabledByDefault
+  "Out of the box the router serves plaintext HTTP: no certificate configured, so tlsEnabled is
+   false. (The TLS handshake itself is verified by a live curl check, not here -- McpMockSocket is
+   not a real TLS socket.)"
+  self savingTlsConfigDo: [
+    McpRouter disableTls.
+    self deny: McpRouter tlsEnabled]
+%
+category: 'tests'
+method: McpTransportTest
+testTlsEnabledWhenConfigured
+  "Configuring a certificate + key flips tlsEnabled to true (so runOnPort: would bind a
+   GsSecureSocket); disableTls flips it back. tlsEnabled only checks that both paths are set, so
+   throwaway paths suffice."
+  self savingTlsConfigDo: [
+    McpRouter useTlsCertificateFile: '/tmp/nonexistent.crt' privateKeyFile: '/tmp/nonexistent.key'.
+    self assert: McpRouter tlsEnabled.
+    McpRouter disableTls.
+    self deny: McpRouter tlsEnabled]
 %
 category: 'tests'
 method: McpTransportTest

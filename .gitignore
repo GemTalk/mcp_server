@@ -1,3 +1,4 @@
 .setenv
 *.out
 *.log
+certs/

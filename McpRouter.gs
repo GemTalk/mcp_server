@@ -6,7 +6,7 @@ McpBase subclass: 'McpRouter'
   instVarNames: #( isRunning mutex routesTable
                     serverSocket sessions)
   classVars: #()
-  classInstVars: #( allowedOriginHosts)
+  classInstVars: #( allowedOriginHosts tlsCertificateFile tlsPrivateKeyFile)
   poolDictionaries: #()
   inDictionary: Published
   options: #()
@@ -31,6 +31,12 @@ Start (from a dedicated gem / topaz session):
     McpRouter runOnPort: 8000
 or, in a separate detached gem that survives logout:
     McpRouter forkOnPort: 8000
+
+TLS (optional; off by default -- the base router is meant for localhost): configure a PEM
+certificate + UNENCRYPTED private key once, then run/fork as usual to serve HTTPS instead of
+plaintext HTTP. Commit so a forkOnPort: child gem sees the config:
+    McpRouter useTlsCertificateFile: ''/path/server.crt'' privateKeyFile: ''/path/server.key''.
+    System commitTransaction.
 
 Test it:
     curl -s localhost:8000/mcp -d ''{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}''
@@ -64,6 +70,14 @@ classmethod: McpRouter
 defaultAllowedOriginHosts
   "Loopback hosts only -- a page served from any other origin is a DNS-rebinding attempt."
   ^#('localhost' '127.0.0.1' '[::1]')
+%
+category: 'tls'
+classmethod: McpRouter
+disableTls
+  "Clear the TLS server credentials, returning the router to plaintext HTTP (the default). Commit to
+   persist. Mainly for reverting a misconfiguration or restoring the default after a test."
+  tlsCertificateFile := nil.
+  tlsPrivateKeyFile := nil
 %
 category: 'forking'
 classmethod: McpRouter
@@ -128,6 +142,47 @@ stopForked
   SessionTemps current removeKey: #McpForkedServerSession otherwise: nil.
   ^'Stopped the forked MCP front end (System stopSession: ' , sid printString , ').'
 %
+category: 'tls'
+classmethod: McpRouter
+tlsCertificateFile
+  "Absolute path to the server's PEM certificate (chain) file, or nil for plaintext HTTP (default).
+   Set via useTlsCertificateFile:privateKeyFile: (commit to persist)."
+  ^tlsCertificateFile
+%
+category: 'tls'
+classmethod: McpRouter
+tlsCertificateFile: aPathOrNil
+  tlsCertificateFile := aPathOrNil
+%
+category: 'tls'
+classmethod: McpRouter
+tlsEnabled
+  "True when both a certificate and a private key are configured; then runOnPort: binds a
+   GsSecureSocket and serves HTTPS instead of plaintext HTTP. Off by default."
+  ^tlsCertificateFile notNil and: [tlsPrivateKeyFile notNil]
+%
+category: 'tls'
+classmethod: McpRouter
+tlsPrivateKeyFile
+  "Absolute path to the server's PEM private-key file (may be the same file as the certificate), or
+   nil. The key must be UNENCRYPTED -- we pass a nil passphrase (the API rejects ''). Set via
+   useTlsCertificateFile:privateKeyFile: (commit to persist)."
+  ^tlsPrivateKeyFile
+%
+category: 'tls'
+classmethod: McpRouter
+tlsPrivateKeyFile: aPathOrNil
+  tlsPrivateKeyFile := aPathOrNil
+%
+category: 'tls'
+classmethod: McpRouter
+useTlsCertificateFile: certPath privateKeyFile: keyPath
+  "Enable TLS: serve HTTPS using the PEM certificate + UNENCRYPTED private key at these paths. Both
+   must be readable by the gem process when the listener binds. Commit so a forkOnPort: child gem
+   sees them. Pass the same path twice for a combined cert+key PEM, or two paths."
+  tlsCertificateFile := certPath.
+  tlsPrivateKeyFile := keyPath
+%
 ! ------------------- Instance methods for McpRouter
 category: 'running'
 method: McpRouter
@@ -141,6 +196,42 @@ buildRoutes
   d at: 'GET'    put: [:req :conn | self serveGet: req on: conn].
   d at: 'DELETE' put: [:req :conn | self serveDelete: req on: conn].
   ^d
+%
+category: 'running'
+method: McpRouter
+completeHandshake: aClientSocket
+  "Perform the TLS server handshake on a freshly accepted connection when TLS is enabled; answer
+   whether the connection is ready to speak HTTP. Plaintext (the default) needs nothing. Runs inside
+   the per-connection GsProcess (see serve:) so it never stalls the accept loop. The handshake is
+   bounded (tlsHandshakeTimeoutMs) so a stalled or non-TLS client cannot wedge the connection; on
+   timeout or error the socket is closed and false is answered."
+  self class tlsEnabled ifFalse: [^true].
+  ^[ | ok |
+     ok := aClientSocket secureAcceptTimeoutMs: self tlsHandshakeTimeoutMs errorOnTimeout: false.
+     ok ifFalse: [
+       self log: 'TLS handshake timed out'.
+       [aClientSocket close] on: Error do: [:e | nil]].
+     ok ]
+    on: Error
+    do: [:ex |
+      self log: 'TLS handshake failed: ' , ([ex description] on: Error do: [:x | ex class name asString]).
+      [aClientSocket close] on: Error do: [:e | nil].
+      false]
+%
+category: 'running'
+method: McpRouter
+configureServerTls
+  "Install this gem's TLS server credentials on GsSecureSocket. This state is global to the gem and
+   only affects sockets created AFTER it runs, so it is called just before newServer (in
+   makeListenerOnPort:). The private key must be unencrypted (nil passphrase). We do NOT request a
+   client certificate (disableCertificateVerificationOnServer): clients authenticate with a JWT
+   bearer token, not mTLS. NULL and anonymous-DH ciphers are excluded, sorted by strength."
+  GsSecureSocket
+    useServerCertificateFile: self class tlsCertificateFile
+    withPrivateKeyFile: self class tlsPrivateKeyFile
+    privateKeyPassphrase: nil.  "unencrypted key -> nil passphrase (the API rejects '')"
+  GsSecureSocket disableCertificateVerificationOnServer.
+  GsSecureSocket setServerCipherListFromString: 'ALL:!ADH:@STRENGTH'
 %
 category: 'sessions'
 method: McpRouter
@@ -193,6 +284,21 @@ initialize
   isRunning := false.
   sessions := Dictionary new.
   ^self
+%
+category: 'running'
+method: McpRouter
+makeListenerOnPort: aPort
+  "Create and bind the loopback listening socket (backlog 16). When TLS is configured
+   (self class tlsEnabled) install this gem's server credentials (configureServerTls) and bind a
+   GsSecureSocket, so accepted connections can complete a TLS handshake (completeHandshake:);
+   otherwise bind a plain GsSocket serving cleartext HTTP. Signals an error if the bind fails."
+  | sock |
+  self class tlsEnabled
+    ifTrue: [self configureServerTls. sock := GsSecureSocket newServer]
+    ifFalse: [sock := GsSocket new].
+  (sock makeServer: 16 atPort: aPort atAddress: '127.0.0.1')
+    ifNil: [^self error: 'makeServer failed on port ' , aPort printString , ': ' , sock lastErrorString].
+  ^sock
 %
 category: 'sessions'
 method: McpRouter
@@ -305,16 +411,23 @@ runOnPort: aPort
   "Bind a localhost-only listener and run the accept loop until #stop.
    BLOCKING: this is meant to be the gem's main activity (forked GsProcesses
    only run while the gem is actively executing Smalltalk)."
-  serverSocket := GsSocket new.
-  (serverSocket makeServer: 16 atPort: aPort atAddress: '127.0.0.1')
-    ifNil: [^self error: 'makeServer failed on port ' , aPort printString , ': ' , serverSocket lastErrorString].
+  serverSocket := self makeListenerOnPort: aPort.
   isRunning := true.
   self forkReaper.
-  self log: 'McpRouter listening on 127.0.0.1:' , aPort printString.
+  self log: self class name asString , ' listening on ' ,
+    (self class tlsEnabled ifTrue: ['https'] ifFalse: ['http']) , '://127.0.0.1:' , aPort printString.
   [isRunning] whileTrue: [
-    | client |
-    client := serverSocket acceptTimeoutMs: 500.
-    client ifNotNil: [self serve: client]].
+    "Gate the accept on readiness rather than acceptTimeoutMs:: for a GsSecureSocket listener
+     acceptTimeoutMs: RAISES on an idle timeout (it treats the nil from a plain-socket timeout as a
+     failure), which would kill the loop every 500ms. readWillNotBlockWithin: yields false on an
+     idle tick (loop continues) and true when a connection is pending; the subsequent accept then
+     returns immediately. Works identically for a plain GsSocket."
+    (serverSocket readWillNotBlockWithin: 500) == true ifTrue: [
+      | client |
+      client := [serverSocket accept]
+        on: Error
+        do: [:e | self log: 'accept failed: ' , ([e description] on: Error do: [:x | e class name asString]). nil].
+      client ifNotNil: [self serve: client]]].
   serverSocket close.
   self log: 'McpRouter stopped.'.
   ^self
@@ -322,9 +435,11 @@ runOnPort: aPort
 category: 'running'
 method: McpRouter
 serve: aClientSocket
-  "Handle each connection in its own GsProcess so a slow or stalled client cannot
-   block the accept loop. The forked process runs during the loop's accept waits."
-  [self handleConnection: (McpHttpConnection on: aClientSocket)] fork
+  "Handle each connection in its own GsProcess so a slow or stalled client cannot block the accept
+   loop (the forked process runs during the loop's accept waits). When TLS is enabled, complete the
+   server-side handshake first; a failed handshake closes the socket and serves nothing."
+  [(self completeHandshake: aClientSocket)
+     ifTrue: [self handleConnection: (McpHttpConnection on: aClientSocket)]] fork
 %
 category: 'routing'
 method: McpRouter
@@ -413,6 +528,13 @@ method: McpRouter
 stop
   "Request a graceful shutdown; the accept loop exits within one accept timeout."
   isRunning := false
+%
+category: 'tls'
+method: McpRouter
+tlsHandshakeTimeoutMs
+  "Maximum time (ms) to wait for a client to complete its TLS handshake before abandoning the
+   connection, so a stalled or non-TLS client cannot tie up a handler. 10 seconds."
+  ^10000
 %
 category: 'routing'
 method: McpRouter
