@@ -207,10 +207,20 @@ nextSessionId
 category: 'sessions'
 method: McpRouter
 openSession
-  "Create + register a new client session (a worker gem) with a fresh id."
+  "Create + register a new client session (a worker gem for the current/server user)."
+  ^self openSessionCreating: [:newId | McpSession startWithId: newId]
+%
+category: 'sessions'
+method: McpRouter
+openSessionCreating: aOneArgBlock
+  "Mint a fresh session id, create the session via aOneArgBlock (given the id, answers a started
+   McpSession), and register it in the id -> session map. The block runs OUTSIDE the mutex (login is
+   slow); the id mint and map insert are guarded. Subclasses (McpAuthRouter) pass a block that
+   starts a per-user JWT session. A block that raises (e.g. a failed login) propagates and leaves
+   nothing registered."
   | newId sess |
   newId := mutex critical: [self nextSessionId].
-  sess := McpSession startWithId: newId.
+  sess := aOneArgBlock value: newId.
   mutex critical: [sessions at: newId put: sess].
   ^sess
 %
@@ -340,12 +350,13 @@ serveGetStream: conn
 %
 category: 'routing'
 method: McpRouter
-serveInitialize: body on: conn
+serveInitialize: req on: conn
   "Open a new client session (worker gem), forward the initialize request to it, and answer with
-   the worker's response plus the MCP-Session-Id header the client echoes on later requests."
+   the worker's response plus the MCP-Session-Id header the client echoes on later requests.
+   McpAuthRouter overrides this to authenticate the request and open a per-user (JWT) session."
   | sess |
   sess := self openSession.
-  conn writeJson: (sess forward: body) sessionId: sess id
+  conn writeJson: (sess forward: (req at: 'body' ifAbsent: [''])) sessionId: sess id
 %
 category: 'running'
 method: McpRouter
@@ -361,7 +372,7 @@ servePost: req on: conn
   parsed := self parseBody: body.
   parsed isNil ifTrue: [^self writeParseError: conn].
   method := parsed at: 'method' ifAbsent: [nil].
-  method = 'initialize' ifTrue: [^self serveInitialize: body on: conn].
+  method = 'initialize' ifTrue: [^self serveInitialize: req on: conn].
   ^self serveRouted: body sessionId: (self sessionIdOf: req) on: conn
 %
 category: 'routing'

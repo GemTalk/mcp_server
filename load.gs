@@ -10,11 +10,13 @@ input McpBase.gs
 input McpServer.gs
 input McpSession.gs
 input McpRouter.gs
+input McpAuthRouter.gs
 
 ! Unit-test classes (GsTestCase subclasses) + their mock transport.
 input McpMockSocket.gs
 input McpToolTest.gs
 input McpDispatcherTest.gs
 input McpTransportTest.gs
+input McpAuthTest.gs
 
 commit
