@@ -245,6 +245,14 @@ compile_method/commit round-trip, error paths, the SSE GET stream, DELETE), then
 down. It targets the **base** server — run it against a base install. Uses port `8011` by default
 (set `GS_MCP_PORT`). Exit status 0 = all passed.
 
+**TLS test (real HTTPS socket)** — `./test-tls.sh` forks a TLS-enabled server and drives the same
+transport over HTTPS with `curl -k`: TLS handshake, the self-signed cert, the SSE GET stream,
+`initialize`, a routed tool call, the unknown-session 404, and a check that plaintext HTTP is
+refused on the TLS port. It generates a throwaway self-signed `certs/` cert if none exists, and
+sets the cert/key **only in the forked gem's session (never committed)**, so the repository's
+default stays plaintext — nothing to restore even if interrupted. Uses port `8443` by default
+(set `GS_MCP_PORT`). Exit status 0 = all passed.
+
 ## Adding a tool
 
 There are two steps to adding a tool, both of which happen in the `McpServer` class. First,
