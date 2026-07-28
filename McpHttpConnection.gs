@@ -148,15 +148,24 @@ writeStatus: code reason: reasonString body: aBodyString
 category: 'writing'
 method: McpHttpConnection
 writeStatus: code reason: reasonString body: aBodyString sessionId: anIdOrNil
-  "The single place a complete HTTP/1.1 JSON response is built. Adds the MCP-Session-Id header
-   when anIdOrNil is non-nil (the initialize response, so the client echoes the id on later
-   requests). Content-Length is the byte size of the body; GemStone Strings are byte-oriented,
-   so for ASCII/UTF-8 JSON size = byte count."
-  | crlf hdr resp |
+  "Write a JSON response, adding the MCP-Session-Id header when anIdOrNil is non-nil (the
+   initialize response, so the client echoes the id on later requests)."
+  | crlf hdr |
   crlf := String with: Character cr with: Character lf.
   hdr := anIdOrNil isNil ifTrue: [''] ifFalse: ['MCP-Session-Id: ' , anIdOrNil , crlf].
+  ^self writeStatus: code reason: reasonString headers: hdr body: aBodyString
+%
+category: 'writing'
+method: McpHttpConnection
+writeStatus: code reason: reasonString headers: extraHeaders body: aBodyString
+  "The single place a complete HTTP/1.1 JSON response is assembled. extraHeaders is a String of
+   complete CRLF-terminated header lines (e.g. an MCP-Session-Id or WWW-Authenticate line), or ''
+   for none. Content-Length is the byte size of the body; GemStone Strings are byte-oriented, so
+   for ASCII/UTF-8 JSON size = byte count."
+  | crlf resp |
+  crlf := String with: Character cr with: Character lf.
   resp := 'HTTP/1.1 ' , code printString , ' ' , reasonString , crlf ,
-    'Content-Type: application/json' , crlf , hdr ,
+    'Content-Type: application/json' , crlf , extraHeaders ,
     'Content-Length: ' , aBodyString size printString , crlf ,
     'Connection: close' , crlf , crlf , aBodyString.
   ^socket write: resp

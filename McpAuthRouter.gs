@@ -5,7 +5,7 @@ doit
 McpRouter subclass: 'McpAuthRouter'
   instVarNames: #()
   classVars: #()
-  classInstVars: #( userIdClaim)
+  classInstVars: #( userIdClaim authorizationServers resourceMetadataUrl)
   poolDictionaries: #()
   inDictionary: Published
   options: #()
@@ -25,10 +25,12 @@ trusted keys + the user''s JwtSecurityData); a missing/failed token yields HTTP 
 initialize succeeds, the (unguessable) MCP-Session-Id carries authorization on later requests,
 exactly as in the base class.
 
-Deferred (see ~/.claude/plans/step4-authorization-evaluation.md): TLS transport (add before real
-network exposure); a `WWW-Authenticate` challenge + Protected Resource Metadata endpoint; and
-RS-layer token pre-validation / scopes. This first cut relies on GemStone''s own login-time
-validation, which is enough to prevent impersonation -- a tampered claim just fails the login.'
+Serves a `WWW-Authenticate: Bearer` challenge on 401 and RFC 9728 Protected Resource Metadata at
+`/.well-known/oauth-protected-resource`. Deferred (see
+~/.claude/plans/step4-authorization-evaluation.md): TLS transport (add before real network
+exposure), RS-layer token pre-validation / scopes, and a real OIDC IdP (authorizationServers stays
+empty until then). Relies on GemStone''s own login-time validation, which is enough to prevent
+impersonation -- a tampered claim just fails the login.'
 %
 expectvalue /Class
 doit
@@ -38,6 +40,31 @@ McpAuthRouter category: 'MCPServer'
 removeallmethods McpAuthRouter
 removeallclassmethods McpAuthRouter
 ! ------------------- Class methods for McpAuthRouter
+category: 'metadata'
+classmethod: McpAuthRouter
+authorizationServers
+  "Array of OAuth Authorization Server issuer URLs advertised in Protected Resource Metadata.
+   Empty until a real IdP is configured (Step 4e); set via authorizationServers: (commit to persist)."
+  ^authorizationServers ifNil: [authorizationServers := #()]
+%
+category: 'metadata'
+classmethod: McpAuthRouter
+authorizationServers: anArrayOfUrls
+  authorizationServers := anArrayOfUrls
+%
+category: 'metadata'
+classmethod: McpAuthRouter
+resourceMetadataUrl
+  "Absolute URL of this server's Protected Resource Metadata document, advertised in the
+   `WWW-Authenticate: Bearer resource_metadata=...` challenge. nil (default) omits it. Set once a
+   real external URL exists."
+  ^resourceMetadataUrl
+%
+category: 'metadata'
+classmethod: McpAuthRouter
+resourceMetadataUrl: aStringOrNil
+  resourceMetadataUrl := aStringOrNil
+%
 category: 'userId claim'
 classmethod: McpAuthRouter
 userIdClaim
@@ -74,6 +101,15 @@ openSessionForUser: aUserId jwt: aJwtString
 %
 category: 'routing'
 method: McpAuthRouter
+serveGet: req on: conn
+  "GET /.well-known/oauth-protected-resource -> Protected Resource Metadata (unauthenticated; it's
+   a discovery endpoint). Any other GET falls through to the inherited SSE stream."
+  (req at: 'path' ifAbsent: ['']) = '/.well-known/oauth-protected-resource'
+    ifTrue: [^self serveProtectedResourceMetadata: req on: conn].
+  ^super serveGet: req on: conn
+%
+category: 'routing'
+method: McpAuthRouter
 serveInitialize: req on: conn
   "Authenticate the initialize request via its bearer JWT, then open a per-user worker session.
    Missing token, missing userId claim, or a login GemStone rejects -> HTTP 401. On success the
@@ -92,6 +128,21 @@ serveInitialize: req on: conn
   sess isNil ifTrue: [^self writeUnauthorized: 'Authentication failed' on: conn].
   conn writeJson: (sess forward: (req at: 'body' ifAbsent: [''])) sessionId: sess id
 %
+category: 'routing'
+method: McpAuthRouter
+serveProtectedResourceMetadata: req on: conn
+  "RFC 9728 Protected Resource Metadata: advertise this resource + its authorization server(s) so a
+   compliant MCP client can discover where to obtain a token. authorization_servers is empty until
+   an IdP is configured (Step 4e); `resource` is derived from the Host header until a fixed
+   identifier / TLS scheme is set."
+  | host meta |
+  host := (req at: 'headers' ifAbsent: [Dictionary new]) at: 'host' ifAbsent: ['127.0.0.1'].
+  meta := Dictionary new.
+  meta at: 'resource' put: 'http://' , host , '/mcp'.
+  meta at: 'authorization_servers' put: self class authorizationServers asArray.
+  meta at: 'bearer_methods_supported' put: (Array with: 'header').
+  conn writeStatus: 200 reason: 'OK' body: meta asJson
+%
 category: 'auth'
 method: McpAuthRouter
 userIdFromToken: aJwtString
@@ -107,11 +158,14 @@ userIdFromToken: aJwtString
 category: 'auth'
 method: McpAuthRouter
 writeUnauthorized: aMessage on: conn
-  "HTTP 401 with a JSON-RPC -32600 error body for humans. A `WWW-Authenticate: Bearer` challenge +
-   Protected Resource Metadata pointer are added in the next phase (alongside the metadata route)."
-  | err |
+  "HTTP 401 with a `WWW-Authenticate: Bearer` challenge (adding resource_metadata=... when a
+   resourceMetadataUrl is configured, per RFC 9728) and a JSON-RPC -32600 error body for humans."
+  | err crlf challenge |
+  crlf := String with: Character cr with: Character lf.
+  challenge := 'WWW-Authenticate: Bearer'.
+  self class resourceMetadataUrl ifNotNil: [:u | challenge := challenge , ' resource_metadata="' , u , '"'].
   err := Dictionary new.
   err at: 'jsonrpc' put: '2.0'; at: 'id' put: nil.
   err at: 'error' put: (Dictionary new at: 'code' put: -32600; at: 'message' put: aMessage; yourself).
-  conn writeStatus: 401 reason: 'Unauthorized' body: err asJson
+  conn writeStatus: 401 reason: 'Unauthorized' headers: challenge , crlf body: err asJson
 %

@@ -90,14 +90,14 @@ forkOnPort: aPort
    the external session rejects further queries (GciError 'operation in progress')."
   sid := es stoneSessionId.
   pid := [(System descriptionOfSession: sid) at: 2] on: Error do: [:e | nil].
-  es forkAndDetachString: 'McpRouter runOnPort: ' , aPort printString.
+  es forkAndDetachString: self name asString , ' runOnPort: ' , aPort printString.
   [es logout] on: Error do: [:e | nil].  "release our handle; the detached front end keeps running on its own"
   SessionTemps current at: #McpForkedServerSession put: sid.  "child session id, for stopForked"
   s := WriteStream on: String new.
   s nextPutAll: 'MCP front end forked into gem session '; nextPutAll: sid printString.
   pid ifNotNil: [:p | s nextPutAll: ' (host pid '; nextPutAll: p printString; nextPutAll: ')'].
   s nextPutAll: ', listening on port '; nextPutAll: aPort printString; nextPutAll: ' (independent; survives logout).'.
-  s nextPut: Character lf; nextPutAll: 'To stop:  McpRouter stopForked   (from this session)'.
+  s nextPut: Character lf; nextPutAll: 'To stop:  ' , self name asString , ' stopForked   (from this session)'.
   s nextPut: Character lf; nextPutAll: '     or:  System stopSession: '; nextPutAll: sid printString; nextPutAll: '   (from any session)'.
   pid ifNotNil: [:p | s nextPut: Character lf; nextPutAll: '     or:  kill '; nextPutAll: p printString; nextPutAll: '   (shell)'].
   ^s contents
@@ -138,7 +138,7 @@ buildRoutes
   | d |
   d := Dictionary new.
   d at: 'POST'   put: [:req :conn | self servePost: req on: conn].
-  d at: 'GET'    put: [:req :conn | self serveGetStream: conn].
+  d at: 'GET'    put: [:req :conn | self serveGet: req on: conn].
   d at: 'DELETE' put: [:req :conn | self serveDelete: req on: conn].
   ^d
 %
@@ -335,6 +335,13 @@ serveDelete: req on: conn
   sess := sid isNil ifTrue: [nil] ifFalse: [mutex critical: [sessions removeKey: sid ifAbsent: [nil]]].
   sess ifNotNil: [:s | s close].
   conn writeStatus: 200 reason: 'OK' body: ''
+%
+category: 'running'
+method: McpRouter
+serveGet: req on: conn
+  "Dispatch a GET. Base: open the standalone SSE stream. Subclasses may branch on the request path
+   (McpAuthRouter serves Protected Resource Metadata at a well-known path)."
+  ^self serveGetStream: conn
 %
 category: 'running'
 method: McpRouter

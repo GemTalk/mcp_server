@@ -35,6 +35,14 @@ crlf
 %
 category: 'helpers'
 method: McpAuthTest
+get: path
+  "A raw HTTP GET request for path, no body."
+  | crlf |
+  crlf := self crlf.
+  ^'GET ' , path , ' HTTP/1.1' , crlf , 'Host: localhost' , crlf , crlf
+%
+category: 'helpers'
+method: McpAuthTest
 includesCS: aSubstring in: aString
   "Case-sensitive substring test (String>>includesString: is case-INsensitive in GemStone)."
   ^(aString findString: aSubstring startingAt: 1) > 0
@@ -92,7 +100,8 @@ method: McpAuthTest
 testMissingTokenReturns401
   | out |
   out := self runRequest: (self post: self initBody headers: '') on: McpAuthRouter new.
-  self assert: (self includesCS: 'HTTP/1.1 401 Unauthorized' in: out)
+  self assert: (self includesCS: 'HTTP/1.1 401 Unauthorized' in: out).
+  self assert: (self includesCS: 'WWW-Authenticate: Bearer' in: out)
 %
 category: 'tests'
 method: McpAuthTest
@@ -100,6 +109,16 @@ testNonBearerReturns401
   | out |
   out := self runRequest: (self post: self initBody headers: 'Authorization: Basic Zm9v' , self crlf) on: McpAuthRouter new.
   self assert: (self includesCS: 'HTTP/1.1 401 Unauthorized' in: out)
+%
+category: 'tests'
+method: McpAuthTest
+testProtectedResourceMetadataServed
+  "The RFC 9728 metadata endpoint is served (unauthenticated) at the well-known path."
+  | out |
+  out := self runRequest: (self get: '/.well-known/oauth-protected-resource') on: McpAuthRouter new.
+  self assert: (self includesCS: 'HTTP/1.1 200 OK' in: out).
+  self assert: (self includesCS: '"resource"' in: out).
+  self assert: (self includesCS: '"authorization_servers"' in: out)
 %
 category: 'tests'
 method: McpAuthTest
