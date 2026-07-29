@@ -381,13 +381,14 @@ testFindReferencesToNone
    formatMethodList:. 'Foo-Bar' is not a legal identifier, so it will never be defined."
   self assert: (self mcp tool_find_references_to: (self oneArg: 'name' value: 'Foo-Bar')) = 'Global not found: Foo-Bar'
 %
-category: 'tools - search'
+category: 'tests'
 method: McpToolTest
 testFindSenders
-  "serveGetStream: is sent from the GET route block in buildRoutes. Few senders -> not capped."
+  "serveGetStream: is sent from serveGet:on: (the GET route dispatch in McpRouter). Few senders ->
+   not capped."
   | out |
   out := self mcp tool_find_senders: (self oneArg: 'selector' value: 'serveGetStream:').
-  self assert: (self includesCS: 'buildRoutes' in: out).
+  self assert: (self includesCS: 'serveGet:on:' in: out).
   self deny: (self includesCS: 'showing first' in: out)
 %
 category: 'tools - search'
