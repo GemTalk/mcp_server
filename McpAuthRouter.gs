@@ -5,7 +5,7 @@ doit
 McpRouter subclass: 'McpAuthRouter'
   instVarNames: #()
   classVars: #()
-  classInstVars: #( userIdClaim authorizationServers resourceMetadataUrl)
+  classInstVars: #( userIdClaim authorizationServers resourceMetadataUrl requiredScopes expectedAudience expectedIssuer)
   poolDictionaries: #()
   inDictionary: Published
   options: #()
@@ -18,19 +18,24 @@ McpAuthRouter comment:
 client a worker gem logged in as its own GemStone user (via JWT). Use this instead of the base
 McpRouter for a port reachable beyond localhost.
 
-On `initialize` the client MUST present `Authorization: Bearer <jwt>`. The router derives the
-GemStone userId from a configurable JWT claim (userIdClaim, default ''sub'') and opens the worker
-via McpSession>>startWithId:user:jwt:. GemStone validates the token at login (signature against
-trusted keys + the user''s JwtSecurityData); a missing/failed token yields HTTP 401. Once
-initialize succeeds, the (unguessable) MCP-Session-Id carries authorization on later requests,
-exactly as in the base class.
+On `initialize` the client MUST present `Authorization: Bearer <jwt>`. The router applies
+RS-layer (Resource Server) checks on the token -- expiry (`exp`), and, when configured, issuer,
+audience (RFC 8707) and required OAuth scopes -- then derives the GemStone userId from a
+configurable JWT claim (userIdClaim, default ''sub'') and opens the worker via
+McpSession>>startWithId:user:jwt:. GemStone validates the token again at login (signature against
+trusted keys + the user''s JwtSecurityData), so the RS checks are belt-and-suspenders for MCP
+conformance, not the sole gate -- a tampered claim still fails the login regardless. A
+missing/expired/untrusted/wrong-audience token yields HTTP 401 (`invalid_token`); a token lacking
+a required scope yields HTTP 403 (`insufficient_scope`). Once initialize succeeds, the
+(unguessable) MCP-Session-Id carries authorization on later requests, exactly as in the base class.
 
-Serves a `WWW-Authenticate: Bearer` challenge on 401 and RFC 9728 Protected Resource Metadata at
-`/.well-known/oauth-protected-resource`. Deferred (see
-~/.claude/plans/step4-authorization-evaluation.md): TLS transport (add before real network
-exposure), RS-layer token pre-validation / scopes, and a real OIDC IdP (authorizationServers stays
-empty until then). Relies on GemStone''s own login-time validation, which is enough to prevent
-impersonation -- a tampered claim just fails the login.'
+Serves a `WWW-Authenticate: Bearer` challenge (with `error`/`error_description`/`scope` and, when
+set, `resource_metadata`) on 401/403, and RFC 9728 Protected Resource Metadata at
+`/.well-known/oauth-protected-resource`. Config is class-side (commit to persist): userIdClaim,
+requiredScopes (default empty -> no scope check), expectedAudience / expectedIssuer (default nil ->
+skip that check), authorizationServers, resourceMetadataUrl. Deferred (see
+~/.claude/plans/step4-authorization-evaluation.md): a real OIDC IdP (authorizationServers stays
+empty and keys are ad-hoc until then).'
 %
 expectvalue /Class
 doit
@@ -51,6 +56,45 @@ category: 'metadata'
 classmethod: McpAuthRouter
 authorizationServers: anArrayOfUrls
   authorizationServers := anArrayOfUrls
+%
+category: 'validation'
+classmethod: McpAuthRouter
+expectedAudience
+  "The resource identifier this server's tokens must be bound to (RFC 8707): the token's `aud`
+   claim must include this value. nil (default) skips the audience check -- rely on GemStone's
+   JwtSecurityData audience match. Set to this server's canonical URL once fixed. Commit to persist."
+  ^expectedAudience
+%
+category: 'validation'
+classmethod: McpAuthRouter
+expectedAudience: aStringOrNil
+  expectedAudience := aStringOrNil
+%
+category: 'validation'
+classmethod: McpAuthRouter
+expectedIssuer
+  "The issuer (`iss`) this server trusts to mint tokens. nil (default) skips the RS-layer issuer
+   check -- rely on GemStone's JwtSecurityData issuer match. Set to the IdP's issuer URL in
+   production. Commit to persist."
+  ^expectedIssuer
+%
+category: 'validation'
+classmethod: McpAuthRouter
+expectedIssuer: aStringOrNil
+  expectedIssuer := aStringOrNil
+%
+category: 'validation'
+classmethod: McpAuthRouter
+requiredScopes
+  "Array of OAuth scope strings a token MUST carry (in its space-delimited `scope` claim, or `scp`
+   array) to initialize. Empty (default) requires no scope. A token missing any of these yields
+   HTTP 403 insufficient_scope. Set via requiredScopes: (commit to persist)."
+  ^requiredScopes ifNil: [requiredScopes := #()]
+%
+category: 'validation'
+classmethod: McpAuthRouter
+requiredScopes: anArrayOfScopeStrings
+  requiredScopes := anArrayOfScopeStrings
 %
 category: 'metadata'
 classmethod: McpAuthRouter
@@ -99,6 +143,53 @@ openSessionForUser: aUserId jwt: aJwtString
   "Open + register a worker session logged in as aUserId, authenticated by the JWT."
   ^self openSessionCreating: [:newId | McpSession startWithId: newId user: aUserId jwt: aJwtString]
 %
+category: 'validation'
+method: McpAuthRouter
+payload: payload hasAudience: expected
+  "Whether the token's `aud` claim (a String or Array of Strings, RFC 7519) includes expected."
+  | aud |
+  aud := payload at: 'aud' ifAbsent: [nil].
+  aud isNil ifTrue: [^false].
+  (aud isKindOf: Array) ifTrue: [^aud includes: expected].
+  ^aud = expected
+%
+category: 'validation'
+method: McpAuthRouter
+rejectionForPayload: payload
+  "The claim checks behind tokenRejectionFor:, factored out to run on a decoded payload Dictionary
+   (keys are String/Symbol-interchangeable). Answers nil (accept) or { httpCode. errorCode. desc }.
+   exp is always enforced; issuer/audience only when configured; scopes only when requiredScopes is
+   non-empty."
+  | exp |
+  exp := payload at: 'exp' ifAbsent: [nil].
+  (exp notNil and: [exp < System timeGmt])
+    ifTrue: [^Array with: 401 with: 'invalid_token' with: 'Token expired'].
+  self class expectedIssuer ifNotNil: [:iss |
+    (payload at: 'iss' ifAbsent: [nil]) = iss
+      ifFalse: [^Array with: 401 with: 'invalid_token' with: 'Untrusted token issuer']].
+  self class expectedAudience ifNotNil: [:aud |
+    (self payload: payload hasAudience: aud)
+      ifFalse: [^Array with: 401 with: 'invalid_token' with: 'Token audience does not include this resource']].
+  self class requiredScopes isEmpty ifFalse: [ | granted missing |
+    granted := self scopesOf: payload.
+    missing := self class requiredScopes reject: [:s | granted includes: s].
+    missing isEmpty ifFalse: [
+      ^Array with: 403 with: 'insufficient_scope'
+        with: 'Token missing required scope(s): ' , (self spaceSeparated: missing)]].
+  ^nil
+%
+category: 'validation'
+method: McpAuthRouter
+scopesOf: payload
+  "The scopes a token grants: the space-delimited OAuth `scope` claim (RFC 8693), or an `scp`
+   array (some IdPs), as an Array of Strings. Empty if neither is present."
+  | s |
+  s := payload at: 'scope' ifAbsent: [nil].
+  (s isKindOf: String) ifTrue: [^s subStrings: ' '].
+  s := payload at: 'scp' ifAbsent: [nil].
+  (s isKindOf: Array) ifTrue: [^s].
+  ^#()
+%
 category: 'routing'
 method: McpAuthRouter
 serveGet: req on: conn
@@ -112,20 +203,28 @@ category: 'routing'
 method: McpAuthRouter
 serveInitialize: req on: conn
   "Authenticate the initialize request via its bearer JWT, then open a per-user worker session.
-   Missing token, missing userId claim, or a login GemStone rejects -> HTTP 401. On success the
-   worker runs as the JWT's GemStone user and the MCP-Session-Id is returned as usual."
-  | token userId sess |
+   Order: (1) no token -> 401; (2) RS-layer checks (exp/issuer/audience -> 401 invalid_token,
+   missing scope -> 403 insufficient_scope); (3) userId claim missing -> 401; (4) GemStone login
+   (signature + JwtSecurityData) fails -> 401. On success the worker runs as the JWT's GemStone
+   user and the MCP-Session-Id is returned as usual."
+  | token rejection userId sess |
   token := self bearerTokenOf: req.
-  token isNil ifTrue: [^self writeUnauthorized: 'Missing or malformed Authorization: Bearer token' on: conn].
+  token isNil ifTrue: [^self writeAuthError: 401 oauthError: nil
+    description: 'Missing or malformed Authorization: Bearer token' on: conn].
+  rejection := self tokenRejectionFor: token.
+  rejection ifNotNil: [^self writeAuthError: (rejection at: 1) oauthError: (rejection at: 2)
+    description: (rejection at: 3) on: conn].
   userId := self userIdFromToken: token.
-  userId isNil ifTrue: [^self writeUnauthorized: 'Token has no ' , self class userIdClaim , ' claim' on: conn].
+  userId isNil ifTrue: [^self writeAuthError: 401 oauthError: 'invalid_token'
+    description: 'Token has no ' , self class userIdClaim , ' claim' on: conn].
   sess := [self openSessionForUser: userId jwt: token]
     on: Error
     do: [:e |
       self log: 'McpAuthRouter login failed for ' , userId printString , ': '
         , ([e description] on: Error do: [:x | e class name asString]).
       nil].
-  sess isNil ifTrue: [^self writeUnauthorized: 'Authentication failed' on: conn].
+  sess isNil ifTrue: [^self writeAuthError: 401 oauthError: 'invalid_token'
+    description: 'Authentication failed' on: conn].
   conn writeJson: (sess forward: (req at: 'body' ifAbsent: [''])) sessionId: sess id
 %
 category: 'routing'
@@ -143,6 +242,26 @@ serveProtectedResourceMetadata: req on: conn
   meta at: 'bearer_methods_supported' put: (Array with: 'header').
   conn writeStatus: 200 reason: 'OK' body: meta asJson
 %
+category: 'validation'
+method: McpAuthRouter
+spaceSeparated: aCollectionOfStrings
+  "Join strings with single spaces (for the scope list in messages / the WWW-Authenticate scope=)."
+  ^aCollectionOfStrings inject: '' into: [:acc :s | acc isEmpty ifTrue: [s] ifFalse: [acc , ' ' , s]]
+%
+category: 'validation'
+method: McpAuthRouter
+tokenRejectionFor: aJwtString
+  "RS-layer validation of the bearer token BEFORE attempting a GemStone login. Answers nil if the
+   token passes, else an Array { httpCode. oauthErrorCode. description } naming the failure. Parses
+   the token WITHOUT verifying its signature (GemStone re-verifies at login); this layer enforces
+   the OAuth claims GemStone does not model (notably scopes) plus standard hygiene (exp) and, when
+   configured, issuer/audience per RFC 8707."
+  | payload |
+  payload := [(JsonWebToken fromJwtString: aJwtString) instVarNamed: #payload]
+    on: Error do: [:e | nil].
+  payload isNil ifTrue: [^Array with: 401 with: 'invalid_token' with: 'Malformed bearer token'].
+  ^self rejectionForPayload: payload
+%
 category: 'auth'
 method: McpAuthRouter
 userIdFromToken: aJwtString
@@ -157,15 +276,30 @@ userIdFromToken: aJwtString
 %
 category: 'auth'
 method: McpAuthRouter
-writeUnauthorized: aMessage on: conn
-  "HTTP 401 with a `WWW-Authenticate: Bearer` challenge (adding resource_metadata=... when a
-   resourceMetadataUrl is configured, per RFC 9728) and a JSON-RPC -32600 error body for humans."
-  | err crlf challenge |
+writeAuthError: httpCode oauthError: errorCodeOrNil description: aMessage on: conn
+  "Write an auth failure: HTTP httpCode (401 Unauthorized or 403 Forbidden) with an RFC 6750
+   `WWW-Authenticate: Bearer` challenge and a JSON-RPC -32600 error body for humans. The challenge
+   carries auth-params (comma-separated) when present: error (errorCodeOrNil, e.g. invalid_token /
+   insufficient_scope -- nil for a plain missing-token challenge), error_description, scope (when
+   refusing for insufficient scope), and resource_metadata (RFC 9728) when a resourceMetadataUrl is
+   configured."
+  | crlf params challenge reason err |
   crlf := String with: Character cr with: Character lf.
+  params := OrderedCollection new.
+  errorCodeOrNil ifNotNil: [:e |
+    params add: 'error="' , e , '"'.
+    "error_description is only meaningful alongside an error code (RFC 6750 3.1); a plain
+     missing-token challenge carries neither and just invites the client to authenticate."
+    aMessage ifNotNil: [:m | params add: 'error_description="' , m , '"']].
+  (errorCodeOrNil = 'insufficient_scope' and: [self class requiredScopes isEmpty not])
+    ifTrue: [params add: 'scope="' , (self spaceSeparated: self class requiredScopes) , '"'].
+  self class resourceMetadataUrl ifNotNil: [:u | params add: 'resource_metadata="' , u , '"'].
   challenge := 'WWW-Authenticate: Bearer'.
-  self class resourceMetadataUrl ifNotNil: [:u | challenge := challenge , ' resource_metadata="' , u , '"'].
+  params isEmpty ifFalse: [challenge := challenge , ' ' , (params inject: '' into: [:acc :p |
+    acc isEmpty ifTrue: [p] ifFalse: [acc , ', ' , p]])].
+  reason := httpCode = 403 ifTrue: ['Forbidden'] ifFalse: ['Unauthorized'].
   err := Dictionary new.
   err at: 'jsonrpc' put: '2.0'; at: 'id' put: nil.
   err at: 'error' put: (Dictionary new at: 'code' put: -32600; at: 'message' put: aMessage; yourself).
-  conn writeStatus: 401 reason: 'Unauthorized' headers: challenge , crlf body: err asJson
+  conn writeStatus: httpCode reason: reason headers: challenge , crlf body: err asJson
 %

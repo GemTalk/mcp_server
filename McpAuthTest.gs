@@ -76,6 +76,21 @@ runRequest: rawRequest on: aRouter
 %
 category: 'helpers'
 method: McpAuthTest
+savingAuthConfigDo: aBlock
+  "Run aBlock with McpAuthRouter's RS-layer validation config (requiredScopes / expectedAudience /
+   expectedIssuer) saved and ALWAYS restored (no commit), so a test can set constraints without
+   leaking state into other tests."
+  | scopes aud iss |
+  scopes := McpAuthRouter requiredScopes.
+  aud := McpAuthRouter expectedAudience.
+  iss := McpAuthRouter expectedIssuer.
+  ^[aBlock value] ensure: [
+    McpAuthRouter requiredScopes: scopes.
+    McpAuthRouter expectedAudience: aud.
+    McpAuthRouter expectedIssuer: iss]
+%
+category: 'helpers'
+method: McpAuthTest
 sessionIdFrom: aResponse
   "The MCP-Session-Id header value from a raw HTTP response, or nil if absent."
   | line |
@@ -90,10 +105,89 @@ statusBody
 %
 category: 'tests'
 method: McpAuthTest
+testAudienceArrayMatchAccepted
+  "aud may be an array; a match on any element passes."
+  self savingAuthConfigDo: [ | p |
+    McpAuthRouter requiredScopes: #(); expectedIssuer: nil; expectedAudience: 'https://mcp.example/mcp'.
+    p := Dictionary new. p at: 'exp' put: System timeGmt + 1000.
+    p at: 'aud' put: (Array with: 'x' with: 'https://mcp.example/mcp').
+    self assert: (McpAuthRouter new rejectionForPayload: p) isNil]
+%
+category: 'tests'
+method: McpAuthTest
+testAudienceMismatchRejected401
+  "RS-layer audience check (RFC 8707): a token whose aud omits this resource is rejected 401."
+  self savingAuthConfigDo: [ | p r |
+    McpAuthRouter requiredScopes: #(); expectedIssuer: nil; expectedAudience: 'https://mcp.example/mcp'.
+    p := Dictionary new. p at: 'exp' put: System timeGmt + 1000. p at: 'aud' put: 'someone-else'.
+    r := McpAuthRouter new rejectionForPayload: p.
+    self deny: r isNil.
+    self assert: (r at: 1) equals: 401.
+    self assert: (r at: 2) equals: 'invalid_token']
+%
+category: 'tests'
+method: McpAuthTest
+testExpiredTokenRejected401
+  "RS-layer expiry check: a token whose exp is in the past is rejected 401 invalid_token."
+  self savingAuthConfigDo: [ | p r |
+    McpAuthRouter requiredScopes: #(); expectedAudience: nil; expectedIssuer: nil.
+    p := Dictionary new. p at: 'exp' put: System timeGmt - 100.
+    r := McpAuthRouter new rejectionForPayload: p.
+    self deny: r isNil.
+    self assert: (r at: 1) equals: 401.
+    self assert: (r at: 2) equals: 'invalid_token']
+%
+category: 'tests'
+method: McpAuthTest
+testFutureExpiryAccepted
+  "A token with a future exp and no other constraints passes RS-layer validation."
+  self savingAuthConfigDo: [ | p |
+    McpAuthRouter requiredScopes: #(); expectedAudience: nil; expectedIssuer: nil.
+    p := Dictionary new. p at: 'exp' put: System timeGmt + 1000.
+    self assert: (McpAuthRouter new rejectionForPayload: p) isNil]
+%
+category: 'tests'
+method: McpAuthTest
 testGarbageBearerReturns401
   | out |
   out := self runRequest: (self post: self initBody headers: 'Authorization: Bearer not.a.jwt' , self crlf) on: McpAuthRouter new.
   self assert: (self includesCS: 'HTTP/1.1 401 Unauthorized' in: out)
+%
+category: 'tests'
+method: McpAuthTest
+testInsufficientScopeRejected403
+  "RS-layer scope check: a token lacking a required scope is rejected 403 insufficient_scope."
+  self savingAuthConfigDo: [ | p r |
+    McpAuthRouter expectedAudience: nil; expectedIssuer: nil; requiredScopes: #('mcp:use').
+    p := Dictionary new. p at: 'exp' put: System timeGmt + 1000.
+    r := McpAuthRouter new rejectionForPayload: p.
+    self deny: r isNil.
+    self assert: (r at: 1) equals: 403.
+    self assert: (r at: 2) equals: 'insufficient_scope']
+%
+category: 'tests'
+method: McpAuthTest
+testInsufficientScopeReturns403
+  "End-to-end: a valid signed token lacking a required scope is refused 403 insufficient_scope at
+   initialize, BEFORE any GemStone login (the RS-layer check)."
+  self savingAuthConfigDo: [
+    McpAuthRouter expectedAudience: nil; expectedIssuer: nil; requiredScopes: #('mcp:use').
+    self withJwtUser: 'McpScopeTestUser' do: [:jwt | | out |
+      out := self runRequest: (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: McpAuthRouter new.
+      self assert: (self includesCS: 'HTTP/1.1 403 Forbidden' in: out).
+      self assert: (self includesCS: 'insufficient_scope' in: out)]]
+%
+category: 'tests'
+method: McpAuthTest
+testIssuerMismatchRejected401
+  "RS-layer issuer check: a token from an untrusted issuer is rejected 401 invalid_token."
+  self savingAuthConfigDo: [ | p r |
+    McpAuthRouter requiredScopes: #(); expectedAudience: nil; expectedIssuer: 'https://trusted'.
+    p := Dictionary new. p at: 'exp' put: System timeGmt + 1000. p at: 'iss' put: 'https://evil'.
+    r := McpAuthRouter new rejectionForPayload: p.
+    self deny: r isNil.
+    self assert: (r at: 1) equals: 401.
+    self assert: (r at: 2) equals: 'invalid_token']
 %
 category: 'tests'
 method: McpAuthTest
@@ -122,6 +216,27 @@ testProtectedResourceMetadataServed
 %
 category: 'tests'
 method: McpAuthTest
+testSufficientScopeAccepted
+  "A token whose space-delimited scope claim contains the required scope passes."
+  self savingAuthConfigDo: [ | p |
+    McpAuthRouter expectedAudience: nil; expectedIssuer: nil; requiredScopes: #('mcp:use').
+    p := Dictionary new. p at: 'exp' put: System timeGmt + 1000. p at: 'scope' put: 'openid mcp:use extra'.
+    self assert: (McpAuthRouter new rejectionForPayload: p) isNil]
+%
+category: 'tests'
+method: McpAuthTest
+testValidScopedTokenOpensSession
+  "End-to-end: a valid token carrying the required scope passes the RS check and opens a per-user
+   worker session (200 + MCP-Session-Id)."
+  self savingAuthConfigDo: [
+    McpAuthRouter expectedAudience: nil; expectedIssuer: nil; requiredScopes: #('mcp:use').
+    self withJwtUser: 'McpScopeTestUser' scope: 'openid mcp:use' do: [:jwt | | out |
+      out := self runRequest: (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: McpAuthRouter new.
+      self assert: (self includesCS: 'HTTP/1.1 200 OK' in: out).
+      self assert: (self includesCS: 'MCP-Session-Id:' in: out)]]
+%
+category: 'tests'
+method: McpAuthTest
 testValidTokenOpensPerUserSession
   "A valid Bearer JWT authenticates initialize (200 + MCP-Session-Id) and opens a worker running as
    the token's GemStone user -- proven by a routed status call reporting that user."
@@ -138,10 +253,17 @@ testValidTokenOpensPerUserSession
 category: 'helpers'
 method: McpAuthTest
 withJwtUser: aUserId do: aOneArgBlock
+  "withJwtUser:scope:do: with no scope claim on the token."
+  ^self withJwtUser: aUserId scope: nil do: aOneArgBlock
+%
+category: 'helpers'
+method: McpAuthTest
+withJwtUser: aUserId scope: aScopeStringOrNil do: aOneArgBlock
   "Provision a JWT-enabled UserProfile for aUserId (identity from the 'sub' claim, wildcard
-   issuer/audience) + register a signing key, mint a matching JWT, evaluate aOneArgBlock with the
-   JWT string, and ALWAYS clean up the key + user afterward. Answers the block's value."
-  | keyId jwtSec up now jwt |
+   issuer/audience) + register a signing key, mint a matching JWT (carrying aScopeStringOrNil as its
+   space-delimited `scope` claim when non-nil), evaluate aOneArgBlock with the JWT string, and
+   ALWAYS clean up the key + user afterward. Answers the block's value."
+  | keyId jwtSec up now tok |
   keyId := 'mcp-authtest-key'.
   (AllUsers userWithId: aUserId ifAbsent: [nil]) ifNotNil: [:u |
     AllUsers removeAndCleanupUserWithId: aUserId ifAbsent: [nil]. System commitTransaction].
@@ -152,11 +274,12 @@ withJwtUser: aUserId do: aOneArgBlock
   System commitTransaction.
   System addJwtKey: JsonWebToken example_publicKey withId: keyId.
   now := System timeGmt.
-  jwt := (JsonWebToken newForRsa256
-    subject: aUserId; issuer: 'https://test'; audience: 'gs-mcp'; keyId: keyId;
-    issuedAtTime: now; expirationTime: now + 3600;
-    signWithPrivateKey: JsonWebToken example_privateKey; yourself) asJwtString.
-  ^[aOneArgBlock value: jwt] ensure: [
+  tok := JsonWebToken newForRsa256.
+  tok subject: aUserId; issuer: 'https://test'; audience: 'gs-mcp'; keyId: keyId;
+    issuedAtTime: now; expirationTime: now + 3600.
+  aScopeStringOrNil ifNotNil: [:sc | tok payloadClaimAt: 'scope' put: sc].
+  tok signWithPrivateKey: JsonWebToken example_privateKey.
+  ^[aOneArgBlock value: tok asJwtString] ensure: [
     [System removeJwtKeyWithId: keyId] on: Error do: [:e | nil].
     [AllUsers removeAndCleanupUserWithId: aUserId ifAbsent: [nil]. System commitTransaction] on: Error do: [:e | nil]]
 %
