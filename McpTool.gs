@@ -43,6 +43,13 @@ callWith: argsDict
    Returns a String. Any error raised propagates to the dispatcher."
   ^handler value: (argsDict ifNil: [Dictionary new])
 %
+category: 'private'
+method: McpTool
+commaList: aCollection
+  "The collection's elements, sorted, as a comma-separated String."
+  ^aCollection asSortedCollection asArray
+    inject: '' into: [:acc :s | acc isEmpty ifTrue: [s asString] ifFalse: [acc , ', ' , s asString]]
+%
 category: 'converting'
 method: McpTool
 descriptor
@@ -67,4 +74,22 @@ setName: aName description: aDescription inputSchema: aSchema handler: aBlock
   schema := aSchema.
   handler := aBlock.
   ^self
+%
+category: 'validating'
+method: McpTool
+validationErrorFor: argsDict
+  "nil if argsDict satisfies this tool's input schema, else a human message naming the problem.
+   Structural only: rejects unknown top-level keys when the schema sets additionalProperties:false,
+   and requires every `required` key. Not a full JSON-Schema validator (no deep type checks)."
+  | args props extra missing |
+  args := argsDict ifNil: [Dictionary new].
+  props := schema at: 'properties' ifAbsent: [Dictionary new].
+  ((schema at: 'additionalProperties' ifAbsent: [true]) == false) ifTrue: [
+    extra := args keys reject: [:k | props includesKey: k].
+    extra isEmpty ifFalse: [
+      ^'Unknown argument(s): ' , (self commaList: extra)
+        , '. Allowed: ' , (self commaList: props keys)]].
+  missing := (schema at: 'required' ifAbsent: [#()]) reject: [:k | args includesKey: k].
+  missing isEmpty ifFalse: [^'Missing required argument(s): ' , (self commaList: missing)].
+  ^nil
 %

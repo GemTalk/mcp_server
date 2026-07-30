@@ -55,6 +55,32 @@ new
   ^super new initialize
 %
 ! ------------------- Instance methods for McpServer
+category: 'guards'
+method: McpServer
+assertMutableClass: aClass
+  "Refuse (signal McpError kind:#refused, naming the class, reason, and remedy) if aClass is a
+   protected/kernel class. Called by every mutation tool before it changes anything. NB: this
+   guards the structured mutation tools only -- execute_code is the deliberate escape hatch (and is
+   itself gated in read-only mode)."
+  | arr where |
+  (self isProtectedClass: aClass) ifFalse: [^aClass].
+  arr := System myUserProfile dictionaryAndSymbolOf: aClass.
+  where := arr isNil ifTrue: ['no user dictionary'] ifFalse: [(arr at: 1) name asString].
+  ^McpError signalKind: #refused message:
+    'Refused: ' , aClass name asString , ' is a protected class (home dictionary ' , where
+      , '); MCP mutation tools do not modify kernel/system classes. Remedy: target one of your own '
+      , 'classes in a user dictionary (e.g. UserGlobals), or use execute_code if you truly intend a '
+      , 'system change.'
+%
+category: 'guards'
+method: McpServer
+assertRemovableDictionaryNamed: aName
+  "Refuse (signal McpError kind:#refused) if aName is a protected system dictionary."
+  (self protectedDictionaryNames includes: aName asString) ifTrue: [
+    ^McpError signalKind: #refused message:
+      'Refused: ' , aName asString , ' is a protected system dictionary and cannot be removed.'].
+  ^aName
+%
 category: 'schema building'
 method: McpServer
 boolProperty: aDescription
@@ -177,6 +203,17 @@ initialize
   self registerTestTools.
   ^self
 %
+category: 'guards'
+method: McpServer
+isProtectedClass: aClass
+  "True if aClass is a kernel/system class that mutation tools must not modify -- judged by its home
+   symbol dictionary being one of protectedDictionaryNames. A class resident in no dictionary is
+   treated as protected (conservative)."
+  | arr |
+  arr := System myUserProfile dictionaryAndSymbolOf: aClass.
+  arr isNil ifTrue: [^true].
+  ^self protectedDictionaryNames includes: (arr at: 1) name asString
+%
 category: 'private'
 method: McpServer
 linesFrom: aCollectionOfStrings
@@ -207,11 +244,15 @@ methodsReportFor: aBehavior label: aLabel
 category: 'schema building'
 method: McpServer
 objectSchema: propsDict required: requiredArray
+  "Build a closed JSON-Schema object: additionalProperties is false so an unknown/hallucinated
+   argument is a detectable error (McpTool>>validationErrorFor:) rather than silently dropped.
+   Every tool's inputSchema is built through here, so this closes them all."
   | d |
   d := Dictionary new.
   d at: 'type' put: 'object'.
   d at: 'properties' put: propsDict.
   d at: 'required' put: requiredArray.
+  d at: 'additionalProperties' put: false.
   ^d
 %
 category: 'schema building'
@@ -222,6 +263,14 @@ propString: aDescription
   d at: 'type' put: 'string'.
   d at: 'description' put: aDescription.
   ^d
+%
+category: 'guards'
+method: McpServer
+protectedDictionaryNames
+  "Names of the kernel/system symbol dictionaries that mutation tools must not touch: only Globals,
+   which holds the base classes. Everything else is freely mutable -- UserGlobals (the DEFAULT home
+   for new user-created classes) and any application dictionary such as Published."
+  ^#('Globals')
 %
 category: 'private'
 method: McpServer
@@ -529,11 +578,13 @@ tool_compile_class_definition: args
    all its methods), recompile the prior version's methods onto the new version and report any
    that fail. Refused when the class has subclasses (handle the hierarchy manually, or pass
    recompileMethods=false to redefine raw)."
-  | source recompile name oldClass newClass |
+  | source recompile name existing oldClass newClass |
   source := args at: 'source'.
   recompile := (args at: 'recompileMethods' ifAbsent: [true]) ~~ false.
   name := self classNameFromDefinition: source.
-  oldClass := (recompile and: [name notNil]) ifTrue: [self resolveClass: name] ifFalse: [nil].
+  existing := name notNil ifTrue: [self resolveClass: name] ifFalse: [nil].
+  existing ifNotNil: [:c | self assertMutableClass: c].  "refuse redefining a kernel class (any recompile setting)"
+  oldClass := recompile ifTrue: [existing] ifFalse: [nil].
   (recompile and: [oldClass notNil and: [oldClass subclasses isEmpty not]]) ifTrue: [
     ^'Refused: ' , name asString , ' has subclasses '
       , (oldClass subclasses collect: [:c | c name asString]) asArray printString
@@ -556,6 +607,7 @@ tool_compile_method: args
   ^cls isNil
     ifTrue: ['Class not found: ' , (args at: 'className')]
     ifFalse: [
+      self assertMutableClass: cls.
       target := ((args at: 'meta' ifAbsent: [false]) == true) ifTrue: [cls class] ifFalse: [cls].
       errs := target
         compileMethod: (args at: 'source')
@@ -573,6 +625,7 @@ tool_delete_class: args
   ^cls isNil
     ifTrue: ['Class not found: ' , (args at: 'className')]
     ifFalse: [
+      self assertMutableClass: cls.
       arr := System myUserProfile dictionaryAndSymbolOf: cls.
       arr isNil
         ifTrue: ['Class is not resident in a dictionary: ' , (args at: 'className')]
@@ -589,6 +642,7 @@ tool_delete_method: args
   ^cls isNil
     ifTrue: ['Class not found: ' , (args at: 'className')]
     ifFalse: [
+      self assertMutableClass: cls.
       target := ((args at: 'meta' ifAbsent: [false]) == true) ifTrue: [cls class] ifFalse: [cls].
       sel := (args at: 'selector') asSymbol.
       (target selectors includes: sel)
@@ -798,7 +852,8 @@ tool_remove_dictionary: args
   dict := self dictNamed: name.
   ^dict isNil
     ifTrue: ['Dictionary not found: ' , name]
-    ifFalse: [up := System myUserProfile.
+    ifFalse: [self assertRemovableDictionaryNamed: name.
+      up := System myUserProfile.
       up removeDictionaryAt: (up symbolList indexOf: dict).
       up symbolList do: [:d | (d at: name asSymbol ifAbsent: [nil]) == dict ifTrue: [d removeKey: name asSymbol ifAbsent: [nil]]].
       System commitTransaction.
@@ -848,6 +903,7 @@ tool_set_class_comment: args
   | cls |
   cls := self resolveClass: (args at: 'className').
   ^cls isNil ifTrue: ['Class not found: ' , (args at: 'className')] ifFalse: [
+    self assertMutableClass: cls.
     cls comment: (args at: 'comment').
     System commitTransaction.
     'Comment set on ' , cls name asString , ' and committed.']

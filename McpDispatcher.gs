@@ -68,10 +68,18 @@ contentText: aString isError: aBool
 category: 'responses'
 method: McpDispatcher
 errorFor: id code: aCode message: aMessage
+  ^self errorFor: id code: aCode message: aMessage kind: nil
+%
+category: 'responses'
+method: McpDispatcher
+errorFor: id code: aCode message: aMessage kind: aKindOrNil
+  "A JSON-RPC error response. When aKindOrNil is non-nil it is attached as `error.data.kind`, a
+   short machine-readable classifier the client can branch on (e.g. 'invalidParams', 'notFound')."
   | d err |
   err := Dictionary new.
   err at: 'code' put: aCode.
   err at: 'message' put: aMessage.
+  aKindOrNil ifNotNil: [:k | err at: 'data' put: (Dictionary new at: 'kind' put: k; yourself)].
   d := Dictionary new.
   d at: 'jsonrpc' put: '2.0'.
   d at: 'id' put: id.
@@ -99,19 +107,22 @@ handle: requestDict
 category: 'dispatch'
 method: McpDispatcher
 handleToolsCall: params id: id
-  "Refresh the view, look up and invoke the named tool, wrap the result."
-  | name tool |
+  "Validate arguments against the tool's schema, then refresh the view, invoke the tool, and wrap
+   the result. Bad arguments (unknown key / missing required) -> -32602 invalidParams BEFORE any
+   side effect. A raised error becomes an isError result carrying a structured kind (see
+   toolErrorContentFrom:)."
+  | name tool args argErr |
   name := params at: 'name' ifAbsent: [nil].
-  name isNil ifTrue: [^self errorFor: id code: -32602 message: 'Missing tool name'].
+  name isNil ifTrue: [^self errorFor: id code: -32602 message: 'Missing tool name' kind: 'invalidParams'].
   tool := toolRegistry at: name.
-  tool isNil ifTrue: [^self errorFor: id code: -32602 message: 'Unknown tool: ' , name].
+  tool isNil ifTrue: [^self errorFor: id code: -32602 message: 'Unknown tool: ' , name kind: 'notFound'].
+  args := params at: 'arguments' ifAbsent: [Dictionary new].
+  argErr := tool validationErrorFor: args.
+  argErr ifNotNil: [^self errorFor: id code: -32602 message: argErr kind: 'invalidParams'].
   System abortTransaction.
-  ^[ | text |
-     text := tool callWith: (params at: 'arguments' ifAbsent: [Dictionary new]).
-     self resultFor: id with: (self contentText: text isError: false) ]
+  ^[ self resultFor: id with: (self contentText: (tool callWith: args) isError: false) ]
    on: Error
-   do: [:ex | self resultFor: id with:
-       (self contentText: ([ex description] on: Error do: [:e | ex messageText ifNil: ['(error)']]) isError: true) ]
+   do: [:ex | self resultFor: id with: (self toolErrorContentFrom: ex) ]
 %
 category: 'responses'
 method: McpDispatcher
@@ -140,6 +151,15 @@ initializeResultFor: params
 %
 category: 'responses'
 method: McpDispatcher
+kindForError: ex
+  "Classify a caught error into a short machine-readable kind for the tools/call error envelope.
+   An McpError carries its own kind; a CompileError is 'compileError'; everything else is 'other'."
+  (ex isKindOf: McpError) ifTrue: [^ex kind asString].
+  (ex isKindOf: CompileError) ifTrue: [^'compileError'].
+  ^'other'
+%
+category: 'responses'
+method: McpDispatcher
 resultFor: id with: resultObj
   | d |
   d := Dictionary new.
@@ -155,6 +175,23 @@ setRegistry: aRegistry
   serverName := 'gemstone-mcp'.
   serverVersion := '0.1.0'.
   ^self
+%
+category: 'responses'
+method: McpDispatcher
+toolErrorContentFrom: ex
+  "The tools/call error envelope for a raised error: the human message in `content` text (as
+   before), PLUS `structuredContent` {error:{kind,message}} so an agent can branch on the kind
+   instead of parsing prose. Keeps using `ex description` for the message text."
+  | msg d struct |
+  msg := [ex description] on: Error do: [:e | ex messageText ifNil: ['(error)']].
+  d := self contentText: msg isError: true.
+  struct := Dictionary new.
+  struct at: 'error' put: (Dictionary new
+    at: 'kind' put: (self kindForError: ex);
+    at: 'message' put: msg;
+    yourself).
+  d at: 'structuredContent' put: struct.
+  ^d
 %
 category: 'responses'
 method: McpDispatcher
