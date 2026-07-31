@@ -83,23 +83,6 @@ runRequest: rawRequest on: aRouter
 %
 category: 'helpers'
 method: McpAuthTest
-savingAuthConfigDo: aBlock
-  "Run aBlock with McpAuthRouter's RS-layer validation config (requiredScopes / expectedAudience /
-   expectedIssuer) saved and ALWAYS restored (no commit), so a test can set constraints without
-   leaking state into other tests."
-  | scopes aud iss write |
-  scopes := McpAuthRouter requiredScopes.
-  aud := McpAuthRouter expectedAudience.
-  iss := McpAuthRouter expectedIssuer.
-  write := McpAuthRouter writeScope.
-  ^[aBlock value] ensure: [
-    McpAuthRouter requiredScopes: scopes.
-    McpAuthRouter expectedAudience: aud.
-    McpAuthRouter expectedIssuer: iss.
-    McpAuthRouter writeScope: write]
-%
-category: 'helpers'
-method: McpAuthTest
 sessionIdFrom: aResponse
   "The MCP-Session-Id header value from a raw HTTP response, or nil if absent."
   | line |
@@ -116,44 +99,48 @@ category: 'tests'
 method: McpAuthTest
 testAudienceArrayMatchAccepted
   "aud may be an array; a match on any element passes."
-  self savingAuthConfigDo: [ | p |
-    McpAuthRouter requiredScopes: #(); expectedIssuer: nil; expectedAudience: 'https://mcp.example/mcp'.
-    p := Dictionary new. p at: 'exp' put: System timeGmt + 1000.
-    p at: 'aud' put: (Array with: 'x' with: 'https://mcp.example/mcp').
-    self assert: (McpAuthRouter new rejectionForPayload: p) isNil]
+  | p router |
+  router := McpAuthRouter new.
+  router requiredScopes: #(); expectedIssuer: nil; expectedAudience: 'https://mcp.example/mcp'.
+  p := Dictionary new. p at: 'exp' put: System timeGmt + 1000.
+  p at: 'aud' put: (Array with: 'x' with: 'https://mcp.example/mcp').
+  self assert: (router rejectionForPayload: p) isNil
 %
 category: 'tests'
 method: McpAuthTest
 testAudienceMismatchRejected401
   "RS-layer audience check (RFC 8707): a token whose aud omits this resource is rejected 401."
-  self savingAuthConfigDo: [ | p r |
-    McpAuthRouter requiredScopes: #(); expectedIssuer: nil; expectedAudience: 'https://mcp.example/mcp'.
-    p := Dictionary new. p at: 'exp' put: System timeGmt + 1000. p at: 'aud' put: 'someone-else'.
-    r := McpAuthRouter new rejectionForPayload: p.
-    self deny: r isNil.
-    self assert: (r at: 1) equals: 401.
-    self assert: (r at: 2) equals: 'invalid_token']
+  | p r router |
+  router := McpAuthRouter new.
+  router requiredScopes: #(); expectedIssuer: nil; expectedAudience: 'https://mcp.example/mcp'.
+  p := Dictionary new. p at: 'exp' put: System timeGmt + 1000. p at: 'aud' put: 'someone-else'.
+  r := router rejectionForPayload: p.
+  self deny: r isNil.
+  self assert: (r at: 1) equals: 401.
+  self assert: (r at: 2) equals: 'invalid_token'
 %
 category: 'tests'
 method: McpAuthTest
 testExpiredTokenRejected401
   "RS-layer expiry check: a token whose exp is in the past is rejected 401 invalid_token."
-  self savingAuthConfigDo: [ | p r |
-    McpAuthRouter requiredScopes: #(); expectedAudience: nil; expectedIssuer: nil.
-    p := Dictionary new. p at: 'exp' put: System timeGmt - 100.
-    r := McpAuthRouter new rejectionForPayload: p.
-    self deny: r isNil.
-    self assert: (r at: 1) equals: 401.
-    self assert: (r at: 2) equals: 'invalid_token']
+  | p r router |
+  router := McpAuthRouter new.
+  router requiredScopes: #(); expectedAudience: nil; expectedIssuer: nil.
+  p := Dictionary new. p at: 'exp' put: System timeGmt - 100.
+  r := router rejectionForPayload: p.
+  self deny: r isNil.
+  self assert: (r at: 1) equals: 401.
+  self assert: (r at: 2) equals: 'invalid_token'
 %
 category: 'tests'
 method: McpAuthTest
 testFutureExpiryAccepted
   "A token with a future exp and no other constraints passes RS-layer validation."
-  self savingAuthConfigDo: [ | p |
-    McpAuthRouter requiredScopes: #(); expectedAudience: nil; expectedIssuer: nil.
-    p := Dictionary new. p at: 'exp' put: System timeGmt + 1000.
-    self assert: (McpAuthRouter new rejectionForPayload: p) isNil]
+  | p router |
+  router := McpAuthRouter new.
+  router requiredScopes: #(); expectedAudience: nil; expectedIssuer: nil.
+  p := Dictionary new. p at: 'exp' put: System timeGmt + 1000.
+  self assert: (router rejectionForPayload: p) isNil
 %
 category: 'tests'
 method: McpAuthTest
@@ -166,37 +153,40 @@ category: 'tests'
 method: McpAuthTest
 testInsufficientScopeRejected403
   "RS-layer scope check: a token lacking a required scope is rejected 403 insufficient_scope."
-  self savingAuthConfigDo: [ | p r |
-    McpAuthRouter expectedAudience: nil; expectedIssuer: nil; requiredScopes: #('mcp:use').
-    p := Dictionary new. p at: 'exp' put: System timeGmt + 1000.
-    r := McpAuthRouter new rejectionForPayload: p.
-    self deny: r isNil.
-    self assert: (r at: 1) equals: 403.
-    self assert: (r at: 2) equals: 'insufficient_scope']
+  | p r router |
+  router := McpAuthRouter new.
+  router expectedAudience: nil; expectedIssuer: nil; requiredScopes: #('mcp:use').
+  p := Dictionary new. p at: 'exp' put: System timeGmt + 1000.
+  r := router rejectionForPayload: p.
+  self deny: r isNil.
+  self assert: (r at: 1) equals: 403.
+  self assert: (r at: 2) equals: 'insufficient_scope'
 %
 category: 'tests'
 method: McpAuthTest
 testInsufficientScopeReturns403
   "End-to-end: a valid signed token lacking a required scope is refused 403 insufficient_scope at
    initialize, BEFORE any GemStone login (the RS-layer check)."
-  self savingAuthConfigDo: [
-    McpAuthRouter expectedAudience: nil; expectedIssuer: nil; requiredScopes: #('mcp:use').
-    self withJwtUser: 'McpScopeTestUser' do: [:jwt | | out |
-      out := self runRequest: (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: McpAuthRouter new.
-      self assert: (self includesCS: 'HTTP/1.1 403 Forbidden' in: out).
-      self assert: (self includesCS: 'insufficient_scope' in: out)]]
+  | router |
+  router := McpAuthRouter new.
+  router expectedAudience: nil; expectedIssuer: nil; requiredScopes: #('mcp:use'); userIdClaim: 'sub'.
+  self withJwtUser: 'McpScopeTestUser' do: [:jwt | | out |
+    out := self runRequest: (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: router.
+    self assert: (self includesCS: 'HTTP/1.1 403 Forbidden' in: out).
+    self assert: (self includesCS: 'insufficient_scope' in: out)]
 %
 category: 'tests'
 method: McpAuthTest
 testIssuerMismatchRejected401
   "RS-layer issuer check: a token from an untrusted issuer is rejected 401 invalid_token."
-  self savingAuthConfigDo: [ | p r |
-    McpAuthRouter requiredScopes: #(); expectedAudience: nil; expectedIssuer: 'https://trusted'.
-    p := Dictionary new. p at: 'exp' put: System timeGmt + 1000. p at: 'iss' put: 'https://evil'.
-    r := McpAuthRouter new rejectionForPayload: p.
-    self deny: r isNil.
-    self assert: (r at: 1) equals: 401.
-    self assert: (r at: 2) equals: 'invalid_token']
+  | p r router |
+  router := McpAuthRouter new.
+  router requiredScopes: #(); expectedAudience: nil; expectedIssuer: 'https://trusted'.
+  p := Dictionary new. p at: 'exp' put: System timeGmt + 1000. p at: 'iss' put: 'https://evil'.
+  r := router rejectionForPayload: p.
+  self deny: r isNil.
+  self assert: (r at: 1) equals: 401.
+  self assert: (r at: 2) equals: 'invalid_token'
 %
 category: 'tests'
 method: McpAuthTest
@@ -218,17 +208,17 @@ method: McpAuthTest
 testProtectedResourceMetadataSchemeFollowsTls
   "The RFC 9728 `resource` identifier's scheme must follow the transport: plaintext -> http, and
    TLS-enabled -> https (not a hard-coded http). tlsEnabled only checks that both cert+key paths are
-   set, so throwaway paths suffice; restored afterward."
-  | cert key |
-  cert := McpAuthRouter tlsCertificateFile.
-  key := McpAuthRouter tlsPrivateKeyFile.
-  [McpAuthRouter tlsCertificateFile: nil; tlsPrivateKeyFile: nil.
-   self assert: (self includesCS: '"resource":"http://'
-     in: (self runRequest: (self get: '/.well-known/oauth-protected-resource') on: McpAuthRouter new)).
-   McpAuthRouter tlsCertificateFile: '/tmp/mcp-x.crt'; tlsPrivateKeyFile: '/tmp/mcp-x.key'.
-   self assert: (self includesCS: '"resource":"https://'
-     in: (self runRequest: (self get: '/.well-known/oauth-protected-resource') on: McpAuthRouter new))]
-    ensure: [McpAuthRouter tlsCertificateFile: cert. McpAuthRouter tlsPrivateKeyFile: key]
+   set, so throwaway paths suffice. Each router carries its own TLS config, so the two cases are just
+   two instances -- nothing global is touched and nothing needs restoring."
+  | plain secure |
+  plain := McpAuthRouter new.
+  plain disableTls.
+  self assert: (self includesCS: '"resource":"http://'
+    in: (self runRequest: (self get: '/.well-known/oauth-protected-resource') on: plain)).
+  secure := McpAuthRouter new.
+  secure useTlsCertificateFile: '/tmp/mcp-x.crt' privateKeyFile: '/tmp/mcp-x.key'.
+  self assert: (self includesCS: '"resource":"https://'
+    in: (self runRequest: (self get: '/.well-known/oauth-protected-resource') on: secure))
 %
 category: 'tests'
 method: McpAuthTest
@@ -244,10 +234,11 @@ category: 'tests'
 method: McpAuthTest
 testSufficientScopeAccepted
   "A token whose space-delimited scope claim contains the required scope passes."
-  self savingAuthConfigDo: [ | p |
-    McpAuthRouter expectedAudience: nil; expectedIssuer: nil; requiredScopes: #('mcp:use').
-    p := Dictionary new. p at: 'exp' put: System timeGmt + 1000. p at: 'scope' put: 'openid mcp:use extra'.
-    self assert: (McpAuthRouter new rejectionForPayload: p) isNil]
+  | p router |
+  router := McpAuthRouter new.
+  router expectedAudience: nil; expectedIssuer: nil; requiredScopes: #('mcp:use').
+  p := Dictionary new. p at: 'exp' put: System timeGmt + 1000. p at: 'scope' put: 'openid mcp:use extra'.
+  self assert: (router rejectionForPayload: p) isNil
 %
 category: 'tests'
 method: McpAuthTest
@@ -255,56 +246,64 @@ testTokenWithoutWriteScopeGivesReadOnlySession
   "#7b: with a writeScope configured, a token lacking it opens a read-only worker -- a mutating tool
    is refused (kind readOnly) while a safe tool still works. Target a kernel class so a regression
    can't mutate anything."
-  self savingAuthConfigDo: [
-    McpAuthRouter expectedAudience: nil; expectedIssuer: nil; requiredScopes: #(); writeScope: 'mcp:write'.
-    self withJwtUser: 'McpWriteScopeUser' do: [:jwt | | router sid out |
-      router := McpAuthRouter new.
-      out := self runRequest: (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: router.
-      self assert: (self includesCS: 'HTTP/1.1 200 OK' in: out).
-      sid := self sessionIdFrom: out.
-      self deny: sid isNil.
-      out := self runRequest: (self post: (self callBody: 'compile_method' arguments: '{"className":"Object","source":"x ^1"}')
-        headers: 'MCP-Session-Id: ' , sid , self crlf) on: router.
-      self assert: (self includesCS: 'readOnly' in: out).
-      out := self runRequest: (self post: self statusBody headers: 'MCP-Session-Id: ' , sid , self crlf) on: router.
-      self assert: (self includesCS: 'user=McpWriteScopeUser' in: out)]]
+  | router |
+  router := McpAuthRouter new.
+  router expectedAudience: nil; expectedIssuer: nil; requiredScopes: #(); writeScope: 'mcp:write';
+    userIdClaim: 'sub'.
+  self withJwtUser: 'McpWriteScopeUser' do: [:jwt | | sid out |
+    out := self runRequest: (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: router.
+    self assert: (self includesCS: 'HTTP/1.1 200 OK' in: out).
+    sid := self sessionIdFrom: out.
+    self deny: sid isNil.
+    out := self runRequest: (self post: (self callBody: 'compile_method' arguments: '{"className":"Object","source":"x ^1"}')
+      headers: 'MCP-Session-Id: ' , sid , self crlf) on: router.
+    self assert: (self includesCS: 'readOnly' in: out).
+    out := self runRequest: (self post: self statusBody headers: 'MCP-Session-Id: ' , sid , self crlf) on: router.
+    self assert: (self includesCS: 'user=McpWriteScopeUser' in: out)]
 %
 category: 'tests'
 method: McpAuthTest
 testTokenWithWriteScopeGivesWritableSession
   "#7b: a token that DOES carry the writeScope opens a full read-write worker -- a mutating/execution
    tool runs normally."
-  self savingAuthConfigDo: [
-    McpAuthRouter expectedAudience: nil; expectedIssuer: nil; requiredScopes: #(); writeScope: 'mcp:write'.
-    self withJwtUser: 'McpWriteScopeUser' scope: 'openid mcp:write' do: [:jwt | | router sid out |
-      router := McpAuthRouter new.
-      out := self runRequest: (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: router.
-      sid := self sessionIdFrom: out.
-      self deny: sid isNil.
-      out := self runRequest: (self post: (self callBody: 'execute_code' arguments: '{"code":"6 * 7"}')
-        headers: 'MCP-Session-Id: ' , sid , self crlf) on: router.
-      self assert: (self includesCS: '42' in: out).
-      self deny: (self includesCS: 'readOnly' in: out)]]
+  | router |
+  router := McpAuthRouter new.
+  router expectedAudience: nil; expectedIssuer: nil; requiredScopes: #(); writeScope: 'mcp:write';
+    userIdClaim: 'sub'.
+  self withJwtUser: 'McpWriteScopeUser' scope: 'openid mcp:write' do: [:jwt | | sid out |
+    out := self runRequest: (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: router.
+    sid := self sessionIdFrom: out.
+    self deny: sid isNil.
+    out := self runRequest: (self post: (self callBody: 'execute_code' arguments: '{"code":"6 * 7"}')
+      headers: 'MCP-Session-Id: ' , sid , self crlf) on: router.
+    self assert: (self includesCS: '42' in: out).
+    self deny: (self includesCS: 'readOnly' in: out)]
 %
 category: 'tests'
 method: McpAuthTest
 testValidScopedTokenOpensSession
   "End-to-end: a valid token carrying the required scope passes the RS check and opens a per-user
    worker session (200 + MCP-Session-Id)."
-  self savingAuthConfigDo: [
-    McpAuthRouter expectedAudience: nil; expectedIssuer: nil; requiredScopes: #('mcp:use').
-    self withJwtUser: 'McpScopeTestUser' scope: 'openid mcp:use' do: [:jwt | | out |
-      out := self runRequest: (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: McpAuthRouter new.
-      self assert: (self includesCS: 'HTTP/1.1 200 OK' in: out).
-      self assert: (self includesCS: 'MCP-Session-Id:' in: out)]]
+  | router |
+  router := McpAuthRouter new.
+  router expectedAudience: nil; expectedIssuer: nil; requiredScopes: #('mcp:use'); userIdClaim: 'sub'.
+  self withJwtUser: 'McpScopeTestUser' scope: 'openid mcp:use' do: [:jwt | | out |
+    out := self runRequest: (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: router.
+    self assert: (self includesCS: 'HTTP/1.1 200 OK' in: out).
+    self assert: (self includesCS: 'MCP-Session-Id:' in: out)]
 %
 category: 'tests'
 method: McpAuthTest
 testValidTokenOpensPerUserSession
   "A valid Bearer JWT authenticates initialize (200 + MCP-Session-Id) and opens a worker running as
-   the token's GemStone user -- proven by a routed status call reporting that user."
-  self withJwtUser: 'McpAuthTestUser' do: [:jwt | | router initOut sid statusOut |
-    router := McpAuthRouter new.
+   the token's GemStone user -- proven by a routed status call reporting that user.
+   Pins the RS-layer config on its own router, as the other success-path tests do: this token
+   carries no scope claim, so an inherited requiredScopes would turn the initialize into a 403 and
+   fail this test for a reason unrelated to what it checks."
+  | router |
+  router := McpAuthRouter new.
+  router requiredScopes: #(); expectedAudience: nil; expectedIssuer: nil; userIdClaim: 'sub'.
+  self withJwtUser: 'McpAuthTestUser' do: [:jwt | | initOut sid statusOut |
     initOut := self runRequest: (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: router.
     self assert: (self includesCS: 'HTTP/1.1 200 OK' in: initOut).
     self assert: (self includesCS: 'MCP-Session-Id:' in: initOut).

@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
-# Run the native MCP server's in-image unit tests (no socket, no running server).
+# Run the native MCP server's in-image unit tests (no listening server required).
 # Logs in via topaz and runs each GsTestCase suite, printing the TestResult for each.
 # Exits non-zero if any test failed or errored.
 #
 # Assumes the classes are already installed (run ./install.sh first).
+#
+# NB: McpAuthTest is not purely in-image -- its fixtures create and commit a throwaway
+# JWT-enabled UserProfile (touching AllUsers) and it spawns a real worker gem, so a NETLDI
+# must be running. It is included anyway: it is the only suite covering the token->session
+# path, and leaving it out of this list once let a broken parse in McpAuthRouter (every
+# token rejected as malformed) go unnoticed.
 #
 # Configure (or export before running):
 #   GEMSTONE   - GemStone product directory (required)
@@ -31,7 +37,7 @@ login
 iferr 1 stk
 run
 | s classes grailTest |
-classes := #( 'McpToolTest' 'McpDispatcherTest' 'McpTransportTest' 'McpContractTest' ) asOrderedCollection.
+classes := #( 'McpToolTest' 'McpDispatcherTest' 'McpTransportTest' 'McpContractTest' 'McpAuthTest' ) asOrderedCollection.
 grailTest := System myUserProfile objectNamed: #McpServerWithGrailTest.
 grailTest ifNotNil: [classes add: 'McpServerWithGrailTest'].
 s := WriteStream on: String new.

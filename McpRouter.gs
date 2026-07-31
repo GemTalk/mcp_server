@@ -4,7 +4,8 @@ expectvalue /Class
 doit
 McpBase subclass: 'McpRouter'
   instVarNames: #( isRunning mutex routesTable
-                    serverSocket sessions)
+                    serverSocket sessions
+                    allowedOriginHosts tlsCertificateFile tlsPrivateKeyFile)
   classVars: #()
   classInstVars: #( allowedOriginHosts tlsCertificateFile tlsPrivateKeyFile)
   poolDictionaries: #()
@@ -53,9 +54,14 @@ removeallclassmethods McpRouter
 category: 'origin allowlist'
 classmethod: McpRouter
 allowedOriginHosts
-  "Origin-host allowlist for DNS-rebinding protection (MCP Streamable HTTP security). Defaults to
-   loopback hosts; set via allowedOriginHosts: (commit to persist) to permit a browser app's
-   origin host."
+  "DEPLOYMENT DEFAULT for the Origin-host allowlist (DNS-rebinding protection, MCP Streamable HTTP
+   security). Defaults to loopback hosts; set via allowedOriginHosts: (commit to persist) to permit
+   a browser app's origin host.
+   Class-side config is a DEFAULT ONLY: #initialize copies it into the new router's instance
+   variable, and every instance method reads that copy. So changing this does not affect an
+   already-running router, and a test can configure one router instance without touching global
+   (persistent) state. A forked front end still picks this up, because forkOnPort: can only send a
+   class-side message into the child gem, where runOnPort: creates a fresh instance."
   ^allowedOriginHosts ifNil: [allowedOriginHosts := self defaultAllowedOriginHosts]
 %
 category: 'origin allowlist'
@@ -157,8 +163,9 @@ tlsCertificateFile: aPathOrNil
 category: 'tls'
 classmethod: McpRouter
 tlsEnabled
-  "True when both a certificate and a private key are configured; then runOnPort: binds a
-   GsSecureSocket and serves HTTPS instead of plaintext HTTP. Off by default."
+  "True when both a DEFAULT certificate and private key are configured, so a router created from
+   here will serve HTTPS. Off by default. Instance methods use the instance-side #tlsEnabled, which
+   reflects that router's own copy -- see the class-side #allowedOriginHosts comment."
   ^tlsCertificateFile notNil and: [tlsPrivateKeyFile notNil]
 %
 category: 'tls'
@@ -205,7 +212,7 @@ completeHandshake: aClientSocket
    the per-connection GsProcess (see serve:) so it never stalls the accept loop. The handshake is
    bounded (tlsHandshakeTimeoutMs) so a stalled or non-TLS client cannot wedge the connection; on
    timeout or error the socket is closed and false is answered."
-  self class tlsEnabled ifFalse: [^true].
+  self tlsEnabled ifFalse: [^true].
   ^[ | ok |
      ok := aClientSocket secureAcceptTimeoutMs: self tlsHandshakeTimeoutMs errorOnTimeout: false.
      ok ifFalse: [
@@ -227,8 +234,8 @@ configureServerTls
    client certificate (disableCertificateVerificationOnServer): clients authenticate with a JWT
    bearer token, not mTLS. NULL and anonymous-DH ciphers are excluded, sorted by strength."
   GsSecureSocket
-    useServerCertificateFile: self class tlsCertificateFile
-    withPrivateKeyFile: self class tlsPrivateKeyFile
+    useServerCertificateFile: self tlsCertificateFile
+    withPrivateKeyFile: self tlsPrivateKeyFile
     privateKeyPassphrase: nil.  "unencrypted key -> nil passphrase (the API rejects '')"
   GsSecureSocket disableCertificateVerificationOnServer.
   GsSecureSocket setServerCipherListFromString: 'ALL:!ADH:@STRENGTH'
@@ -279,21 +286,85 @@ hostOfOrigin: aString
 category: 'initialization'
 method: McpRouter
 initialize
+  "Snapshot the class-side deployment config into this router's own instance variables. From here on
+   every instance method reads the instance copy, so this router's behaviour is fixed at creation:
+   later class-side changes cannot alter a running server, and a caller (notably a test) can
+   reconfigure THIS router without mutating persistent class state."
   mutex := Semaphore forMutualExclusion.
   routesTable := self buildRoutes.
   isRunning := false.
   sessions := Dictionary new.
+  allowedOriginHosts := self class allowedOriginHosts.
+  tlsCertificateFile := self class tlsCertificateFile.
+  tlsPrivateKeyFile := self class tlsPrivateKeyFile.
   ^self
+%
+category: 'origin allowlist'
+method: McpRouter
+allowedOriginHosts
+  "This router's Origin-host allowlist, snapshotted from the class at #initialize."
+  ^allowedOriginHosts
+%
+category: 'origin allowlist'
+method: McpRouter
+allowedOriginHosts: aCollectionOfHostStrings
+  "Override this router's allowlist without touching class-side (persistent) config."
+  allowedOriginHosts := aCollectionOfHostStrings
+%
+category: 'tls'
+method: McpRouter
+tlsCertificateFile
+  "This router's PEM certificate path, or nil for plaintext HTTP."
+  ^tlsCertificateFile
+%
+category: 'tls'
+method: McpRouter
+tlsCertificateFile: aPathOrNil
+  tlsCertificateFile := aPathOrNil
+%
+category: 'tls'
+method: McpRouter
+tlsEnabled
+  "True when this router has both a certificate and a private key, so runOnPort: binds a
+   GsSecureSocket and serves HTTPS rather than cleartext HTTP."
+  ^tlsCertificateFile notNil and: [tlsPrivateKeyFile notNil]
+%
+category: 'tls'
+method: McpRouter
+tlsPrivateKeyFile
+  "This router's PEM private-key path (may be the same file as the certificate), or nil. The key must
+   be UNENCRYPTED -- configureServerTls passes a nil passphrase."
+  ^tlsPrivateKeyFile
+%
+category: 'tls'
+method: McpRouter
+tlsPrivateKeyFile: aPathOrNil
+  tlsPrivateKeyFile := aPathOrNil
+%
+category: 'tls'
+method: McpRouter
+useTlsCertificateFile: certPath privateKeyFile: keyPath
+  "Enable TLS on THIS router only. Both files must be readable by the gem when the listener binds.
+   Pass the same path twice for a combined cert+key PEM."
+  tlsCertificateFile := certPath.
+  tlsPrivateKeyFile := keyPath
+%
+category: 'tls'
+method: McpRouter
+disableTls
+  "Return THIS router to plaintext HTTP, leaving class-side config alone."
+  tlsCertificateFile := nil.
+  tlsPrivateKeyFile := nil
 %
 category: 'running'
 method: McpRouter
 makeListenerOnPort: aPort
   "Create and bind the loopback listening socket (backlog 16). When TLS is configured
-   (self class tlsEnabled) install this gem's server credentials (configureServerTls) and bind a
+   (self tlsEnabled) install this gem's server credentials (configureServerTls) and bind a
    GsSecureSocket, so accepted connections can complete a TLS handshake (completeHandshake:);
    otherwise bind a plain GsSocket serving cleartext HTTP. Signals an error if the bind fails."
   | sock |
-  self class tlsEnabled
+  self tlsEnabled
     ifTrue: [self configureServerTls. sock := GsSecureSocket newServer]
     ifFalse: [sock := GsSocket new].
   (sock makeServer: 16 atPort: aPort atAddress: '127.0.0.1')
@@ -340,7 +411,7 @@ originAllowed: req
   | origin |
   origin := (req at: 'headers' ifAbsent: [Dictionary new]) at: 'origin' ifAbsent: [nil].
   origin isNil ifTrue: [^true].
-  ^self class allowedOriginHosts includes: (self hostOfOrigin: origin) asLowercase
+  ^self allowedOriginHosts includes: (self hostOfOrigin: origin) asLowercase
 %
 category: 'routing'
 method: McpRouter
@@ -415,7 +486,7 @@ runOnPort: aPort
   isRunning := true.
   self forkReaper.
   self log: self class name asString , ' listening on ' ,
-    (self class tlsEnabled ifTrue: ['https'] ifFalse: ['http']) , '://127.0.0.1:' , aPort printString.
+    (self tlsEnabled ifTrue: ['https'] ifFalse: ['http']) , '://127.0.0.1:' , aPort printString.
   [isRunning] whileTrue: [
     "Gate the accept on readiness rather than acceptTimeoutMs:: for a GsSecureSocket listener
      acceptTimeoutMs: RAISES on an idle timeout (it treats the nil from a plain-socket timeout as a
