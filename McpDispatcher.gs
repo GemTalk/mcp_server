@@ -35,6 +35,46 @@ preferredProtocolVersion
    Our latest supported revision; must be a member of supportedProtocolVersions."
   ^'2025-11-25'
 %
+category: 'prompts'
+classmethod: McpDispatcher
+promptArg: aName description: aDescription
+  "An OPTIONAL prompt-argument descriptor (all our prompt arguments are optional)."
+  ^Dictionary new
+    at: 'name' put: aName;
+    at: 'description' put: aDescription;
+    at: 'required' put: false;
+    yourself
+%
+category: 'prompts'
+classmethod: McpDispatcher
+promptSpecFor: aName
+  ^self promptSpecs detect: [:s | (s at: 'name') = aName] ifNone: [nil]
+%
+category: 'prompts'
+classmethod: McpDispatcher
+promptSpecNamed: aName description: aDescription arguments: anArgumentArray
+  ^Dictionary new
+    at: 'name' put: aName;
+    at: 'description' put: aDescription;
+    at: 'arguments' put: anArgumentArray;
+    yourself
+%
+category: 'prompts'
+classmethod: McpDispatcher
+promptSpecs
+  "Single source of truth for the MCP workflow prompts: the prompts/list descriptors (name,
+   description, optional arguments). The message body for each is built by promptTextFor:arguments:."
+  ^Array
+    with: (self promptSpecNamed: 'gemstone-transaction-hygiene'
+      description: 'Keep a clean GemStone transaction while working: status -> refresh -> work -> commit/abort.'
+      arguments: #())
+    with: (self promptSpecNamed: 'gemstone-tdd'
+      description: 'A red/green TDD loop for GemStone: locate, write a failing test, implement, re-run, commit.'
+      arguments: (Array with: (self promptArg: 'subject' description: 'What you are building (optional; woven into the guidance).')))
+    with: (self promptSpecNamed: 'gemstone-safe-change'
+      description: 'Change existing code safely: green baseline, impact map, change, re-test, confirm.'
+      arguments: (Array with: (self promptArg: 'change' description: 'The change you intend to make (optional).')))
+%
 category: 'protocol versions'
 classmethod: McpDispatcher
 supportedProtocolVersions
@@ -57,46 +97,6 @@ withToolRegistry: aRegistry server: aServerOrNil
   "aServerOrNil is the owning McpServer, consulted for read-only gating; nil (e.g. in isolated
    dispatcher tests) means never read-only."
   ^self new setRegistry: aRegistry server: aServerOrNil
-%
-category: 'prompts'
-classmethod: McpDispatcher
-promptSpecs
-  "Single source of truth for the MCP workflow prompts: the prompts/list descriptors (name,
-   description, optional arguments). The message body for each is built by promptTextFor:arguments:."
-  ^Array
-    with: (self promptSpecNamed: 'gemstone-transaction-hygiene'
-      description: 'Keep a clean GemStone transaction while working: status -> refresh -> work -> commit/abort.'
-      arguments: #())
-    with: (self promptSpecNamed: 'gemstone-tdd'
-      description: 'A red/green TDD loop for GemStone: locate, write a failing test, implement, re-run, commit.'
-      arguments: (Array with: (self promptArg: 'subject' description: 'What you are building (optional; woven into the guidance).')))
-    with: (self promptSpecNamed: 'gemstone-safe-change'
-      description: 'Change existing code safely: green baseline, impact map, change, re-test, confirm.'
-      arguments: (Array with: (self promptArg: 'change' description: 'The change you intend to make (optional).')))
-%
-category: 'prompts'
-classmethod: McpDispatcher
-promptSpecNamed: aName description: aDescription arguments: anArgumentArray
-  ^Dictionary new
-    at: 'name' put: aName;
-    at: 'description' put: aDescription;
-    at: 'arguments' put: anArgumentArray;
-    yourself
-%
-category: 'prompts'
-classmethod: McpDispatcher
-promptArg: aName description: aDescription
-  "An OPTIONAL prompt-argument descriptor (all our prompt arguments are optional)."
-  ^Dictionary new
-    at: 'name' put: aName;
-    at: 'description' put: aDescription;
-    at: 'required' put: false;
-    yourself
-%
-category: 'prompts'
-classmethod: McpDispatcher
-promptSpecFor: aName
-  ^self promptSpecs detect: [:s | (s at: 'name') = aName] ifNone: [nil]
 %
 ! ------------------- Instance methods for McpDispatcher
 category: 'responses'
@@ -213,22 +213,6 @@ kindForError: ex
   (ex isKindOf: CompileError) ifTrue: [^'compileError'].
   ^'other'
 %
-category: 'responses'
-method: McpDispatcher
-resultFor: id with: resultObj
-  | d |
-  d := Dictionary new.
-  d at: 'jsonrpc' put: '2.0'.
-  d at: 'id' put: id.
-  d at: 'result' put: resultObj.
-  ^d
-%
-category: 'prompts'
-method: McpDispatcher
-promptsListResult
-  "prompts/list: the workflow-prompt catalogue (name/description/arguments)."
-  ^Dictionary new at: 'prompts' put: self class promptSpecs; yourself
-%
 category: 'prompts'
 method: McpDispatcher
 promptsGetResult: params id: id
@@ -247,12 +231,9 @@ promptsGetResult: params id: id
 %
 category: 'prompts'
 method: McpDispatcher
-promptUserMessage: aString
-  "One MCP prompt message: a user-role text content block."
-  ^Dictionary new
-    at: 'role' put: 'user';
-    at: 'content' put: (Dictionary new at: 'type' put: 'text'; at: 'text' put: aString; yourself);
-    yourself
+promptsListResult
+  "prompts/list: the workflow-prompt catalogue (name/description/arguments)."
+  ^Dictionary new at: 'prompts' put: self class promptSpecs; yourself
 %
 category: 'prompts'
 method: McpDispatcher
@@ -265,39 +246,22 @@ promptTextFor: name arguments: args
 %
 category: 'prompts'
 method: McpDispatcher
-txHygieneText
-  ^'Keep a clean GemStone transaction while working through the MCP tools:
-
-1. status - see the user, session, stone, and whether there are uncommitted changes.
-2. refresh - abort uncommitted work and update your view to the latest committed state. The server
-   already aborts before every tool call, so you usually get a fresh view for free; call refresh
-   explicitly when you specifically depend on other sessions'' latest commits.
-3. Work: browse and search freely (describe_class, get_method_source, find_senders,
-   search_method_source, ...). The mutating tools (compile_method, compile_class_definition,
-   delete_class, delete_method, set_class_comment) COMMIT on success, so a successful change is
-   already persisted.
-4. If execute_code or a partial edit left uncommitted state you do NOT want, call abort to discard
-   it, then status again to confirm uncommittedChanges is false.
-5. When unsure whether in-progress state should persist, prefer abort - never leave a session with
-   unintended uncommitted changes.'
+promptUserMessage: aString
+  "One MCP prompt message: a user-role text content block."
+  ^Dictionary new
+    at: 'role' put: 'user';
+    at: 'content' put: (Dictionary new at: 'type' put: 'text'; at: 'text' put: aString; yourself);
+    yourself
 %
-category: 'prompts'
+category: 'responses'
 method: McpDispatcher
-tddTextFor: subjectOrNil
-  | lf header |
-  lf := String with: Character lf.
-  header := subjectOrNil isNil ifTrue: [''] ifFalse: ['Goal: ' , subjectOrNil , lf , lf].
-  ^header , 'A red/green TDD loop for GemStone via the MCP tools:
-
-1. Locate - understand the target with describe_class, list_methods, get_method_source, and
-   find_senders / find_implementors.
-2. Red - add a failing test: compile_method a test... method onto a TestCase subclass, then
-   run_test_class (or run_test_method) and confirm it FAILS.
-3. Green - implement with compile_method until run_test_class passes.
-4. Guard - run list_failing_tests to confirm nothing else regressed.
-5. Commit - the mutating tools already commit on success; use status to confirm, or abort to back out.
-
-Keep each red/green step small.'
+resultFor: id with: resultObj
+  | d |
+  d := Dictionary new.
+  d at: 'jsonrpc' put: '2.0'.
+  d at: 'id' put: id.
+  d at: 'result' put: resultObj.
+  ^d
 %
 category: 'prompts'
 method: McpDispatcher
@@ -323,6 +287,24 @@ setRegistry: aRegistry server: aServerOrNil
   serverName := 'gemstone-mcp'.
   serverVersion := '0.1.0'.
   ^self
+%
+category: 'prompts'
+method: McpDispatcher
+tddTextFor: subjectOrNil
+  | lf header |
+  lf := String with: Character lf.
+  header := subjectOrNil isNil ifTrue: [''] ifFalse: ['Goal: ' , subjectOrNil , lf , lf].
+  ^header , 'A red/green TDD loop for GemStone via the MCP tools:
+
+1. Locate - understand the target with describe_class, list_methods, get_method_source, and
+   find_senders / find_implementors.
+2. Red - add a failing test: compile_method a test... method onto a TestCase subclass, then
+   run_test_class (or run_test_method) and confirm it FAILS.
+3. Green - implement with compile_method until run_test_class passes.
+4. Guard - run list_failing_tests to confirm nothing else regressed.
+5. Commit - the mutating tools already commit on success; use status to confirm, or abort to back out.
+
+Keep each red/green step small.'
 %
 category: 'read-only'
 method: McpDispatcher
@@ -357,4 +339,22 @@ toolsListResult
   d := Dictionary new.
   d at: 'tools' put: (toolRegistry descriptors select: [:desc | self toolAllowed: (desc at: 'name')]).
   ^d
+%
+category: 'prompts'
+method: McpDispatcher
+txHygieneText
+  ^'Keep a clean GemStone transaction while working through the MCP tools:
+
+1. status - see the user, session, stone, and whether there are uncommitted changes.
+2. refresh - abort uncommitted work and update your view to the latest committed state. The server
+   already aborts before every tool call, so you usually get a fresh view for free; call refresh
+   explicitly when you specifically depend on other sessions'' latest commits.
+3. Work: browse and search freely (describe_class, get_method_source, find_senders,
+   search_method_source, ...). The mutating tools (compile_method, compile_class_definition,
+   delete_class, delete_method, set_class_comment) COMMIT on success, so a successful change is
+   already persisted.
+4. If execute_code or a partial edit left uncommitted state you do NOT want, call abort to discard
+   it, then status again to confirm uncommittedChanges is false.
+5. When unsure whether in-progress state should persist, prefer abort - never leave a session with
+   unintended uncommitted changes.'
 %

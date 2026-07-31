@@ -53,6 +53,12 @@ listedToolNames
 %
 category: 'helpers'
 method: McpContractTest
+promptGet: promptName args: argsDict
+  ^self request: 'prompts/get' params:
+    (Dictionary new at: 'name' put: promptName; at: 'arguments' put: argsDict; yourself)
+%
+category: 'helpers'
+method: McpContractTest
 request: methodName params: paramsDict
   | d |
   d := Dictionary new.
@@ -104,6 +110,15 @@ testEverySchemaIsClosed
     self assert: (schema at: 'type') equals: 'object'.
     self assert: (schema at: 'additionalProperties' ifAbsent: [true]) == false]
 %
+category: 'tests - prompts'
+method: McpContractTest
+testInitializeAdvertisesPromptsCapability
+  "#9: initialize advertises the prompts capability alongside tools."
+  | caps |
+  caps := ((self dispatch: (self request: 'initialize' params: Dictionary new)) at: 'result') at: 'capabilities'.
+  self assert: (caps includesKey: 'tools').
+  self assert: (caps includesKey: 'prompts')
+%
 category: 'tests - guard'
 method: McpContractTest
 testKernelMutationRefusedThroughEnvelope
@@ -135,6 +150,39 @@ testNotReadOnlyByDefault
   names := self listedToolNames.
   self assert: names size equals: 31.
   self assert: (names includes: 'compile_method')
+%
+category: 'tests - prompts'
+method: McpContractTest
+testPromptsGetInterpolatesArgument
+  "#9: an optional argument is woven into the prompt text."
+  | content |
+  content := (((self dispatch: (self promptGet: 'gemstone-tdd' args:
+    (Dictionary new at: 'subject' put: 'a Foo widget'; yourself))) at: 'result')
+      at: 'messages') first at: 'content'.
+  self assert: (self includesCS: 'Foo widget' in: (content at: 'text'))
+%
+category: 'tests - prompts'
+method: McpContractTest
+testPromptsGetReturnsUserMessage
+  "#9: prompts/get answers a description plus a user-role text message."
+  | result msg |
+  result := (self dispatch: (self promptGet: 'gemstone-transaction-hygiene' args: Dictionary new)) at: 'result'.
+  self deny: (result at: 'description') isEmpty.
+  msg := (result at: 'messages') first.
+  self assert: (msg at: 'role') equals: 'user'.
+  self deny: ((msg at: 'content') at: 'text') isEmpty
+%
+category: 'tests - prompts'
+method: McpContractTest
+testPromptsListReturnsWorkflows
+  "#9: prompts/list returns the GemStone workflow prompts, each with a non-empty description."
+  | prompts names |
+  prompts := ((self dispatch: (self request: 'prompts/list' params: nil)) at: 'result') at: 'prompts'.
+  names := prompts collect: [:p | p at: 'name'].
+  self assert: (names includes: 'gemstone-transaction-hygiene').
+  self assert: (names includes: 'gemstone-tdd').
+  self assert: (names includes: 'gemstone-safe-change').
+  prompts do: [:p | self deny: (p at: 'description') isEmpty]
 %
 category: 'tests - guard'
 method: McpContractTest
@@ -235,6 +283,14 @@ testUnknownArgumentRejected
   self assert: (err at: 'code') equals: -32602.
   self assert: ((err at: 'data') at: 'kind') equals: 'invalidParams'
 %
+category: 'tests - prompts'
+method: McpContractTest
+testUnknownPromptRejected
+  "#9: prompts/get for an unknown name -> -32602."
+  | resp |
+  resp := self dispatch: (self promptGet: 'no-such-prompt' args: Dictionary new).
+  self assert: ((resp at: 'error') at: 'code') equals: -32602
+%
 category: 'tests - validation'
 method: McpContractTest
 testValidArgumentsAccepted
@@ -249,60 +305,4 @@ method: McpContractTest
 toolCall: toolName args: argsDict
   ^self request: 'tools/call' params:
     (Dictionary new at: 'name' put: toolName; at: 'arguments' put: argsDict; yourself)
-%
-category: 'helpers'
-method: McpContractTest
-promptGet: promptName args: argsDict
-  ^self request: 'prompts/get' params:
-    (Dictionary new at: 'name' put: promptName; at: 'arguments' put: argsDict; yourself)
-%
-category: 'tests - prompts'
-method: McpContractTest
-testInitializeAdvertisesPromptsCapability
-  "#9: initialize advertises the prompts capability alongside tools."
-  | caps |
-  caps := ((self dispatch: (self request: 'initialize' params: Dictionary new)) at: 'result') at: 'capabilities'.
-  self assert: (caps includesKey: 'tools').
-  self assert: (caps includesKey: 'prompts')
-%
-category: 'tests - prompts'
-method: McpContractTest
-testPromptsListReturnsWorkflows
-  "#9: prompts/list returns the GemStone workflow prompts, each with a non-empty description."
-  | prompts names |
-  prompts := ((self dispatch: (self request: 'prompts/list' params: nil)) at: 'result') at: 'prompts'.
-  names := prompts collect: [:p | p at: 'name'].
-  self assert: (names includes: 'gemstone-transaction-hygiene').
-  self assert: (names includes: 'gemstone-tdd').
-  self assert: (names includes: 'gemstone-safe-change').
-  prompts do: [:p | self deny: (p at: 'description') isEmpty]
-%
-category: 'tests - prompts'
-method: McpContractTest
-testPromptsGetReturnsUserMessage
-  "#9: prompts/get answers a description plus a user-role text message."
-  | result msg |
-  result := (self dispatch: (self promptGet: 'gemstone-transaction-hygiene' args: Dictionary new)) at: 'result'.
-  self deny: (result at: 'description') isEmpty.
-  msg := (result at: 'messages') first.
-  self assert: (msg at: 'role') equals: 'user'.
-  self deny: ((msg at: 'content') at: 'text') isEmpty
-%
-category: 'tests - prompts'
-method: McpContractTest
-testPromptsGetInterpolatesArgument
-  "#9: an optional argument is woven into the prompt text."
-  | content |
-  content := (((self dispatch: (self promptGet: 'gemstone-tdd' args:
-    (Dictionary new at: 'subject' put: 'a Foo widget'; yourself))) at: 'result')
-      at: 'messages') first at: 'content'.
-  self assert: (self includesCS: 'Foo widget' in: (content at: 'text'))
-%
-category: 'tests - prompts'
-method: McpContractTest
-testUnknownPromptRejected
-  "#9: prompts/get for an unknown name -> -32602."
-  | resp |
-  resp := self dispatch: (self promptGet: 'no-such-prompt' args: Dictionary new).
-  self assert: ((resp at: 'error') at: 'code') equals: -32602
 %
