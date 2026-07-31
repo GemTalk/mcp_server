@@ -96,20 +96,6 @@ classmethod: McpAuthRouter
 requiredScopes: anArrayOfScopeStrings
   requiredScopes := anArrayOfScopeStrings
 %
-category: 'validation'
-classmethod: McpAuthRouter
-writeScope
-  "The OAuth scope a token must carry for its session to get read-WRITE access. nil (default) means
-   no per-session write-gating: every authenticated session is full-access (subject only to the
-   global McpServer readOnly switch). Set to e.g. 'mcp:write' to make sessions whose token lacks it
-   read-only (the dangerous tools are hidden + refused for that worker). Commit to persist."
-  ^writeScope
-%
-category: 'validation'
-classmethod: McpAuthRouter
-writeScope: aStringOrNil
-  writeScope := aStringOrNil
-%
 category: 'metadata'
 classmethod: McpAuthRouter
 resourceMetadataUrl
@@ -136,6 +122,20 @@ classmethod: McpAuthRouter
 userIdClaim: aString
   "Set the JWT claim read for the GemStone userId."
   userIdClaim := aString
+%
+category: 'validation'
+classmethod: McpAuthRouter
+writeScope
+  "The OAuth scope a token must carry for its session to get read-WRITE access. nil (default) means
+   no per-session write-gating: every authenticated session is full-access (subject only to the
+   global McpServer readOnly switch). Set to e.g. 'mcp:write' to make sessions whose token lacks it
+   read-only (the dangerous tools are hidden + refused for that worker). Commit to persist."
+  ^writeScope
+%
+category: 'validation'
+classmethod: McpAuthRouter
+writeScope: aStringOrNil
+  writeScope := aStringOrNil
 %
 ! ------------------- Instance methods for McpAuthRouter
 category: 'auth'
@@ -212,21 +212,6 @@ scopesOf: payload
   (s isKindOf: Array) ifTrue: [^s].
   ^#()
 %
-category: 'validation'
-method: McpAuthRouter
-tokenGrantsWrite: aJwtString
-  "Whether aJwtString carries the configured writeScope, granting its session read-WRITE access.
-   True (write allowed) when no writeScope is configured -- per-session write-gating is off. A token
-   that can't be parsed grants no write (fail-safe -> read-only). GemStone still re-validates the
-   token's signature at login regardless."
-  | scope |
-  scope := self class writeScope.
-  scope isNil ifTrue: [^true].
-  ^[ | payload |
-     payload := (JsonWebToken fromJwtString: aJwtString) instVarNamed: #payload.
-     (self scopesOf: payload) includes: scope ]
-   on: Error do: [:e | false]
-%
 category: 'routing'
 method: McpAuthRouter
 serveGet: req on: conn
@@ -269,12 +254,16 @@ method: McpAuthRouter
 serveProtectedResourceMetadata: req on: conn
   "RFC 9728 Protected Resource Metadata: advertise this resource + its authorization server(s) so a
    compliant MCP client can discover where to obtain a token. authorization_servers is empty until
-   an IdP is configured (Step 4e); `resource` is derived from the Host header until a fixed
-   identifier / TLS scheme is set."
-  | host meta |
+   an IdP is configured (Step 4e). `resource` is derived from the request Host header, with the
+   scheme following the router's own TLS setting (https when tlsEnabled) so the identifier matches
+   the URL the client actually reached. NB: this reflects in-gem TLS (GsSecureSocket); behind a
+   TLS-terminating reverse proxy the gem sees plaintext, so an explicit canonical identifier would
+   be needed there (a configurable resource id is a TODO)."
+  | host scheme meta |
   host := (req at: 'headers' ifAbsent: [Dictionary new]) at: 'host' ifAbsent: ['127.0.0.1'].
+  scheme := self class tlsEnabled ifTrue: ['https://'] ifFalse: ['http://'].
   meta := Dictionary new.
-  meta at: 'resource' put: 'http://' , host , '/mcp'.
+  meta at: 'resource' put: scheme , host , '/mcp'.
   meta at: 'authorization_servers' put: self class authorizationServers asArray.
   meta at: 'bearer_methods_supported' put: (Array with: 'header').
   conn writeStatus: 200 reason: 'OK' body: meta asJson
@@ -284,6 +273,21 @@ method: McpAuthRouter
 spaceSeparated: aCollectionOfStrings
   "Join strings with single spaces (for the scope list in messages / the WWW-Authenticate scope=)."
   ^aCollectionOfStrings inject: '' into: [:acc :s | acc isEmpty ifTrue: [s] ifFalse: [acc , ' ' , s]]
+%
+category: 'validation'
+method: McpAuthRouter
+tokenGrantsWrite: aJwtString
+  "Whether aJwtString carries the configured writeScope, granting its session read-WRITE access.
+   True (write allowed) when no writeScope is configured -- per-session write-gating is off. A token
+   that can't be parsed grants no write (fail-safe -> read-only). GemStone still re-validates the
+   token's signature at login regardless."
+  | scope |
+  scope := self class writeScope.
+  scope isNil ifTrue: [^true].
+  ^[ | payload |
+     payload := (JsonWebToken fromJwtString: aJwtString) instVarNamed: #payload.
+     (self scopesOf: payload) includes: scope ]
+   on: Error do: [:e | false]
 %
 category: 'validation'
 method: McpAuthRouter

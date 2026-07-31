@@ -30,6 +30,13 @@ removeallclassmethods McpAuthTest
 ! ------------------- Instance methods for McpAuthTest
 category: 'helpers'
 method: McpAuthTest
+callBody: toolName arguments: anArgsJsonString
+  "A tools/call JSON-RPC body for toolName with the given raw JSON arguments object."
+  ^'{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"' , toolName
+    , '","arguments":' , anArgsJsonString , '}}'
+%
+category: 'helpers'
+method: McpAuthTest
 crlf
   ^String with: Character cr with: Character lf
 %
@@ -90,13 +97,6 @@ savingAuthConfigDo: aBlock
     McpAuthRouter expectedAudience: aud.
     McpAuthRouter expectedIssuer: iss.
     McpAuthRouter writeScope: write]
-%
-category: 'helpers'
-method: McpAuthTest
-callBody: toolName arguments: anArgsJsonString
-  "A tools/call JSON-RPC body for toolName with the given raw JSON arguments object."
-  ^'{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"' , toolName
-    , '","arguments":' , anArgsJsonString , '}}'
 %
 category: 'helpers'
 method: McpAuthTest
@@ -215,6 +215,23 @@ testNonBearerReturns401
 %
 category: 'tests'
 method: McpAuthTest
+testProtectedResourceMetadataSchemeFollowsTls
+  "The RFC 9728 `resource` identifier's scheme must follow the transport: plaintext -> http, and
+   TLS-enabled -> https (not a hard-coded http). tlsEnabled only checks that both cert+key paths are
+   set, so throwaway paths suffice; restored afterward."
+  | cert key |
+  cert := McpAuthRouter tlsCertificateFile.
+  key := McpAuthRouter tlsPrivateKeyFile.
+  [McpAuthRouter tlsCertificateFile: nil; tlsPrivateKeyFile: nil.
+   self assert: (self includesCS: '"resource":"http://'
+     in: (self runRequest: (self get: '/.well-known/oauth-protected-resource') on: McpAuthRouter new)).
+   McpAuthRouter tlsCertificateFile: '/tmp/mcp-x.crt'; tlsPrivateKeyFile: '/tmp/mcp-x.key'.
+   self assert: (self includesCS: '"resource":"https://'
+     in: (self runRequest: (self get: '/.well-known/oauth-protected-resource') on: McpAuthRouter new))]
+    ensure: [McpAuthRouter tlsCertificateFile: cert. McpAuthRouter tlsPrivateKeyFile: key]
+%
+category: 'tests'
+method: McpAuthTest
 testProtectedResourceMetadataServed
   "The RFC 9728 metadata endpoint is served (unauthenticated) at the well-known path."
   | out |
@@ -231,18 +248,6 @@ testSufficientScopeAccepted
     McpAuthRouter expectedAudience: nil; expectedIssuer: nil; requiredScopes: #('mcp:use').
     p := Dictionary new. p at: 'exp' put: System timeGmt + 1000. p at: 'scope' put: 'openid mcp:use extra'.
     self assert: (McpAuthRouter new rejectionForPayload: p) isNil]
-%
-category: 'tests'
-method: McpAuthTest
-testValidScopedTokenOpensSession
-  "End-to-end: a valid token carrying the required scope passes the RS check and opens a per-user
-   worker session (200 + MCP-Session-Id)."
-  self savingAuthConfigDo: [
-    McpAuthRouter expectedAudience: nil; expectedIssuer: nil; requiredScopes: #('mcp:use').
-    self withJwtUser: 'McpScopeTestUser' scope: 'openid mcp:use' do: [:jwt | | out |
-      out := self runRequest: (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: McpAuthRouter new.
-      self assert: (self includesCS: 'HTTP/1.1 200 OK' in: out).
-      self assert: (self includesCS: 'MCP-Session-Id:' in: out)]]
 %
 category: 'tests'
 method: McpAuthTest
@@ -280,6 +285,18 @@ testTokenWithWriteScopeGivesWritableSession
         headers: 'MCP-Session-Id: ' , sid , self crlf) on: router.
       self assert: (self includesCS: '42' in: out).
       self deny: (self includesCS: 'readOnly' in: out)]]
+%
+category: 'tests'
+method: McpAuthTest
+testValidScopedTokenOpensSession
+  "End-to-end: a valid token carrying the required scope passes the RS check and opens a per-user
+   worker session (200 + MCP-Session-Id)."
+  self savingAuthConfigDo: [
+    McpAuthRouter expectedAudience: nil; expectedIssuer: nil; requiredScopes: #('mcp:use').
+    self withJwtUser: 'McpScopeTestUser' scope: 'openid mcp:use' do: [:jwt | | out |
+      out := self runRequest: (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: McpAuthRouter new.
+      self assert: (self includesCS: 'HTTP/1.1 200 OK' in: out).
+      self assert: (self includesCS: 'MCP-Session-Id:' in: out)]]
 %
 category: 'tests'
 method: McpAuthTest
