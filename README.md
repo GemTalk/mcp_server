@@ -24,8 +24,11 @@ sessions** — each client gets its own isolated worker gem (see [Per-client ses
 cryptographically-random 128-bit tokens, and every request's `Origin` header is validated to
 prevent DNS-rebinding — a present `Origin` whose host is not loopback (`localhost`/`127.0.0.1`/`[::1]`)
 gets **`403`**; an absent `Origin` (non-browser clients like curl) is allowed. Add a browser app's
-origin host with `McpRouter allowedOriginHosts: #(...)` (commit to persist). Client authentication
-is a planned addition (see `../../.claude/plans/mcp-spec-compliance.md`).
+origin host with `McpRouter allowedOriginHosts: #(...)` (commit to persist). For network-facing use,
+the `McpAuthRouter` subclass adds OAuth 2.1 / JWT bearer-token authentication (per-user worker gems),
+a `WWW-Authenticate` challenge + RFC 9728 Protected Resource Metadata, TLS (`GsSecureSocket`), and
+scope-based [read-only sessions](#read-only-mode); the base `McpRouter` is the localhost,
+unauthenticated front end.
 
 ```
 # initialize -- the response carries an MCP-Session-Id header
@@ -124,19 +127,48 @@ These live on the optional `McpServerWithGrail` subclass, loaded only via `load-
 > an undefined name → `CompileError`) are handled cleanly — the latter surface as a normal
 > `isError` result.
 
+## Tool-call safety
+
+- **Closed argument schemas** — every tool's input schema sets `additionalProperties: false` plus
+  its `required` list, so an unknown or missing argument is rejected up front with a JSON-RPC
+  `-32602` (`error.data.kind = "invalidParams"`) rather than being silently dropped.
+- **Kernel-class guard** — the mutation tools refuse to modify a base/kernel class (one whose home
+  dictionary is `Globals`); the refusal names the class and a remedy and carries `kind = "refused"`.
+  Your own classes (in `UserGlobals`, or an application dictionary) stay freely mutable.
+  `execute_code` is the deliberate escape hatch (and is itself gated in read-only mode).
+- **Structured error kinds** — when a tool raises, the `isError` result keeps the human-readable
+  message in `content` **and** carries `structuredContent.error.kind`, a short machine-readable
+  classifier (`compileError`, `refused`, `readOnly`, `notFound`, `invalidParams`, `other`), so a
+  client can branch on the kind instead of parsing prose.
+
+## Prompts
+
+The server advertises the MCP `prompts` capability and serves `prompts/list` / `prompts/get` with a
+few GemStone-specific workflow guides — static text that references the real tools:
+
+| Prompt | Optional argument | Guides you through |
+|--------|-------------------|--------------------|
+| `gemstone-transaction-hygiene` | – | `status → refresh → work → commit`/`abort` |
+| `gemstone-tdd` | `subject` | locate → write a failing test → implement → re-run → commit |
+| `gemstone-safe-change` | `change` | green baseline → impact map → change → re-test → confirm |
+
+A supplied optional argument is woven into the returned guidance.
+
 ## Architecture
 
 | Class | Role |
 |-------|------|
 | `McpBase` | abstract superclass of the router + worker; holds only the two shared helpers (`parseBody:`, `log:`) |
 | `McpRouter` | front end: accept loop, HTTP, routing, the `MCP-Session-Id → McpSession` map, and the idle reaper. Owns the socket; never runs a tool |
+| `McpAuthRouter` | network-facing `McpRouter` subclass: requires an OAuth/JWT bearer token, logs each worker in as its own GemStone user, serves the `WWW-Authenticate` challenge + RFC 9728 metadata, validates token claims/scopes, adds TLS, and (via `writeScope`) can open a session read-only |
 | `McpServer` | per-client worker: the single-client MCP server (JSON-RPC dispatch + the 31 base tool definitions) that runs inside each worker gem. No socket |
 | `McpServerWithGrail` | optional worker subclass: `super initialize` then registers the 2 Grail/Python tools; each worker gem loads it (in `handleJsonString:`) when its file is installed |
 | `McpSession` | one client's isolated worker handle: a `GsTsExternalSession` gem + session id + last-activity; `forward:` runs a request in it (`McpServer handleJsonString: …`), `close` stops it |
 | `McpHttpConnection` | reads one HTTP/1.1 request, writes one JSON response (incl. `MCP-Session-Id`) |
-| `McpDispatcher` | JSON-RPC 2.0 / MCP routing (`initialize`, `tools/list`, `tools/call`) |
+| `McpDispatcher` | JSON-RPC 2.0 / MCP routing (`initialize`, `tools/list`, `tools/call`, `prompts/list`, `prompts/get`); read-only tool gating; structured error kinds |
 | `McpToolRegistry` | name → `McpTool` map; produces `tools/list` descriptors |
-| `McpTool` | one tool: name, description, JSON Schema, handler block |
+| `McpTool` | one tool: name, description, JSON Schema, handler block; validates arguments against the schema |
+| `McpError` | an error carrying a machine-readable `kind` (e.g. `refused`, `readOnly`) that the dispatcher surfaces in the tool-call error envelope |
 
 Built on existing image facilities: `GsSocket` (TCP), `JsonParser parse:` and
 `Object>>asJson` (JSON), and `String>>evaluate` (the `execute_code` engine).
@@ -182,7 +214,30 @@ tools itself (those run in the per-client `McpServer` workers):
 Isolation comes from each worker being a separate gem = a separate transaction view. Forwarding is
 **blocking / serialized** for now (a single front-end gem can't overlap blocking GCI calls, and the
 non-blocking poll path corrupts results); true cross-client concurrency is a deferred follow-up.
-All workers run as the current user today; per-user auth is a future extension (`McpSession userId`).
+The base `McpRouter` logs every worker in as the current (server) user; the network-facing
+`McpAuthRouter` instead logs each worker in as the **token's own GemStone user** via JWT.
+
+## Read-only mode
+
+The server can refuse every state-changing tool, so a client can browse and search but not modify
+the image. A worker is read-only if **either** of these applies:
+
+- **Globally** — `McpServer readOnly: true` (commit to persist). Every worker gem then refuses the
+  dangerous tools. Off by default. (Backed by a class variable, so it also covers the
+  `McpServerWithGrail` workers.)
+- **Per session, by OAuth scope** — on the authenticated front end, set
+  `McpAuthRouter writeScope: 'mcp:write'` (commit). A client whose bearer token carries that scope
+  gets a full read-write worker; a client whose token lacks it gets a read-only worker for that
+  session only.
+
+**What's gated:** everything that can persist a change or run arbitrary code — `execute_code`,
+`commit`, and all the mutation tools. Everything else (browsing, listing, search,
+`status`/`refresh`/`abort`, and the test-runner tools) stays available. The allow-list is
+**fail-closed** — a newly added tool is gated until it's explicitly listed as read-only-safe
+(`McpServer class>>readOnlySafeToolNames`).
+
+A gated tool is **hidden from `tools/list`** and, if called directly by name, returns a JSON-RPC
+error (`-32601`) with `error.data.kind = "readOnly"`.
 
 ## Install & run
 
@@ -222,6 +277,16 @@ suite when `McpServerWithGrail` is installed:
   paths that spawn **no** worker gem: GET→SSE, DELETE→200, unknown verb→405, malformed→`-32700`,
   a session-less POST→`400`, chunked delivery, EOF, Content-Length. (initialize and a routed tool
   call spawn a real worker, so they're exercised by the integration test instead.)
+- `McpContractTest` — contract / property tests over the tool surface, all driven through the real
+  `McpDispatcher>>handle:` envelope: every tool schema is closed (`additionalProperties:false`),
+  unknown/missing arguments → `-32602`, a raised error carries a structured `kind`, kernel-class
+  mutation is refused, read-only hides + refuses the gated tools, and `prompts/list` / `prompts/get`
+  behave. Socket-less and worker-less, so it runs in `run-unit-tests.sh` with the others above.
+- `McpAuthTest` — the authenticated front end (`McpAuthRouter`): missing / non-bearer / garbage /
+  valid tokens, RS-layer `exp` / issuer / audience / scope validation, and the write-scope read-only
+  sessions. It commits a throwaway JWT user and spawns real worker gems (needs netldi), so — like
+  `test-tls.sh` — it runs via the `run_test_class` tool or the scripts rather than the socket-less
+  `run-unit-tests.sh`.
 - `McpServerWithGrailTest` *(Grail images only)* — the optional Grail/Python tools:
   `eval_python`→`42`, `compile_python`→`__mul__`, `print`→`None`, a semantic error →
   `CompileError`→`isError`, a 33-tool `tools/list` check, and two guarded tripwires
@@ -230,9 +295,10 @@ suite when `McpServerWithGrail` is installed:
   syntax/runtime errors.
 
 Run a single suite while a server is up via the `run_test_class` tool (e.g. `run_test_class
-McpToolTest`), or the whole set via `./run-unit-tests.sh` (exit 0 = all passed). **68 base
-tests**, **+7 in `McpServerWithGrailTest`** on a Grail image (75 total; two of the Grail ones
-are the guarded tripwires that no-op until Grail is fixed).
+McpToolTest`). `./run-unit-tests.sh` runs the socket-less suites — `McpToolTest`, `McpDispatcherTest`,
+`McpTransportTest`, `McpContractTest` (**98 tests**, **+7 in `McpServerWithGrailTest`** on a Grail
+image, two of them guarded tripwires that no-op until Grail is fixed) — and exits 0 when all pass.
+`McpAuthTest` (16) needs netldi, so run it with `run_test_class` or the scripts.
 
 > Note: a test helper must never reuse a SUnit framework selector (`run:`, `setUp`, …) — doing
 > so shadows the framework method and silently breaks `suite run`. The transport helper is named
@@ -283,7 +349,10 @@ reaped after 5 min idle. **31 base tools** across seven categories (execution, s
 browsing, search, mutation, testing) — **plus 2 Python tools** on the optional `McpServerWithGrail`
 subclass (loaded via `install.sh --grail`); per-connection forking + read timeout. Verified
 end-to-end with curl (initialize / `MCP-Session-Id` routing / tools/call / two-client isolation /
-400 / 404 / SSE GET / DELETE, and stalled-connection load) and by the in-image unit tests (68 base,
-+7 with Grail). The Python tools delegate to Grail's `ModuleAst` and require a Grail-equipped image
-(see the Python note above). Future work: true concurrent cross-client forwarding, per-user worker
-auth (`McpSession userId`), server-initiated SSE messages.
+400 / 404 / SSE GET / DELETE, and stalled-connection load) and by the in-image unit tests. Since the
+first release it has also gained: OAuth 2.1 / JWT authentication + TLS (the `McpAuthRouter` subclass),
+read-only mode (a global switch plus per-token write-scope sessions), closed argument schemas + a
+kernel-class guard + structured error kinds, and MCP workflow prompts. The Python tools delegate to
+Grail's `ModuleAst` and require a Grail-equipped image (see the Python note above). Future work: true
+concurrent cross-client forwarding, server-initiated SSE messages, and an external OIDC identity
+provider.
