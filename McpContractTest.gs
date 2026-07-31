@@ -32,14 +32,24 @@ removeallclassmethods McpContractTest
 category: 'helpers'
 method: McpContractTest
 dispatch: requestDict
-  "Route requestDict through a fresh dispatcher over a fresh server's registry."
-  ^(McpDispatcher withToolRegistry: McpServer new toolRegistry) handle: requestDict
+  "Route requestDict through a fresh dispatcher wired to its owning server, so read-only gating is
+   exercised through the real path."
+  | s |
+  s := McpServer new.
+  ^(McpDispatcher withToolRegistry: s toolRegistry server: s) handle: requestDict
 %
 category: 'helpers'
 method: McpContractTest
 includesCS: aSubstring in: aString
   "Case-sensitive substring test (String>>includesString: is case-INsensitive in GemStone)."
   ^(aString findString: aSubstring startingAt: 1) > 0
+%
+category: 'helpers'
+method: McpContractTest
+listedToolNames
+  "The tool names returned by tools/list through the (read-only-aware) dispatcher."
+  ^(((self dispatch: (self request: 'tools/list' params: nil)) at: 'result') at: 'tools')
+    collect: [:d | d at: 'name']
 %
 category: 'helpers'
 method: McpContractTest
@@ -51,6 +61,17 @@ request: methodName params: paramsDict
   d at: 'method' put: methodName.
   paramsDict ifNotNil: [d at: 'params' put: paramsDict].
   ^d
+%
+category: 'helpers'
+method: McpContractTest
+savingReadOnlyDo: aBlock
+  "Run aBlock with the global read-only switch saved + restored and the per-session flag cleared
+   afterward (no commit), so a read-only test cannot leak state into other tests."
+  | was |
+  was := McpServer readOnly.
+  ^[aBlock value] ensure: [
+    McpServer readOnly: was.
+    SessionTemps current removeKey: #McpReadOnly ifAbsent: [nil]]
 %
 category: 'tests - guard'
 method: McpContractTest
@@ -106,6 +127,15 @@ testMissingRequiredArgumentRejected
   resp := self dispatch: (self toolCall: 'describe_class' args: Dictionary new).
   self assert: ((resp at: 'error') at: 'code') equals: -32602
 %
+category: 'tests - read-only'
+method: McpContractTest
+testNotReadOnlyByDefault
+  "Sanity: with the switch off, tools/list shows all 31 tools including the mutating ones."
+  | names |
+  names := self listedToolNames.
+  self assert: names size equals: 31.
+  self assert: (names includes: 'compile_method')
+%
 category: 'tests - guard'
 method: McpContractTest
 testProtectedClassPredicate
@@ -134,6 +164,54 @@ testRaisedErrorCarriesStructuredKind
   struct := result at: 'structuredContent'.
   self assert: ((struct at: 'error') includesKey: 'kind').
   self deny: ((struct at: 'error') at: 'message') isEmpty
+%
+category: 'tests - read-only'
+method: McpContractTest
+testReadOnlyAllowsSafeToolCall
+  "#7: a safe (read) tool still works while read-only."
+  self savingReadOnlyDo: [ | result |
+    McpServer readOnly: true.
+    result := (self dispatch: (self toolCall: 'describe_class' args:
+      (Dictionary new at: 'className' put: 'Object'; yourself))) at: 'result'.
+    self deny: (result at: 'isError')]
+%
+category: 'tests - read-only'
+method: McpContractTest
+testReadOnlyGatesDangerousToolCall
+  "#7: a direct call to a gated tool is refused -32601 kind readOnly, before any validation or side
+   effect. Targets a kernel class so a regression can't mutate anything even if the gate failed."
+  self savingReadOnlyDo: [ | err |
+    McpServer readOnly: true.
+    err := (self dispatch: (self toolCall: 'compile_method' args:
+      (Dictionary new at: 'className' put: 'Object'; at: 'source' put: 'x ^1'; yourself))) at: 'error'.
+    self assert: (err at: 'code') equals: -32601.
+    self assert: ((err at: 'data') at: 'kind') equals: 'readOnly']
+%
+category: 'tests - read-only'
+method: McpContractTest
+testReadOnlyHidesDangerousToolsFromList
+  "#7: read-only hides the gated (dangerous) tools from tools/list; safe tools remain."
+  self savingReadOnlyDo: [ | names |
+    McpServer readOnly: true.
+    names := self listedToolNames.
+    self deny: (names includes: 'compile_method').
+    self deny: (names includes: 'execute_code').
+    self deny: (names includes: 'commit').
+    self assert: (names includes: 'describe_class').
+    self assert: (names includes: 'status')]
+%
+category: 'tests - read-only'
+method: McpContractTest
+testSessionReadOnlyGatesIndependentlyOfGlobal
+  "#7b mechanism: the per-session flag (SessionTemps, set by sessionReadOnly:) gates even when the
+   global switch is off."
+  self savingReadOnlyDo: [ | err |
+    McpServer readOnly: false.
+    McpServer sessionReadOnly: true.
+    err := (self dispatch: (self toolCall: 'execute_code' args:
+      (Dictionary new at: 'code' put: '1'; yourself))) at: 'error'.
+    self assert: (err at: 'code') equals: -32601.
+    self assert: ((err at: 'data') at: 'kind') equals: 'readOnly']
 %
 category: 'tests - errors'
 method: McpContractTest

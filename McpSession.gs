@@ -44,6 +44,13 @@ startWithId: anId user: aUserId jwt: aJwtString
    client id. See the instance-side method."
   ^self new startWithId: anId user: aUserId jwt: aJwtString
 %
+category: 'instance creation'
+classmethod: McpSession
+startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
+  "As startWithId:user:jwt:, but marks the worker read-only when aBoolean is true (the token lacked
+   the configured write scope -- see McpAuthRouter writeScope)."
+  ^self new startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
+%
 ! ------------------- Instance methods for McpSession
 category: 'lifecycle'
 method: McpSession
@@ -103,16 +110,25 @@ startWithId: anId
 category: 'initialization'
 method: McpSession
 startWithId: anId user: aUserId jwt: aJwtString
+  "JWT worker login with full read-write access (see the readOnly: variant)."
+  ^self startWithId: anId user: aUserId jwt: aJwtString readOnly: false
+%
+category: 'initialization'
+method: McpSession
+startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
   "Log in a fresh worker gem authenticated by a JWT (an OAuth/OIDC access token), for the
    network-facing authenticated front end (McpAuthRouter). The caller has already validated the
-   token and derived aUserId from its claims; GemStone re-validates the JWT's signature (against
-   its trusted keys) and claims when the worker logs in -- a bad/expired token fails the login."
+   token and derived aUserId from its claims; GemStone re-validates the JWT's signature (against its
+   trusted keys) and claims when the worker logs in -- a bad/expired token fails the login. When
+   aBoolean is true the worker is marked read-only for its whole life (its token lacked the write
+   scope) -- set inside the worker gem itself, so it needs no commit and cannot affect other sessions."
   id := anId.
   userId := aUserId.
   worker := self newWorkerSession.
   worker username: aUserId.
   worker jwtPassword: aJwtString.
   worker login.
+  aBoolean ifTrue: [worker executeString: 'McpServer sessionReadOnly: true'].
   self touch.
   ^self
 %

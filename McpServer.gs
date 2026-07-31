@@ -4,7 +4,7 @@ expectvalue /Class
 doit
 McpBase subclass: 'McpServer'
   instVarNames: #( dispatcher toolRegistry)
-  classVars: #()
+  classVars: #( ReadOnly)
   classInstVars: #()
   poolDictionaries: #()
   inDictionary: Published
@@ -53,6 +53,48 @@ category: 'instance creation'
 classmethod: McpServer
 new
   ^super new initialize
+%
+category: 'read-only'
+classmethod: McpServer
+readOnly
+  "Global read-only switch: when true, EVERY worker refuses the dangerous (mutating) tools --
+   they are hidden from tools/list and error on a direct call. Off by default. Commit to persist so
+   forked worker gems see it. A session may also be read-only for other reasons (see the instance
+   isReadOnly / #McpReadOnly SessionTemps flag set per session by McpAuthRouter's write-scope).
+   Backed by a class VARIABLE (not a class-instance variable) so the one switch is shared across
+   McpServer and its worker subclasses (e.g. McpServerWithGrail), rather than each class holding its
+   own copy."
+  ^ReadOnly ifNil: [false]
+%
+category: 'read-only'
+classmethod: McpServer
+readOnly: aBoolean
+  "Set the global read-only switch (commit to persist)."
+  ReadOnly := aBoolean
+%
+category: 'read-only'
+classmethod: McpServer
+readOnlySafeToolNames
+  "The allow-list of tools permitted when a session is read-only. FAIL-CLOSED: membership is by
+   inclusion, so any tool NOT listed here (including a future one) is treated as dangerous and
+   gated. Safe = cannot persist a change. Note run_test_* / list_failing_tests ARE safe: read-only
+   forbids execute_code and the mutation tools, so no NEW code can be introduced this session, and a
+   test can only run already-committed (trusted) code."
+  ^#( 'describe_class' 'export_class_source' 'get_class_definition' 'get_class_hierarchy'
+      'get_method_source' 'list_methods'
+      'list_all_classes' 'list_classes' 'list_dictionaries' 'list_dictionary_entries'
+      'find_implementors' 'find_references_to' 'find_senders' 'search_method_source'
+      'status' 'refresh' 'abort'
+      'list_test_classes' 'list_failing_tests' 'describe_test_failure'
+      'run_test_class' 'run_test_method' )
+%
+category: 'read-only'
+classmethod: McpServer
+sessionReadOnly: aBoolean
+  "Mark (or clear) read-only for the CURRENT worker session only, independent of the global switch.
+   Set by McpAuthRouter in a worker gem whose bearer token lacked the write scope (Step 7b). Stored
+   in SessionTemps so it lives and dies with the worker gem and needs no commit."
+  SessionTemps current at: #McpReadOnly put: aBoolean
 %
 ! ------------------- Instance methods for McpServer
 category: 'guards'
@@ -193,7 +235,7 @@ category: 'initialization'
 method: McpServer
 initialize
   toolRegistry := McpToolRegistry new.
-  dispatcher := McpDispatcher withToolRegistry: toolRegistry.
+  dispatcher := McpDispatcher withToolRegistry: toolRegistry server: self.
   self registerBrowsingTools.
   self registerExecutionTools.
   self registerListingTools.
@@ -213,6 +255,20 @@ isProtectedClass: aClass
   arr := System myUserProfile dictionaryAndSymbolOf: aClass.
   arr isNil ifTrue: [^true].
   ^self protectedDictionaryNames includes: (arr at: 1) name asString
+%
+category: 'read-only'
+method: McpServer
+isReadOnly
+  "Whether THIS worker session is currently read-only: the global switch OR a per-session mark
+   (McpAuthRouter sets #McpReadOnly for a token without the write scope)."
+  ^self class readOnly or: [(SessionTemps current at: #McpReadOnly otherwise: false) == true]
+%
+category: 'read-only'
+method: McpServer
+isToolAllowed: aToolName
+  "Whether aToolName may run right now: always when not read-only; only the read-only-safe tools
+   when read-only."
+  ^self isReadOnly not or: [self class readOnlySafeToolNames includes: aToolName]
 %
 category: 'private'
 method: McpServer

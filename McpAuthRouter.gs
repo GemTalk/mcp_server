@@ -5,7 +5,7 @@ doit
 McpRouter subclass: 'McpAuthRouter'
   instVarNames: #()
   classVars: #()
-  classInstVars: #( userIdClaim authorizationServers resourceMetadataUrl requiredScopes expectedAudience expectedIssuer)
+  classInstVars: #( userIdClaim authorizationServers resourceMetadataUrl requiredScopes expectedAudience expectedIssuer writeScope)
   poolDictionaries: #()
   inDictionary: Published
   options: #()
@@ -96,6 +96,20 @@ classmethod: McpAuthRouter
 requiredScopes: anArrayOfScopeStrings
   requiredScopes := anArrayOfScopeStrings
 %
+category: 'validation'
+classmethod: McpAuthRouter
+writeScope
+  "The OAuth scope a token must carry for its session to get read-WRITE access. nil (default) means
+   no per-session write-gating: every authenticated session is full-access (subject only to the
+   global McpServer readOnly switch). Set to e.g. 'mcp:write' to make sessions whose token lacks it
+   read-only (the dangerous tools are hidden + refused for that worker). Commit to persist."
+  ^writeScope
+%
+category: 'validation'
+classmethod: McpAuthRouter
+writeScope: aStringOrNil
+  writeScope := aStringOrNil
+%
 category: 'metadata'
 classmethod: McpAuthRouter
 resourceMetadataUrl
@@ -141,7 +155,15 @@ category: 'sessions'
 method: McpAuthRouter
 openSessionForUser: aUserId jwt: aJwtString
   "Open + register a worker session logged in as aUserId, authenticated by the JWT."
-  ^self openSessionCreating: [:newId | McpSession startWithId: newId user: aUserId jwt: aJwtString]
+  ^self openSessionForUser: aUserId jwt: aJwtString readOnly: false
+%
+category: 'sessions'
+method: McpAuthRouter
+openSessionForUser: aUserId jwt: aJwtString readOnly: aBoolean
+  "Open + register a worker session for aUserId. When aBoolean, the worker is read-only for its
+   whole life (its token lacked the write scope)."
+  ^self openSessionCreating: [:newId |
+    McpSession startWithId: newId user: aUserId jwt: aJwtString readOnly: aBoolean]
 %
 category: 'validation'
 method: McpAuthRouter
@@ -190,6 +212,21 @@ scopesOf: payload
   (s isKindOf: Array) ifTrue: [^s].
   ^#()
 %
+category: 'validation'
+method: McpAuthRouter
+tokenGrantsWrite: aJwtString
+  "Whether aJwtString carries the configured writeScope, granting its session read-WRITE access.
+   True (write allowed) when no writeScope is configured -- per-session write-gating is off. A token
+   that can't be parsed grants no write (fail-safe -> read-only). GemStone still re-validates the
+   token's signature at login regardless."
+  | scope |
+  scope := self class writeScope.
+  scope isNil ifTrue: [^true].
+  ^[ | payload |
+     payload := (JsonWebToken fromJwtString: aJwtString) instVarNamed: #payload.
+     (self scopesOf: payload) includes: scope ]
+   on: Error do: [:e | false]
+%
 category: 'routing'
 method: McpAuthRouter
 serveGet: req on: conn
@@ -217,7 +254,7 @@ serveInitialize: req on: conn
   userId := self userIdFromToken: token.
   userId isNil ifTrue: [^self writeAuthError: 401 oauthError: 'invalid_token'
     description: 'Token has no ' , self class userIdClaim , ' claim' on: conn].
-  sess := [self openSessionForUser: userId jwt: token]
+  sess := [self openSessionForUser: userId jwt: token readOnly: (self tokenGrantsWrite: token) not]
     on: Error
     do: [:e |
       self log: 'McpAuthRouter login failed for ' , userId printString , ': '

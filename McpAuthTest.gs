@@ -80,14 +80,23 @@ savingAuthConfigDo: aBlock
   "Run aBlock with McpAuthRouter's RS-layer validation config (requiredScopes / expectedAudience /
    expectedIssuer) saved and ALWAYS restored (no commit), so a test can set constraints without
    leaking state into other tests."
-  | scopes aud iss |
+  | scopes aud iss write |
   scopes := McpAuthRouter requiredScopes.
   aud := McpAuthRouter expectedAudience.
   iss := McpAuthRouter expectedIssuer.
+  write := McpAuthRouter writeScope.
   ^[aBlock value] ensure: [
     McpAuthRouter requiredScopes: scopes.
     McpAuthRouter expectedAudience: aud.
-    McpAuthRouter expectedIssuer: iss]
+    McpAuthRouter expectedIssuer: iss.
+    McpAuthRouter writeScope: write]
+%
+category: 'helpers'
+method: McpAuthTest
+callBody: toolName arguments: anArgsJsonString
+  "A tools/call JSON-RPC body for toolName with the given raw JSON arguments object."
+  ^'{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"' , toolName
+    , '","arguments":' , anArgsJsonString , '}}'
 %
 category: 'helpers'
 method: McpAuthTest
@@ -234,6 +243,43 @@ testValidScopedTokenOpensSession
       out := self runRequest: (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: McpAuthRouter new.
       self assert: (self includesCS: 'HTTP/1.1 200 OK' in: out).
       self assert: (self includesCS: 'MCP-Session-Id:' in: out)]]
+%
+category: 'tests'
+method: McpAuthTest
+testTokenWithoutWriteScopeGivesReadOnlySession
+  "#7b: with a writeScope configured, a token lacking it opens a read-only worker -- a mutating tool
+   is refused (kind readOnly) while a safe tool still works. Target a kernel class so a regression
+   can't mutate anything."
+  self savingAuthConfigDo: [
+    McpAuthRouter expectedAudience: nil; expectedIssuer: nil; requiredScopes: #(); writeScope: 'mcp:write'.
+    self withJwtUser: 'McpWriteScopeUser' do: [:jwt | | router sid out |
+      router := McpAuthRouter new.
+      out := self runRequest: (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: router.
+      self assert: (self includesCS: 'HTTP/1.1 200 OK' in: out).
+      sid := self sessionIdFrom: out.
+      self deny: sid isNil.
+      out := self runRequest: (self post: (self callBody: 'compile_method' arguments: '{"className":"Object","source":"x ^1"}')
+        headers: 'MCP-Session-Id: ' , sid , self crlf) on: router.
+      self assert: (self includesCS: 'readOnly' in: out).
+      out := self runRequest: (self post: self statusBody headers: 'MCP-Session-Id: ' , sid , self crlf) on: router.
+      self assert: (self includesCS: 'user=McpWriteScopeUser' in: out)]]
+%
+category: 'tests'
+method: McpAuthTest
+testTokenWithWriteScopeGivesWritableSession
+  "#7b: a token that DOES carry the writeScope opens a full read-write worker -- a mutating/execution
+   tool runs normally."
+  self savingAuthConfigDo: [
+    McpAuthRouter expectedAudience: nil; expectedIssuer: nil; requiredScopes: #(); writeScope: 'mcp:write'.
+    self withJwtUser: 'McpWriteScopeUser' scope: 'openid mcp:write' do: [:jwt | | router sid out |
+      router := McpAuthRouter new.
+      out := self runRequest: (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: router.
+      sid := self sessionIdFrom: out.
+      self deny: sid isNil.
+      out := self runRequest: (self post: (self callBody: 'execute_code' arguments: '{"code":"6 * 7"}')
+        headers: 'MCP-Session-Id: ' , sid , self crlf) on: router.
+      self assert: (self includesCS: '42' in: out).
+      self deny: (self includesCS: 'readOnly' in: out)]]
 %
 category: 'tests'
 method: McpAuthTest

@@ -3,7 +3,8 @@ set compile_env: 0
 expectvalue /Class
 doit
 Object subclass: 'McpDispatcher'
-  instVarNames: #( toolRegistry serverName serverVersion)
+  instVarNames: #( toolRegistry serverName serverVersion
+                    server)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -48,7 +49,14 @@ supportedProtocolVersions
 category: 'instance creation'
 classmethod: McpDispatcher
 withToolRegistry: aRegistry
-  ^self new setRegistry: aRegistry
+  ^self withToolRegistry: aRegistry server: nil
+%
+category: 'instance creation'
+classmethod: McpDispatcher
+withToolRegistry: aRegistry server: aServerOrNil
+  "aServerOrNil is the owning McpServer, consulted for read-only gating; nil (e.g. in isolated
+   dispatcher tests) means never read-only."
+  ^self new setRegistry: aRegistry server: aServerOrNil
 %
 ! ------------------- Instance methods for McpDispatcher
 category: 'responses'
@@ -116,6 +124,9 @@ handleToolsCall: params id: id
   name isNil ifTrue: [^self errorFor: id code: -32602 message: 'Missing tool name' kind: 'invalidParams'].
   tool := toolRegistry at: name.
   tool isNil ifTrue: [^self errorFor: id code: -32602 message: 'Unknown tool: ' , name kind: 'notFound'].
+  (self toolAllowed: name) ifFalse: [
+    ^self errorFor: id code: -32601
+      message: '''' , name , ''' is not available: the server is read-only' kind: 'readOnly'].
   args := params at: 'arguments' ifAbsent: [Dictionary new].
   argErr := tool validationErrorFor: args.
   argErr ifNotNil: [^self errorFor: id code: -32602 message: argErr kind: 'invalidParams'].
@@ -170,11 +181,19 @@ resultFor: id with: resultObj
 %
 category: 'initialization'
 method: McpDispatcher
-setRegistry: aRegistry
+setRegistry: aRegistry server: aServerOrNil
   toolRegistry := aRegistry.
+  server := aServerOrNil.
   serverName := 'gemstone-mcp'.
   serverVersion := '0.1.0'.
   ^self
+%
+category: 'read-only'
+method: McpDispatcher
+toolAllowed: aToolName
+  "Whether aToolName may be listed/called now. Always yes when there's no server or it isn't
+   read-only; otherwise only the read-only-safe tools (server decides)."
+  ^server isNil or: [server isToolAllowed: aToolName]
 %
 category: 'responses'
 method: McpDispatcher
@@ -196,8 +215,10 @@ toolErrorContentFrom: ex
 category: 'responses'
 method: McpDispatcher
 toolsListResult
+  "tools/list. When the session is read-only, hide the gated (dangerous) tools so an agent only
+   sees what it may actually call (they still error clearly on a direct call -- see handleToolsCall:)."
   | d |
   d := Dictionary new.
-  d at: 'tools' put: toolRegistry descriptors.
+  d at: 'tools' put: (toolRegistry descriptors select: [:desc | self toolAllowed: (desc at: 'name')]).
   ^d
 %
