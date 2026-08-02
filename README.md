@@ -24,7 +24,8 @@ sessions** — each client gets its own isolated worker gem (see [Per-client ses
 cryptographically-random 128-bit tokens, and every request's `Origin` header is validated to
 prevent DNS-rebinding — a present `Origin` whose host is not loopback (`localhost`/`127.0.0.1`/`[::1]`)
 gets **`403`**; an absent `Origin` (non-browser clients like curl) is allowed. Add a browser app's
-origin host with `McpRouter allowedOriginHosts: #(...)` (commit to persist). For network-facing use,
+origin host by configuring the router instance — `(McpRouter new allowedOriginHosts: #(...)) forkOnPort: 8000`.
+For network-facing use,
 the `McpAuthRouter` subclass adds OAuth 2.1 / JWT bearer-token authentication (per-user worker gems),
 a `WWW-Authenticate` challenge + RFC 9728 Protected Resource Metadata, TLS (`GsSecureSocket`), and
 scope-based [read-only sessions](#read-only-mode); the base `McpRouter` is the localhost,
@@ -180,14 +181,17 @@ GCI-driven session (like the Jasper VS Code session) is parked in the C client b
 commands, so a background accept loop forked there would be frozen and never serve
 requests. Therefore the server runs as the **blocking main activity of a dedicated gem**.
 
-Two class-side entry points on the front end start that gem:
-- **`McpRouter runOnPort: aPort`** — runs the accept loop as the *calling* session's blocking
+Configure a router **instance** and start it two ways:
+- **`McpRouter new runOnPort: aPort`** — runs the accept loop as the *calling* session's blocking
   activity; never returns until `stop`. Use it to run the server in a foreground topaz.
-- **`McpRouter forkOnPort: aPort`** — spawns a *separate* gem via `GsTsExternalSession` and runs
-  the loop there **detached** (`forkAndDetachString:`), returning immediately. The forked server
-  is **independent** — it keeps serving after the launching session logs out. Stop it with
-  `McpRouter stopForked` (from the launching session) or, from anywhere, `System stopSession:
-  <id>` / `kill <pid>` (both printed at fork). `run-server.sh` uses this.
+- **`(McpRouter new … ) forkOnPort: aPort`** — spawns a *separate* gem via `GsTsExternalSession` and
+  runs the loop there **detached** (`forkAndDetachString:`), returning immediately. The router's
+  config travels to the child gem as JSON embedded in the fork string (`configDict` — host lists,
+  file paths, and identifiers only, **never key material**), so nothing is committed and several
+  differently-configured routers can run at once. The forked server is **independent** — it keeps
+  serving after the launching session logs out. Stop it by port with **`./stop-server.sh`**, or from
+  anywhere with `System stopSession: <id>` / `kill <pid>` (both printed at fork). `run-server.sh`
+  uses this.
 
 The front end is always `McpRouter`; Grail is not a boot-time choice. Each **per-client worker
 gem** independently loads the most capable installed worker class (the Grail subclass if its file
@@ -219,16 +223,17 @@ The base `McpRouter` logs every worker in as the current (server) user; the netw
 
 ## Read-only mode
 
-The server can refuse every state-changing tool, so a client can browse and search but not modify
-the image. A worker is read-only if **either** of these applies:
+A router can refuse every state-changing tool, so a client can browse and search but not modify the
+image — primarily a **localhost convenience** so a single user cannot *accidentally* mutate or commit
+(it is a tool-gate, **not** an access-control boundary). Read-only is **per-router**: the router marks
+each worker read-only at session open, so two routers (one read-only, one not) can run at once with
+no shared state. A worker is read-only if **either** applies:
 
-- **Globally** — `McpServer readOnly: true` (commit to persist). Every worker gem then refuses the
-  dangerous tools. Off by default. (Backed by a class variable, so it also covers the
-  `McpServerWithGrail` workers.)
-- **Per session, by OAuth scope** — on the authenticated front end, set
-  `McpAuthRouter writeScope: 'mcp:write'` (commit). A client whose bearer token carries that scope
-  gets a full read-write worker; a client whose token lacks it gets a read-only worker for that
-  session only.
+- **The router is read-only** — `(McpRouter new readOnly: true) forkOnPort: 8000`, or the shortcut
+  `GS_MCP_READONLY=1 ./run-server.sh`. Every session that router opens is read-only.
+- **By OAuth scope (`McpAuthRouter`)** — give the router a `writeScope` (e.g. `./run-auth-server.sh`
+  with `MCP_WRITE_SCOPE=mcp:write`): a token carrying that scope gets a read-write worker; a token
+  lacking it gets a read-only worker for that session.
 
 **What's gated:** everything that can persist a change or run arbitrary code — `execute_code`,
 `commit`, and all the mutation tools. Everything else (browsing, listing, search,
@@ -245,17 +250,22 @@ error (`-32601`) with `error.data.kind = "readOnly"`.
 export GEMSTONE=/path/to/GemStone64Bit3.7.x   # product dir
 export GS_USER=DataCurator GS_PASS=...         # GemStone credentials
 
-./install.sh                 # file in the base classes and commit
-./install.sh --grail         # ...and the optional Grail/Python tools (Grail image only)
-GS_MCP_PORT=8000 ./run-server.sh   # fork a detached, independent server gem and return
+./install.sh                        # file in the base classes and commit
+./install.sh --grail                # ...and the optional Grail/Python tools (Grail image only)
+GS_MCP_PORT=8000 ./run-server.sh    # fork a detached, independent localhost server gem and return
+GS_MCP_READONLY=1 ./run-server.sh   # ...read-only (browse/search only; no accidental mutation)
+./run-auth-server.sh                # ...the OAuth/OIDC network-facing server (McpAuthRouter)
 ```
 
-`install.sh` and `run-server.sh` use topaz; set `GEMSTONE`, `GS_STONE`, `GS_USER`,
+`install.sh` and the `run-*.sh` scripts use topaz; set `GEMSTONE`, `GS_STONE`, `GS_USER`,
 `GS_PASS` to match your environment. `install.sh --grail` (or `GS_MCP_WITH_GRAIL=1 ./install.sh`)
 loads `load-grail.gs` — the base classes plus `McpServerWithGrail`; plain `install.sh` loads
-only the base `load.gs`. `run-server.sh` calls `McpRouter forkOnPort:`, which launches a
-detached, independent front-end gem and returns; it prints a `System stopSession: <id>` /
-`kill <pid>` line for stopping it later. (Grail, if installed, is picked up per worker gem.)
+only the base `load.gs`. `run-server.sh` builds a base `McpRouter` instance and calls its
+`forkOnPort:` (`run-auth-server.sh` builds a Keycloak-configured `McpAuthRouter` — realm config as
+code, no commit), which launches a
+detached, independent front-end gem and returns; stop it with `./stop-server.sh` (by port), or the
+`System stopSession: <id>` / `kill <pid>` line it prints. (Grail, if installed, is picked up per
+worker gem.)
 
 ## Test
 
@@ -351,7 +361,7 @@ subclass (loaded via `install.sh --grail`); per-connection forking + read timeou
 end-to-end with curl (initialize / `MCP-Session-Id` routing / tools/call / two-client isolation /
 400 / 404 / SSE GET / DELETE, and stalled-connection load) and by the in-image unit tests. Since the
 first release it has also gained: OAuth 2.1 / JWT authentication + TLS (the `McpAuthRouter` subclass),
-read-only mode (a global switch plus per-token write-scope sessions), closed argument schemas + a
+per-router read-only mode (a router toggle plus per-token write-scope sessions), closed argument schemas + a
 kernel-class guard + structured error kinds, and MCP workflow prompts. The Python tools delegate to
 Grail's `ModuleAst` and require a Grail-equipped image (see the Python note above). Future work: true
 concurrent cross-client forwarding, server-initiated SSE messages, and an external OIDC identity

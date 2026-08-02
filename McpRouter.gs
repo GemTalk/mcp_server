@@ -4,10 +4,10 @@ expectvalue /Class
 doit
 McpBase subclass: 'McpRouter'
   instVarNames: #( isRunning mutex routesTable
-                    serverSocket sessions
-                    allowedOriginHosts tlsCertificateFile tlsPrivateKeyFile)
+                    serverSocket sessions allowedOriginHosts tlsCertificateFile
+                    tlsPrivateKeyFile readOnly)
   classVars: #()
-  classInstVars: #( allowedOriginHosts tlsCertificateFile tlsPrivateKeyFile)
+  classInstVars: #()
   poolDictionaries: #()
   inDictionary: Published
   options: #()
@@ -28,16 +28,20 @@ IMPORTANT: runOnPort: is BLOCKING and is meant to be the main activity of a dedi
 GsProcesses only run while the gem is actively executing Smalltalk, so a background fork in an idle
 GCI session would never serve requests.
 
-Start (from a dedicated gem / topaz session):
-    McpRouter runOnPort: 8000
-or, in a separate detached gem that survives logout:
-    McpRouter forkOnPort: 8000
+Configure a router INSTANCE and run or fork it. Config lives on the instance (no class/committed
+state); forkOnPort: carries it to the detached child gem as JSON embedded in the fork string (paths
++ identifiers only, never key material -- see configDict), so nothing is committed and multiple
+differently-configured routers can run at once.
 
-TLS (optional; off by default -- the base router is meant for localhost): configure a PEM
-certificate + UNENCRYPTED private key once, then run/fork as usual to serve HTTPS instead of
-plaintext HTTP. Commit so a forkOnPort: child gem sees the config:
-    McpRouter useTlsCertificateFile: ''/path/server.crt'' privateKeyFile: ''/path/server.key''.
-    System commitTransaction.
+Foreground (blocks this session):
+    McpRouter new runOnPort: 8000
+Detached, independent (survives logout); stop it by port with ./stop-server.sh:
+    McpRouter new forkOnPort: 8000
+Read-only (a localhost convenience so a single user cannot accidentally mutate the image):
+    (McpRouter new readOnly: true) forkOnPort: 8000
+TLS (serve HTTPS): give the instance a PEM cert + UNENCRYPTED private key, then run/fork:
+    (McpRouter new useTlsCertificateFile: ''/path/server.crt'' privateKeyFile: ''/path/server.key'')
+      forkOnPort: 8443
 
 Test it:
     curl -s localhost:8000/mcp -d ''{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}''
@@ -53,74 +57,9 @@ removeallclassmethods McpRouter
 ! ------------------- Class methods for McpRouter
 category: 'origin allowlist'
 classmethod: McpRouter
-allowedOriginHosts
-  "DEPLOYMENT DEFAULT for the Origin-host allowlist (DNS-rebinding protection, MCP Streamable HTTP
-   security). Defaults to loopback hosts; set via allowedOriginHosts: (commit to persist) to permit
-   a browser app's origin host.
-   Class-side config is a DEFAULT ONLY: #initialize copies it into the new router's instance
-   variable, and every instance method reads that copy. So changing this does not affect an
-   already-running router, and a test can configure one router instance without touching global
-   (persistent) state. A forked front end still picks this up, because forkOnPort: can only send a
-   class-side message into the child gem, where runOnPort: creates a fresh instance."
-  ^allowedOriginHosts ifNil: [allowedOriginHosts := self defaultAllowedOriginHosts]
-%
-category: 'origin allowlist'
-classmethod: McpRouter
-allowedOriginHosts: aCollectionOfHostStrings
-  "Replace the Origin-host allowlist. Hosts are compared lower-cased; include loopback if you
-   still want local browsers to connect. Commit to persist across sessions."
-  allowedOriginHosts := aCollectionOfHostStrings
-%
-category: 'origin allowlist'
-classmethod: McpRouter
 defaultAllowedOriginHosts
   "Loopback hosts only -- a page served from any other origin is a DNS-rebinding attempt."
   ^#('localhost' '127.0.0.1' '[::1]')
-%
-category: 'tls'
-classmethod: McpRouter
-disableTls
-  "Clear the TLS server credentials, returning the router to plaintext HTTP (the default). Commit to
-   persist. Mainly for reverting a misconfiguration or restoring the default after a test."
-  tlsCertificateFile := nil.
-  tlsPrivateKeyFile := nil
-%
-category: 'forking'
-classmethod: McpRouter
-forkOnPort: aPort
-  "Start the front end in a SEPARATE, INDEPENDENT gem instead of blocking this session. A plain
-   GsProcess fork would freeze whenever this session goes idle (a forked GsProcess only runs
-   while its gem is executing Smalltalk), so spawn a real gem via GsTsExternalSession and run the
-   blocking accept loop there. The child logs in as the current user via a one-time password (no
-   embedded credential). Grail-ness is NOT a property of this boot: the front end is always
-   McpRouter, and each per-client worker gem independently loads the most capable installed
-   worker class (the Grail subclass if present).
-   Uses forkAndDetachString:, which runs the loop DETACHED -- the child keeps serving after this
-   session logs out, so it is an independent server, NOT tied to the launcher (hence we log our
-   own handle out immediately). Stop it with `McpRouter stopForked` (this session), or from
-   anywhere via `System stopSession: <id>` or `kill <pid>` (both printed below); logout will NOT
-   stop it. Answers a status string. Requires GsTsExternalSession (standard in GS 3.x)."
-  | extClass es sid pid s |
-  extClass := System myUserProfile objectNamed: #GsTsExternalSession.
-  extClass isNil ifTrue: [^'GsTsExternalSession is not available in this image; use runOnPort: or run-server.sh.'].
-  es := extClass newDefaultForGemHost: 'localhost'.
-  es useOnetimePassword.
-  es login.
-  "Capture the child's id/pid BEFORE launching the loop -- once the non-blocking call is running
-   the external session rejects further queries (GciError 'operation in progress')."
-  sid := es stoneSessionId.
-  pid := [(System descriptionOfSession: sid) at: 2] on: Error do: [:e | nil].
-  es forkAndDetachString: self name asString , ' runOnPort: ' , aPort printString.
-  [es logout] on: Error do: [:e | nil].  "release our handle; the detached front end keeps running on its own"
-  SessionTemps current at: #McpForkedServerSession put: sid.  "child session id, for stopForked"
-  s := WriteStream on: String new.
-  s nextPutAll: 'MCP front end forked into gem session '; nextPutAll: sid printString.
-  pid ifNotNil: [:p | s nextPutAll: ' (host pid '; nextPutAll: p printString; nextPutAll: ')'].
-  s nextPutAll: ', listening on port '; nextPutAll: aPort printString; nextPutAll: ' (independent; survives logout).'.
-  s nextPut: Character lf; nextPutAll: 'To stop:  ' , self name asString , ' stopForked   (from this session)'.
-  s nextPut: Character lf; nextPutAll: '     or:  System stopSession: '; nextPutAll: sid printString; nextPutAll: '   (from any session)'.
-  pid ifNotNil: [:p | s nextPut: Character lf; nextPutAll: '     or:  kill '; nextPutAll: p printString; nextPutAll: '   (shell)'].
-  ^s contents
 %
 category: 'instance creation'
 classmethod: McpRouter
@@ -130,67 +69,50 @@ new
 category: 'instance creation'
 classmethod: McpRouter
 runOnPort: aPort
-  "Convenience: create a front end and run its (blocking) accept loop. Intended as
-   the main activity of a dedicated gem."
+  "Convenience: create a default-config front end and run its (blocking) accept loop. Intended as
+   the main activity of a dedicated gem (foreground)."
   ^self new runOnPort: aPort
 %
 category: 'forking'
 classmethod: McpRouter
-stopForked
-  "Stop the front end this session started with forkOnPort:. It is detached/independent, so a
-   logout would NOT stop it -- we terminate its session directly with System stopSession:. For a
-   server forked by another session, use `System stopSession: <id>` with the id printed at fork."
-  | sid |
-  sid := SessionTemps current at: #McpForkedServerSession otherwise: nil.
-  sid isNil ifTrue: [^'No forked server recorded in this session; use System stopSession: <id>.'].
-  [System stopSession: sid] on: Error do: [:e |
-    ^'System stopSession: ' , sid printString , ' failed: ' , ([e description] on: Error do: [:x | e class name asString])].
-  SessionTemps current removeKey: #McpForkedServerSession otherwise: nil.
-  ^'Stopped the forked MCP front end (System stopSession: ' , sid printString , ').'
-%
-category: 'tls'
-classmethod: McpRouter
-tlsCertificateFile
-  "Absolute path to the server's PEM certificate (chain) file, or nil for plaintext HTTP (default).
-   Set via useTlsCertificateFile:privateKeyFile: (commit to persist)."
-  ^tlsCertificateFile
-%
-category: 'tls'
-classmethod: McpRouter
-tlsCertificateFile: aPathOrNil
-  tlsCertificateFile := aPathOrNil
-%
-category: 'tls'
-classmethod: McpRouter
-tlsEnabled
-  "True when both a DEFAULT certificate and private key are configured, so a router created from
-   here will serve HTTPS. Off by default. Instance methods use the instance-side #tlsEnabled, which
-   reflects that router's own copy -- see the class-side #allowedOriginHosts comment."
-  ^tlsCertificateFile notNil and: [tlsPrivateKeyFile notNil]
-%
-category: 'tls'
-classmethod: McpRouter
-tlsPrivateKeyFile
-  "Absolute path to the server's PEM private-key file (may be the same file as the certificate), or
-   nil. The key must be UNENCRYPTED -- we pass a nil passphrase (the API rejects ''). Set via
-   useTlsCertificateFile:privateKeyFile: (commit to persist)."
-  ^tlsPrivateKeyFile
-%
-category: 'tls'
-classmethod: McpRouter
-tlsPrivateKeyFile: aPathOrNil
-  tlsPrivateKeyFile := aPathOrNil
-%
-category: 'tls'
-classmethod: McpRouter
-useTlsCertificateFile: certPath privateKeyFile: keyPath
-  "Enable TLS: serve HTTPS using the PEM certificate + UNENCRYPTED private key at these paths. Both
-   must be readable by the gem process when the listener binds. Commit so a forkOnPort: child gem
-   sees them. Pass the same path twice for a combined cert+key PEM, or two paths."
-  tlsCertificateFile := certPath.
-  tlsPrivateKeyFile := keyPath
+runOnPort: aPort configJson: aJsonString
+  "Child-gem entry the detached fork runs (see the instance forkOnPort:): build a router of THIS
+   class, apply the serialized config, and run its blocking accept loop."
+  ^(self new applyConfigJson: aJsonString) runOnPort: aPort
 %
 ! ------------------- Instance methods for McpRouter
+category: 'origin allowlist'
+method: McpRouter
+allowedOriginHosts
+  "This router's Origin-host allowlist for DNS-rebinding protection. Seeded to loopback in
+   #initialize; override with allowedOriginHosts:."
+  ^allowedOriginHosts
+%
+category: 'origin allowlist'
+method: McpRouter
+allowedOriginHosts: aCollectionOfHostStrings
+  "Replace this router's Origin-host allowlist (hosts compared lower-cased; include loopback if you
+   still want local browsers to connect)."
+  allowedOriginHosts := aCollectionOfHostStrings
+%
+category: 'config'
+method: McpRouter
+applyConfig: aConfigDict
+  "Set this router's config from a parsed config Dictionary (see configDict). A key that is absent
+   leaves the initialize-seeded default; a present key (including a JSON null -> nil) is applied.
+   Subclasses extend via super."
+  allowedOriginHosts := aConfigDict at: 'allowedOriginHosts' ifAbsent: [allowedOriginHosts].
+  tlsCertificateFile := aConfigDict at: 'tlsCertificateFile' ifAbsent: [tlsCertificateFile].
+  tlsPrivateKeyFile := aConfigDict at: 'tlsPrivateKeyFile' ifAbsent: [tlsPrivateKeyFile].
+  readOnly := aConfigDict at: 'readOnly' ifAbsent: [readOnly].
+  ^self
+%
+category: 'config'
+method: McpRouter
+applyConfigJson: aJsonString
+  "Apply a JSON config string (see applyConfig: / configJson)."
+  ^self applyConfig: (self parseBody: aJsonString)
+%
 category: 'running'
 method: McpRouter
 buildRoutes
@@ -225,6 +147,27 @@ completeHandshake: aClientSocket
       [aClientSocket close] on: Error do: [:e | nil].
       false]
 %
+category: 'config'
+method: McpRouter
+configDict
+  "This router's deployment config as a Dictionary of JSON-safe values, for serialization into the
+   fork string (forkOnPort:). FIXED KEY ALLOW-LIST: only these keys travel, so a future ivar cannot
+   silently start carrying a secret. Values are host lists, file PATHS, and booleans -- never key
+   material. Subclasses add their keys via super."
+  | d |
+  d := Dictionary new.
+  d at: 'allowedOriginHosts' put: allowedOriginHosts.
+  d at: 'tlsCertificateFile' put: tlsCertificateFile.
+  d at: 'tlsPrivateKeyFile' put: tlsPrivateKeyFile.
+  d at: 'readOnly' put: readOnly.
+  ^d
+%
+category: 'config'
+method: McpRouter
+configJson
+  "This router's config (configDict) as a JSON string."
+  ^self configDict asJson
+%
 category: 'running'
 method: McpRouter
 configureServerTls
@@ -239,6 +182,48 @@ configureServerTls
     privateKeyPassphrase: nil.  "unencrypted key -> nil passphrase (the API rejects '')"
   GsSecureSocket disableCertificateVerificationOnServer.
   GsSecureSocket setServerCipherListFromString: 'ALL:!ADH:@STRENGTH'
+%
+category: 'tls'
+method: McpRouter
+disableTls
+  "Return THIS router to plaintext HTTP (clear its cert + key)."
+  tlsCertificateFile := nil.
+  tlsPrivateKeyFile := nil
+%
+category: 'forking'
+method: McpRouter
+forkOnPort: aPort
+  "Start THIS router (with its current config) in a SEPARATE, INDEPENDENT gem, detached, so it keeps
+   serving after this session logs out. A plain GsProcess fork would freeze whenever this session
+   goes idle, so spawn a real gem via GsTsExternalSession and run the blocking accept loop there.
+   This router's config travels to the child IN the fork string as JSON (configDict -- paths +
+   identifiers only, never key material), so nothing is committed and multiple differently-configured
+   routers can run at once. The child logs in as the current user via a one-time password.
+   Stop it by port with ./stop-server.sh, or via `System stopSession: <id>` / `kill <pid>` (both
+   printed below). Answers a status string. Requires GsTsExternalSession."
+  | extClass es sid pid s |
+  extClass := System myUserProfile objectNamed: #GsTsExternalSession.
+  extClass isNil ifTrue: [^'GsTsExternalSession is not available in this image; use runOnPort:.'].
+  es := extClass newDefaultForGemHost: 'localhost'.
+  es useOnetimePassword.
+  es login.
+  "Capture the child's id/pid BEFORE launching the loop -- once the non-blocking call is running the
+   external session rejects further queries (GciError 'operation in progress')."
+  sid := es stoneSessionId.
+  pid := [(System descriptionOfSession: sid) at: 2] on: Error do: [:e | nil].
+  es forkAndDetachString: self class name asString , ' runOnPort: ' , aPort printString
+    , ' configJson: ' , (self quoteForFork: self configJson).
+  [es logout] on: Error do: [:e | nil].  "release our handle; the detached front end keeps running"
+  s := WriteStream on: String new.
+  s nextPutAll: self class name asString.
+  readOnly ifTrue: [s nextPutAll: ' (read-only)'].
+  s nextPutAll: ' forked into gem session '; nextPutAll: sid printString.
+  pid ifNotNil: [:p | s nextPutAll: ' (host pid '; nextPutAll: p printString; nextPutAll: ')'].
+  s nextPutAll: ', listening on port '; nextPutAll: aPort printString; nextPutAll: ' (independent; survives logout).'.
+  s nextPut: Character lf; nextPutAll: 'To stop:  ./stop-server.sh   (by port)'.
+  s nextPut: Character lf; nextPutAll: '     or:  System stopSession: '; nextPutAll: sid printString; nextPutAll: '   (from any session)'.
+  pid ifNotNil: [:p | s nextPut: Character lf; nextPutAll: '     or:  kill '; nextPutAll: p printString; nextPutAll: '   (shell)'].
+  ^s contents
 %
 category: 'sessions'
 method: McpRouter
@@ -286,75 +271,19 @@ hostOfOrigin: aString
 category: 'initialization'
 method: McpRouter
 initialize
-  "Snapshot the class-side deployment config into this router's own instance variables. From here on
-   every instance method reads the instance copy, so this router's behaviour is fixed at creation:
-   later class-side changes cannot alter a running server, and a caller (notably a test) can
-   reconfigure THIS router without mutating persistent class state."
+  "Seed this router's config with safe instance-side defaults. There is NO class-side config state:
+   a caller (a launch script, a test) reconfigures the instance via the setters, and forkOnPort:
+   serializes the config into the child gem's fork string. Genuinely-optional fields stay nil (= off);
+   only fields where nil would be unsafe or crash get a seed here."
   mutex := Semaphore forMutualExclusion.
   routesTable := self buildRoutes.
   isRunning := false.
   sessions := Dictionary new.
-  allowedOriginHosts := self class allowedOriginHosts.
-  tlsCertificateFile := self class tlsCertificateFile.
-  tlsPrivateKeyFile := self class tlsPrivateKeyFile.
-  ^self
-%
-category: 'origin allowlist'
-method: McpRouter
-allowedOriginHosts
-  "This router's Origin-host allowlist, snapshotted from the class at #initialize."
-  ^allowedOriginHosts
-%
-category: 'origin allowlist'
-method: McpRouter
-allowedOriginHosts: aCollectionOfHostStrings
-  "Override this router's allowlist without touching class-side (persistent) config."
-  allowedOriginHosts := aCollectionOfHostStrings
-%
-category: 'tls'
-method: McpRouter
-tlsCertificateFile
-  "This router's PEM certificate path, or nil for plaintext HTTP."
-  ^tlsCertificateFile
-%
-category: 'tls'
-method: McpRouter
-tlsCertificateFile: aPathOrNil
-  tlsCertificateFile := aPathOrNil
-%
-category: 'tls'
-method: McpRouter
-tlsEnabled
-  "True when this router has both a certificate and a private key, so runOnPort: binds a
-   GsSecureSocket and serves HTTPS rather than cleartext HTTP."
-  ^tlsCertificateFile notNil and: [tlsPrivateKeyFile notNil]
-%
-category: 'tls'
-method: McpRouter
-tlsPrivateKeyFile
-  "This router's PEM private-key path (may be the same file as the certificate), or nil. The key must
-   be UNENCRYPTED -- configureServerTls passes a nil passphrase."
-  ^tlsPrivateKeyFile
-%
-category: 'tls'
-method: McpRouter
-tlsPrivateKeyFile: aPathOrNil
-  tlsPrivateKeyFile := aPathOrNil
-%
-category: 'tls'
-method: McpRouter
-useTlsCertificateFile: certPath privateKeyFile: keyPath
-  "Enable TLS on THIS router only. Both files must be readable by the gem when the listener binds.
-   Pass the same path twice for a combined cert+key PEM."
-  tlsCertificateFile := certPath.
-  tlsPrivateKeyFile := keyPath
-%
-category: 'tls'
-method: McpRouter
-disableTls
-  "Return THIS router to plaintext HTTP, leaving class-side config alone."
+  allowedOriginHosts := self class defaultAllowedOriginHosts.  "loopback -- a security default"
   tlsCertificateFile := nil.
-  tlsPrivateKeyFile := nil
+  tlsPrivateKeyFile := nil.
+  readOnly := false.
+  ^self
 %
 category: 'running'
 method: McpRouter
@@ -384,8 +313,9 @@ nextSessionId
 category: 'sessions'
 method: McpRouter
 openSession
-  "Create + register a new client session (a worker gem for the current/server user)."
-  ^self openSessionCreating: [:newId | McpSession startWithId: newId]
+  "Create + register a new client session (a worker gem for the current/server user). The worker is
+   opened read-only when THIS router is read-only."
+  ^self openSessionCreating: [:newId | McpSession startWithId: newId readOnly: self readOnly]
 %
 category: 'sessions'
 method: McpRouter
@@ -423,6 +353,19 @@ protocolVersionAllowed: req
   version := (req at: 'headers' ifAbsent: [Dictionary new]) at: 'mcp-protocol-version' ifAbsent: [nil].
   ^version isNil or: [McpDispatcher supportedProtocolVersions includes: version]
 %
+category: 'config'
+method: McpRouter
+quoteForFork: aString
+  "aString as a Smalltalk single-quoted string literal, doubling any interior single quote, so a
+   config JSON embeds safely in the fork's execute-string. Our config values (paths, URLs,
+   identifiers) contain no single quotes, so this is usually a plain wrap."
+  | s |
+  s := WriteStream on: String new.
+  s nextPut: $'.
+  aString do: [:c | c = $' ifTrue: [s nextPut: $']. s nextPut: c].
+  s nextPut: $'.
+  ^s contents
+%
 category: 'sessions'
 method: McpRouter
 randomSessionToken
@@ -435,6 +378,20 @@ randomSessionToken
   f isNil ifTrue: [^self error: 'cannot open /dev/urandom for session-id entropy'].
   bytes := [f next: 16] ensure: [f close].
   ^bytes asHexString
+%
+category: 'read-only'
+method: McpRouter
+readOnly
+  "Whether this router opens its worker sessions read-only (mutating tools hidden + refused). A
+   localhost convenience so a single user cannot accidentally mutate the image -- NOT an access
+   boundary. Default false."
+  ^readOnly
+%
+category: 'read-only'
+method: McpRouter
+readOnly: aBoolean
+  "Open this router's workers read-only (see #readOnly)."
+  readOnly := aBoolean
 %
 category: 'sessions'
 method: McpRouter
@@ -602,10 +559,48 @@ stop
 %
 category: 'tls'
 method: McpRouter
+tlsCertificateFile
+  "This router's PEM certificate path, or nil for plaintext HTTP."
+  ^tlsCertificateFile
+%
+category: 'tls'
+method: McpRouter
+tlsCertificateFile: aPathOrNil
+  tlsCertificateFile := aPathOrNil
+%
+category: 'tls'
+method: McpRouter
+tlsEnabled
+  "True when this router has both a certificate and a private key, so runOnPort: binds a
+   GsSecureSocket and serves HTTPS rather than cleartext HTTP."
+  ^tlsCertificateFile notNil and: [tlsPrivateKeyFile notNil]
+%
+category: 'tls'
+method: McpRouter
 tlsHandshakeTimeoutMs
   "Maximum time (ms) to wait for a client to complete its TLS handshake before abandoning the
    connection, so a stalled or non-TLS client cannot tie up a handler. 10 seconds."
   ^10000
+%
+category: 'tls'
+method: McpRouter
+tlsPrivateKeyFile
+  "This router's PEM private-key path (may be the same file as the certificate), or nil. The key must
+   be UNENCRYPTED -- configureServerTls passes a nil passphrase."
+  ^tlsPrivateKeyFile
+%
+category: 'tls'
+method: McpRouter
+tlsPrivateKeyFile: aPathOrNil
+  tlsPrivateKeyFile := aPathOrNil
+%
+category: 'tls'
+method: McpRouter
+useTlsCertificateFile: certPath privateKeyFile: keyPath
+  "Enable TLS on THIS router only. Both files must be readable by the gem when the listener binds.
+   Pass the same path twice for a combined cert+key PEM."
+  tlsCertificateFile := certPath.
+  tlsPrivateKeyFile := keyPath
 %
 category: 'routing'
 method: McpRouter

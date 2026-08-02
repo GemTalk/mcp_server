@@ -39,6 +39,13 @@ startWithId: anId
 %
 category: 'instance creation'
 classmethod: McpSession
+startWithId: anId readOnly: aBoolean
+  "As startWithId:, but marks the local worker read-only when aBoolean (a read-only McpRouter -- a
+   localhost convenience so a single user cannot accidentally mutate)."
+  ^self new startWithId: anId readOnly: aBoolean
+%
+category: 'instance creation'
+classmethod: McpSession
 startWithId: anId user: aUserId jwt: aJwtString
   "Spawn a JWT-authenticated worker gem for aUserId and answer a started session with the given
    client id. See the instance-side method."
@@ -97,13 +104,21 @@ newWorkerSession
 category: 'initialization'
 method: McpSession
 startWithId: anId
-  "Log in a fresh worker gem as the current (server) user via a one-time password. Used by the
-   local, unauthenticated front end (McpRouter)."
+  "Local worker login with full read-write access (see the readOnly: variant)."
+  ^self startWithId: anId readOnly: false
+%
+category: 'initialization'
+method: McpSession
+startWithId: anId readOnly: aBoolean
+  "Log in a fresh worker gem as the current (server) user via a one-time password (the local,
+   unauthenticated front end, McpRouter). When aBoolean, mark the worker read-only for its whole
+   life -- set inside the worker gem itself, so it needs no commit and is private to that gem."
   id := anId.
   userId := System myUserProfile userId.
   worker := self newWorkerSession.
   worker useOnetimePassword.
   worker login.
+  aBoolean ifTrue: [worker executeString: 'McpServer sessionReadOnly: true'].
   self touch.
   ^self
 %

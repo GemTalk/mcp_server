@@ -3,9 +3,10 @@ set compile_env: 0
 expectvalue /Class
 doit
 McpRouter subclass: 'McpAuthRouter'
-  instVarNames: #( userIdClaim authorizationServers resourceMetadataUrl requiredScopes expectedAudience expectedIssuer writeScope)
+  instVarNames: #( userIdClaim authorizationServers resourceMetadataUrl
+                    requiredScopes expectedAudience expectedIssuer writeScope)
   classVars: #()
-  classInstVars: #( userIdClaim authorizationServers resourceMetadataUrl requiredScopes expectedAudience expectedIssuer writeScope)
+  classInstVars: #()
   poolDictionaries: #()
   inDictionary: Published
   options: #()
@@ -31,9 +32,11 @@ a required scope yields HTTP 403 (`insufficient_scope`). Once initialize succeed
 
 Serves a `WWW-Authenticate: Bearer` challenge (with `error`/`error_description`/`scope` and, when
 set, `resource_metadata`) on 401/403, and RFC 9728 Protected Resource Metadata at
-`/.well-known/oauth-protected-resource`. Config is class-side (commit to persist): userIdClaim,
-requiredScopes (default empty -> no scope check), expectedAudience / expectedIssuer (default nil ->
-skip that check), authorizationServers, resourceMetadataUrl. Deferred (see
+`/.well-known/oauth-protected-resource`. Config is per-instance (set on the router via the setters,
+no committed class state; forkOnPort: serializes it into the child gem''s fork string): userIdClaim
+(default ''sub''), requiredScopes (default empty -> no scope check), expectedAudience / expectedIssuer
+(default nil -> skip that check), authorizationServers, resourceMetadataUrl, writeScope, and the
+inherited readOnly. Configure a router and fork it, e.g. via run-auth-server.sh. Deferred (see
 ~/.claude/plans/step4-authorization-evaluation.md): a real OIDC IdP (authorizationServers stays
 empty and keys are ad-hoc until then).'
 %
@@ -45,114 +48,20 @@ McpAuthRouter category: 'MCPServer'
 removeallmethods McpAuthRouter
 removeallclassmethods McpAuthRouter
 ! ------------------- Class methods for McpAuthRouter
-category: 'metadata'
-classmethod: McpAuthRouter
-authorizationServers
-  "Array of OAuth Authorization Server issuer URLs advertised in Protected Resource Metadata.
-   Empty until a real IdP is configured (Step 4e); set via authorizationServers: (commit to persist)."
-  ^authorizationServers ifNil: [authorizationServers := #()]
-%
-category: 'metadata'
-classmethod: McpAuthRouter
-authorizationServers: anArrayOfUrls
-  authorizationServers := anArrayOfUrls
-%
-category: 'validation'
-classmethod: McpAuthRouter
-expectedAudience
-  "The resource identifier this server's tokens must be bound to (RFC 8707): the token's `aud`
-   claim must include this value. nil (default) skips the audience check -- rely on GemStone's
-   JwtSecurityData audience match. Set to this server's canonical URL once fixed. Commit to persist."
-  ^expectedAudience
-%
-category: 'validation'
-classmethod: McpAuthRouter
-expectedAudience: aStringOrNil
-  expectedAudience := aStringOrNil
-%
-category: 'validation'
-classmethod: McpAuthRouter
-expectedIssuer
-  "The issuer (`iss`) this server trusts to mint tokens. nil (default) skips the RS-layer issuer
-   check -- rely on GemStone's JwtSecurityData issuer match. Set to the IdP's issuer URL in
-   production. Commit to persist."
-  ^expectedIssuer
-%
-category: 'validation'
-classmethod: McpAuthRouter
-expectedIssuer: aStringOrNil
-  expectedIssuer := aStringOrNil
-%
-category: 'validation'
-classmethod: McpAuthRouter
-requiredScopes
-  "Array of OAuth scope strings a token MUST carry (in its space-delimited `scope` claim, or `scp`
-   array) to initialize. Empty (default) requires no scope. A token missing any of these yields
-   HTTP 403 insufficient_scope. Set via requiredScopes: (commit to persist)."
-  ^requiredScopes ifNil: [requiredScopes := #()]
-%
-category: 'validation'
-classmethod: McpAuthRouter
-requiredScopes: anArrayOfScopeStrings
-  requiredScopes := anArrayOfScopeStrings
-%
-category: 'metadata'
-classmethod: McpAuthRouter
-resourceMetadataUrl
-  "Absolute URL of this server's Protected Resource Metadata document, advertised in the
-   `WWW-Authenticate: Bearer resource_metadata=...` challenge. nil (default) omits it. Set once a
-   real external URL exists."
-  ^resourceMetadataUrl
-%
-category: 'metadata'
-classmethod: McpAuthRouter
-resourceMetadataUrl: aStringOrNil
-  resourceMetadataUrl := aStringOrNil
-%
-category: 'userId claim'
-classmethod: McpAuthRouter
-userIdClaim
-  "The JWT payload claim whose value is the GemStone userId to log in as. Must match the userIdKey
-   configured in each user's JwtSecurityData on the GemStone side. Defaults to the OIDC subject
-   claim; set via userIdClaim: (commit to persist)."
-  ^userIdClaim ifNil: [userIdClaim := 'sub']
-%
-category: 'userId claim'
-classmethod: McpAuthRouter
-userIdClaim: aString
-  "Set the JWT claim read for the GemStone userId."
-  userIdClaim := aString
-%
-category: 'validation'
-classmethod: McpAuthRouter
-writeScope
-  "The OAuth scope a token must carry for its session to get read-WRITE access. nil (default) means
-   no per-session write-gating: every authenticated session is full-access (subject only to the
-   global McpServer readOnly switch). Set to e.g. 'mcp:write' to make sessions whose token lacks it
-   read-only (the dangerous tools are hidden + refused for that worker). Commit to persist."
-  ^writeScope
-%
-category: 'validation'
-classmethod: McpAuthRouter
-writeScope: aStringOrNil
-  writeScope := aStringOrNil
-%
 ! ------------------- Instance methods for McpAuthRouter
-category: 'initialization'
+category: 'config'
 method: McpAuthRouter
-initialize
-  "Snapshot the class-side RS-layer deployment config into this router's instance variables, on top
-   of what McpRouter>>initialize snapshots. Instance methods read these copies, so reconfiguring one
-   router (in a test, say) never mutates persistent class state, and a class-side change cannot
-   retroactively alter a router that is already serving."
-  super initialize.
-  userIdClaim := self class userIdClaim.
-  authorizationServers := self class authorizationServers.
-  resourceMetadataUrl := self class resourceMetadataUrl.
-  requiredScopes := self class requiredScopes.
-  expectedAudience := self class expectedAudience.
-  expectedIssuer := self class expectedIssuer.
-  writeScope := self class writeScope.
+applyConfig: aConfigDict
+  "Apply the base + RS-layer config from a parsed config Dictionary (absent key -> keep the seeded
+   default)."
+  super applyConfig: aConfigDict.
+  userIdClaim := aConfigDict at: 'userIdClaim' ifAbsent: [userIdClaim].
+  authorizationServers := aConfigDict at: 'authorizationServers' ifAbsent: [authorizationServers].
+  resourceMetadataUrl := aConfigDict at: 'resourceMetadataUrl' ifAbsent: [resourceMetadataUrl].
+  requiredScopes := aConfigDict at: 'requiredScopes' ifAbsent: [requiredScopes].
+  expectedAudience := aConfigDict at: 'expectedAudience' ifAbsent: [expectedAudience].
+  expectedIssuer := aConfigDict at: 'expectedIssuer' ifAbsent: [expectedIssuer].
+  writeScope := aConfigDict at: 'writeScope' ifAbsent: [writeScope].
   ^self
 %
 category: 'metadata'
@@ -165,6 +74,35 @@ category: 'metadata'
 method: McpAuthRouter
 authorizationServers: anArrayOfUrls
   authorizationServers := anArrayOfUrls
+%
+category: 'auth'
+method: McpAuthRouter
+bearerTokenOf: req
+  "The <jwt> from an `Authorization: Bearer <jwt>` request header (header keys are lower-cased by
+   parseHead:), or nil if absent or not a non-empty Bearer credential."
+  | auth prefix |
+  auth := (req at: 'headers' ifAbsent: [Dictionary new]) at: 'authorization' ifAbsent: [nil].
+  auth isNil ifTrue: [^nil].
+  prefix := 'Bearer '.
+  (auth size > prefix size and: [(auth copyFrom: 1 to: prefix size) asLowercase = prefix asLowercase])
+    ifFalse: [^nil].
+  ^(auth copyFrom: prefix size + 1 to: auth size) trimSeparators
+%
+category: 'config'
+method: McpAuthRouter
+configDict
+  "Extend the base router config (McpRouter>>configDict) with the RS-layer / OIDC settings. Still
+   identifiers + booleans only -- the JWT signing key is trusted Stone-side (addJwtKey), never here."
+  | d |
+  d := super configDict.
+  d at: 'userIdClaim' put: userIdClaim.
+  d at: 'authorizationServers' put: authorizationServers.
+  d at: 'resourceMetadataUrl' put: resourceMetadataUrl.
+  d at: 'requiredScopes' put: requiredScopes.
+  d at: 'expectedAudience' put: expectedAudience.
+  d at: 'expectedIssuer' put: expectedIssuer.
+  d at: 'writeScope' put: writeScope.
+  ^d
 %
 category: 'validation'
 method: McpAuthRouter
@@ -188,62 +126,22 @@ method: McpAuthRouter
 expectedIssuer: aStringOrNil
   expectedIssuer := aStringOrNil
 %
-category: 'validation'
+category: 'initialization'
 method: McpAuthRouter
-requiredScopes
-  "Scopes a token MUST carry for this router to initialize a session; empty requires none."
-  ^requiredScopes
-%
-category: 'validation'
-method: McpAuthRouter
-requiredScopes: anArrayOfScopeStrings
-  requiredScopes := anArrayOfScopeStrings
-%
-category: 'metadata'
-method: McpAuthRouter
-resourceMetadataUrl
-  "Absolute URL of this router's Protected Resource Metadata document, or nil to omit it."
-  ^resourceMetadataUrl
-%
-category: 'metadata'
-method: McpAuthRouter
-resourceMetadataUrl: aStringOrNil
-  resourceMetadataUrl := aStringOrNil
-%
-category: 'userId claim'
-method: McpAuthRouter
-userIdClaim
-  "The JWT payload claim this router reads for the GemStone userId to log in as."
-  ^userIdClaim
-%
-category: 'userId claim'
-method: McpAuthRouter
-userIdClaim: aString
-  userIdClaim := aString
-%
-category: 'validation'
-method: McpAuthRouter
-writeScope
-  "The scope a token must carry for its session to get read-WRITE access, or nil for no gating."
-  ^writeScope
-%
-category: 'validation'
-method: McpAuthRouter
-writeScope: aStringOrNil
-  writeScope := aStringOrNil
-%
-category: 'auth'
-method: McpAuthRouter
-bearerTokenOf: req
-  "The <jwt> from an `Authorization: Bearer <jwt>` request header (header keys are lower-cased by
-   parseHead:), or nil if absent or not a non-empty Bearer credential."
-  | auth prefix |
-  auth := (req at: 'headers' ifAbsent: [Dictionary new]) at: 'authorization' ifAbsent: [nil].
-  auth isNil ifTrue: [^nil].
-  prefix := 'Bearer '.
-  (auth size > prefix size and: [(auth copyFrom: 1 to: prefix size) asLowercase = prefix asLowercase])
-    ifFalse: [^nil].
-  ^(auth copyFrom: prefix size + 1 to: auth size) trimSeparators
+initialize
+  "Seed the RS-layer config with safe instance-side defaults, on top of McpRouter>>initialize. There
+   is NO class-side config state: a launch script / test configures the instance and forkOnPort:
+   serializes it. Optional checks stay nil (= skip); userIdClaim defaults to the OIDC subject claim;
+   requiredScopes / authorizationServers default empty."
+  super initialize.
+  userIdClaim := 'sub'.
+  authorizationServers := #().
+  resourceMetadataUrl := nil.
+  requiredScopes := #().
+  expectedAudience := nil.
+  expectedIssuer := nil.
+  writeScope := nil.
+  ^self
 %
 category: 'sessions'
 method: McpAuthRouter
@@ -296,6 +194,28 @@ rejectionForPayload: payload
 %
 category: 'validation'
 method: McpAuthRouter
+requiredScopes
+  "Scopes a token MUST carry for this router to initialize a session; empty requires none."
+  ^requiredScopes
+%
+category: 'validation'
+method: McpAuthRouter
+requiredScopes: anArrayOfScopeStrings
+  requiredScopes := anArrayOfScopeStrings
+%
+category: 'metadata'
+method: McpAuthRouter
+resourceMetadataUrl
+  "Absolute URL of this router's Protected Resource Metadata document, or nil to omit it."
+  ^resourceMetadataUrl
+%
+category: 'metadata'
+method: McpAuthRouter
+resourceMetadataUrl: aStringOrNil
+  resourceMetadataUrl := aStringOrNil
+%
+category: 'validation'
+method: McpAuthRouter
 scopesOf: payload
   "The scopes a token grants: the space-delimited OAuth `scope` claim (RFC 8693), or an `scp`
    array (some IdPs), as an Array of Strings. Empty if neither is present."
@@ -333,7 +253,8 @@ serveInitialize: req on: conn
   userId := self userIdFromToken: token.
   userId isNil ifTrue: [^self writeAuthError: 401 oauthError: 'invalid_token'
     description: 'Token has no ' , self userIdClaim , ' claim' on: conn].
-  sess := [self openSessionForUser: userId jwt: token readOnly: (self tokenGrantsWrite: token) not]
+  sess := [self openSessionForUser: userId jwt: token
+    readOnly: (self readOnly or: [(self tokenGrantsWrite: token) not])]
     on: Error
     do: [:e |
       self log: 'McpAuthRouter login failed for ' , userId printString , ': '
@@ -402,6 +323,17 @@ tokenRejectionFor: aJwtString
   payload isNil ifTrue: [^Array with: 401 with: 'invalid_token' with: 'Malformed bearer token'].
   ^self rejectionForPayload: payload
 %
+category: 'userId claim'
+method: McpAuthRouter
+userIdClaim
+  "The JWT payload claim this router reads for the GemStone userId to log in as."
+  ^userIdClaim
+%
+category: 'userId claim'
+method: McpAuthRouter
+userIdClaim: aString
+  userIdClaim := aString
+%
 category: 'auth'
 method: McpAuthRouter
 userIdFromToken: aJwtString
@@ -442,4 +374,15 @@ writeAuthError: httpCode oauthError: errorCodeOrNil description: aMessage on: co
   err at: 'jsonrpc' put: '2.0'; at: 'id' put: nil.
   err at: 'error' put: (Dictionary new at: 'code' put: -32600; at: 'message' put: aMessage; yourself).
   conn writeStatus: httpCode reason: reason headers: challenge , crlf body: err asJson
+%
+category: 'validation'
+method: McpAuthRouter
+writeScope
+  "The scope a token must carry for its session to get read-WRITE access, or nil for no gating."
+  ^writeScope
+%
+category: 'validation'
+method: McpAuthRouter
+writeScope: aStringOrNil
+  writeScope := aStringOrNil
 %

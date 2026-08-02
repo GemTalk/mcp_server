@@ -9,9 +9,9 @@
 #
 # Self-contained: generates a throwaway self-signed localhost cert under certs/ if one is absent.
 #
-# No lasting side effects: the TLS credentials are set in the FORKED gem's own session and never
-# committed, so the repository's McpRouter stays plaintext (the committed default). Nothing to
-# restore even if this script is interrupted -- the config lives and dies with the test gem.
+# No lasting side effects: the router's TLS config is per-instance and travels in the fork string;
+# nothing is committed, so no shared/class state is touched and there is nothing to restore even if
+# this script is interrupted.
 #
 # Configure (or export before running):
 #   GEMSTONE    - GemStone product directory (required)
@@ -82,7 +82,7 @@ fi
 echo
 
 # ---------------------------------------------------------------------------
-echo "[2/4] Forking a TLS McpRouter on $HOST:$PORT (session-local TLS config; NOT committed) ..."
+echo "[2/4] Forking a TLS McpRouter on $HOST:$PORT (instance TLS config; nothing committed) ..."
 "$TOPAZ" -l >"$SERVER_LOG" 2>&1 <<TPZ
 set gemstone $GS_STONE
 set username $GS_USER
@@ -90,14 +90,7 @@ set password $GS_PASS
 login
 iferr 1 stk
 run
-| es code |
-code := 'McpRouter tlsCertificateFile: ''$CERT''; tlsPrivateKeyFile: ''$KEY''. McpRouter new runOnPort: $PORT'.
-es := GsTsExternalSession newDefaultForGemHost: 'localhost'.
-es useOnetimePassword.
-es login.
-es forkAndDetachString: code.
-[es logout] on: Error do: [:e | nil].
-true
+(McpRouter new useTlsCertificateFile: '$CERT' privateKeyFile: '$KEY') forkOnPort: $PORT
 %
 logout
 exit
