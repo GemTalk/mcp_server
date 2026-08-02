@@ -71,13 +71,11 @@ request: methodName params: paramsDict
 category: 'helpers'
 method: McpContractTest
 savingReadOnlyDo: aBlock
-  "Run aBlock with the global read-only switch saved + restored and the per-session flag cleared
-   afterward (no commit), so a read-only test cannot leak state into other tests."
-  | was |
-  was := McpServer readOnly.
-  ^[aBlock value] ensure: [
-    McpServer readOnly: was.
-    SessionTemps current removeKey: #McpReadOnly ifAbsent: [nil]]
+  "Run aBlock with the per-session read-only flag cleared BEFORE and after, so a read-only test
+   starts clean and cannot leak the flag into other tests. Read-only is purely the per-session
+   #McpReadOnly flag now -- there is no global switch to save/restore."
+  SessionTemps current removeKey: #McpReadOnly ifAbsent: [nil].
+  ^[aBlock value] ensure: [SessionTemps current removeKey: #McpReadOnly ifAbsent: [nil]]
 %
 category: 'tests - guard'
 method: McpContractTest
@@ -218,7 +216,7 @@ method: McpContractTest
 testReadOnlyAllowsSafeToolCall
   "#7: a safe (read) tool still works while read-only."
   self savingReadOnlyDo: [ | result |
-    McpServer readOnly: true.
+    McpServer sessionReadOnly: true.
     result := (self dispatch: (self toolCall: 'describe_class' args:
       (Dictionary new at: 'className' put: 'Object'; yourself))) at: 'result'.
     self deny: (result at: 'isError')]
@@ -229,9 +227,21 @@ testReadOnlyGatesDangerousToolCall
   "#7: a direct call to a gated tool is refused -32601 kind readOnly, before any validation or side
    effect. Targets a kernel class so a regression can't mutate anything even if the gate failed."
   self savingReadOnlyDo: [ | err |
-    McpServer readOnly: true.
+    McpServer sessionReadOnly: true.
     err := (self dispatch: (self toolCall: 'compile_method' args:
       (Dictionary new at: 'className' put: 'Object'; at: 'source' put: 'x ^1'; yourself))) at: 'error'.
+    self assert: (err at: 'code') equals: -32601.
+    self assert: ((err at: 'data') at: 'kind') equals: 'readOnly']
+%
+category: 'tests - read-only'
+method: McpContractTest
+testReadOnlyGatesExecuteCode
+  "#7: execute_code (arbitrary code -- the tool that most needs gating) is refused -32601 readOnly
+   when the session is read-only."
+  self savingReadOnlyDo: [ | err |
+    McpServer sessionReadOnly: true.
+    err := (self dispatch: (self toolCall: 'execute_code' args:
+      (Dictionary new at: 'code' put: '1'; yourself))) at: 'error'.
     self assert: (err at: 'code') equals: -32601.
     self assert: ((err at: 'data') at: 'kind') equals: 'readOnly']
 %
@@ -240,26 +250,13 @@ method: McpContractTest
 testReadOnlyHidesDangerousToolsFromList
   "#7: read-only hides the gated (dangerous) tools from tools/list; safe tools remain."
   self savingReadOnlyDo: [ | names |
-    McpServer readOnly: true.
+    McpServer sessionReadOnly: true.
     names := self listedToolNames.
     self deny: (names includes: 'compile_method').
     self deny: (names includes: 'execute_code').
     self deny: (names includes: 'commit').
     self assert: (names includes: 'describe_class').
     self assert: (names includes: 'status')]
-%
-category: 'tests - read-only'
-method: McpContractTest
-testSessionReadOnlyGatesIndependentlyOfGlobal
-  "#7b mechanism: the per-session flag (SessionTemps, set by sessionReadOnly:) gates even when the
-   global switch is off."
-  self savingReadOnlyDo: [ | err |
-    McpServer readOnly: false.
-    McpServer sessionReadOnly: true.
-    err := (self dispatch: (self toolCall: 'execute_code' args:
-      (Dictionary new at: 'code' put: '1'; yourself))) at: 'error'.
-    self assert: (err at: 'code') equals: -32601.
-    self assert: ((err at: 'data') at: 'kind') equals: 'readOnly']
 %
 category: 'tests - errors'
 method: McpContractTest

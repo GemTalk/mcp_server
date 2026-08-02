@@ -4,7 +4,7 @@ expectvalue /Class
 doit
 McpBase subclass: 'McpServer'
   instVarNames: #( dispatcher toolRegistry)
-  classVars: #( ReadOnly)
+  classVars: #()
   classInstVars: #()
   poolDictionaries: #()
   inDictionary: Published
@@ -56,24 +56,6 @@ new
 %
 category: 'read-only'
 classmethod: McpServer
-readOnly
-  "Global read-only switch: when true, EVERY worker refuses the dangerous (mutating) tools --
-   they are hidden from tools/list and error on a direct call. Off by default. Commit to persist so
-   forked worker gems see it. A session may also be read-only for other reasons (see the instance
-   isReadOnly / #McpReadOnly SessionTemps flag set per session by McpAuthRouter's write-scope).
-   Backed by a class VARIABLE (not a class-instance variable) so the one switch is shared across
-   McpServer and its worker subclasses (e.g. McpServerWithGrail), rather than each class holding its
-   own copy."
-  ^ReadOnly ifNil: [false]
-%
-category: 'read-only'
-classmethod: McpServer
-readOnly: aBoolean
-  "Set the global read-only switch (commit to persist)."
-  ReadOnly := aBoolean
-%
-category: 'read-only'
-classmethod: McpServer
 readOnlySafeToolNames
   "The allow-list of tools permitted when a session is read-only. FAIL-CLOSED: membership is by
    inclusion, so any tool NOT listed here (including a future one) is treated as dangerous and
@@ -91,9 +73,12 @@ readOnlySafeToolNames
 category: 'read-only'
 classmethod: McpServer
 sessionReadOnly: aBoolean
-  "Mark (or clear) read-only for the CURRENT worker session only, independent of the global switch.
-   Set by McpAuthRouter in a worker gem whose bearer token lacked the write scope (Step 7b). Stored
-   in SessionTemps so it lives and dies with the worker gem and needs no commit."
+  "Mark (or clear) read-only for the CURRENT worker session. The opening router sets this in the
+   worker gem when the session should be read-only -- a router configured read-only (a localhost
+   convenience so a single user cannot accidentally mutate), or an McpAuthRouter session whose bearer
+   token lacked the write scope. Stored in SessionTemps, so it lives and dies with the worker gem,
+   needs no commit, and is private to that gem -- which is why two routers (one read-only, one not)
+   can run at once with no shared state."
   SessionTemps current at: #McpReadOnly put: aBoolean
 %
 ! ------------------- Instance methods for McpServer
@@ -259,9 +244,9 @@ isProtectedClass: aClass
 category: 'read-only'
 method: McpServer
 isReadOnly
-  "Whether THIS worker session is currently read-only: the global switch OR a per-session mark
-   (McpAuthRouter sets #McpReadOnly for a token without the write scope)."
-  ^self class readOnly or: [(SessionTemps current at: #McpReadOnly otherwise: false) == true]
+  "Whether THIS worker session is read-only: the per-session #McpReadOnly flag its opening router set
+   (see sessionReadOnly:). Read-only is entirely per-worker now -- there is no global switch."
+  ^(SessionTemps current at: #McpReadOnly otherwise: false) == true
 %
 category: 'read-only'
 method: McpServer
