@@ -18,6 +18,17 @@
 #   MCP_AUDIENCE- resource identifier the tokens are minted for
 #                                     (default: https://localhost:8443/mcp)
 #   MCP_USERS   - space-separated userIds to provision (default: "alice bob")
+#
+# CROSS-MACHINE USE (Keycloak and the Stone on different hosts): this script normally fetches the
+# realm key itself, which needs to reach KC_URL. When the Stone is on a host that CANNOT reach
+# Keycloak -- e.g. Keycloak bound to loopback on a laptop, Stone in a VM -- fetch on the Keycloak
+# host, copy the PEM over, and set MCP_KID here to skip the fetch:
+#   MCP_KID     - the realm's RS256 kid. When set AND the PEM file already exists, the two curl
+#                 calls are skipped and the existing PEM is trusted as-is.
+#   MCP_PEM_FILE- path to that PEM ON THIS HOST (default: $HOME/idp/keycloak-realm-pubkey.pem).
+#                 The GEM reads this file, so it must be a path on the Stone's machine.
+# Note ISSUER is only ever compared as a STRING against the token's `iss` (key trust is local, via
+# addJwtKey), so it does NOT have to be resolvable from the Stone's host.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -32,23 +43,30 @@ MCP_USERS="${MCP_USERS:-alice bob}"
 TOPAZ="$GEMSTONE/bin/topaz"
 
 ISSUER="$KC_URL/realms/$KC_REALM"
-PEM_FILE="$HOME/idp/keycloak-realm-pubkey.pem"
+PEM_FILE="${MCP_PEM_FILE:-$HOME/idp/keycloak-realm-pubkey.pem}"
 
-echo "Fetching signing key from $ISSUER ..."
-# The realm endpoint exposes the active RS256 signing key as base64 DER; wrap it as a PEM.
-curl -sf "$ISSUER" | python3 -c '
+if [ -n "${MCP_KID:-}" ] && [ -s "$PEM_FILE" ]; then
+  # Cross-machine path: key already fetched elsewhere and copied here.
+  KID="$MCP_KID"
+  echo "Using pre-fetched signing key: $PEM_FILE (kid from MCP_KID; no Keycloak access needed)"
+else
+  echo "Fetching signing key from $ISSUER ..."
+  mkdir -p "$(dirname "$PEM_FILE")"
+  # The realm endpoint exposes the active RS256 signing key as base64 DER; wrap it as a PEM.
+  curl -sf "$ISSUER" | python3 -c '
 import sys, json
 pk = json.load(sys.stdin)["public_key"]
 body = "\n".join(pk[i:i+64] for i in range(0, len(pk), 64))
 print("-----BEGIN PUBLIC KEY-----\n" + body + "\n-----END PUBLIC KEY-----")
 ' > "$PEM_FILE"
 
-# The kid must match the `kid` header Keycloak stamps on its tokens, or the Stone won't find the key.
-KID=$(curl -sf "$ISSUER/protocol/openid-connect/certs" | python3 -c '
+  # The kid must match the `kid` header Keycloak stamps on its tokens, or the Stone won't find the key.
+  KID=$(curl -sf "$ISSUER/protocol/openid-connect/certs" | python3 -c '
 import sys, json
 keys = json.load(sys.stdin)["keys"]
 print(next(k["kid"] for k in keys if k.get("alg") == "RS256" and k.get("use") == "sig"))
 ')
+fi
 
 echo "  issuer:   $ISSUER"
 echo "  audience: $MCP_AUDIENCE"
