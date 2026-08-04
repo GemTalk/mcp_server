@@ -21,4 +21,9 @@ input McpContractTest.gs
 input McpTransportTest.gs
 input McpAuthTest.gs
 
+! MCP authorization-spec conformance suite. Deliberately NOT in run-unit-tests.sh's class list:
+! it is a burn-down checklist whose unimplemented requirements fail on purpose, and that script
+! exits non-zero on any failure. Run it with ./run-conformance.sh.
+input McpAuthConformanceTest.gs
+
 commit
