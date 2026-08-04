@@ -23,13 +23,12 @@
 #                         (e.g. 172.16.73.10) or 0.0.0.0 to accept connections from other hosts.
 #                         Safe here precisely because this router requires a bearer token; never do
 #                         it with the unauthenticated run-server.sh.
-#   MCP_TLS_CERT        - path to a PEM certificate (chain) file; serves HTTPS when set together
-#   MCP_TLS_KEY           with MCP_TLS_KEY. The key must be UNENCRYPTED (GsSecureSocket is given a
-#                         nil passphrase). Both paths are read by the GEM, so they must exist on the
-#                         Stone's machine. Strongly recommended whenever MCP_BIND_ADDRESS is not
-#                         loopback: a bearer token is a password, and without TLS it crosses the
-#                         wire in cleartext. The certificate's SAN must cover the hostname or IP the
-#                         client connects to, or the client will reject it.
+#   MCP_TLS_CERT        - REQUIRED. Path to a PEM certificate (chain) file.
+#   MCP_TLS_KEY         - REQUIRED. Path to the matching UNENCRYPTED PEM private key (GsSecureSocket
+#                         is given a nil passphrase). Both paths are read by the GEM, so they must
+#                         exist on the Stone's machine. McpAuthRouter refuses to run without them.
+#                         The certificate's SAN must cover the hostname or IP the client connects
+#                         to, or the client will reject the connection.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -49,9 +48,16 @@ MCP_TLS_CERT="${MCP_TLS_CERT:-}"
 MCP_TLS_KEY="${MCP_TLS_KEY:-}"
 TOPAZ="$GEMSTONE/bin/topaz"
 
-if [ -n "$MCP_BIND_ADDRESS" ] && [ "$MCP_BIND_ADDRESS" != "127.0.0.1" ] && [ -z "$MCP_TLS_CERT" ]; then
-  echo "WARNING: binding $MCP_BIND_ADDRESS without TLS -- bearer tokens will cross the network in" >&2
-  echo "         cleartext. Set MCP_TLS_CERT/MCP_TLS_KEY unless this is a deliberate test." >&2
+# McpAuthRouter refuses to run without TLS (McpAuthRouter>>requireTls), so fail here with a clear
+# message rather than launching topaz only for the router to signal. The code is the real gate; this
+# is just a faster, friendlier version of the same rule.
+if [ -z "$MCP_TLS_CERT" ] || [ -z "$MCP_TLS_KEY" ]; then
+  echo "ERROR: McpAuthRouter requires TLS. Set both MCP_TLS_CERT and MCP_TLS_KEY (the key must be" >&2
+  echo "       an UNENCRYPTED PEM, and both paths are read by the GEM, so they must exist on the" >&2
+  echo "       Stone's machine). A bearer token is a password and travels in a header on every" >&2
+  echo "       request; cleartext is never appropriate. For an unauthenticated cleartext loopback" >&2
+  echo "       server, use ./run-server.sh instead." >&2
+  exit 1
 fi
 
 # Smalltalk array literal of the required scopes: "mcp:use extra" -> 'mcp:use' 'extra'

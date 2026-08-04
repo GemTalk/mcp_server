@@ -4,7 +4,8 @@ expectvalue /Class
 doit
 McpRouter subclass: 'McpAuthRouter'
   instVarNames: #( userIdClaim authorizationServers resourceMetadataUrl
-                    requiredScopes expectedAudience expectedIssuer writeScope)
+                    requiredScopes expectedAudience expectedIssuer writeScope
+                    bindAddress)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -35,10 +36,26 @@ set, `resource_metadata`) on 401/403, and RFC 9728 Protected Resource Metadata a
 `/.well-known/oauth-protected-resource`. Config is per-instance (set on the router via the setters,
 no committed class state; forkOnPort: serializes it into the child gem''s fork string): userIdClaim
 (default ''sub''), requiredScopes (default empty -> no scope check), expectedAudience / expectedIssuer
-(default nil -> skip that check), authorizationServers, resourceMetadataUrl, writeScope, and the
-inherited readOnly. Configure a router and fork it, e.g. via run-auth-server.sh. Deferred (see
-~/.claude/plans/step4-authorization-evaluation.md): a real OIDC IdP (authorizationServers stays
-empty and keys are ad-hoc until then).'
+(default nil -> skip that check), authorizationServers, resourceMetadataUrl, writeScope, bindAddress,
+and the inherited readOnly. Configure a router and fork it, e.g. via run-auth-server.sh.
+
+TWO INVARIANTS distinguish this class from its superclass, and both are enforced in code rather
+than by a launch script, because runOnPort:/forkOnPort: can be called directly:
+ * bindAddress IS configurable here (McpRouter answers loopback with no setter), because every
+   request must present a valid bearer token. Seeded to loopback all the same -- reachability is
+   something the caller asks for.
+ * TLS is MANDATORY: runOnPort: and forkOnPort: signal unless a certificate and UNENCRYPTED private
+   key are set (see requireTls). A bearer token is a password that travels in a header on every
+   request, so cleartext is never appropriate -- not even on loopback, since a router that is safe
+   today becomes unsafe the moment its bind address is widened.
+
+    (McpAuthRouter new
+        useTlsCertificateFile: ''/path/server.crt'' privateKeyFile: ''/path/server.key'';
+        bindAddress: ''172.16.73.10'';
+        yourself) forkOnPort: 8443
+
+Deferred (see ~/.claude/plans/step4-authorization-evaluation.md): a real OIDC IdP
+(authorizationServers stays empty and keys are ad-hoc until then).'
 %
 expectvalue /Class
 doit
@@ -62,7 +79,55 @@ applyConfig: aConfigDict
   expectedAudience := aConfigDict at: 'expectedAudience' ifAbsent: [expectedAudience].
   expectedIssuer := aConfigDict at: 'expectedIssuer' ifAbsent: [expectedIssuer].
   writeScope := aConfigDict at: 'writeScope' ifAbsent: [writeScope].
+  bindAddress := aConfigDict at: 'bindAddress' ifAbsent: [bindAddress].
   ^self
+%
+category: 'network'
+method: McpAuthRouter
+requireTls
+  "Signal unless this router has TLS credentials. A bearer token IS a password: it grants the
+   holder a GemStone session as its user, and it travels in a request header on every call. Serving
+   this router over cleartext would put that password on the wire, so TLS is not optional here --
+   this is enforced in code rather than left to a launch script, because runOnPort:/forkOnPort: can
+   be called directly.
+   Enforced unconditionally, not only for a non-loopback bindAddress: a router that is safe today
+   becomes unsafe the moment someone widens its bind address, and the check should not depend on
+   remembering that."
+  self tlsEnabled ifTrue: [^self].
+  ^self error: 'McpAuthRouter requires TLS: set useTlsCertificateFile:privateKeyFile: (an ' ,
+    'UNENCRYPTED PEM key) before runOnPort:/forkOnPort:. For a cleartext loopback server with no ' ,
+    'authentication at all, use McpRouter instead.'
+%
+category: 'running'
+method: McpAuthRouter
+runOnPort: aPort
+  "Refuse to serve without TLS, then run the inherited blocking accept loop."
+  self requireTls.
+  ^super runOnPort: aPort
+%
+category: 'forking'
+method: McpAuthRouter
+forkOnPort: aPort
+  "Refuse to fork without TLS. Checked HERE as well as in runOnPort: so the failure surfaces in the
+   launching session rather than only in the detached child gem's log."
+  self requireTls.
+  ^super forkOnPort: aPort
+%
+category: 'network'
+method: McpAuthRouter
+bindAddress
+  "The local address this router's listener binds. Seeded to loopback; set bindAddress: to an
+   interface address (e.g. '172.16.73.10') or '0.0.0.0' to accept connections from other hosts.
+   Unlike the base McpRouter this IS configurable, because every request here must carry a valid
+   bearer token and the transport must be TLS (see requireTls)."
+  ^bindAddress
+%
+category: 'network'
+method: McpAuthRouter
+bindAddress: aHostAddressString
+  "Bind this router's listener to aHostAddressString instead of loopback. Prefer a specific interface
+   address over '0.0.0.0', which accepts connections on every interface the host has."
+  bindAddress := aHostAddressString
 %
 category: 'metadata'
 method: McpAuthRouter
@@ -102,6 +167,7 @@ configDict
   d at: 'expectedAudience' put: expectedAudience.
   d at: 'expectedIssuer' put: expectedIssuer.
   d at: 'writeScope' put: writeScope.
+  d at: 'bindAddress' put: bindAddress.
   ^d
 %
 category: 'validation'
@@ -141,6 +207,7 @@ initialize
   expectedAudience := nil.
   expectedIssuer := nil.
   writeScope := nil.
+  bindAddress := self class loopbackAddress.  "reachable only if the caller asks for it"
   ^self
 %
 category: 'sessions'

@@ -5,7 +5,7 @@ doit
 McpBase subclass: 'McpRouter'
   instVarNames: #( isRunning mutex routesTable
                     serverSocket sessions allowedOriginHosts tlsCertificateFile
-                    tlsPrivateKeyFile readOnly bindAddress)
+                    tlsPrivateKeyFile readOnly)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -16,8 +16,7 @@ McpBase subclass: 'McpRouter'
 expectvalue /Class
 doit
 McpRouter comment: 
-'Native GemStone MCP front end. Runs a blocking HTTP/1.1 accept loop (on loopback by default; see
-bindAddress) that speaks the
+'Native GemStone MCP front end. Runs a blocking HTTP/1.1 accept loop on LOOPBACK ONLY that speaks the
 MCP Streamable HTTP transport (single /mcp endpoint), and gives EACH client its own worker gem
 (an isolated GemStone session) so clients never share uncommitted changes. It routes by the
 MCP-Session-Id header: `initialize` opens a worker (a McpSession) and returns its id; every
@@ -43,10 +42,10 @@ Read-only (a localhost convenience so a single user cannot accidentally mutate t
 TLS (serve HTTPS): give the instance a PEM cert + UNENCRYPTED private key, then run/fork:
     (McpRouter new useTlsCertificateFile: ''/path/server.crt'' privateKeyFile: ''/path/server.key'')
       forkOnPort: 8443
-Reachable from other hosts: bind a real interface address instead of loopback. Do NOT do this on a
-base McpRouter -- it has no authentication, so a reachable port is an open door. Use McpAuthRouter,
-which requires a bearer token:
-    (McpAuthRouter new bindAddress: ''172.16.73.10''; yourself) forkOnPort: 8443
+This class CANNOT be made reachable from another host: bindAddress answers loopback and has no
+setter, because a base McpRouter performs no authentication and a reachable port would be an open
+door into the repository. For a reachable port use McpAuthRouter, which requires a bearer token,
+takes a configurable bindAddress, and refuses to run without TLS.
 
 Test it:
     curl -s localhost:8000/mcp -d ''{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}''
@@ -68,10 +67,9 @@ defaultAllowedOriginHosts
 %
 category: 'network'
 classmethod: McpRouter
-defaultBindAddress
-  "Loopback only -- the safe default. A base McpRouter has NO authentication, so binding it to an
-   address other than loopback would expose an unauthenticated server; that is why this must be set
-   deliberately, per instance, and why McpAuthRouter exists for reachable ports."
+loopbackAddress
+  "The only address a base McpRouter will ever bind. Kept here as the single place the literal
+   lives; McpAuthRouter seeds its configurable bindAddress from it too."
   ^'127.0.0.1'
 %
 category: 'instance creation'
@@ -118,7 +116,6 @@ applyConfig: aConfigDict
   tlsCertificateFile := aConfigDict at: 'tlsCertificateFile' ifAbsent: [tlsCertificateFile].
   tlsPrivateKeyFile := aConfigDict at: 'tlsPrivateKeyFile' ifAbsent: [tlsPrivateKeyFile].
   readOnly := aConfigDict at: 'readOnly' ifAbsent: [readOnly].
-  bindAddress := aConfigDict at: 'bindAddress' ifAbsent: [bindAddress].
   ^self
 %
 category: 'config'
@@ -130,18 +127,11 @@ applyConfigJson: aJsonString
 category: 'network'
 method: McpRouter
 bindAddress
-  "The local address this router's listener binds. Seeded to loopback ('127.0.0.1') in #initialize;
-   set to a specific interface address (e.g. '172.16.73.10') or '0.0.0.0' for all interfaces to make
-   the server reachable from other hosts."
-  ^bindAddress
-%
-category: 'network'
-method: McpRouter
-bindAddress: aHostAddressString
-  "Bind this router's listener to aHostAddressString instead of loopback. A reachable address on a
-   base McpRouter exposes an UNAUTHENTICATED server -- use McpAuthRouter (bearer tokens) for anything
-   beyond loopback, and prefer a specific interface address over '0.0.0.0'."
-  bindAddress := aHostAddressString
+  "The local address this router's listener binds. For a base McpRouter this is ALWAYS loopback and
+   there is deliberately no setter: this class performs no authentication, so a reachable port would
+   be an open door into the repository. McpAuthRouter overrides this with a configurable address,
+   because it requires a bearer token and enforces TLS."
+  ^self class loopbackAddress
 %
 category: 'running'
 method: McpRouter
@@ -190,7 +180,6 @@ configDict
   d at: 'tlsCertificateFile' put: tlsCertificateFile.
   d at: 'tlsPrivateKeyFile' put: tlsPrivateKeyFile.
   d at: 'readOnly' put: readOnly.
-  d at: 'bindAddress' put: bindAddress.
   ^d
 %
 category: 'config'
@@ -314,14 +303,13 @@ initialize
   tlsCertificateFile := nil.
   tlsPrivateKeyFile := nil.
   readOnly := false.
-  bindAddress := self class defaultBindAddress.  "loopback -- a security default"
   ^self
 %
 category: 'running'
 method: McpRouter
 makeListenerOnPort: aPort
-  "Create and bind the listening socket (backlog 16) on self bindAddress -- loopback unless the
-   instance was configured otherwise. When TLS is configured (self tlsEnabled) install this gem's
+  "Create and bind the listening socket (backlog 16) on self bindAddress -- always loopback for this
+   class; McpAuthRouter overrides it. When TLS is configured (self tlsEnabled) install this gem's
    server credentials (configureServerTls) and bind a GsSecureSocket, so accepted connections can
    complete a TLS handshake (completeHandshake:); otherwise bind a plain GsSocket serving cleartext
    HTTP. Signals an error if the bind fails."

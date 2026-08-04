@@ -232,6 +232,28 @@ testProtectedResourceMetadataServed
 %
 category: 'tests'
 method: McpAuthTest
+testRequiresTlsToServe
+  "A bearer token is a password that rides in a header on every request, so this router refuses to
+   serve cleartext. The guard lives in requireTls and BOTH entry points check it, so calling
+   runOnPort:/forkOnPort: directly cannot bypass what run-auth-server.sh enforces. Enforced even for
+   the default loopback bindAddress, since widening the address later must not silently downgrade
+   the transport. Neither call reaches a socket: the guard signals first.
+   Asserted against Error rather than the concrete UserDefinedError that `self error:` signals, so
+   the test survives the guard being reimplemented with a purpose-built exception class."
+  | r |
+  r := McpAuthRouter new.
+  self deny: r tlsEnabled.
+  self should: [r requireTls] raise: Error.
+  self should: [r runOnPort: 65000] raise: Error.
+  self should: [r forkOnPort: 65000] raise: Error.
+  "with credentials set the guard passes and answers the router (tlsEnabled only checks both paths
+   are present, so throwaway paths suffice here)"
+  r useTlsCertificateFile: '/tmp/nonexistent.crt' privateKeyFile: '/tmp/nonexistent.key'.
+  self shouldnt: [r requireTls] raise: Error.
+  self assert: r requireTls == r
+%
+category: 'tests'
+method: McpAuthTest
 testSufficientScopeAccepted
   "A token whose space-delimited scope claim contains the required scope passes."
   | p router |

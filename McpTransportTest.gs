@@ -243,6 +243,34 @@ testSupportedProtocolVersionServed
 %
 category: 'tests'
 method: McpTransportTest
+testBaseRouterIsLoopbackOnly
+  "A base McpRouter performs NO authentication, so it must not be bindable to a reachable address:
+   bindAddress answers loopback, there is deliberately no setter, and 'bindAddress' is not a config
+   key (so it cannot arrive via a fork string either)."
+  | r |
+  r := McpRouter new.
+  self assert: r bindAddress equals: '127.0.0.1'.
+  self deny: (McpRouter canUnderstand: #bindAddress:).
+  self deny: (r configDict includesKey: 'bindAddress').
+  "and a fork string cannot smuggle one in"
+  r applyConfig: (Dictionary new at: 'bindAddress' put: '0.0.0.0'; yourself).
+  self assert: r bindAddress equals: '127.0.0.1'
+%
+category: 'tests'
+method: McpTransportTest
+testAuthRouterBindAddressIsConfigurableButDefaultsToLoopback
+  "McpAuthRouter DOES take a bindAddress -- every request must carry a bearer token -- but it still
+   starts on loopback, so reachability is something the caller asks for explicitly."
+  | r |
+  r := McpAuthRouter new.
+  self assert: r bindAddress equals: '127.0.0.1'.
+  self assert: (McpAuthRouter canUnderstand: #bindAddress:).
+  r bindAddress: '172.16.73.10'.
+  self assert: r bindAddress equals: '172.16.73.10'.
+  self assert: (r configDict at: 'bindAddress') equals: '172.16.73.10'
+%
+category: 'tests'
+method: McpTransportTest
 testTlsDisabledByDefault
   "A fresh router serves plaintext HTTP: no certificate configured, so tlsEnabled is false. (The TLS
    handshake itself is verified by a live curl check, not here -- McpMockSocket is not a real TLS
