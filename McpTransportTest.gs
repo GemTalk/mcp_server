@@ -108,19 +108,6 @@ testAbsentOriginServed
 %
 category: 'tests'
 method: McpTransportTest
-testAuthRouterBindAddressIsConfigurableButDefaultsToLoopback
-  "McpAuthRouter DOES take a bindAddress -- every request must carry a bearer token -- but it still
-   starts on loopback, so reachability is something the caller asks for explicitly."
-  | r |
-  r := McpAuthRouter new.
-  self assert: r bindAddress equals: '127.0.0.1'.
-  self assert: (McpAuthRouter canUnderstand: #bindAddress:).
-  r bindAddress: '172.16.73.10'.
-  self assert: r bindAddress equals: '172.16.73.10'.
-  self assert: (r configDict at: 'bindAddress') equals: '172.16.73.10'
-%
-category: 'tests'
-method: McpTransportTest
 testBaseRouterIsLoopbackOnly
   "A base McpRouter performs NO authentication, so it must not be bindable to a reachable address:
    bindAddress answers loopback, there is deliberately no setter, and 'bindAddress' is not a config
@@ -147,32 +134,20 @@ testChunkedDeliveryParses
 category: 'tests'
 method: McpTransportTest
 testConfigJsonRoundTrips
-  "The fork-string mechanism: a router's config survives configJson -> applyConfigJson: exactly.
-   Every set field is carried (including the McpAuthRouter RS-layer keys); an unset field keeps its
-   safe initialize-seeded default."
+  "The fork-string mechanism: a base router's config survives configJson -> applyConfigJson: exactly.
+   Every set field on the fixed key allow-list is carried; an unset field keeps its safe
+   initialize-seeded default. (McpAuthRouter's RS-layer keys are covered in McpAuthTest.)"
   | src dst |
-  src := McpAuthRouter new.
+  src := McpRouter new.
   src readOnly: true;
-    allowedOriginHosts: #('example.com');
-    bindAddress: '172.16.73.10';
-    userIdClaim: 'preferred_username';
-    requiredScopes: #('mcp:use' 'mcp:write');
-    expectedIssuer: 'https://issuer';
-    writeScope: 'mcp:write'.
-  dst := McpAuthRouter new applyConfigJson: src configJson.
+    allowedOriginHosts: #('example.com').
+  dst := McpRouter new applyConfigJson: src configJson.
   self assert: dst readOnly.
   self assert: dst allowedOriginHosts equals: #('example.com').
-  self assert: dst bindAddress equals: '172.16.73.10'.
-  self assert: dst userIdClaim equals: 'preferred_username'.
-  self assert: dst requiredScopes equals: #('mcp:use' 'mcp:write').
-  self assert: dst expectedIssuer equals: 'https://issuer'.
-  self assert: dst writeScope equals: 'mcp:write'.
-  self assert: dst expectedAudience isNil.       "unset optional stays nil through the round-trip"
-  self assert: dst tlsCertificateFile isNil.
-  "an unconfigured router round-trips to its defaults -- bindAddress must stay loopback, since a
-   silently-widened bind would expose the server"
-  self assert: (McpAuthRouter new applyConfigJson: McpAuthRouter new configJson) userIdClaim equals: 'sub'.
-  self assert: (McpAuthRouter new applyConfigJson: McpAuthRouter new configJson) bindAddress equals: '127.0.0.1'
+  self assert: dst tlsCertificateFile isNil.     "unset optional stays nil through the round-trip"
+  self assert: dst tlsPrivateKeyFile isNil.
+  "an unconfigured router round-trips to its safe defaults -- read-write on, loopback origins"
+  self deny: (McpRouter new applyConfigJson: McpRouter new configJson) readOnly
 %
 category: 'tests'
 method: McpTransportTest
