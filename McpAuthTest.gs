@@ -205,20 +205,33 @@ testNonBearerReturns401
 %
 category: 'tests'
 method: McpAuthTest
-testProtectedResourceMetadataSchemeFollowsTls
-  "The RFC 9728 `resource` identifier's scheme must follow the transport: plaintext -> http, and
-   TLS-enabled -> https (not a hard-coded http). tlsEnabled only checks that both cert+key paths are
-   set, so throwaway paths suffice. Each router carries its own TLS config, so the two cases are just
-   two instances -- nothing global is touched and nothing needs restoring."
-  | plain secure |
+testProtectedResourceMetadataPublishesConfiguredResource
+  "The RFC 9728 `resource` identifier is the CONFIGURED canonical identifier (expectedAudience) --
+   the same value the router validates in a token's aud claim -- and it does not vary with the
+   transport or with the request.
+   This replaces an earlier test asserting the opposite (that the scheme followed the router's own
+   TLS setting, over a host taken from the request's Host header). Both derivations were wrong: what
+   the router publishes must be what it enforces, or a client that obeys the document obtains a token
+   this router then refuses; and taking the host from the request let the caller choose the identifier
+   we publish. Each router carries its own config, so the two cases here are just two instances --
+   nothing global is touched and nothing needs restoring."
+  | id plain secure spoofed |
+  id := 'https://mcp.example:8443/mcp'.
   plain := McpAuthRouter new.
+  plain expectedAudience: id.
   plain disableTls.
-  self assert: (self includesCS: '"resource":"http://'
+  self assert: (self includesCS: '"resource":"' , id , '"'
     in: (self runRequest: (self get: '/.well-known/oauth-protected-resource') on: plain)).
   secure := McpAuthRouter new.
+  secure expectedAudience: id.
   secure useTlsCertificateFile: '/tmp/mcp-x.crt' privateKeyFile: '/tmp/mcp-x.key'.
-  self assert: (self includesCS: '"resource":"https://'
-    in: (self runRequest: (self get: '/.well-known/oauth-protected-resource') on: secure))
+  self assert: (self includesCS: '"resource":"' , id , '"'
+    in: (self runRequest: (self get: '/.well-known/oauth-protected-resource') on: secure)).
+  "a spoofed Host must not change what we publish"
+  spoofed := 'GET /.well-known/oauth-protected-resource HTTP/1.1' , self crlf ,
+    'Host: evil.example.com' , self crlf , self crlf.
+  self assert: (self includesCS: '"resource":"' , id , '"'
+    in: (self runRequest: spoofed on: secure))
 %
 category: 'tests'
 method: McpAuthTest
@@ -278,9 +291,9 @@ testTokenWithoutWriteScopeGivesReadOnlySession
     sid := self sessionIdFrom: out.
     self deny: sid isNil.
     out := self runRequest: (self post: (self callBody: 'compile_method' arguments: '{"className":"Object","source":"x ^1"}')
-      headers: 'MCP-Session-Id: ' , sid , self crlf) on: router.
+      headers: 'MCP-Session-Id: ' , sid , self crlf , 'Authorization: Bearer ' , jwt , self crlf) on: router.
     self assert: (self includesCS: 'readOnly' in: out).
-    out := self runRequest: (self post: self statusBody headers: 'MCP-Session-Id: ' , sid , self crlf) on: router.
+    out := self runRequest: (self post: self statusBody headers: 'MCP-Session-Id: ' , sid , self crlf , 'Authorization: Bearer ' , jwt , self crlf) on: router.
     self assert: (self includesCS: 'user=McpWriteScopeUser' in: out)]
 %
 category: 'tests'
@@ -297,7 +310,7 @@ testTokenWithWriteScopeGivesWritableSession
     sid := self sessionIdFrom: out.
     self deny: sid isNil.
     out := self runRequest: (self post: (self callBody: 'execute_code' arguments: '{"code":"6 * 7"}')
-      headers: 'MCP-Session-Id: ' , sid , self crlf) on: router.
+      headers: 'MCP-Session-Id: ' , sid , self crlf , 'Authorization: Bearer ' , jwt , self crlf) on: router.
     self assert: (self includesCS: '42' in: out).
     self deny: (self includesCS: 'readOnly' in: out)]
 %
@@ -331,7 +344,7 @@ testValidTokenOpensPerUserSession
     self assert: (self includesCS: 'MCP-Session-Id:' in: initOut).
     sid := self sessionIdFrom: initOut.
     self deny: sid isNil.
-    statusOut := self runRequest: (self post: self statusBody headers: 'MCP-Session-Id: ' , sid , self crlf) on: router.
+    statusOut := self runRequest: (self post: self statusBody headers: 'MCP-Session-Id: ' , sid , self crlf , 'Authorization: Bearer ' , jwt , self crlf) on: router.
     self assert: (self includesCS: 'user=McpAuthTestUser' in: statusOut)]
 %
 category: 'helpers'

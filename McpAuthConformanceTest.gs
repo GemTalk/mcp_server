@@ -18,38 +18,37 @@ McpAuthConformanceTest comment:
 OAuth 2.1 Resource Server. One test per normative requirement, named after the requirement and
 carrying the spec clause in its comment.
 
-THIS SUITE IS A BURN-DOWN CHECKLIST, NOT A REGRESSION GATE. Several tests assert behavior the
-router does not implement yet, so they FAIL on purpose. Run it with ./run-conformance.sh, which
-reports a per-test score and does NOT fail the build. It is deliberately NOT in
-run-unit-tests.sh''s class list: that script exits non-zero on any failure, so adding a red suite
-there would mask real regressions. Once this suite is green, move it into that list and delete
-this paragraph.
+STATUS: 25 of 25 passing, identically on 3.7.5 and 4.0.0. It started at 10 of 25 and was written
+deliberately red, as a burn-down checklist; it is now a regression gate and is included in
+run-unit-tests.sh. ./run-conformance.sh still exists to score it test-by-test, which is the more
+useful output while changing authorization behavior.
 
-BASELINE at the time of writing: 10 of 25 passing, identically on 3.7.5 and 4.0.0. The 15 failures
-are five distinct gaps, roughly in severity order:
- 1. Only initialize is authenticated -- afterwards the MCP-Session-Id alone admits a request, so
-    token expiry and revocation stop being enforced, and GET/DELETE take no token at all.
-    (testRoutedRequestRequiresBearerToken, testRoutedRequestWithExpiredTokenRejected,
-    testGetStreamRequiresBearerToken, testDeleteRequiresBearerToken)
- 2. MUST-level checks are optional config that defaults to off, so a router can be started in a
-    non-conformant state: no audience validation, no advertised authorization server, and a
-    cleartext authorization server is accepted. (testRefusesToRunWithoutExpectedAudience,
-    testRefusesToRunWithoutAuthorizationServer, testRefusesNonHttpsAuthorizationServer)
- 3. A token with no exp claim is accepted, and a token whose signature is garbage is judged on its
-    unverified claims -- so it can come back 403 with the required scope names attached.
-    (testTokenWithoutExpiryRejected, testForgedSignatureRejectedWith401AndLeaksNoScopes)
- 4. The challenge and the metadata document give a client too little to act on: no scope on the 401,
-    no scopes_supported, and resource_metadata only if separately configured.
-    (testChallengeCarriesRequiredScopeOn401, testMetadataDeclaresScopesSupported,
-    testChallengeCarriesResourceMetadataWithoutExtraConfiguration)
- 5. Discovery details: the published resource identifier is taken from the client''s Host header,
-    the path-scoped well-known URI is not served, and a query string on the well-known path falls
-    through to the SSE handler. (testMetadataResourceIgnoresHostHeader,
-    testMetadataServedAtPathScopedWellKnownUri, testMetadataPathToleratesQueryString)
+WHAT CLOSING IT CHANGED, in the order the gaps were closed -- worth knowing, because two of these
+alter behavior a client can observe:
+ 1. Start-up guards (requireResourceServerConfig): a router now REFUSES to run or fork without an
+    expectedAudience and at least one https authorization server. Audience validation and naming an
+    authorization server are MUSTs, so they cannot be settings that default to off.
+ 2. The metadata document is built from configuration, not from the request. `resource` is now
+    expectedAudience -- the same identifier the router validates -- where it used to be assembled
+    from the request Host header and the TLS setting, which let the caller choose the identifier we
+    published. scopes_supported is published, and resource_metadata is DERIVED, so a 401 always
+    carries it instead of only when someone remembered to set it.
+ 3. Every request is authenticated (requestAuthorized:on:), not just initialize, and a request that
+    names a session must present a token belonging to that session''s user. The MCP-Session-Id is no
+    longer a credential.
+ 4. Token signatures are verified at this layer (signatureVerified:) before any claim is believed.
+    This became REQUIRED by (3), not merely tidier: with no GemStone login behind a non-initialize
+    request, this is the only place a forgery can be caught -- otherwise an unsigned token carrying a
+    victim''s userId claim plus their session id would have been accepted.
+ 5. A token with no exp claim is refused (it was accepted: the guard read `exp notNil and: [expired]`,
+    which fails open).
 
-NOTE ON FIXING (2): making expectedAudience mandatory will break the McpAuthTest tests that build
-routers with expectedAudience: nil. That is the correct outcome -- those tests predate the guard --
-but they must be updated in the same change.
+A DISCARDED ASSERTION, recorded so it is not reintroduced: an early version of
+testForgedSignatureRejectedAsInvalidTokenNotInsufficientScope also asserted that the challenge
+withheld the required scope names from an unauthenticated caller. That is not a leak this protocol
+recognises -- RFC 9728 publishes scopes_supported in an unauthenticated metadata document by design,
+and the Scope Selection Strategy has the challenge repeat them so a client knows what to request.
+Scope names are public here; only the status code was ever wrong.
 
 VERSIONS. McpDispatcher>>supportedProtocolVersions claims 2025-06-18 and 2025-11-25. Each test
 comment names the revisions its requirement appears in. The three revisions differ in ways that
@@ -469,30 +468,55 @@ method: McpAuthConformanceTest
 testInsufficientScopeReturns403WithScopeAndResourceMetadata
   "Scope Challenge Handling (2025-11-25, draft): a token with insufficient scope SHOULD get 403
    with error=insufficient_scope, scope naming the required scopes, and resource_metadata 'for
-   consistency with 401 responses'. All required scopes go in ONE challenge."
-  | claims out challenge |
-  claims := self validClaims.
-  claims at: 'scope' put: 'openid'.  "authenticated, but not authorized for this resource"
-  out := self driveRequest: (self postInitWithToken: (self tokenWithClaims: claims))
-    on: self conformantRouter.
-  self assert: (self statusOf: out) equals: 403.
-  challenge := self headerNamed: 'WWW-Authenticate' in: out.
-  self deny: challenge isNil.
-  self assert: (self includesCS: 'error="insufficient_scope"' in: challenge).
-  self assert: (self includesCS: 'scope="mcp:use"' in: challenge).
-  self assert: (self includesCS: 'resource_metadata=' in: challenge)
+   consistency with 401 responses'. All required scopes go in ONE challenge.
+   Runs with the fixture key trusted: the subject here is a genuinely VALID token that is merely
+   under-scoped, so its signature has to verify or it would be refused as invalid_token first."
+  ^self withConformanceKeyDo: [ | claims out challenge |
+    claims := self validClaims.
+    claims at: 'scope' put: 'openid'.  "authenticated, but not authorized for this resource"
+    out := self driveRequest: (self postInitWithToken: (self tokenWithClaims: claims))
+      on: self conformantRouter.
+    self assert: (self statusOf: out) equals: 403.
+    challenge := self headerNamed: 'WWW-Authenticate' in: out.
+    self deny: challenge isNil.
+    self assert: (self includesCS: 'error="insufficient_scope"' in: challenge).
+    self assert: (self includesCS: 'scope="mcp:use"' in: challenge).
+    self assert: (self includesCS: 'resource_metadata=' in: challenge)]
+%
+category: 'helpers'
+method: McpAuthConformanceTest
+conformanceKeyId
+  "The kid the fixture tokens are signed under."
+  ^'mcp-conformance-key'
+%
+category: 'helpers'
+method: McpAuthConformanceTest
+withConformanceKeyDo: aBlock
+  "Register the example public key as a TRUSTED Stone key under conformanceKeyId for the duration of
+   aBlock, then remove it. Needed because tokenRejectionFor: verifies a token's signature against the
+   Stone's trusted keys before believing any claim, so a fixture token is only meaningful while its
+   key is trusted.
+   Removes any leftover of the same id before adding: System addJwtKey:withId: RAISES when the id
+   already exists, so a previous test that died before its cleanup would otherwise break every test
+   after it."
+  [System removeJwtKeyWithId: self conformanceKeyId] on: Error do: [:e | nil].
+  System addJwtKey: JsonWebToken example_publicKey withId: self conformanceKeyId.
+  ^[aBlock value] ensure: [
+    [System removeJwtKeyWithId: self conformanceKeyId] on: Error do: [:e | nil]]
 %
 category: 'helpers'
 method: McpAuthConformanceTest
 rsVerdictFor: aClaimsDict
   "The router's RESOURCE-SERVER verdict on a token carrying aClaimsDict: nil to accept, else
-   { httpCode. oauthErrorCode. description }.
+   { httpCode. oauthErrorCode. description }. Runs with the fixture signing key trusted, so the
+   verdict reflects the CLAIM under test rather than an untrusted signature.
    The claim-level tests below assert this rather than an HTTP status ON PURPOSE. Driving a whole
    initialize would reach the GemStone login, and these fixture tokens name users that were never
    provisioned, so the login fails and the response is 401 no matter what the RS layer decided --
    an HTTP-level assertion would pass even for a claim the router never checked. (That is not
    hypothetical: the no-expiry test passed that way before being rewritten to assert the verdict.)"
-  ^self conformantRouter tokenRejectionFor: (self tokenWithClaims: aClaimsDict)
+  ^self withConformanceKeyDo: [
+    self conformantRouter tokenRejectionFor: (self tokenWithClaims: aClaimsDict)]
 %
 category: 'tests - token validation'
 method: McpAuthConformanceTest
@@ -566,21 +590,30 @@ testAudienceArrayContainingThisResourceAccepted
 %
 category: 'tests - token validation'
 method: McpAuthConformanceTest
-testForgedSignatureRejectedWith401AndLeaksNoScopes
-  "OAuth 2.1 section 5.3: a token that fails validation is an invalid token -- 401 invalid_token,
-   not 403. The RS-layer claim checks currently run on an UNVERIFIED payload and the signature is
-   only checked later, at the GemStone login, so a token with a garbage signature is judged on its
-   claims: one with no scope claim comes back 403 insufficient_scope, which both mis-states the
-   error and hands an unauthenticated caller the exact scope names the deployment requires."
-  | verdict out challenge |
-  verdict := self conformantRouter tokenRejectionFor: self forgedToken.
-  self deny: verdict isNil.
-  self assert: (verdict at: 1) equals: 401.
-  self assert: (verdict at: 2) equals: 'invalid_token'.
-  out := self driveRequest: (self postInitWithToken: self forgedToken) on: self conformantRouter.
-  self assert: (self statusOf: out) equals: 401.
-  challenge := self headerNamed: 'WWW-Authenticate' in: out.
-  self deny: (self includesCS: 'mcp:use' in: challenge)
+testForgedSignatureRejectedAsInvalidTokenNotInsufficientScope
+  "OAuth 2.1 section 5.3: a token that fails validation is an INVALID token -- 401 invalid_token, not
+   403. A token whose signature does not verify must be refused on that ground alone, before any of its
+   claims is believed. Judging an unverified token on its claims (as this router once did, leaving the
+   signature to the later GemStone login) meant a forged token whose payload merely lacked a scope came
+   back 403 insufficient_scope, describing a forgery as an authorization shortfall.
+   This test deliberately does NOT assert that the challenge withholds the scope names. An earlier
+   version did, on the theory that naming them to an unauthenticated caller leaked configuration -- but
+   that is not a leak this protocol recognises: RFC 9728 has the server publish scopes_supported in a
+   metadata document served unauthenticated on purpose, and the Scope Selection Strategy has it repeat
+   them in the challenge so a client knows what to ask for. Scope names are public here; only the
+   status code was ever wrong.
+   Asserted with the fixture key TRUSTED, so the refusal is genuinely about THIS token's signature
+   failing to verify, and not merely about the Stone holding no trusted keys at all."
+  ^self withConformanceKeyDo: [ | verdict out challenge |
+    verdict := self conformantRouter tokenRejectionFor: self forgedToken.
+    self deny: verdict isNil.
+    self assert: (verdict at: 1) equals: 401.
+    self assert: (verdict at: 2) equals: 'invalid_token'.
+    out := self driveRequest: (self postInitWithToken: self forgedToken) on: self conformantRouter.
+    self assert: (self statusOf: out) equals: 401.
+    challenge := self headerNamed: 'WWW-Authenticate' in: out.
+    self assert: (self includesCS: 'error="invalid_token"' in: challenge).
+    self deny: (self includesCS: 'insufficient_scope' in: challenge)]
 %
 category: 'tests - per-request authorization'
 method: McpAuthConformanceTest

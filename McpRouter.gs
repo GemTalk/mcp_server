@@ -448,6 +448,11 @@ route: req on: conn
     ^self writeSessionError: 'Origin not allowed (DNS-rebinding protection)' code: 403 reason: 'Forbidden' on: conn].
   (self protocolVersionAllowed: req) ifFalse: [
     ^self writeSessionError: 'Unsupported MCP-Protocol-Version' code: 400 reason: 'Bad Request' on: conn].
+  "Credential gate, AFTER the transport gates (they concern the connection, not the principal, and
+   are cheaper). The base class authenticates nothing and always passes; McpAuthRouter overrides this
+   to require a valid bearer token on every request. A false answer means the hook has already written
+   the error response."
+  (self requestAuthorized: req on: conn) ifFalse: [^self].
   httpMethod := (req at: 'method' ifAbsent: ['']) asUppercase.
   handler := routesTable
     at: httpMethod
@@ -553,12 +558,29 @@ serveRouted: body sessionId: sid on: conn
    worker's JSON response, or 202 for a notification (empty response)."
   | sess resp |
   sid isNil ifTrue: [^self writeSessionError: 'Missing MCP-Session-Id header (call initialize first)' code: 400 reason: 'Bad Request' on: conn].
-  sess := mutex critical: [sessions at: sid ifAbsent: [nil]].
+  sess := self sessionAt: sid.
   sess isNil ifTrue: [^self writeSessionError: 'Unknown or expired session: ' , sid code: 404 reason: 'Not Found' on: conn].
   resp := sess forward: body.
   resp isEmpty
     ifTrue: [conn writeStatus: 202 reason: 'Accepted' body: '']
     ifFalse: [conn writeJson: resp]
+%
+category: 'routing'
+method: McpRouter
+requestAuthorized: req on: conn
+  "Whether req may proceed to a verb handler. A hook for subclasses: this class performs NO
+   authentication (it is loopback-only for exactly that reason), so it always answers true. An
+   override answers false to refuse the request, and is responsible for having written the error
+   response itself -- see McpAuthRouter>>requestAuthorized:on:."
+  ^true
+%
+category: 'sessions'
+method: McpRouter
+sessionAt: aSessionId
+  "The client session registered under aSessionId, or nil if there is none (unknown or already
+   reaped). Mutex-guarded, since it reads the shared `sessions` map."
+  aSessionId isNil ifTrue: [^nil].
+  ^mutex critical: [sessions at: aSessionId ifAbsent: [nil]]
 %
 category: 'sessions'
 method: McpRouter

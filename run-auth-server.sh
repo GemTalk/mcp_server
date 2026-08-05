@@ -13,8 +13,19 @@
 #   GEMSTONE            - GemStone product directory (required)
 #   GS_STONE/GS_USER/GS_PASS - stone + admin login (defaults: gs64stone/DataCurator/swordfish)
 #   GS_MCP_PORT         - listen port (default: 8443)
-#   MCP_ISSUER          - OIDC issuer URL (default: http://localhost:8080/realms/gs-mcp)
-#   MCP_AUDIENCE        - resource identifier the tokens are minted for (default: https://localhost:8443/mcp)
+#   MCP_ISSUER          - OIDC issuer URL. MUST be https: McpAuthRouter refuses to advertise a
+#                         cleartext authorization server, because "All authorization server endpoints
+#                         MUST be served over HTTPS" (the spec's localhost exemption covers redirect
+#                         URIs, not AS endpoints). Point this at Keycloak's https listener -- in dev
+#                         mode that is https://<host>:8443/realms/gs-mcp, with a self-signed cert.
+#                         (default: https://localhost:8443/realms/gs-mcp)
+#   MCP_AUDIENCE        - the CANONICAL RESOURCE IDENTIFIER of this server: the exact absolute URL
+#                         clients dial, no trailing slash. Required -- the router refuses to start
+#                         without it, since token audience validation is not optional. It is also
+#                         published as `resource` in the Protected Resource Metadata document and
+#                         used to derive the resource_metadata URL, so it must MATCH what clients
+#                         actually connect to, INCLUDING a hostname the TLS certificate covers.
+#                         (default: https://localhost:8443/mcp)
 #   MCP_USERID_CLAIM    - JWT claim carrying the GemStone userId (default: preferred_username)
 #   MCP_REQUIRED_SCOPES - space-separated scopes a token MUST carry (default: mcp:use)
 #   MCP_WRITE_SCOPE     - scope granting write; a token lacking it gets a READ-ONLY worker (default: none)
@@ -37,7 +48,7 @@ GS_STONE="${GS_STONE:-gs64stone}"
 GS_USER="${GS_USER:-DataCurator}"
 GS_PASS="${GS_PASS:-swordfish}"
 GS_MCP_PORT="${GS_MCP_PORT:-8443}"
-MCP_ISSUER="${MCP_ISSUER:-http://localhost:8080/realms/gs-mcp}"
+MCP_ISSUER="${MCP_ISSUER:-https://localhost:8443/realms/gs-mcp}"
 MCP_AUDIENCE="${MCP_AUDIENCE:-https://localhost:8443/mcp}"
 MCP_USERID_CLAIM="${MCP_USERID_CLAIM:-preferred_username}"
 MCP_REQUIRED_SCOPES="${MCP_REQUIRED_SCOPES:-mcp:use}"
@@ -51,6 +62,19 @@ TOPAZ="$GEMSTONE/bin/topaz"
 # McpAuthRouter refuses to run without TLS (McpAuthRouter>>requireTls), so fail here with a clear
 # message rather than launching topaz only for the router to signal. The code is the real gate; this
 # is just a faster, friendlier version of the same rule.
+# McpAuthRouter also refuses a cleartext authorization server (requireResourceServerConfig). Fail here
+# with a clear message rather than launching topaz only for the router to signal. The code is the real
+# gate; this is just a faster, friendlier version of the same rule.
+case "$MCP_ISSUER" in
+  https://*) ;;
+  *)
+    echo "ERROR: MCP_ISSUER must be an https URL (got '$MCP_ISSUER'). All authorization server" >&2
+    echo "       endpoints MUST be served over HTTPS; the spec's localhost exemption applies to" >&2
+    echo "       redirect URIs, not to authorization server endpoints. Point MCP_ISSUER at your" >&2
+    echo "       IdP's https listener (Keycloak dev mode: https://<host>:8443/realms/<realm>)." >&2
+    exit 1 ;;
+esac
+
 if [ -z "$MCP_TLS_CERT" ] || [ -z "$MCP_TLS_KEY" ]; then
   echo "ERROR: McpAuthRouter requires TLS. Set both MCP_TLS_CERT and MCP_TLS_KEY (the key must be" >&2
   echo "       an UNENCRYPTED PEM, and both paths are read by the GEM, so they must exist on the" >&2
