@@ -142,19 +142,6 @@ These live on the optional `McpServerWithGrail` subclass, loaded only via `load-
   classifier (`compileError`, `refused`, `readOnly`, `notFound`, `invalidParams`, `other`), so a
   client can branch on the kind instead of parsing prose.
 
-## Prompts
-
-The server advertises the MCP `prompts` capability and serves `prompts/list` / `prompts/get` with a
-few GemStone-specific workflow guides — static text that references the real tools:
-
-| Prompt | Optional argument | Guides you through |
-|--------|-------------------|--------------------|
-| `gemstone-transaction-hygiene` | – | `status → refresh → work → commit`/`abort` |
-| `gemstone-tdd` | `subject` | locate → write a failing test → implement → re-run → commit |
-| `gemstone-safe-change` | `change` | green baseline → impact map → change → re-test → confirm |
-
-A supplied optional argument is woven into the returned guidance.
-
 ## Architecture
 
 | Class | Role |
@@ -166,7 +153,7 @@ A supplied optional argument is woven into the returned guidance.
 | `McpServerWithGrail` | optional worker subclass: `super initialize` then registers the 2 Grail/Python tools; each worker gem loads it (in `handleJsonString:`) when its file is installed |
 | `McpSession` | one client's isolated worker handle: a `GsTsExternalSession` gem + session id + last-activity; `forward:` runs a request in it (`McpServer handleJsonString: …`), `close` stops it |
 | `McpHttpConnection` | reads one HTTP/1.1 request, writes one JSON response (incl. `MCP-Session-Id`) |
-| `McpDispatcher` | JSON-RPC 2.0 / MCP routing (`initialize`, `tools/list`, `tools/call`, `prompts/list`, `prompts/get`); read-only tool gating; structured error kinds |
+| `McpDispatcher` | JSON-RPC 2.0 / MCP routing (`initialize`, `tools/list`, `tools/call`); read-only tool gating; structured error kinds |
 | `McpToolRegistry` | name → `McpTool` map; produces `tools/list` descriptors |
 | `McpTool` | one tool: name, description, JSON Schema, handler block; validates arguments against the schema |
 | `McpError` | an error carrying a machine-readable `kind` (e.g. `refused`, `readOnly`) that the dispatcher surfaces in the tool-call error envelope |
@@ -290,8 +277,8 @@ suite when `McpServerWithGrail` is installed:
 - `McpContractTest` — contract / property tests over the tool surface, all driven through the real
   `McpDispatcher>>handle:` envelope: every tool schema is closed (`additionalProperties:false`),
   unknown/missing arguments → `-32602`, a raised error carries a structured `kind`, kernel-class
-  mutation is refused, read-only hides + refuses the gated tools, and `prompts/list` / `prompts/get`
-  behave. Socket-less and worker-less, so it runs in `run-unit-tests.sh` with the others above.
+  mutation is refused, and read-only hides + refuses the gated tools. Socket-less and worker-less,
+  so it runs in `run-unit-tests.sh` with the others above.
 - `McpAuthTest` — the authenticated front end (`McpAuthRouter`): missing / non-bearer / garbage /
   valid tokens, RS-layer `exp` / issuer / audience / scope validation, and the write-scope read-only
   sessions. It commits a throwaway JWT user and spawns real worker gems (needs netldi), so — like
@@ -361,8 +348,8 @@ subclass (loaded via `install.sh --grail`); per-connection forking + read timeou
 end-to-end with curl (initialize / `MCP-Session-Id` routing / tools/call / two-client isolation /
 400 / 404 / SSE GET / DELETE, and stalled-connection load) and by the in-image unit tests. Since the
 first release it has also gained: OAuth 2.1 / JWT authentication + TLS (the `McpAuthRouter` subclass),
-per-router read-only mode (a router toggle plus per-token write-scope sessions), closed argument schemas + a
-kernel-class guard + structured error kinds, and MCP workflow prompts. The Python tools delegate to
+per-router read-only mode (a router toggle plus per-token write-scope sessions), and closed argument schemas + a
+kernel-class guard + structured error kinds. The Python tools delegate to
 Grail's `ModuleAst` and require a Grail-equipped image (see the Python note above). Future work: true
 concurrent cross-client forwarding, server-initiated SSE messages, and an external OIDC identity
 provider.

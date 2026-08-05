@@ -35,46 +35,6 @@ preferredProtocolVersion
    Our latest supported revision; must be a member of supportedProtocolVersions."
   ^'2025-11-25'
 %
-category: 'prompts'
-classmethod: McpDispatcher
-promptArg: aName description: aDescription
-  "An OPTIONAL prompt-argument descriptor (all our prompt arguments are optional)."
-  ^Dictionary new
-    at: 'name' put: aName;
-    at: 'description' put: aDescription;
-    at: 'required' put: false;
-    yourself
-%
-category: 'prompts'
-classmethod: McpDispatcher
-promptSpecFor: aName
-  ^self promptSpecs detect: [:s | (s at: 'name') = aName] ifNone: [nil]
-%
-category: 'prompts'
-classmethod: McpDispatcher
-promptSpecNamed: aName description: aDescription arguments: anArgumentArray
-  ^Dictionary new
-    at: 'name' put: aName;
-    at: 'description' put: aDescription;
-    at: 'arguments' put: anArgumentArray;
-    yourself
-%
-category: 'prompts'
-classmethod: McpDispatcher
-promptSpecs
-  "Single source of truth for the MCP workflow prompts: the prompts/list descriptors (name,
-   description, optional arguments). The message body for each is built by promptTextFor:arguments:."
-  ^Array
-    with: (self promptSpecNamed: 'gemstone-transaction-hygiene'
-      description: 'Keep a clean GemStone transaction while working: status -> refresh -> work -> commit/abort.'
-      arguments: #())
-    with: (self promptSpecNamed: 'gemstone-tdd'
-      description: 'A red/green TDD loop for GemStone: locate, write a failing test, implement, re-run, commit.'
-      arguments: (Array with: (self promptArg: 'subject' description: 'What you are building (optional; woven into the guidance).')))
-    with: (self promptSpecNamed: 'gemstone-safe-change'
-      description: 'Change existing code safely: green baseline, impact map, change, re-test, confirm.'
-      arguments: (Array with: (self promptArg: 'change' description: 'The change you intend to make (optional).')))
-%
 category: 'protocol versions'
 classmethod: McpDispatcher
 supportedProtocolVersions
@@ -148,9 +108,6 @@ handle: requestDict
   method = 'tools/list' ifTrue: [^self resultFor: id with: self toolsListResult].
   method = 'tools/call' ifTrue: [
     ^self handleToolsCall: (requestDict at: 'params' ifAbsent: [Dictionary new]) id: id].
-  method = 'prompts/list' ifTrue: [^self resultFor: id with: self promptsListResult].
-  method = 'prompts/get' ifTrue: [
-    ^self promptsGetResult: (requestDict at: 'params' ifAbsent: [Dictionary new]) id: id].
   (method beginsWith: 'notifications/') ifTrue: [^nil].
   id isNil ifTrue: [^nil].
   ^self errorFor: id code: -32601 message: 'Method not found: ' , method
@@ -194,7 +151,6 @@ initializeResultFor: params
   tools := Dictionary new.
   caps := Dictionary new.
   caps at: 'tools' put: tools.
-  caps at: 'prompts' put: Dictionary new.
   info := Dictionary new.
   info at: 'name' put: serverName.
   info at: 'version' put: serverVersion.
@@ -213,46 +169,6 @@ kindForError: ex
   (ex isKindOf: CompileError) ifTrue: [^'compileError'].
   ^'other'
 %
-category: 'prompts'
-method: McpDispatcher
-promptsGetResult: params id: id
-  "prompts/get: answer {description, messages:[one user text message]} for the named prompt, weaving
-   in any optional argument. Missing/unknown name -> -32602."
-  | name spec |
-  name := params at: 'name' ifAbsent: [nil].
-  name isNil ifTrue: [^self errorFor: id code: -32602 message: 'Missing prompt name' kind: 'invalidParams'].
-  spec := self class promptSpecFor: name.
-  spec isNil ifTrue: [^self errorFor: id code: -32602 message: 'Unknown prompt: ' , name kind: 'notFound'].
-  ^self resultFor: id with: (Dictionary new
-    at: 'description' put: (spec at: 'description');
-    at: 'messages' put: (Array with: (self promptUserMessage:
-      (self promptTextFor: name arguments: (params at: 'arguments' ifAbsent: [Dictionary new]))));
-    yourself)
-%
-category: 'prompts'
-method: McpDispatcher
-promptsListResult
-  "prompts/list: the workflow-prompt catalogue (name/description/arguments)."
-  ^Dictionary new at: 'prompts' put: self class promptSpecs; yourself
-%
-category: 'prompts'
-method: McpDispatcher
-promptTextFor: name arguments: args
-  "The guidance body for a prompt, given its (optional) arguments."
-  name = 'gemstone-transaction-hygiene' ifTrue: [^self txHygieneText].
-  name = 'gemstone-tdd' ifTrue: [^self tddTextFor: (args at: 'subject' ifAbsent: [nil])].
-  name = 'gemstone-safe-change' ifTrue: [^self safeChangeTextFor: (args at: 'change' ifAbsent: [nil])].
-  ^''
-%
-category: 'prompts'
-method: McpDispatcher
-promptUserMessage: aString
-  "One MCP prompt message: a user-role text content block."
-  ^Dictionary new
-    at: 'role' put: 'user';
-    at: 'content' put: (Dictionary new at: 'type' put: 'text'; at: 'text' put: aString; yourself);
-    yourself
-%
 category: 'responses'
 method: McpDispatcher
 resultFor: id with: resultObj
@@ -263,22 +179,6 @@ resultFor: id with: resultObj
   d at: 'result' put: resultObj.
   ^d
 %
-category: 'prompts'
-method: McpDispatcher
-safeChangeTextFor: changeOrNil
-  | lf header |
-  lf := String with: Character lf.
-  header := changeOrNil isNil ifTrue: [''] ifFalse: ['Change: ' , changeOrNil , lf , lf].
-  ^header , 'Change existing code safely:
-
-1. Baseline - run_test_class (or list_failing_tests) so you know the starting state is green.
-2. Map impact - find_senders / find_references_to / find_implementors for everything you will touch.
-3. Change - compile_method or compile_class_definition. Note: compile_class_definition refuses
-   kernel classes and, on a shape change, recompiles the existing methods onto the new version by
-   default.
-4. Re-test - run_test_class / list_failing_tests. If red, abort and reconsider.
-5. Confirm - status to check the final state.'
-%
 category: 'initialization'
 method: McpDispatcher
 setRegistry: aRegistry server: aServerOrNil
@@ -287,24 +187,6 @@ setRegistry: aRegistry server: aServerOrNil
   serverName := 'gemstone-mcp'.
   serverVersion := '0.1.0'.
   ^self
-%
-category: 'prompts'
-method: McpDispatcher
-tddTextFor: subjectOrNil
-  | lf header |
-  lf := String with: Character lf.
-  header := subjectOrNil isNil ifTrue: [''] ifFalse: ['Goal: ' , subjectOrNil , lf , lf].
-  ^header , 'A red/green TDD loop for GemStone via the MCP tools:
-
-1. Locate - understand the target with describe_class, list_methods, get_method_source, and
-   find_senders / find_implementors.
-2. Red - add a failing test: compile_method a test... method onto a TestCase subclass, then
-   run_test_class (or run_test_method) and confirm it FAILS.
-3. Green - implement with compile_method until run_test_class passes.
-4. Guard - run list_failing_tests to confirm nothing else regressed.
-5. Commit - the mutating tools already commit on success; use status to confirm, or abort to back out.
-
-Keep each red/green step small.'
 %
 category: 'read-only'
 method: McpDispatcher
@@ -339,22 +221,4 @@ toolsListResult
   d := Dictionary new.
   d at: 'tools' put: (toolRegistry descriptors select: [:desc | self toolAllowed: (desc at: 'name')]).
   ^d
-%
-category: 'prompts'
-method: McpDispatcher
-txHygieneText
-  ^'Keep a clean GemStone transaction while working through the MCP tools:
-
-1. status - see the user, session, stone, and whether there are uncommitted changes.
-2. refresh - abort uncommitted work and update your view to the latest committed state. The server
-   already aborts before every tool call, so you usually get a fresh view for free; call refresh
-   explicitly when you specifically depend on other sessions'' latest commits.
-3. Work: browse and search freely (describe_class, get_method_source, find_senders,
-   search_method_source, ...). The mutating tools (compile_method, compile_class_definition,
-   delete_class, delete_method, set_class_comment) COMMIT on success, so a successful change is
-   already persisted.
-4. If execute_code or a partial edit left uncommitted state you do NOT want, call abort to discard
-   it, then status again to confirm uncommittedChanges is false.
-5. When unsure whether in-progress state should persist, prefer abort - never leave a session with
-   unintended uncommitted changes.'
 %
