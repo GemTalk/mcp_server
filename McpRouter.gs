@@ -585,8 +585,8 @@ sessionAt: aSessionId
 category: 'sessions'
 method: McpRouter
 sessionIdleTimeoutSeconds
-  "Idle time (seconds) before a client session's worker gem is reaped. 5 minutes."
-  ^300
+  "Idle time (seconds) before a client session's worker gem is reaped. 30 minutes."
+  ^1800
 %
 category: 'routing'
 method: McpRouter
