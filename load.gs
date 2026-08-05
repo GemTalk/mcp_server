@@ -11,7 +11,6 @@ input McpBase.gs
 input McpServer.gs
 input McpSession.gs
 input McpRouter.gs
-input McpAuthRouter.gs
 
 ! Unit-test classes (GsTestCase subclasses) + their mock transport.
 input McpMockSocket.gs
@@ -19,11 +18,5 @@ input McpToolTest.gs
 input McpDispatcherTest.gs
 input McpContractTest.gs
 input McpTransportTest.gs
-input McpAuthTest.gs
-
-! MCP authorization-spec conformance suite: one test per normative requirement of the authorization
-! spec, for McpAuthRouter in its role as an OAuth 2.1 Resource Server. Green, so it is a regression
-! gate in run-unit-tests.sh; ./run-conformance.sh scores it test-by-test.
-input McpAuthConformanceTest.gs
 
 commit
