@@ -108,6 +108,34 @@ testAbsentOriginServed
 %
 category: 'tests'
 method: McpTransportTest
+testAuthRouterBindAddressIsConfigurableButDefaultsToLoopback
+  "McpAuthRouter DOES take a bindAddress -- every request must carry a bearer token -- but it still
+   starts on loopback, so reachability is something the caller asks for explicitly."
+  | r |
+  r := McpAuthRouter new.
+  self assert: r bindAddress equals: '127.0.0.1'.
+  self assert: (McpAuthRouter canUnderstand: #bindAddress:).
+  r bindAddress: '172.16.73.10'.
+  self assert: r bindAddress equals: '172.16.73.10'.
+  self assert: (r configDict at: 'bindAddress') equals: '172.16.73.10'
+%
+category: 'tests'
+method: McpTransportTest
+testBaseRouterIsLoopbackOnly
+  "A base McpRouter performs NO authentication, so it must not be bindable to a reachable address:
+   bindAddress answers loopback, there is deliberately no setter, and 'bindAddress' is not a config
+   key (so it cannot arrive via a fork string either)."
+  | r |
+  r := McpRouter new.
+  self assert: r bindAddress equals: '127.0.0.1'.
+  self deny: (McpRouter canUnderstand: #bindAddress:).
+  self deny: (r configDict includesKey: 'bindAddress').
+  "and a fork string cannot smuggle one in"
+  r applyConfig: (Dictionary new at: 'bindAddress' put: '0.0.0.0'; yourself).
+  self assert: r bindAddress equals: '127.0.0.1'
+%
+category: 'tests'
+method: McpTransportTest
 testChunkedDeliveryParses
   "Even when the request arrives a few bytes at a time, readRequest must reassemble it. Uses a
    session-less tools/list so no worker gem is spawned -- the routed -32600 proves the body was
@@ -240,34 +268,6 @@ testSupportedProtocolVersionServed
   out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' protocolVersion: '2025-11-25')) output.
   self deny: (self includesCS: 'Unsupported MCP-Protocol-Version' in: out).
   self assert: (self includesCS: '-32600' in: out)
-%
-category: 'tests'
-method: McpTransportTest
-testBaseRouterIsLoopbackOnly
-  "A base McpRouter performs NO authentication, so it must not be bindable to a reachable address:
-   bindAddress answers loopback, there is deliberately no setter, and 'bindAddress' is not a config
-   key (so it cannot arrive via a fork string either)."
-  | r |
-  r := McpRouter new.
-  self assert: r bindAddress equals: '127.0.0.1'.
-  self deny: (McpRouter canUnderstand: #bindAddress:).
-  self deny: (r configDict includesKey: 'bindAddress').
-  "and a fork string cannot smuggle one in"
-  r applyConfig: (Dictionary new at: 'bindAddress' put: '0.0.0.0'; yourself).
-  self assert: r bindAddress equals: '127.0.0.1'
-%
-category: 'tests'
-method: McpTransportTest
-testAuthRouterBindAddressIsConfigurableButDefaultsToLoopback
-  "McpAuthRouter DOES take a bindAddress -- every request must carry a bearer token -- but it still
-   starts on loopback, so reachability is something the caller asks for explicitly."
-  | r |
-  r := McpAuthRouter new.
-  self assert: r bindAddress equals: '127.0.0.1'.
-  self assert: (McpAuthRouter canUnderstand: #bindAddress:).
-  r bindAddress: '172.16.73.10'.
-  self assert: r bindAddress equals: '172.16.73.10'.
-  self assert: (r configDict at: 'bindAddress') equals: '172.16.73.10'
 %
 category: 'tests'
 method: McpTransportTest

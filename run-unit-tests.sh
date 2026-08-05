@@ -25,11 +25,16 @@ GS_USER="${GS_USER:-DataCurator}"
 GS_PASS="${GS_PASS:-swordfish}"
 TOPAZ="$GEMSTONE/bin/topaz"
 
-# NOTE (macOS bash 3.2): this heredoc runs inside $( ... ), whose command-substitution scanner
-# treats '#' in the body as a comment. A body line that STARTS with '(' whose matching ')' sits
-# after a '#...symbol' is miscounted -> "bad substitution: no closing )". Keep such expressions
-# off the start of a line (assign to a temp first, as with grailTest below).
-OUT="$("$TOPAZ" -l <<TPZ
+# Stream topaz output live AND keep a copy to gate on. Do NOT wrap the heredoc in $( ... ):
+# under `set -e`, a command substitution that exits non-zero aborts the script BEFORE anything
+# is printed, so ALL output was silently discarded whenever topaz's session status was tainted
+# (e.g. a handled error inside a worker-gem test that `iferr 1 stk` escalated -- the test still
+# passed, but topaz exited non-zero and you saw a blank terminal). Instead tee to a temp file,
+# capture topaz's OWN exit code via PIPESTATUS, and always show the output.
+# (Keep a line-leading '(' out of the Smalltalk -- assign to a temp first, as with grailTest.)
+TMP="$(mktemp "${TMPDIR:-/tmp}/mcp-unit.XXXXXX")"
+set +e
+"$TOPAZ" -l 2>&1 <<TPZ | tee "$TMP"
 set gemstone $GS_STONE
 set username $GS_USER
 set password $GS_PASS
@@ -55,9 +60,13 @@ s contents
 logout
 exit
 TPZ
-)"
+rc=${PIPESTATUS[0]}
+set -e
+OUT="$(cat "$TMP")"
+rm -f "$TMP"
 
-echo "$OUT"
+# A non-zero topaz exit no longer hides the run; the test counts below are authoritative.
+[ "$rc" -ne 0 ] && echo "WARNING: topaz exited $rc -- session status was tainted (see any stack trace above)."
 # Each result line reads "N run, N passed, N failed, N errors".
 # Fail if any non-zero failed/errors count appears.
 if echo "$OUT" | grep -qE '[1-9][0-9]* (failed|errors)'; then

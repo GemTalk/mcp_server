@@ -98,107 +98,6 @@ applyConfig: aConfigDict
   bindAddress := aConfigDict at: 'bindAddress' ifAbsent: [bindAddress].
   ^self
 %
-category: 'network'
-method: McpAuthRouter
-requireTls
-  "Signal unless this router has TLS credentials. A bearer token IS a password: it grants the
-   holder a GemStone session as its user, and it travels in a request header on every call. Serving
-   this router over cleartext would put that password on the wire, so TLS is not optional here --
-   this is enforced in code rather than left to a launch script, because runOnPort:/forkOnPort: can
-   be called directly.
-   Enforced unconditionally, not only for a non-loopback bindAddress: a router that is safe today
-   becomes unsafe the moment someone widens its bind address, and the check should not depend on
-   remembering that."
-  self tlsEnabled ifTrue: [^self].
-  ^self error: 'McpAuthRouter requires TLS: set useTlsCertificateFile:privateKeyFile: (an ' ,
-    'UNENCRYPTED PEM key) before runOnPort:/forkOnPort:. For a cleartext loopback server with no ' ,
-    'authentication at all, use McpRouter instead.'
-%
-category: 'network'
-method: McpAuthRouter
-requireResourceServerConfig
-  "Signal unless this router is configured to act as a conformant OAuth 2.1 Resource Server. Checked
-   at start-up rather than per request so a misconfiguration fails loudly at launch instead of
-   quietly accepting tokens it should refuse.
-   Each check backs a MUST in the MCP authorization spec:
-    * expectedAudience -- 'MCP servers MUST only accept tokens specifically intended for themselves
-      and MUST reject tokens that do not include them in the audience claim'. nil means 'skip the
-      check' in rejectionForPayload:, so without this guard an unconfigured router accepts a token
-      minted for any resource at all.
-    * authorizationServers -- 'The Protected Resource Metadata document returned by the MCP server
-      MUST include the authorization_servers field containing at least one authorization server'.
-      An empty list publishes a document that satisfies the letter of serving metadata while telling
-      the client nothing it needs to get a token.
-    * https on every authorization server -- 'All authorization server endpoints MUST be served over
-      HTTPS'. The spec's localhost exemption covers redirect URIs, NOT authorization server
-      endpoints, so there is deliberately no loopback escape here. expectedIssuer is held to the same
-      rule when set: it names the same authorization server."
-  | insecure |
-  self expectedAudience isNil ifTrue: [
-    ^self error: 'McpAuthRouter requires expectedAudience: the canonical resource identifier ' ,
-      'clients use for this server (e.g. ''https://host:8443/mcp''). Token audience validation is ' ,
-      'not optional -- a router without it accepts tokens minted for any resource.'].
-  self authorizationServers isEmpty ifTrue: [
-    ^self error: 'McpAuthRouter requires authorizationServers: at least one OAuth/OIDC issuer URL. ' ,
-      'The Protected Resource Metadata document MUST name an authorization server, or a client has ' ,
-      'no way to discover where to obtain a token.'].
-  insecure := self authorizationServers reject: [:u | self isHttpsUrl: u].
-  self expectedIssuer ifNotNil: [:iss |
-    (self isHttpsUrl: iss) ifFalse: [insecure := insecure asArray , (Array with: iss)]].
-  insecure isEmpty ifFalse: [
-    ^self error: 'McpAuthRouter requires https authorization server URLs; these are cleartext: ' ,
-      (self spaceSeparated: insecure) ,
-      '. All authorization server endpoints MUST be served over HTTPS (the spec''s localhost ' ,
-      'exemption applies to redirect URIs, not to authorization server endpoints).'].
-  ^self
-%
-category: 'network'
-method: McpAuthRouter
-isHttpsUrl: aString
-  "Whether aString is an absolute https URL. Case-insensitive on the scheme, since RFC 3986 defines
-   the scheme as case-insensitive and the MCP spec asks implementations to accept an uppercase
-   scheme for robustness."
-  | prefix |
-  prefix := 'https://'.
-  aString isNil ifTrue: [^false].
-  aString size <= prefix size ifTrue: [^false].
-  ^(aString copyFrom: 1 to: prefix size) asLowercase = prefix
-%
-category: 'running'
-method: McpAuthRouter
-runOnPort: aPort
-  "Refuse to serve without TLS or a conformant resource-server config, then run the inherited
-   blocking accept loop."
-  self requireTls.
-  self requireResourceServerConfig.
-  ^super runOnPort: aPort
-%
-category: 'forking'
-method: McpAuthRouter
-forkOnPort: aPort
-  "Refuse to fork without TLS or a conformant resource-server config. Checked HERE as well as in
-   runOnPort: so the failure surfaces in the launching session rather than only in the detached child
-   gem's log."
-  self requireTls.
-  self requireResourceServerConfig.
-  ^super forkOnPort: aPort
-%
-category: 'network'
-method: McpAuthRouter
-bindAddress
-  "The local address this router's listener binds. Seeded to loopback; set bindAddress: to an
-   interface address (e.g. '172.16.73.10') or '0.0.0.0' to accept connections from other hosts.
-   Unlike the base McpRouter this IS configurable, because every request here must carry a valid
-   bearer token and the transport must be TLS (see requireTls)."
-  ^bindAddress
-%
-category: 'network'
-method: McpAuthRouter
-bindAddress: aHostAddressString
-  "Bind this router's listener to aHostAddressString instead of loopback. Prefer a specific interface
-   address over '0.0.0.0', which accepts connections on every interface the host has."
-  bindAddress := aHostAddressString
-%
 category: 'metadata'
 method: McpAuthRouter
 authorizationServers
@@ -223,6 +122,22 @@ bearerTokenOf: req
     ifFalse: [^nil].
   ^(auth copyFrom: prefix size + 1 to: auth size) trimSeparators
 %
+category: 'network'
+method: McpAuthRouter
+bindAddress
+  "The local address this router's listener binds. Seeded to loopback; set bindAddress: to an
+   interface address (e.g. '172.16.73.10') or '0.0.0.0' to accept connections from other hosts.
+   Unlike the base McpRouter this IS configurable, because every request here must carry a valid
+   bearer token and the transport must be TLS (see requireTls)."
+  ^bindAddress
+%
+category: 'network'
+method: McpAuthRouter
+bindAddress: aHostAddressString
+  "Bind this router's listener to aHostAddressString instead of loopback. Prefer a specific interface
+   address over '0.0.0.0', which accepts connections on every interface the host has."
+  bindAddress := aHostAddressString
+%
 category: 'config'
 method: McpAuthRouter
 configDict
@@ -239,6 +154,20 @@ configDict
   d at: 'writeScope' put: writeScope.
   d at: 'bindAddress' put: bindAddress.
   ^d
+%
+category: 'metadata'
+method: McpAuthRouter
+derivedResourceMetadataUrl
+  "The metadata document URL implied by the canonical resource identifier: the path-scoped form when
+   the identifier has a path (resource https://host:8443/mcp ->
+   https://host:8443/.well-known/oauth-protected-resource/mcp), else the root form. nil when no
+   identifier is configured, so a router that cannot name itself omits the parameter rather than
+   publishing a nonsense URL."
+  | origin |
+  self expectedAudience isNil ifTrue: [^nil].
+  origin := self resourceOrigin.
+  origin isEmpty ifTrue: [^nil].
+  ^origin , '/.well-known/oauth-protected-resource' , self resourcePath
 %
 category: 'validation'
 method: McpAuthRouter
@@ -262,6 +191,16 @@ method: McpAuthRouter
 expectedIssuer: aStringOrNil
   expectedIssuer := aStringOrNil
 %
+category: 'forking'
+method: McpAuthRouter
+forkOnPort: aPort
+  "Refuse to fork without TLS or a conformant resource-server config. Checked HERE as well as in
+   runOnPort: so the failure surfaces in the launching session rather than only in the detached child
+   gem's log."
+  self requireTls.
+  self requireResourceServerConfig.
+  ^super forkOnPort: aPort
+%
 category: 'initialization'
 method: McpAuthRouter
 initialize
@@ -280,6 +219,46 @@ initialize
   bindAddress := self class loopbackAddress.  "reachable only if the caller asks for it"
   ^self
 %
+category: 'network'
+method: McpAuthRouter
+isHttpsUrl: aString
+  "Whether aString is an absolute https URL. Case-insensitive on the scheme, since RFC 3986 defines
+   the scheme as case-insensitive and the MCP spec asks implementations to accept an uppercase
+   scheme for robustness."
+  | prefix |
+  prefix := 'https://'.
+  aString isNil ifTrue: [^false].
+  aString size <= prefix size ifTrue: [^false].
+  ^(aString copyFrom: 1 to: prefix size) asLowercase = prefix
+%
+category: 'metadata'
+method: McpAuthRouter
+isMetadataPath: aPath
+  "Whether aPath (query already stripped) addresses this router's metadata document. A trailing slash
+   is tolerated: it names the same resource and a client that adds one should still get the document."
+  | candidate |
+  candidate := (aPath notEmpty and: [aPath last = $/])
+    ifTrue: [aPath copyFrom: 1 to: aPath size - 1]
+    ifFalse: [aPath].
+  ^self metadataPaths includes: candidate
+%
+category: 'metadata'
+method: McpAuthRouter
+metadataPaths
+  "Every local path at which this router serves its Protected Resource Metadata (RFC 9728 section 3).
+   Both forms the spec allows, because a conforming client probes the path-scoped one FIRST and only
+   then falls back to the root:
+    * path-inserted, for a resource identifier that has a path component -- resource
+      https://host:8443/mcp is published at /.well-known/oauth-protected-resource/mcp
+    * the root, /.well-known/oauth-protected-resource"
+  | root paths resourcePath |
+  root := '/.well-known/oauth-protected-resource'.
+  paths := OrderedCollection with: root.
+  resourcePath := self resourcePath.
+  (resourcePath notNil and: [resourcePath notEmpty and: [resourcePath ~= '/']])
+    ifTrue: [paths add: root , resourcePath].
+  ^paths
+%
 category: 'sessions'
 method: McpAuthRouter
 openSessionForUser: aUserId jwt: aJwtString
@@ -293,6 +272,18 @@ openSessionForUser: aUserId jwt: aJwtString readOnly: aBoolean
    whole life (its token lacked the write scope)."
   ^self openSessionCreating: [:newId |
     McpSession startWithId: newId user: aUserId jwt: aJwtString readOnly: aBoolean]
+%
+category: 'metadata'
+method: McpAuthRouter
+pathOf: req
+  "The request path with any query string removed. parseHead: stores the raw request target, so
+   without this a discovery probe such as `/.well-known/oauth-protected-resource?x=1` would not match
+   the metadata path and would fall through to the SSE stream -- answering an event-stream that never
+   completes instead of a metadata document."
+  | path q |
+  path := req at: 'path' ifAbsent: [''].
+  q := path indexOf: $?.
+  ^q = 0 ifTrue: [path] ifFalse: [path copyFrom: 1 to: q - 1]
 %
 category: 'validation'
 method: McpAuthRouter
@@ -334,59 +325,6 @@ rejectionForPayload: payload
         with: 'Token missing required scope(s): ' , (self spaceSeparated: missing)]].
   ^nil
 %
-category: 'validation'
-method: McpAuthRouter
-requiredScopes
-  "Scopes a token MUST carry for this router to initialize a session; empty requires none."
-  ^requiredScopes
-%
-category: 'validation'
-method: McpAuthRouter
-requiredScopes: anArrayOfScopeStrings
-  requiredScopes := anArrayOfScopeStrings
-%
-category: 'metadata'
-method: McpAuthRouter
-resourceMetadataUrl
-  "Absolute URL of this router's Protected Resource Metadata document, for the RFC 9728
-   `resource_metadata` challenge parameter. DERIVED from the canonical resource identifier unless
-   explicitly overridden, so a 401 always carries it: 2025-06-18 states flatly that 'MCP servers MUST
-   use the HTTP header WWW-Authenticate when returning a 401 Unauthorized to indicate the location of
-   the resource server metadata URL', and leaving it to a separately-set field meant every deployment
-   that forgot to set it (including run-auth-server.sh) emitted 401s without it."
-  ^resourceMetadataUrl ifNil: [self derivedResourceMetadataUrl]
-%
-category: 'metadata'
-method: McpAuthRouter
-derivedResourceMetadataUrl
-  "The metadata document URL implied by the canonical resource identifier: the path-scoped form when
-   the identifier has a path (resource https://host:8443/mcp ->
-   https://host:8443/.well-known/oauth-protected-resource/mcp), else the root form. nil when no
-   identifier is configured, so a router that cannot name itself omits the parameter rather than
-   publishing a nonsense URL."
-  | origin |
-  self expectedAudience isNil ifTrue: [^nil].
-  origin := self resourceOrigin.
-  origin isEmpty ifTrue: [^nil].
-  ^origin , '/.well-known/oauth-protected-resource' , self resourcePath
-%
-category: 'metadata'
-method: McpAuthRouter
-resourceMetadataUrl: aStringOrNil
-  resourceMetadataUrl := aStringOrNil
-%
-category: 'validation'
-method: McpAuthRouter
-scopesOf: payload
-  "The scopes a token grants: the space-delimited OAuth `scope` claim (RFC 8693), or an `scp`
-   array (some IdPs), as an Array of Strings. Empty if neither is present."
-  | s |
-  s := payload at: 'scope' ifAbsent: [nil].
-  (s isKindOf: String) ifTrue: [^s subStrings: ' '].
-  s := payload at: 'scp' ifAbsent: [nil].
-  (s isKindOf: Array) ifTrue: [^s].
-  ^#()
-%
 category: 'routing'
 method: McpAuthRouter
 requestAuthorized: req on: conn
@@ -414,79 +352,98 @@ requestAuthorized: req on: conn
     ^false].
   ^self tokenOwnsNamedSession: req on: conn
 %
-category: 'routing'
+category: 'validation'
 method: McpAuthRouter
-tokenOwnsNamedSession: req on: conn
-  "When a request names an EXISTING session, the bearer token must belong to the same GemStone user
-   that session's worker gem runs as. Without this, any caller holding a valid token of their own
-   could drive another user's worker -- and read that user's uncommitted view -- just by presenting
-   its session id. Session ids are unguessable, so this is defence in depth rather than the only
-   barrier, but a leaked or logged id must not be enough to act as someone else.
-   A mismatch answers exactly what an unknown session answers, so the difference cannot be used to
-   probe which session ids exist; 404 also tells the client to re-initialize, which is the correct
-   recovery. Sessions are compared by userId, not by token, so a client that legitimately refreshes
-   its access token mid-session keeps working."
-  | sid sess |
-  sid := self sessionIdOf: req.
-  sid isNil ifTrue: [^true].
-  sess := self sessionAt: sid.
-  sess isNil ifTrue: [^true].  "unknown or reaped -- the routing handler answers 404 on its own"
-  (self userIdFromToken: (self bearerTokenOf: req)) = sess userId ifTrue: [^true].
-  self log: 'McpAuthRouter refused session ' , sid printString ,
-    ': the presented token does not belong to its user.'.
-  self writeSessionError: 'Unknown or expired session: ' , sid code: 404 reason: 'Not Found'
-    on: conn.
-  ^false
+requiredScopes
+  "Scopes a token MUST carry for this router to initialize a session; empty requires none."
+  ^requiredScopes
 %
-category: 'routing'
+category: 'validation'
 method: McpAuthRouter
-serveGet: req on: conn
-  "A GET for this resource's Protected Resource Metadata -> serve it (unauthenticated; it is the
-   discovery endpoint an unauthenticated client reads to find out how to authenticate). Any other GET
-   falls through to the inherited SSE stream."
-  (self isMetadataPath: (self pathOf: req))
-    ifTrue: [^self serveProtectedResourceMetadata: req on: conn].
-  ^super serveGet: req on: conn
+requiredScopes: anArrayOfScopeStrings
+  requiredScopes := anArrayOfScopeStrings
+%
+category: 'network'
+method: McpAuthRouter
+requireResourceServerConfig
+  "Signal unless this router is configured to act as a conformant OAuth 2.1 Resource Server. Checked
+   at start-up rather than per request so a misconfiguration fails loudly at launch instead of
+   quietly accepting tokens it should refuse.
+   Each check backs a MUST in the MCP authorization spec:
+    * expectedAudience -- 'MCP servers MUST only accept tokens specifically intended for themselves
+      and MUST reject tokens that do not include them in the audience claim'. nil means 'skip the
+      check' in rejectionForPayload:, so without this guard an unconfigured router accepts a token
+      minted for any resource at all.
+    * authorizationServers -- 'The Protected Resource Metadata document returned by the MCP server
+      MUST include the authorization_servers field containing at least one authorization server'.
+      An empty list publishes a document that satisfies the letter of serving metadata while telling
+      the client nothing it needs to get a token.
+    * https on every authorization server -- 'All authorization server endpoints MUST be served over
+      HTTPS'. The spec's localhost exemption covers redirect URIs, NOT authorization server
+      endpoints, so there is deliberately no loopback escape here. expectedIssuer is held to the same
+      rule when set: it names the same authorization server."
+  | insecure |
+  self expectedAudience isNil ifTrue: [
+    ^self error: 'McpAuthRouter requires expectedAudience: the canonical resource identifier ' ,
+      'clients use for this server (e.g. ''https://host:8443/mcp''). Token audience validation is ' ,
+      'not optional -- a router without it accepts tokens minted for any resource.'].
+  self authorizationServers isEmpty ifTrue: [
+    ^self error: 'McpAuthRouter requires authorizationServers: at least one OAuth/OIDC issuer URL. ' ,
+      'The Protected Resource Metadata document MUST name an authorization server, or a client has ' ,
+      'no way to discover where to obtain a token.'].
+  insecure := self authorizationServers reject: [:u | self isHttpsUrl: u].
+  self expectedIssuer ifNotNil: [:iss |
+    (self isHttpsUrl: iss) ifFalse: [insecure := insecure asArray , (Array with: iss)]].
+  insecure isEmpty ifFalse: [
+    ^self error: 'McpAuthRouter requires https authorization server URLs; these are cleartext: ' ,
+      (self spaceSeparated: insecure) ,
+      '. All authorization server endpoints MUST be served over HTTPS (the spec''s localhost ' ,
+      'exemption applies to redirect URIs, not to authorization server endpoints).'].
+  ^self
+%
+category: 'network'
+method: McpAuthRouter
+requireTls
+  "Signal unless this router has TLS credentials. A bearer token IS a password: it grants the
+   holder a GemStone session as its user, and it travels in a request header on every call. Serving
+   this router over cleartext would put that password on the wire, so TLS is not optional here --
+   this is enforced in code rather than left to a launch script, because runOnPort:/forkOnPort: can
+   be called directly.
+   Enforced unconditionally, not only for a non-loopback bindAddress: a router that is safe today
+   becomes unsafe the moment someone widens its bind address, and the check should not depend on
+   remembering that."
+  self tlsEnabled ifTrue: [^self].
+  ^self error: 'McpAuthRouter requires TLS: set useTlsCertificateFile:privateKeyFile: (an ' ,
+    'UNENCRYPTED PEM key) before runOnPort:/forkOnPort:. For a cleartext loopback server with no ' ,
+    'authentication at all, use McpRouter instead.'
 %
 category: 'metadata'
 method: McpAuthRouter
-pathOf: req
-  "The request path with any query string removed. parseHead: stores the raw request target, so
-   without this a discovery probe such as `/.well-known/oauth-protected-resource?x=1` would not match
-   the metadata path and would fall through to the SSE stream -- answering an event-stream that never
-   completes instead of a metadata document."
-  | path q |
-  path := req at: 'path' ifAbsent: [''].
-  q := path indexOf: $?.
-  ^q = 0 ifTrue: [path] ifFalse: [path copyFrom: 1 to: q - 1]
+resourceMetadataUrl
+  "Absolute URL of this router's Protected Resource Metadata document, for the RFC 9728
+   `resource_metadata` challenge parameter. DERIVED from the canonical resource identifier unless
+   explicitly overridden, so a 401 always carries it: 2025-06-18 states flatly that 'MCP servers MUST
+   use the HTTP header WWW-Authenticate when returning a 401 Unauthorized to indicate the location of
+   the resource server metadata URL', and leaving it to a separately-set field meant every deployment
+   that forgot to set it (including run-auth-server.sh) emitted 401s without it."
+  ^resourceMetadataUrl ifNil: [self derivedResourceMetadataUrl]
 %
 category: 'metadata'
 method: McpAuthRouter
-metadataPaths
-  "Every local path at which this router serves its Protected Resource Metadata (RFC 9728 section 3).
-   Both forms the spec allows, because a conforming client probes the path-scoped one FIRST and only
-   then falls back to the root:
-    * path-inserted, for a resource identifier that has a path component -- resource
-      https://host:8443/mcp is published at /.well-known/oauth-protected-resource/mcp
-    * the root, /.well-known/oauth-protected-resource"
-  | root paths resourcePath |
-  root := '/.well-known/oauth-protected-resource'.
-  paths := OrderedCollection with: root.
-  resourcePath := self resourcePath.
-  (resourcePath notNil and: [resourcePath notEmpty and: [resourcePath ~= '/']])
-    ifTrue: [paths add: root , resourcePath].
-  ^paths
+resourceMetadataUrl: aStringOrNil
+  resourceMetadataUrl := aStringOrNil
 %
 category: 'metadata'
 method: McpAuthRouter
-isMetadataPath: aPath
-  "Whether aPath (query already stripped) addresses this router's metadata document. A trailing slash
-   is tolerated: it names the same resource and a client that adds one should still get the document."
-  | candidate |
-  candidate := (aPath notEmpty and: [aPath last = $/])
-    ifTrue: [aPath copyFrom: 1 to: aPath size - 1]
-    ifFalse: [aPath].
-  ^self metadataPaths includes: candidate
+resourceOrigin
+  "The scheme + authority of this router's canonical resource identifier, with no trailing path --
+   'https://host:8443' for 'https://host:8443/mcp'. Used to build absolute metadata URLs."
+  | id path |
+  id := self expectedAudience.
+  id isNil ifTrue: [^''].
+  path := self resourcePath.
+  path isEmpty ifTrue: [^id].
+  ^id copyFrom: 1 to: id size - path size
 %
 category: 'metadata'
 method: McpAuthRouter
@@ -501,17 +458,36 @@ resourcePath
   slash := id indexOf: $/ startingAt: afterScheme + 3.
   ^slash = 0 ifTrue: [''] ifFalse: [id copyFrom: slash to: id size]
 %
-category: 'metadata'
+category: 'running'
 method: McpAuthRouter
-resourceOrigin
-  "The scheme + authority of this router's canonical resource identifier, with no trailing path --
-   'https://host:8443' for 'https://host:8443/mcp'. Used to build absolute metadata URLs."
-  | id path |
-  id := self expectedAudience.
-  id isNil ifTrue: [^''].
-  path := self resourcePath.
-  path isEmpty ifTrue: [^id].
-  ^id copyFrom: 1 to: id size - path size
+runOnPort: aPort
+  "Refuse to serve without TLS or a conformant resource-server config, then run the inherited
+   blocking accept loop."
+  self requireTls.
+  self requireResourceServerConfig.
+  ^super runOnPort: aPort
+%
+category: 'validation'
+method: McpAuthRouter
+scopesOf: payload
+  "The scopes a token grants: the space-delimited OAuth `scope` claim (RFC 8693), or an `scp`
+   array (some IdPs), as an Array of Strings. Empty if neither is present."
+  | s |
+  s := payload at: 'scope' ifAbsent: [nil].
+  (s isKindOf: String) ifTrue: [^s subStrings: ' '].
+  s := payload at: 'scp' ifAbsent: [nil].
+  (s isKindOf: Array) ifTrue: [^s].
+  ^#()
+%
+category: 'routing'
+method: McpAuthRouter
+serveGet: req on: conn
+  "A GET for this resource's Protected Resource Metadata -> serve it (unauthenticated; it is the
+   discovery endpoint an unauthenticated client reads to find out how to authenticate). Any other GET
+   falls through to the inherited SSE stream."
+  (self isMetadataPath: (self pathOf: req))
+    ifTrue: [^self serveProtectedResourceMetadata: req on: conn].
+  ^super serveGet: req on: conn
 %
 category: 'routing'
 method: McpAuthRouter
@@ -566,6 +542,25 @@ serveProtectedResourceMetadata: req on: conn
 %
 category: 'validation'
 method: McpAuthRouter
+signatureVerified: aJsonWebToken
+  "Whether aJsonWebToken's signature verifies against the Stone's trusted JWT public keys, selected
+   by the token's own `kid` header. Fails closed on anything unexpected -- an unsigned token, a kid
+   this Stone does not trust (or no kid at all, which raises), or a verification error.
+   Only asymmetric (public-key) signatures are accepted: an HMAC-signed token has no public key to
+   check it against, so it cannot be verified here and is refused. Real OIDC providers sign access
+   tokens with RS256/ES256, so this costs nothing in practice and closes the alg-confusion door."
+  | kid key |
+  ^[ aJsonWebToken isSigned
+       ifFalse: [false]
+       ifTrue: [
+         kid := [aJsonWebToken keyId] on: Error do: [:e | nil].  "raises when the header has no kid"
+         key := self trustedKeyForKeyId: kid.
+         key isNil ifTrue: [false] ifFalse: [
+           (aJsonWebToken verifySignatureNoErrorWithPublicKey: key) == true]] ]
+   on: Error do: [:e | false]
+%
+category: 'validation'
+method: McpAuthRouter
 spaceSeparated: aCollectionOfStrings
   "Join strings with single spaces (for the scope list in messages / the WWW-Authenticate scope=)."
   ^aCollectionOfStrings inject: '' into: [:acc :s | acc isEmpty ifTrue: [s] ifFalse: [acc , ' ' , s]]
@@ -584,6 +579,30 @@ tokenGrantsWrite: aJwtString
      payload := (JsonWebToken fromJwtString: aJwtString) payload.
      (self scopesOf: payload) includes: scope ]
    on: Error do: [:e | false]
+%
+category: 'routing'
+method: McpAuthRouter
+tokenOwnsNamedSession: req on: conn
+  "When a request names an EXISTING session, the bearer token must belong to the same GemStone user
+   that session's worker gem runs as. Without this, any caller holding a valid token of their own
+   could drive another user's worker -- and read that user's uncommitted view -- just by presenting
+   its session id. Session ids are unguessable, so this is defence in depth rather than the only
+   barrier, but a leaked or logged id must not be enough to act as someone else.
+   A mismatch answers exactly what an unknown session answers, so the difference cannot be used to
+   probe which session ids exist; 404 also tells the client to re-initialize, which is the correct
+   recovery. Sessions are compared by userId, not by token, so a client that legitimately refreshes
+   its access token mid-session keeps working."
+  | sid sess |
+  sid := self sessionIdOf: req.
+  sid isNil ifTrue: [^true].
+  sess := self sessionAt: sid.
+  sess isNil ifTrue: [^true].  "unknown or reaped -- the routing handler answers 404 on its own"
+  (self userIdFromToken: (self bearerTokenOf: req)) = sess userId ifTrue: [^true].
+  self log: 'McpAuthRouter refused session ' , sid printString ,
+    ': the presented token does not belong to its user.'.
+  self writeSessionError: 'Unknown or expired session: ' , sid code: 404 reason: 'Not Found'
+    on: conn.
+  ^false
 %
 category: 'validation'
 method: McpAuthRouter
@@ -613,25 +632,6 @@ tokenRejectionFor: aJwtString
   (self signatureVerified: tok)
     ifFalse: [^Array with: 401 with: 'invalid_token' with: 'Token signature is not valid'].
   ^self rejectionForPayload: tok payload
-%
-category: 'validation'
-method: McpAuthRouter
-signatureVerified: aJsonWebToken
-  "Whether aJsonWebToken's signature verifies against the Stone's trusted JWT public keys, selected
-   by the token's own `kid` header. Fails closed on anything unexpected -- an unsigned token, a kid
-   this Stone does not trust (or no kid at all, which raises), or a verification error.
-   Only asymmetric (public-key) signatures are accepted: an HMAC-signed token has no public key to
-   check it against, so it cannot be verified here and is refused. Real OIDC providers sign access
-   tokens with RS256/ES256, so this costs nothing in practice and closes the alg-confusion door."
-  | kid key |
-  ^[ aJsonWebToken isSigned
-       ifFalse: [false]
-       ifTrue: [
-         kid := [aJsonWebToken keyId] on: Error do: [:e | nil].  "raises when the header has no kid"
-         key := self trustedKeyForKeyId: kid.
-         key isNil ifTrue: [false] ifFalse: [
-           (aJsonWebToken verifySignatureNoErrorWithPublicKey: key) == true]] ]
-   on: Error do: [:e | false]
 %
 category: 'validation'
 method: McpAuthRouter

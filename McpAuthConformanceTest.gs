@@ -13,7 +13,7 @@ GsTestCase subclass: 'McpAuthConformanceTest'
 %
 expectvalue /Class
 doit
-McpAuthConformanceTest comment:
+McpAuthConformanceTest comment: 
 'Conformance tests for McpAuthRouter against the MCP authorization specification, in its role as an
 OAuth 2.1 Resource Server. One test per normative requirement, named after the requirement and
 carrying the spec clause in its comment.
@@ -88,6 +88,16 @@ removeallmethods McpAuthConformanceTest
 removeallclassmethods McpAuthConformanceTest
 ! ------------------- Class methods for McpAuthConformanceTest
 ! ------------------- Instance methods for McpAuthConformanceTest
+category: 'helpers'
+method: McpAuthConformanceTest
+bodyOf: aResponse
+  "Everything after the blank line that ends the response head."
+  | marker idx |
+  marker := self crlf , self crlf.
+  idx := aResponse indexOfSubCollection: marker.
+  idx = 0 ifTrue: [^''].
+  ^aResponse copyFrom: idx + marker size to: aResponse size
+%
 category: 'fixture values'
 method: McpAuthConformanceTest
 canonicalResource
@@ -102,6 +112,12 @@ method: McpAuthConformanceTest
 conformanceIssuer
   "An https issuer URL, as Communication Security requires of every authorization server endpoint."
   ^'https://idp.example:8443/realms/gs-mcp'
+%
+category: 'helpers'
+method: McpAuthConformanceTest
+conformanceKeyId
+  "The kid the fixture tokens are signed under."
+  ^'mcp-conformance-key'
 %
 category: 'fixture values'
 method: McpAuthConformanceTest
@@ -127,16 +143,6 @@ conformantRouter
     userIdClaim: 'sub'.
   ^r
 %
-category: 'fixture routers'
-method: McpAuthConformanceTest
-tlsOnlyRouter
-  "A router with TLS credentials and NOTHING else configured. Used by the start-up guard tests: TLS
-   is set so requireTls passes and the assertion is about the guard under test, not about TLS."
-  | r |
-  r := McpAuthRouter new.
-  r useTlsCertificateFile: '/tmp/mcp-conformance.crt' privateKeyFile: '/tmp/mcp-conformance.key'.
-  ^r
-%
 category: 'helpers'
 method: McpAuthConformanceTest
 crlf
@@ -151,6 +157,15 @@ driveRequest: rawRequest on: aRouter
   mock := McpMockSocket on: rawRequest.
   aRouter handleConnection: (McpHttpConnection on: mock).
   ^mock output
+%
+category: 'token fixtures'
+method: McpAuthConformanceTest
+forgedToken
+  "A syntactically valid JWT whose signature is garbage: header {alg:HS256}, payload with sub/exp/
+   iss/aud, and a bogus signature segment. It PARSES (so the RS-layer claim checks run on it) but
+   could never survive signature verification."
+  ^'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhdHRhY2tlciIsImV4cCI6OTk5OTk5OTk5OSwiaXNzIjoiaHR0cHM6Ly9pZHAu'
+    , 'ZXhhbXBsZTo4NDQzL3JlYWxtcy9ncy1tY3AiLCJhdWQiOiJodHRwczovL2xvY2FsaG9zdDo4NDQzL21jcCJ9.AAAA'
 %
 category: 'helpers'
 method: McpAuthConformanceTest
@@ -201,16 +216,6 @@ jsonOf: aResponse
 %
 category: 'helpers'
 method: McpAuthConformanceTest
-bodyOf: aResponse
-  "Everything after the blank line that ends the response head."
-  | marker idx |
-  marker := self crlf , self crlf.
-  idx := aResponse indexOfSubCollection: marker.
-  idx = 0 ifTrue: [^''].
-  ^aResponse copyFrom: idx + marker size to: aResponse size
-%
-category: 'helpers'
-method: McpAuthConformanceTest
 postBody: aBody headers: extraHeaderLines
   "A raw HTTP POST /mcp carrying aBody as JSON, with a correct Content-Length."
   ^'POST /mcp HTTP/1.1' , self crlf , 'Host: localhost:8443' , self crlf , extraHeaderLines ,
@@ -229,8 +234,27 @@ postInitWithToken: aJwtStringOrNil
 %
 category: 'helpers'
 method: McpAuthConformanceTest
+rsVerdictFor: aClaimsDict
+  "The router's RESOURCE-SERVER verdict on a token carrying aClaimsDict: nil to accept, else
+   { httpCode. oauthErrorCode. description }. Runs with the fixture signing key trusted, so the
+   verdict reflects the CLAIM under test rather than an untrusted signature.
+   The claim-level tests below assert this rather than an HTTP status ON PURPOSE. Driving a whole
+   initialize would reach the GemStone login, and these fixture tokens name users that were never
+   provisioned, so the login fails and the response is 401 no matter what the RS layer decided --
+   an HTTP-level assertion would pass even for a claim the router never checked. (That is not
+   hypothetical: the no-expiry test passed that way before being rewritten to assert the verdict.)"
+  ^self withConformanceKeyDo: [
+    self conformantRouter tokenRejectionFor: (self tokenWithClaims: aClaimsDict)]
+%
+category: 'helpers'
+method: McpAuthConformanceTest
 sessionIdFrom: aResponse
   ^self headerNamed: 'MCP-Session-Id' in: aResponse
+%
+category: 'helpers'
+method: McpAuthConformanceTest
+statusBody
+  ^'{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"status","arguments":{}}}'
 %
 category: 'helpers'
 method: McpAuthConformanceTest
@@ -242,195 +266,32 @@ statusOf: aResponse
   parts size < 2 ifTrue: [^nil].
   ^(parts at: 2) asNumber
 %
-category: 'helpers'
+category: 'tests - token validation'
 method: McpAuthConformanceTest
-statusBody
-  ^'{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"status","arguments":{}}}'
-%
-category: 'token fixtures'
-method: McpAuthConformanceTest
-forgedToken
-  "A syntactically valid JWT whose signature is garbage: header {alg:HS256}, payload with sub/exp/
-   iss/aud, and a bogus signature segment. It PARSES (so the RS-layer claim checks run on it) but
-   could never survive signature verification."
-  ^'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhdHRhY2tlciIsImV4cCI6OTk5OTk5OTk5OSwiaXNzIjoiaHR0cHM6Ly9pZHAu'
-    , 'ZXhhbXBsZTo4NDQzL3JlYWxtcy9ncy1tY3AiLCJhdWQiOiJodHRwczovL2xvY2FsaG9zdDo4NDQzL21jcCJ9.AAAA'
-%
-category: 'token fixtures'
-method: McpAuthConformanceTest
-tokenWithClaims: aClaimsDict
-  "An RSA-256 JWT carrying exactly aClaimsDict as extra payload claims (on top of nothing else).
-   Signed with JsonWebToken's example private key so it parses; no GemStone user is provisioned, so
-   it is only useful for RS-layer (pre-login) assertions."
-  | tok |
-  tok := JsonWebToken newForRsa256.
-  tok keyId: 'mcp-conformance-key'.
-  aClaimsDict keysAndValuesDo: [:k :v | tok payloadClaimAt: k put: v].
-  tok signWithPrivateKey: JsonWebToken example_privateKey.
-  ^tok asJwtString
-%
-category: 'token fixtures'
-method: McpAuthConformanceTest
-validClaims
-  "Payload claims that should pass every RS-layer check of conformantRouter."
-  | d |
-  d := Dictionary new.
-  d at: 'sub' put: 'conformanceUser'.
-  d at: 'iss' put: self conformanceIssuer.
-  d at: 'aud' put: self canonicalResource.
-  d at: 'scope' put: 'openid mcp:use'.
-  d at: 'exp' put: System timeGmt + 3600.
-  ^d
-%
-category: 'token fixtures'
-method: McpAuthConformanceTest
-withJwtUser: aUserId scope: aScopeStringOrNil do: aOneArgBlock
-  "Provision a JWT-enabled UserProfile for aUserId plus a trusted signing key, mint a matching JWT
-   whose claims satisfy conformantRouter, evaluate aOneArgBlock with the JWT string, and ALWAYS
-   clean up. Mirrors McpAuthTest>>withJwtUser:scope:do: -- it commits, so it touches AllUsers, and
-   the caller will spawn a worker gem (needs NETLDI)."
-  | keyId jwtSec up now tok |
-  keyId := 'mcp-conformance-key'.
-  (AllUsers userWithId: aUserId ifAbsent: [nil]) ifNotNil: [:u |
-    AllUsers removeAndCleanupUserWithId: aUserId ifAbsent: [nil]. System commitTransaction].
-  jwtSec := JwtSecurityData new.
-  jwtSec userIdKey: #sub; addUserId: aUserId; addIssuer: #*; addAudience: #*.
-  up := AllUsers addNewUserWithId: aUserId password: 'swordfishXYZ'.
-  up enableJwtAuthenticationWith: jwtSec.
-  System commitTransaction.
-  System addJwtKey: JsonWebToken example_publicKey withId: keyId.
-  now := System timeGmt.
-  tok := JsonWebToken newForRsa256.
-  tok subject: aUserId; issuer: self conformanceIssuer; audience: self canonicalResource; keyId: keyId;
-    issuedAtTime: now; expirationTime: now + 3600.
-  aScopeStringOrNil ifNotNil: [:sc | tok payloadClaimAt: 'scope' put: sc].
-  tok signWithPrivateKey: JsonWebToken example_privateKey.
-  ^[aOneArgBlock value: tok asJwtString] ensure: [
-    [System removeJwtKeyWithId: keyId] on: Error do: [:e | nil].
-    [AllUsers removeAndCleanupUserWithId: aUserId ifAbsent: [nil]. System commitTransaction]
-      on: Error do: [:e | nil]]
-%
-category: 'tests - protected resource metadata'
-method: McpAuthConformanceTest
-testMetadataServedAsJsonAtWellKnownRoot
-  "RFC 9728 / all revisions: 'MCP servers MUST implement OAuth 2.0 Protected Resource Metadata'.
-   The document is served unauthenticated (it is what an unauthenticated client reads to find out
-   how to authenticate) as application/json."
-  | out |
-  out := self driveRequest: (self getPath: '/.well-known/oauth-protected-resource')
-    on: self conformantRouter.
-  self assert: (self statusOf: out) equals: 200.
-  self assert: (self headerNamed: 'Content-Type' in: out) equals: 'application/json'.
-  self deny: (self jsonOf: out) isNil
-%
-category: 'tests - protected resource metadata'
-method: McpAuthConformanceTest
-testMetadataAdvertisesAuthorizationServer
-  "Authorization Server Location, all revisions: 'The Protected Resource Metadata document returned
-   by the MCP server MUST include the authorization_servers field containing at least one
-   authorization server.'"
-  | meta servers |
-  meta := self jsonOf: (self driveRequest: (self getPath: '/.well-known/oauth-protected-resource')
-    on: self conformantRouter).
-  servers := meta at: 'authorization_servers' ifAbsent: [nil].
-  self deny: servers isNil.
-  self deny: servers isEmpty.
-  self assert: (servers includes: self conformanceIssuer)
-%
-category: 'tests - protected resource metadata'
-method: McpAuthConformanceTest
-testMetadataResourceIgnoresHostHeader
-  "RFC 9728: the resource value is the resource's OWN canonical identifier. It must not be derived
-   from the request, which the client controls -- two requests differing only in Host must publish
-   the same identifier. Today the Host header is echoed into it, so a request carrying
-   'Host: evil.example.com' is told the resource is https://evil.example.com/mcp."
-  | router fromLocalhost fromElsewhere |
-  router := self conformantRouter.
-  fromLocalhost := self jsonOf: (self driveRequest:
-    (self getPath: '/.well-known/oauth-protected-resource' host: 'localhost:8443' headers: '')
-    on: router).
-  fromElsewhere := self jsonOf: (self driveRequest:
-    (self getPath: '/.well-known/oauth-protected-resource' host: 'evil.example.com' headers: '')
-    on: router).
-  self assert: (fromElsewhere at: 'resource' ifAbsent: [nil])
-    equals: (fromLocalhost at: 'resource' ifAbsent: ['<missing>'])
-%
-category: 'tests - protected resource metadata'
-method: McpAuthConformanceTest
-testMetadataResourceMatchesValidatedAudience
-  "The identifier the server PUBLISHES must be the one it ENFORCES. A client obeys the metadata
-   document when it sets RFC 8707 resource= on its token request, so if the published resource and
-   expectedAudience disagree, every token the client can obtain fails the audience check and the
-   client sees an unexplainable 401 loop."
-  | meta |
-  meta := self jsonOf: (self driveRequest: (self getPath: '/.well-known/oauth-protected-resource')
-    on: self conformantRouter).
-  self assert: (meta at: 'resource' ifAbsent: [nil]) equals: self canonicalResource
-%
-category: 'tests - protected resource metadata'
-method: McpAuthConformanceTest
-testMetadataDeclaresScopesSupported
-  "Scope Selection Strategy (2025-11-25, draft): scopes_supported in the metadata document is the
-   client's documented fallback when the challenge carries no scope -- 'use all scopes defined in
-   scopes_supported from the Protected Resource Metadata document'. requiredScopes is exactly the
-   value to publish. RFC 9728 lists the field as RECOMMENDED."
-  | meta scopes |
-  meta := self jsonOf: (self driveRequest: (self getPath: '/.well-known/oauth-protected-resource')
-    on: self conformantRouter).
-  scopes := meta at: 'scopes_supported' ifAbsent: [nil].
-  self deny: scopes isNil.
-  self assert: (scopes includes: 'mcp:use')
-%
-category: 'tests - protected resource metadata'
-method: McpAuthConformanceTest
-testMetadataOmitsOfflineAccessFromScopesSupported
-  "draft, Refresh Tokens: 'MCP Servers (Protected Resources) SHOULD NOT include offline_access in
-   WWW-Authenticate scope or Protected Resource Metadata scopes_supported, as refresh tokens are
-   not a resource requirement.' A forward guard: it holds vacuously until scopes_supported exists."
-  | meta scopes |
-  meta := self jsonOf: (self driveRequest: (self getPath: '/.well-known/oauth-protected-resource')
-    on: self conformantRouter).
-  scopes := meta at: 'scopes_supported' ifAbsent: [#()].
-  self deny: (scopes includes: 'offline_access')
-%
-category: 'tests - protected resource metadata'
-method: McpAuthConformanceTest
-testMetadataServedAtPathScopedWellKnownUri
-  "Protected Resource Metadata Discovery Requirements, all revisions: for a resource identifier with
-   a path component, the well-known URI inserts that path -- 'https://example.com/public/mcp could
-   host metadata at https://example.com/.well-known/oauth-protected-resource/public/mcp'. Our
-   resource identifier ends in /mcp, and the discovery sequence diagram shows a client probing
-   /.well-known/oauth-protected-resource/mcp FIRST, before falling back to the root."
-  | out |
-  out := self driveRequest: (self getPath: '/.well-known/oauth-protected-resource/mcp')
-    on: self conformantRouter.
-  self assert: (self statusOf: out) equals: 200.
-  self assert: (self headerNamed: 'Content-Type' in: out) equals: 'application/json'
-%
-category: 'tests - protected resource metadata'
-method: McpAuthConformanceTest
-testMetadataPathToleratesQueryString
-  "A discovery probe carrying a query string must still get metadata. The path is matched by exact
-   string equality and parseHead: never splits off the query, so today
-   '/.well-known/oauth-protected-resource?x=1' falls through to the inherited SSE handler and the
-   client gets an event-stream that never answers instead of a metadata document."
-  | out |
-  out := self driveRequest: (self getPath: '/.well-known/oauth-protected-resource?x=1')
-    on: self conformantRouter.
-  self assert: (self statusOf: out) equals: 200.
-  self assert: (self headerNamed: 'Content-Type' in: out) equals: 'application/json'
+testAudienceArrayContainingThisResourceAccepted
+  "RFC 7519: aud may be a single string or an array of strings, and a match on any element counts.
+   Asserted through a real JsonWebToken rather than a hand-built Dictionary, because the payload of
+   a parsed token is a SymbolDictionary while JsonParser yields a plain Dictionary -- a claim-shape
+   test that builds its own Dictionary is not exercising the type the router actually sees. Keycloak
+   issues aud as an array, so this is the shape a real deployment presents."
+  | claims |
+  claims := self validClaims.
+  claims at: 'aud' put: (Array with: 'account' with: self canonicalResource).
+  self assert: (self rsVerdictFor: claims) isNil
 %
 category: 'tests - www-authenticate challenge'
 method: McpAuthConformanceTest
-testUnauthenticatedRequestReturns401WithBearerChallenge
-  "Error Handling, all revisions: 401 means 'Authorization required or token invalid', and RFC 6750
-   requires a WWW-Authenticate challenge naming the Bearer scheme."
+testChallengeCarriesRequiredScopeOn401
+  "Scope Selection Strategy (2025-11-25, draft): 'MCP servers SHOULD include a scope parameter in
+   the WWW-Authenticate header ... to indicate the scopes required for accessing the resource',
+   illustrated with a 401 example. Clients are told to prefer this over scopes_supported. Without
+   it a client requests no scope, is issued a token lacking mcp:use, and only then learns from a
+   403 what it needed -- a wasted authorization round trip on every first connection."
   | out challenge |
   out := self driveRequest: (self postInitWithToken: nil) on: self conformantRouter.
-  self assert: (self statusOf: out) equals: 401.
   challenge := self headerNamed: 'WWW-Authenticate' in: out.
   self deny: challenge isNil.
-  self assert: (self includesCS: 'Bearer' in: challenge)
+  self assert: (self includesCS: 'scope="mcp:use"' in: challenge)
 %
 category: 'tests - www-authenticate challenge'
 method: McpAuthConformanceTest
@@ -449,74 +310,16 @@ testChallengeCarriesResourceMetadataWithoutExtraConfiguration
   self deny: challenge isNil.
   self assert: (self includesCS: 'resource_metadata=' in: challenge)
 %
-category: 'tests - www-authenticate challenge'
+category: 'tests - per-request authorization'
 method: McpAuthConformanceTest
-testChallengeCarriesRequiredScopeOn401
-  "Scope Selection Strategy (2025-11-25, draft): 'MCP servers SHOULD include a scope parameter in
-   the WWW-Authenticate header ... to indicate the scopes required for accessing the resource',
-   illustrated with a 401 example. Clients are told to prefer this over scopes_supported. Without
-   it a client requests no scope, is issued a token lacking mcp:use, and only then learns from a
-   403 what it needed -- a wasted authorization round trip on every first connection."
-  | out challenge |
-  out := self driveRequest: (self postInitWithToken: nil) on: self conformantRouter.
-  challenge := self headerNamed: 'WWW-Authenticate' in: out.
-  self deny: challenge isNil.
-  self assert: (self includesCS: 'scope="mcp:use"' in: challenge)
-%
-category: 'tests - www-authenticate challenge'
-method: McpAuthConformanceTest
-testInsufficientScopeReturns403WithScopeAndResourceMetadata
-  "Scope Challenge Handling (2025-11-25, draft): a token with insufficient scope SHOULD get 403
-   with error=insufficient_scope, scope naming the required scopes, and resource_metadata 'for
-   consistency with 401 responses'. All required scopes go in ONE challenge.
-   Runs with the fixture key trusted: the subject here is a genuinely VALID token that is merely
-   under-scoped, so its signature has to verify or it would be refused as invalid_token first."
-  ^self withConformanceKeyDo: [ | claims out challenge |
-    claims := self validClaims.
-    claims at: 'scope' put: 'openid'.  "authenticated, but not authorized for this resource"
-    out := self driveRequest: (self postInitWithToken: (self tokenWithClaims: claims))
-      on: self conformantRouter.
-    self assert: (self statusOf: out) equals: 403.
-    challenge := self headerNamed: 'WWW-Authenticate' in: out.
-    self deny: challenge isNil.
-    self assert: (self includesCS: 'error="insufficient_scope"' in: challenge).
-    self assert: (self includesCS: 'scope="mcp:use"' in: challenge).
-    self assert: (self includesCS: 'resource_metadata=' in: challenge)]
-%
-category: 'helpers'
-method: McpAuthConformanceTest
-conformanceKeyId
-  "The kid the fixture tokens are signed under."
-  ^'mcp-conformance-key'
-%
-category: 'helpers'
-method: McpAuthConformanceTest
-withConformanceKeyDo: aBlock
-  "Register the example public key as a TRUSTED Stone key under conformanceKeyId for the duration of
-   aBlock, then remove it. Needed because tokenRejectionFor: verifies a token's signature against the
-   Stone's trusted keys before believing any claim, so a fixture token is only meaningful while its
-   key is trusted.
-   Removes any leftover of the same id before adding: System addJwtKey:withId: RAISES when the id
-   already exists, so a previous test that died before its cleanup would otherwise break every test
-   after it."
-  [System removeJwtKeyWithId: self conformanceKeyId] on: Error do: [:e | nil].
-  System addJwtKey: JsonWebToken example_publicKey withId: self conformanceKeyId.
-  ^[aBlock value] ensure: [
-    [System removeJwtKeyWithId: self conformanceKeyId] on: Error do: [:e | nil]]
-%
-category: 'helpers'
-method: McpAuthConformanceTest
-rsVerdictFor: aClaimsDict
-  "The router's RESOURCE-SERVER verdict on a token carrying aClaimsDict: nil to accept, else
-   { httpCode. oauthErrorCode. description }. Runs with the fixture signing key trusted, so the
-   verdict reflects the CLAIM under test rather than an untrusted signature.
-   The claim-level tests below assert this rather than an HTTP status ON PURPOSE. Driving a whole
-   initialize would reach the GemStone login, and these fixture tokens name users that were never
-   provisioned, so the login fails and the response is 401 no matter what the RS layer decided --
-   an HTTP-level assertion would pass even for a claim the router never checked. (That is not
-   hypothetical: the no-expiry test passed that way before being rewritten to assert the verdict.)"
-  ^self withConformanceKeyDo: [
-    self conformantRouter tokenRejectionFor: (self tokenWithClaims: aClaimsDict)]
+testDeleteRequiresBearerToken
+  "Same requirement as testGetStreamRequiresBearerToken: DELETE ends a session and is a protected
+   resource request, so an unauthenticated DELETE must be refused rather than answered 200."
+  | out |
+  out := self driveRequest: 'DELETE /mcp HTTP/1.1' , self crlf , 'Host: localhost:8443' , self crlf
+    , self crlf
+    on: self conformantRouter.
+  self assert: (self statusOf: out) equals: 401
 %
 category: 'tests - token validation'
 method: McpAuthConformanceTest
@@ -534,59 +337,6 @@ testExpiredTokenRejectedWith401
   out := self driveRequest: (self postInitWithToken: (self tokenWithClaims: claims))
     on: self conformantRouter.
   self assert: (self statusOf: out) equals: 401
-%
-category: 'tests - token validation'
-method: McpAuthConformanceTest
-testTokenWithoutExpiryRejected
-  "OAuth 2.1 section 5.2 token validation: a self-contained access token with no expiry can never be
-   shown to be currently valid, so it must be refused. rejectionForPayload: guards its comparison
-   with (exp notNil and: [...]), which fails OPEN -- a token carrying no exp claim at all passes
-   every RS check and is handed to the login."
-  | claims verdict |
-  claims := self validClaims.
-  claims removeKey: 'exp' ifAbsent: [nil].
-  verdict := self rsVerdictFor: claims.
-  self deny: verdict isNil.
-  self assert: (verdict at: 1) equals: 401
-%
-category: 'tests - token validation'
-method: McpAuthConformanceTest
-testTokenForAnotherAudienceRejectedWith401
-  "Access Token Privilege Restriction, all revisions: 'MCP servers MUST only accept tokens
-   specifically intended for themselves and MUST reject tokens that do not include them in the
-   audience claim.'"
-  | claims verdict |
-  claims := self validClaims.
-  claims at: 'aud' put: 'https://some-other-service.example/api'.
-  verdict := self rsVerdictFor: claims.
-  self deny: verdict isNil.
-  self assert: (verdict at: 1) equals: 401.
-  self assert: (verdict at: 2) equals: 'invalid_token'
-%
-category: 'tests - token validation'
-method: McpAuthConformanceTest
-testTokenFromUntrustedIssuerRejectedWith401
-  "OAuth 2.1 section 5.2: the resource server validates the issuer of a self-contained token."
-  | claims verdict |
-  claims := self validClaims.
-  claims at: 'iss' put: 'https://attacker.example/realms/evil'.
-  verdict := self rsVerdictFor: claims.
-  self deny: verdict isNil.
-  self assert: (verdict at: 1) equals: 401.
-  self assert: (verdict at: 2) equals: 'invalid_token'
-%
-category: 'tests - token validation'
-method: McpAuthConformanceTest
-testAudienceArrayContainingThisResourceAccepted
-  "RFC 7519: aud may be a single string or an array of strings, and a match on any element counts.
-   Asserted through a real JsonWebToken rather than a hand-built Dictionary, because the payload of
-   a parsed token is a SymbolDictionary while JsonParser yields a plain Dictionary -- a claim-shape
-   test that builds its own Dictionary is not exercising the type the router actually sees. Keycloak
-   issues aud as an array, so this is the shape a real deployment presents."
-  | claims |
-  claims := self validClaims.
-  claims at: 'aud' put: (Array with: 'account' with: self canonicalResource).
-  self assert: (self rsVerdictFor: claims) isNil
 %
 category: 'tests - token validation'
 method: McpAuthConformanceTest
@@ -629,16 +379,180 @@ testGetStreamRequiresBearerToken
   out := self driveRequest: (self getPath: '/mcp') on: self conformantRouter.
   self assert: (self statusOf: out) equals: 401
 %
-category: 'tests - per-request authorization'
+category: 'tests - www-authenticate challenge'
 method: McpAuthConformanceTest
-testDeleteRequiresBearerToken
-  "Same requirement as testGetStreamRequiresBearerToken: DELETE ends a session and is a protected
-   resource request, so an unauthenticated DELETE must be refused rather than answered 200."
+testInsufficientScopeReturns403WithScopeAndResourceMetadata
+  "Scope Challenge Handling (2025-11-25, draft): a token with insufficient scope SHOULD get 403
+   with error=insufficient_scope, scope naming the required scopes, and resource_metadata 'for
+   consistency with 401 responses'. All required scopes go in ONE challenge.
+   Runs with the fixture key trusted: the subject here is a genuinely VALID token that is merely
+   under-scoped, so its signature has to verify or it would be refused as invalid_token first."
+  ^self withConformanceKeyDo: [ | claims out challenge |
+    claims := self validClaims.
+    claims at: 'scope' put: 'openid'.  "authenticated, but not authorized for this resource"
+    out := self driveRequest: (self postInitWithToken: (self tokenWithClaims: claims))
+      on: self conformantRouter.
+    self assert: (self statusOf: out) equals: 403.
+    challenge := self headerNamed: 'WWW-Authenticate' in: out.
+    self deny: challenge isNil.
+    self assert: (self includesCS: 'error="insufficient_scope"' in: challenge).
+    self assert: (self includesCS: 'scope="mcp:use"' in: challenge).
+    self assert: (self includesCS: 'resource_metadata=' in: challenge)]
+%
+category: 'tests - protected resource metadata'
+method: McpAuthConformanceTest
+testMetadataAdvertisesAuthorizationServer
+  "Authorization Server Location, all revisions: 'The Protected Resource Metadata document returned
+   by the MCP server MUST include the authorization_servers field containing at least one
+   authorization server.'"
+  | meta servers |
+  meta := self jsonOf: (self driveRequest: (self getPath: '/.well-known/oauth-protected-resource')
+    on: self conformantRouter).
+  servers := meta at: 'authorization_servers' ifAbsent: [nil].
+  self deny: servers isNil.
+  self deny: servers isEmpty.
+  self assert: (servers includes: self conformanceIssuer)
+%
+category: 'tests - protected resource metadata'
+method: McpAuthConformanceTest
+testMetadataDeclaresScopesSupported
+  "Scope Selection Strategy (2025-11-25, draft): scopes_supported in the metadata document is the
+   client's documented fallback when the challenge carries no scope -- 'use all scopes defined in
+   scopes_supported from the Protected Resource Metadata document'. requiredScopes is exactly the
+   value to publish. RFC 9728 lists the field as RECOMMENDED."
+  | meta scopes |
+  meta := self jsonOf: (self driveRequest: (self getPath: '/.well-known/oauth-protected-resource')
+    on: self conformantRouter).
+  scopes := meta at: 'scopes_supported' ifAbsent: [nil].
+  self deny: scopes isNil.
+  self assert: (scopes includes: 'mcp:use')
+%
+category: 'tests - protected resource metadata'
+method: McpAuthConformanceTest
+testMetadataOmitsOfflineAccessFromScopesSupported
+  "draft, Refresh Tokens: 'MCP Servers (Protected Resources) SHOULD NOT include offline_access in
+   WWW-Authenticate scope or Protected Resource Metadata scopes_supported, as refresh tokens are
+   not a resource requirement.' A forward guard: it holds vacuously until scopes_supported exists."
+  | meta scopes |
+  meta := self jsonOf: (self driveRequest: (self getPath: '/.well-known/oauth-protected-resource')
+    on: self conformantRouter).
+  scopes := meta at: 'scopes_supported' ifAbsent: [#()].
+  self deny: (scopes includes: 'offline_access')
+%
+category: 'tests - protected resource metadata'
+method: McpAuthConformanceTest
+testMetadataPathToleratesQueryString
+  "A discovery probe carrying a query string must still get metadata. The path is matched by exact
+   string equality and parseHead: never splits off the query, so today
+   '/.well-known/oauth-protected-resource?x=1' falls through to the inherited SSE handler and the
+   client gets an event-stream that never answers instead of a metadata document."
   | out |
-  out := self driveRequest: 'DELETE /mcp HTTP/1.1' , self crlf , 'Host: localhost:8443' , self crlf
-    , self crlf
+  out := self driveRequest: (self getPath: '/.well-known/oauth-protected-resource?x=1')
     on: self conformantRouter.
-  self assert: (self statusOf: out) equals: 401
+  self assert: (self statusOf: out) equals: 200.
+  self assert: (self headerNamed: 'Content-Type' in: out) equals: 'application/json'
+%
+category: 'tests - protected resource metadata'
+method: McpAuthConformanceTest
+testMetadataResourceIgnoresHostHeader
+  "RFC 9728: the resource value is the resource's OWN canonical identifier. It must not be derived
+   from the request, which the client controls -- two requests differing only in Host must publish
+   the same identifier. Today the Host header is echoed into it, so a request carrying
+   'Host: evil.example.com' is told the resource is https://evil.example.com/mcp."
+  | router fromLocalhost fromElsewhere |
+  router := self conformantRouter.
+  fromLocalhost := self jsonOf: (self driveRequest:
+    (self getPath: '/.well-known/oauth-protected-resource' host: 'localhost:8443' headers: '')
+    on: router).
+  fromElsewhere := self jsonOf: (self driveRequest:
+    (self getPath: '/.well-known/oauth-protected-resource' host: 'evil.example.com' headers: '')
+    on: router).
+  self assert: (fromElsewhere at: 'resource' ifAbsent: [nil])
+    equals: (fromLocalhost at: 'resource' ifAbsent: ['<missing>'])
+%
+category: 'tests - protected resource metadata'
+method: McpAuthConformanceTest
+testMetadataResourceMatchesValidatedAudience
+  "The identifier the server PUBLISHES must be the one it ENFORCES. A client obeys the metadata
+   document when it sets RFC 8707 resource= on its token request, so if the published resource and
+   expectedAudience disagree, every token the client can obtain fails the audience check and the
+   client sees an unexplainable 401 loop."
+  | meta |
+  meta := self jsonOf: (self driveRequest: (self getPath: '/.well-known/oauth-protected-resource')
+    on: self conformantRouter).
+  self assert: (meta at: 'resource' ifAbsent: [nil]) equals: self canonicalResource
+%
+category: 'tests - protected resource metadata'
+method: McpAuthConformanceTest
+testMetadataServedAsJsonAtWellKnownRoot
+  "RFC 9728 / all revisions: 'MCP servers MUST implement OAuth 2.0 Protected Resource Metadata'.
+   The document is served unauthenticated (it is what an unauthenticated client reads to find out
+   how to authenticate) as application/json."
+  | out |
+  out := self driveRequest: (self getPath: '/.well-known/oauth-protected-resource')
+    on: self conformantRouter.
+  self assert: (self statusOf: out) equals: 200.
+  self assert: (self headerNamed: 'Content-Type' in: out) equals: 'application/json'.
+  self deny: (self jsonOf: out) isNil
+%
+category: 'tests - protected resource metadata'
+method: McpAuthConformanceTest
+testMetadataServedAtPathScopedWellKnownUri
+  "Protected Resource Metadata Discovery Requirements, all revisions: for a resource identifier with
+   a path component, the well-known URI inserts that path -- 'https://example.com/public/mcp could
+   host metadata at https://example.com/.well-known/oauth-protected-resource/public/mcp'. Our
+   resource identifier ends in /mcp, and the discovery sequence diagram shows a client probing
+   /.well-known/oauth-protected-resource/mcp FIRST, before falling back to the root."
+  | out |
+  out := self driveRequest: (self getPath: '/.well-known/oauth-protected-resource/mcp')
+    on: self conformantRouter.
+  self assert: (self statusOf: out) equals: 200.
+  self assert: (self headerNamed: 'Content-Type' in: out) equals: 'application/json'
+%
+category: 'tests - deployment guards'
+method: McpAuthConformanceTest
+testRefusesNonHttpsAuthorizationServer
+  "Communication Security, all revisions: 'All authorization server endpoints MUST be served over
+   HTTPS.' The spec's localhost exemption covers redirect URIs, not authorization server endpoints.
+   run-auth-server.sh defaults MCP_ISSUER to http://localhost:8080/realms/gs-mcp and puts it
+   straight into authorization_servers, so the shipped default advertises a cleartext AS."
+  | r |
+  r := self tlsOnlyRouter.
+  r expectedAudience: self canonicalResource;
+    expectedIssuer: 'http://localhost:8080/realms/gs-mcp';
+    authorizationServers: #('http://localhost:8080/realms/gs-mcp').
+  self should: [r runOnPort: 65001] raise: Error.
+  self should: [r forkOnPort: 65001] raise: Error
+%
+category: 'tests - deployment guards'
+method: McpAuthConformanceTest
+testRefusesToRunWithoutAuthorizationServer
+  "Authorization Server Location, all revisions: the metadata document MUST name at least one
+   authorization server. authorizationServers defaults to empty, and nothing checks it, so a
+   default router happily publishes 'authorization_servers':[] -- a document that satisfies the
+   letter of 'we serve metadata' while telling the client nothing it needs."
+  | r |
+  r := self tlsOnlyRouter.
+  r expectedAudience: self canonicalResource.
+  self assert: r authorizationServers isEmpty.
+  self should: [r runOnPort: 65001] raise: Error.
+  self should: [r forkOnPort: 65001] raise: Error
+%
+category: 'tests - deployment guards'
+method: McpAuthConformanceTest
+testRefusesToRunWithoutExpectedAudience
+  "Access Token Privilege Restriction, all revisions: audience validation is a MUST, so it cannot
+   be optional. expectedAudience defaults to nil meaning 'skip the check', so a router that is
+   merely constructed and started accepts a token minted for any resource. Make it a start-up
+   invariant, the way requireTls already makes TLS one -- enforced in code because runOnPort: and
+   forkOnPort: can be called directly, without the launch script.
+   TLS is configured here so requireTls passes and this assertion is about the audience guard."
+  | r |
+  r := self tlsOnlyRouter.
+  r authorizationServers: (Array with: self conformanceIssuer).
+  self assert: r expectedAudience isNil.
+  self should: [r runOnPort: 65001] raise: Error.
+  self should: [r forkOnPort: 65001] raise: Error
 %
 category: 'tests - per-request authorization'
 method: McpAuthConformanceTest
@@ -685,48 +599,134 @@ testRoutedRequestWithExpiredTokenRejected
       on: router.
     self assert: (self statusOf: out) equals: 401]
 %
-category: 'tests - deployment guards'
+category: 'tests - token validation'
 method: McpAuthConformanceTest
-testRefusesToRunWithoutExpectedAudience
-  "Access Token Privilege Restriction, all revisions: audience validation is a MUST, so it cannot
-   be optional. expectedAudience defaults to nil meaning 'skip the check', so a router that is
-   merely constructed and started accepts a token minted for any resource. Make it a start-up
-   invariant, the way requireTls already makes TLS one -- enforced in code because runOnPort: and
-   forkOnPort: can be called directly, without the launch script.
-   TLS is configured here so requireTls passes and this assertion is about the audience guard."
-  | r |
-  r := self tlsOnlyRouter.
-  r authorizationServers: (Array with: self conformanceIssuer).
-  self assert: r expectedAudience isNil.
-  self should: [r runOnPort: 65001] raise: Error.
-  self should: [r forkOnPort: 65001] raise: Error
+testTokenForAnotherAudienceRejectedWith401
+  "Access Token Privilege Restriction, all revisions: 'MCP servers MUST only accept tokens
+   specifically intended for themselves and MUST reject tokens that do not include them in the
+   audience claim.'"
+  | claims verdict |
+  claims := self validClaims.
+  claims at: 'aud' put: 'https://some-other-service.example/api'.
+  verdict := self rsVerdictFor: claims.
+  self deny: verdict isNil.
+  self assert: (verdict at: 1) equals: 401.
+  self assert: (verdict at: 2) equals: 'invalid_token'
 %
-category: 'tests - deployment guards'
+category: 'tests - token validation'
 method: McpAuthConformanceTest
-testRefusesToRunWithoutAuthorizationServer
-  "Authorization Server Location, all revisions: the metadata document MUST name at least one
-   authorization server. authorizationServers defaults to empty, and nothing checks it, so a
-   default router happily publishes 'authorization_servers':[] -- a document that satisfies the
-   letter of 'we serve metadata' while telling the client nothing it needs."
-  | r |
-  r := self tlsOnlyRouter.
-  r expectedAudience: self canonicalResource.
-  self assert: r authorizationServers isEmpty.
-  self should: [r runOnPort: 65001] raise: Error.
-  self should: [r forkOnPort: 65001] raise: Error
+testTokenFromUntrustedIssuerRejectedWith401
+  "OAuth 2.1 section 5.2: the resource server validates the issuer of a self-contained token."
+  | claims verdict |
+  claims := self validClaims.
+  claims at: 'iss' put: 'https://attacker.example/realms/evil'.
+  verdict := self rsVerdictFor: claims.
+  self deny: verdict isNil.
+  self assert: (verdict at: 1) equals: 401.
+  self assert: (verdict at: 2) equals: 'invalid_token'
 %
-category: 'tests - deployment guards'
+category: 'tests - token validation'
 method: McpAuthConformanceTest
-testRefusesNonHttpsAuthorizationServer
-  "Communication Security, all revisions: 'All authorization server endpoints MUST be served over
-   HTTPS.' The spec's localhost exemption covers redirect URIs, not authorization server endpoints.
-   run-auth-server.sh defaults MCP_ISSUER to http://localhost:8080/realms/gs-mcp and puts it
-   straight into authorization_servers, so the shipped default advertises a cleartext AS."
+testTokenWithoutExpiryRejected
+  "OAuth 2.1 section 5.2 token validation: a self-contained access token with no expiry can never be
+   shown to be currently valid, so it must be refused. rejectionForPayload: guards its comparison
+   with (exp notNil and: [...]), which fails OPEN -- a token carrying no exp claim at all passes
+   every RS check and is handed to the login."
+  | claims verdict |
+  claims := self validClaims.
+  claims removeKey: 'exp' ifAbsent: [nil].
+  verdict := self rsVerdictFor: claims.
+  self deny: verdict isNil.
+  self assert: (verdict at: 1) equals: 401
+%
+category: 'tests - www-authenticate challenge'
+method: McpAuthConformanceTest
+testUnauthenticatedRequestReturns401WithBearerChallenge
+  "Error Handling, all revisions: 401 means 'Authorization required or token invalid', and RFC 6750
+   requires a WWW-Authenticate challenge naming the Bearer scheme."
+  | out challenge |
+  out := self driveRequest: (self postInitWithToken: nil) on: self conformantRouter.
+  self assert: (self statusOf: out) equals: 401.
+  challenge := self headerNamed: 'WWW-Authenticate' in: out.
+  self deny: challenge isNil.
+  self assert: (self includesCS: 'Bearer' in: challenge)
+%
+category: 'fixture routers'
+method: McpAuthConformanceTest
+tlsOnlyRouter
+  "A router with TLS credentials and NOTHING else configured. Used by the start-up guard tests: TLS
+   is set so requireTls passes and the assertion is about the guard under test, not about TLS."
   | r |
-  r := self tlsOnlyRouter.
-  r expectedAudience: self canonicalResource;
-    expectedIssuer: 'http://localhost:8080/realms/gs-mcp';
-    authorizationServers: #('http://localhost:8080/realms/gs-mcp').
-  self should: [r runOnPort: 65001] raise: Error.
-  self should: [r forkOnPort: 65001] raise: Error
+  r := McpAuthRouter new.
+  r useTlsCertificateFile: '/tmp/mcp-conformance.crt' privateKeyFile: '/tmp/mcp-conformance.key'.
+  ^r
+%
+category: 'token fixtures'
+method: McpAuthConformanceTest
+tokenWithClaims: aClaimsDict
+  "An RSA-256 JWT carrying exactly aClaimsDict as extra payload claims (on top of nothing else).
+   Signed with JsonWebToken's example private key so it parses; no GemStone user is provisioned, so
+   it is only useful for RS-layer (pre-login) assertions."
+  | tok |
+  tok := JsonWebToken newForRsa256.
+  tok keyId: 'mcp-conformance-key'.
+  aClaimsDict keysAndValuesDo: [:k :v | tok payloadClaimAt: k put: v].
+  tok signWithPrivateKey: JsonWebToken example_privateKey.
+  ^tok asJwtString
+%
+category: 'token fixtures'
+method: McpAuthConformanceTest
+validClaims
+  "Payload claims that should pass every RS-layer check of conformantRouter."
+  | d |
+  d := Dictionary new.
+  d at: 'sub' put: 'conformanceUser'.
+  d at: 'iss' put: self conformanceIssuer.
+  d at: 'aud' put: self canonicalResource.
+  d at: 'scope' put: 'openid mcp:use'.
+  d at: 'exp' put: System timeGmt + 3600.
+  ^d
+%
+category: 'helpers'
+method: McpAuthConformanceTest
+withConformanceKeyDo: aBlock
+  "Register the example public key as a TRUSTED Stone key under conformanceKeyId for the duration of
+   aBlock, then remove it. Needed because tokenRejectionFor: verifies a token's signature against the
+   Stone's trusted keys before believing any claim, so a fixture token is only meaningful while its
+   key is trusted.
+   Removes any leftover of the same id before adding: System addJwtKey:withId: RAISES when the id
+   already exists, so a previous test that died before its cleanup would otherwise break every test
+   after it."
+  [System removeJwtKeyWithId: self conformanceKeyId] on: Error do: [:e | nil].
+  System addJwtKey: JsonWebToken example_publicKey withId: self conformanceKeyId.
+  ^[aBlock value] ensure: [
+    [System removeJwtKeyWithId: self conformanceKeyId] on: Error do: [:e | nil]]
+%
+category: 'token fixtures'
+method: McpAuthConformanceTest
+withJwtUser: aUserId scope: aScopeStringOrNil do: aOneArgBlock
+  "Provision a JWT-enabled UserProfile for aUserId plus a trusted signing key, mint a matching JWT
+   whose claims satisfy conformantRouter, evaluate aOneArgBlock with the JWT string, and ALWAYS
+   clean up. Mirrors McpAuthTest>>withJwtUser:scope:do: -- it commits, so it touches AllUsers, and
+   the caller will spawn a worker gem (needs NETLDI)."
+  | keyId jwtSec up now tok |
+  keyId := 'mcp-conformance-key'.
+  (AllUsers userWithId: aUserId ifAbsent: [nil]) ifNotNil: [:u |
+    AllUsers removeAndCleanupUserWithId: aUserId ifAbsent: [nil]. System commitTransaction].
+  jwtSec := JwtSecurityData new.
+  jwtSec userIdKey: #sub; addUserId: aUserId; addIssuer: #*; addAudience: #*.
+  up := AllUsers addNewUserWithId: aUserId password: 'swordfishXYZ'.
+  up enableJwtAuthenticationWith: jwtSec.
+  System commitTransaction.
+  System addJwtKey: JsonWebToken example_publicKey withId: keyId.
+  now := System timeGmt.
+  tok := JsonWebToken newForRsa256.
+  tok subject: aUserId; issuer: self conformanceIssuer; audience: self canonicalResource; keyId: keyId;
+    issuedAtTime: now; expirationTime: now + 3600.
+  aScopeStringOrNil ifNotNil: [:sc | tok payloadClaimAt: 'scope' put: sc].
+  tok signWithPrivateKey: JsonWebToken example_privateKey.
+  ^[aOneArgBlock value: tok asJwtString] ensure: [
+    [System removeJwtKeyWithId: keyId] on: Error do: [:e | nil].
+    [AllUsers removeAndCleanupUserWithId: aUserId ifAbsent: [nil]. System commitTransaction]
+      on: Error do: [:e | nil]]
 %

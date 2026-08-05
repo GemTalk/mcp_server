@@ -436,6 +436,15 @@ reapIdleSessions
   expired isEmpty ifFalse: [self log: 'Reaped ' , expired size printString , ' idle MCP session(s).'].
   ^expired size
 %
+category: 'routing'
+method: McpRouter
+requestAuthorized: req on: conn
+  "Whether req may proceed to a verb handler. A hook for subclasses: this class performs NO
+   authentication (it is loopback-only for exactly that reason), so it always answers true. An
+   override answers false to refuse the request, and is responsible for having written the error
+   response itself -- see McpAuthRouter>>requestAuthorized:on:."
+  ^true
+%
 category: 'running'
 method: McpRouter
 route: req on: conn
@@ -564,15 +573,6 @@ serveRouted: body sessionId: sid on: conn
   resp isEmpty
     ifTrue: [conn writeStatus: 202 reason: 'Accepted' body: '']
     ifFalse: [conn writeJson: resp]
-%
-category: 'routing'
-method: McpRouter
-requestAuthorized: req on: conn
-  "Whether req may proceed to a verb handler. A hook for subclasses: this class performs NO
-   authentication (it is loopback-only for exactly that reason), so it always answers true. An
-   override answers false to refuse the request, and is responsible for having written the error
-   response itself -- see McpAuthRouter>>requestAuthorized:on:."
-  ^true
 %
 category: 'sessions'
 method: McpRouter
