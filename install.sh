@@ -1,16 +1,14 @@
 #!/usr/bin/env bash
 # Install the native GemStone MCP server classes into the image.
 #
-# By default this loads the code as the Rowan project 'Mcp' from the load spec
-# rowan/specs/Mcp.ston (packages Mcp-Core + Mcp-Tests, into the Published symbol
-# dictionary). This REQUIRES an image with Rowan 3 loaded (e.g. the extent0.rowan3
-# seed). Logs in via topaz, ensures the Published dictionary exists, resolves+loads
-# the project, and commits.
+# Loads the code as the Rowan project 'Mcp' from the load spec rowan/specs/Mcp.ston
+# (into the Published symbol dictionary). REQUIRES an image with Rowan 3 loaded (e.g. the
+# extent0.rowan3 seed). Logs in via topaz, ensures the Published dictionary exists,
+# resolves+loads the project, and commits.
 #
-# Legacy / alternate load modes (file in the flat top-level Mcp*.gs files instead):
-#   --flat    file in load.gs (the pre-Rowan flat file-out; works on any image)
-#   --grail   file in load-grail.gs (flat + the optional GemStone-Python/Grail tools;
-#             only valid on an image that has Grail/ModuleAst)
+#   --grail   after the Rowan load, also file in the optional GemStone-Python (Grail) tools
+#             (McpServerWithGrail + its test, via load-grail.gs); only valid on an image that
+#             has Grail/ModuleAst. Equivalently, set GS_MCP_WITH_GRAIL=1.
 #
 # Configure these (or export before running):
 #   GEMSTONE       - GemStone product directory (defaults to $GEMSTONE if set)
@@ -27,20 +25,15 @@ GS_USER="${GS_USER:-DataCurator}"
 GS_PASS="${GS_PASS:-swordfish}"
 TOPAZ="$GEMSTONE/bin/topaz"
 
-# Select the load mode. Default is Rowan; --flat / --grail select the flat file-in paths.
-MODE="rowan"
-case "${1:-}" in
-  --flat)  MODE="flat"  ;;
-  --grail) MODE="grail" ;;
-  "")      [ -n "${GS_MCP_WITH_GRAIL:-}" ] && MODE="grail" ;;
-esac
+# --grail (or GS_MCP_WITH_GRAIL) adds the optional Grail tools on top of the Rowan load.
+WITH_GRAIL=""
+if [ "${1:-}" = "--grail" ] || [ -n "${GS_MCP_WITH_GRAIL:-}" ]; then
+  WITH_GRAIL=1
+fi
 
-# Build the topaz load command(s) for the chosen mode.
-case "$MODE" in
-  rowan)
-    LOAD_BLOCK="run
-\"Load the gs-mcp code as the Rowan project 'Mcp' from its load spec. Reaches RwSpecification
- the same way \$GEMSTONE/rowan3/bin/installProject.stone does (it isn't in the default symbol list).\"
+# Load the gs-mcp code as the Rowan project 'Mcp' from its load spec. Reaches RwSpecification
+# the same way $GEMSTONE/rowan3/bin/installProject.stone does (it isn't in the default symbol list).
+LOAD_BLOCK="run
 | specCls spec |
 specCls := (Rowan globalNamed: 'RwSpecification')
   ifNil: [ (AllUsers userWithId: 'SystemUser' ifAbsent: []) objectNamed: 'RwSpecification' ].
@@ -50,10 +43,14 @@ spec resolve load.
 System commitTransaction.
 'Mcp project loaded via Rowan'
 %"
-    ;;
-  flat)  LOAD_BLOCK="input load.gs" ;;
-  grail) LOAD_BLOCK="input load-grail.gs" ;;
-esac
+
+# With --grail, file in the optional Grail subclass + its test suite after the base load.
+MODE="rowan"
+if [ -n "$WITH_GRAIL" ]; then
+  LOAD_BLOCK="$LOAD_BLOCK
+input load-grail.gs"
+  MODE="rowan+grail"
+fi
 
 "$TOPAZ" -l <<TPZ
 set gemstone $GS_STONE
