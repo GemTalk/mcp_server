@@ -95,11 +95,8 @@ category: 'initialization'
 method: McpSession
 newWorkerSession
   "A fresh, not-yet-logged-in GsTsExternalSession worker gem on localhost. GsTsExternalSession is
-   looked up dynamically so this class compiles on images that lack it."
-  | extClass |
-  extClass := System myUserProfile objectNamed: #GsTsExternalSession.
-  extClass isNil ifTrue: [^self error: 'GsTsExternalSession is not available in this image'].
-  ^extClass newDefaultForGemHost: 'localhost'
+   assumed present -- it exists in every supported image (GemStone 3.6.2+)."
+  ^GsTsExternalSession newDefaultForGemHost: 'localhost'
 %
 category: 'initialization'
 method: McpSession

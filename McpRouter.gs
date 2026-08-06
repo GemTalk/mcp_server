@@ -221,10 +221,8 @@ forkOnPort: aPort
    routers can run at once. The child logs in as the current user via a one-time password.
    Stop it by port with ./stop-server.sh, or via `System stopSession: <id>` / `kill <pid>` (both
    printed below). Answers a status string. Requires GsTsExternalSession."
-  | extClass es sid pid s |
-  extClass := System myUserProfile objectNamed: #GsTsExternalSession.
-  extClass isNil ifTrue: [^'GsTsExternalSession is not available in this image; use runOnPort:.'].
-  es := extClass newDefaultForGemHost: 'localhost'.
+  | es sid pid s |
+  es := GsTsExternalSession newDefaultForGemHost: 'localhost'.
   es useOnetimePassword.
   es login.
   "Capture the child's id/pid BEFORE launching the loop -- once the non-blocking call is running the
