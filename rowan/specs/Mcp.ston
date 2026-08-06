@@ -1,0 +1,17 @@
+RwLoadSpecificationV2 {
+	#projectName : 'Mcp',
+	#gitUrl : 'git@code.gemtalksystems.com:johnf/mcp_server.git',
+	#revision : 'main',
+	#projectSpecFile : 'rowan/project.ston',
+	#componentNames : [
+		'Core'
+	],
+	#platformProperties : {
+		'gemstone' : {
+			'allusers' : {
+				#defaultSymbolDictName : 'Published'
+			}
+		}
+	},
+	#comment : ''
+}
