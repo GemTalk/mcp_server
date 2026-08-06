@@ -1,0 +1,24 @@
+RwLoadComponent {
+	#name : 'Auth',
+	#projectNames : [ ],
+	#componentNames : [ ],
+	#packageNames : [
+		'Mcp-Auth',
+		'Mcp-Auth-Tests'
+	],
+	#conditionalPackageMapSpecs : {
+		'gemstone' : {
+			'allusers' : {
+				#packageNameToPlatformPropertiesMap : {
+					'Mcp-Auth' : {
+						'symbolDictName' : 'Published'
+					},
+					'Mcp-Auth-Tests' : {
+						'symbolDictName' : 'Published'
+					}
+				}
+			}
+		}
+	},
+	#comment : ''
+}
