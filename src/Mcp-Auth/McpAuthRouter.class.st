@@ -64,6 +64,7 @@ Class {
 		'authorizationServers',
 		'resourceMetadataUrl',
 		'requiredScopes',
+		'supportedScopes',
 		'expectedAudience',
 		'expectedIssuer',
 		'writeScope',
@@ -81,12 +82,12 @@ McpAuthRouter >> applyConfig: aConfigDict [
   authorizationServers := aConfigDict at: 'authorizationServers' ifAbsent: [authorizationServers].
   resourceMetadataUrl := aConfigDict at: 'resourceMetadataUrl' ifAbsent: [resourceMetadataUrl].
   requiredScopes := aConfigDict at: 'requiredScopes' ifAbsent: [requiredScopes].
+  supportedScopes := aConfigDict at: 'supportedScopes' ifAbsent: [supportedScopes].
   expectedAudience := aConfigDict at: 'expectedAudience' ifAbsent: [expectedAudience].
   expectedIssuer := aConfigDict at: 'expectedIssuer' ifAbsent: [expectedIssuer].
   writeScope := aConfigDict at: 'writeScope' ifAbsent: [writeScope].
   bindAddress := aConfigDict at: 'bindAddress' ifAbsent: [bindAddress].
   ^self
-
 ]
 
 { #category : 'metadata' }
@@ -137,19 +138,21 @@ McpAuthRouter >> bindAddress: aHostAddressString [
 { #category : 'config' }
 McpAuthRouter >> configDict [
   "Extend the base router config (McpRouter>>configDict) with the RS-layer / OIDC settings. Still
-   identifiers + booleans only -- the JWT signing key is trusted Stone-side (addJwtKey), never here."
+   identifiers + booleans only -- the JWT signing key is trusted Stone-side (addJwtKey), never here.
+   supportedScopes is serialized RAW (the ivar, not the requiredScopes fallback) so an unset value
+   round-trips as unset and keeps deriving from requiredScopes on the far side."
   | d |
   d := super configDict.
   d at: 'userIdClaim' put: userIdClaim.
   d at: 'authorizationServers' put: authorizationServers.
   d at: 'resourceMetadataUrl' put: resourceMetadataUrl.
   d at: 'requiredScopes' put: requiredScopes.
+  d at: 'supportedScopes' put: supportedScopes.
   d at: 'expectedAudience' put: expectedAudience.
   d at: 'expectedIssuer' put: expectedIssuer.
   d at: 'writeScope' put: writeScope.
   d at: 'bindAddress' put: bindAddress.
   ^d
-
 ]
 
 { #category : 'metadata' }
@@ -209,18 +212,19 @@ McpAuthRouter >> initialize [
   "Seed the RS-layer config with safe instance-side defaults, on top of McpRouter>>initialize. There
    is NO class-side config state: a launch script / test configures the instance and forkOnPort:
    serializes it. Optional checks stay nil (= skip); userIdClaim defaults to the OIDC subject claim;
-   requiredScopes / authorizationServers default empty."
+   requiredScopes / authorizationServers default empty; supportedScopes empty means 'advertise exactly
+   requiredScopes' (see supportedScopes)."
   super initialize.
   userIdClaim := 'sub'.
   authorizationServers := #().
   resourceMetadataUrl := nil.
   requiredScopes := #().
+  supportedScopes := #().
   expectedAudience := nil.
   expectedIssuer := nil.
   writeScope := nil.
   bindAddress := self class loopbackAddress.  "reachable only if the caller asks for it"
   ^self
-
 ]
 
 { #category : 'network' }
@@ -395,8 +399,10 @@ McpAuthRouter >> requireResourceServerConfig [
     * https on every authorization server -- 'All authorization server endpoints MUST be served over
       HTTPS'. The spec's localhost exemption covers redirect URIs, NOT authorization server
       endpoints, so there is deliberately no loopback escape here. expectedIssuer is held to the same
-      rule when set: it names the same authorization server."
-  | insecure |
+      rule when set: it names the same authorization server.
+    * requiredScopes subset-of supportedScopes -- a client is told to request supportedScopes, so a
+      scope that is required but not advertised can never be obtained and every token is refused."
+  | insecure unadvertised |
   self expectedAudience isNil ifTrue: [
     ^self error: 'McpAuthRouter requires expectedAudience: the canonical resource identifier ' ,
       'clients use for this server (e.g. ''https://host:8443/mcp''). Token audience validation is ' ,
@@ -413,8 +419,13 @@ McpAuthRouter >> requireResourceServerConfig [
       (self spaceSeparated: insecure) ,
       '. All authorization server endpoints MUST be served over HTTPS (the spec''s localhost ' ,
       'exemption applies to redirect URIs, not to authorization server endpoints).'].
+  unadvertised := self requiredScopes reject: [:s | self supportedScopes includes: s].
+  unadvertised isEmpty ifFalse: [
+    ^self error: 'McpAuthRouter requires every requiredScope to be advertised in supportedScopes; ' ,
+      'these are required but not advertised: ' , (self spaceSeparated: unadvertised) ,
+      '. A client is told to request supportedScopes, so a required scope missing from it can never ' ,
+      'be obtained and every token would be refused insufficient_scope.'].
   ^self
-
 ]
 
 { #category : 'network' }
@@ -554,16 +565,16 @@ McpAuthRouter >> serveProtectedResourceMetadata: req on: conn [
    and the client would see an unexplainable 401 loop. Reading it from the request Host header (as
    this method used to) also let the CALLER choose the identifier we publish: a request carrying
    `Host: evil.example.com` was told the resource was https://evil.example.com/mcp.
-   `scopes_supported` publishes requiredScopes: it is the client's documented fallback for scope
-   selection when a challenge carries no scope parameter."
+   `scopes_supported` publishes supportedScopes (which defaults to requiredScopes): it is the client's
+   documented fallback for scope selection when a challenge carries no scope parameter, and it may
+   advertise MORE than is required (e.g. a role-gated write scope)."
   | meta |
   meta := Dictionary new.
   meta at: 'resource' put: self expectedAudience.
   meta at: 'authorization_servers' put: self authorizationServers asArray.
-  meta at: 'scopes_supported' put: self requiredScopes asArray.
+  meta at: 'scopes_supported' put: self supportedScopes asArray.
   meta at: 'bearer_methods_supported' put: (Array with: 'header').
   conn writeStatus: 200 reason: 'OK' body: meta asJson
-
 ]
 
 { #category : 'validation' }
@@ -591,6 +602,27 @@ McpAuthRouter >> spaceSeparated: aCollectionOfStrings [
   "Join strings with single spaces (for the scope list in messages / the WWW-Authenticate scope=)."
   ^aCollectionOfStrings inject: '' into: [:acc :s | acc isEmpty ifTrue: [s] ifFalse: [acc , ' ' , s]]
 
+]
+
+{ #category : 'validation' }
+McpAuthRouter >> supportedScopes [
+  "The scopes this router ADVERTISES (published as `scopes_supported` in the Protected Resource
+   Metadata and offered in the WWW-Authenticate `scope=` challenge) -- i.e. what a client is told to
+   request. Distinct from requiredScopes, which is what a token MUST carry to be accepted: a scope
+   can be advertised without being required (e.g. a role-gated write scope that only some users are
+   granted). DEFAULTS to requiredScopes when not set explicitly -- 'advertise exactly what you
+   require', the spec's own scope-selection default -- so a router that only sets requiredScopes
+   behaves as before. Set supportedScopes: to advertise a SUPERSET of requiredScopes.
+   requireResourceServerConfig enforces requiredScopes subset-of supportedScopes."
+  ^supportedScopes isEmpty ifTrue: [self requiredScopes] ifFalse: [supportedScopes]
+]
+
+{ #category : 'validation' }
+McpAuthRouter >> supportedScopes: anArrayOfScopeStrings [
+  "Set the advertised scope list (scopes_supported + WWW-Authenticate scope=). Must be a SUPERSET of
+   requiredScopes (validated at fork/run in requireResourceServerConfig). Pass an empty array to
+   revert to the default of advertising exactly requiredScopes."
+  supportedScopes := anArrayOfScopeStrings
 ]
 
 { #category : 'validation' }
@@ -722,13 +754,14 @@ McpAuthRouter >> writeAuthError: httpCode oauthError: errorCodeOrNil description
     "error_description is only meaningful alongside an error code (RFC 6750 3.1); a plain
      missing-token challenge carries neither and just invites the client to authenticate."
     aMessage ifNotNil: [:m | params add: 'error_description="' , m , '"']].
-  "scope goes on EVERY challenge that has required scopes, not only insufficient_scope. The Scope
-   Selection Strategy makes it a client's first choice for what to request, ahead of scopes_supported,
-   and its example is a 401. Without it on the initial 401 a client requests no scope at all, is
-   issued a token lacking them, and only discovers what it needed from the 403 that follows -- a
-   wasted authorization round trip on every first connection."
-  self requiredScopes isEmpty
-    ifFalse: [params add: 'scope="' , (self spaceSeparated: self requiredScopes) , '"'].
+  "scope advertises what the client should request -- supportedScopes (which defaults to
+   requiredScopes, and may be a superset). The Scope Selection Strategy makes this a client's first
+   choice for what to request, ahead of the metadata document's scopes_supported, and its example is
+   a 401. Without it on the initial 401 a client requests no scope at all, is issued a token lacking
+   them, and only discovers what it needed from the 403 that follows -- a wasted authorization round
+   trip on every first connection."
+  self supportedScopes isEmpty
+    ifFalse: [params add: 'scope="' , (self spaceSeparated: self supportedScopes) , '"'].
   self resourceMetadataUrl ifNotNil: [:u | params add: 'resource_metadata="' , u , '"'].
   challenge := 'WWW-Authenticate: Bearer'.
   params isEmpty ifFalse: [challenge := challenge , ' ' , (params inject: '' into: [:acc :p |
@@ -738,7 +771,6 @@ McpAuthRouter >> writeAuthError: httpCode oauthError: errorCodeOrNil description
   err at: 'jsonrpc' put: '2.0'; at: 'id' put: nil.
   err at: 'error' put: (Dictionary new at: 'code' put: -32600; at: 'message' put: aMessage; yourself).
   conn writeStatus: httpCode reason: reason headers: challenge , crlf body: err asJson
-
 ]
 
 { #category : 'validation' }

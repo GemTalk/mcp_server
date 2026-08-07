@@ -138,6 +138,7 @@ McpAuthTest >> testConfigJsonRoundTripsCarriesRsKeys [
     bindAddress: '172.16.73.10';
     userIdClaim: 'preferred_username';
     requiredScopes: #('mcp:use' 'mcp:write');
+    supportedScopes: #('mcp:use' 'mcp:write' 'mcp:admin');
     expectedIssuer: 'https://issuer';
     writeScope: 'mcp:write'.
   dst := McpAuthRouter new applyConfigJson: src configJson.
@@ -146,15 +147,17 @@ McpAuthTest >> testConfigJsonRoundTripsCarriesRsKeys [
   self assert: dst bindAddress equals: '172.16.73.10'.
   self assert: dst userIdClaim equals: 'preferred_username'.
   self assert: dst requiredScopes equals: #('mcp:use' 'mcp:write').
+  self assert: dst supportedScopes equals: #('mcp:use' 'mcp:write' 'mcp:admin').
   self assert: dst expectedIssuer equals: 'https://issuer'.
   self assert: dst writeScope equals: 'mcp:write'.
   self assert: dst expectedAudience isNil.       "unset optional stays nil through the round-trip"
   self assert: dst tlsCertificateFile isNil.
   "an unconfigured router round-trips to its defaults -- bindAddress must stay loopback, since a
-   silently-widened bind would expose the server"
+   silently-widened bind would expose the server; supportedScopes unset stays unset, so it keeps
+   deriving from requiredScopes (both empty here)"
   self assert: (McpAuthRouter new applyConfigJson: McpAuthRouter new configJson) userIdClaim equals: 'sub'.
-  self assert: (McpAuthRouter new applyConfigJson: McpAuthRouter new configJson) bindAddress equals: '127.0.0.1'
-
+  self assert: (McpAuthRouter new applyConfigJson: McpAuthRouter new configJson) bindAddress equals: '127.0.0.1'.
+  self assert: (McpAuthRouter new applyConfigJson: McpAuthRouter new configJson) supportedScopes equals: #()
 ]
 
 { #category : 'tests' }
@@ -292,6 +295,25 @@ McpAuthTest >> testProtectedResourceMetadataServed [
 ]
 
 { #category : 'tests' }
+McpAuthTest >> testRequiredScopeNotAdvertisedRejectedAtStart [
+  "requireResourceServerConfig fails if a requiredScope is not advertised in an explicitly-set
+   supportedScopes: a client is told to request supportedScopes, so a required-but-unadvertised scope
+   could never be obtained and every token would be refused. (When supportedScopes is left unset it
+   defaults to requiredScopes, so this only bites a misconfigured explicit list.)"
+  | r |
+  r := McpAuthRouter new.
+  r useTlsCertificateFile: '/tmp/x.crt' privateKeyFile: '/tmp/x.key';
+    expectedAudience: 'https://mcp.example/mcp';
+    authorizationServers: #('https://issuer.example');
+    requiredScopes: #('mcp:use');
+    supportedScopes: #('mcp:write').  "advertises write but NOT the required mcp:use"
+  self should: [r requireResourceServerConfig] raise: Error.
+  "advertising the required scope (as a superset) passes"
+  r supportedScopes: #('mcp:use' 'mcp:write').
+  self shouldnt: [r requireResourceServerConfig] raise: Error
+]
+
+{ #category : 'tests' }
 McpAuthTest >> testRequiresTlsToServe [
   "A bearer token is a password that rides in a header on every request, so this router refuses to
    serve cleartext. The guard lives in requireTls and BOTH entry points check it, so calling
@@ -323,6 +345,43 @@ McpAuthTest >> testSufficientScopeAccepted [
   p := Dictionary new. p at: 'exp' put: System timeGmt + 1000. p at: 'scope' put: 'openid mcp:use extra'.
   self assert: (router rejectionForPayload: p) isNil
 
+]
+
+{ #category : 'tests' }
+McpAuthTest >> testSupportedScopesAdvertisesSupersetButRequiresOnlyRequired [
+  "supportedScopes may advertise MORE than requiredScopes: the extra (e.g. a role-gated write scope)
+   appears in the metadata scopes_supported and the WWW-Authenticate scope= so clients request it,
+   yet a token carrying only the required scope is still ACCEPTED. Advertise != require."
+  | router meta challenge p |
+  router := McpAuthRouter new.
+  router expectedAudience: nil; expectedIssuer: nil;
+    requiredScopes: #('mcp:use'); supportedScopes: #('mcp:use' 'mcp:write').
+  meta := self runRequest: (self get: '/.well-known/oauth-protected-resource') on: router.
+  self assert: (self includesCS: '"mcp:use"' in: meta).
+  self assert: (self includesCS: '"mcp:write"' in: meta).
+  challenge := self runRequest: (self post: self initBody headers: '') on: router.
+  self assert: (self includesCS: 'scope="mcp:use mcp:write"' in: challenge).
+  "enforcement requires only mcp:use: a token with mcp:use but NOT mcp:write is accepted"
+  p := Dictionary new. p at: 'exp' put: System timeGmt + 1000. p at: 'scope' put: 'mcp:use'.
+  self assert: (router rejectionForPayload: p) isNil.
+  "a token lacking the required mcp:use is still refused, even though it carries an advertised scope"
+  p := Dictionary new. p at: 'exp' put: System timeGmt + 1000. p at: 'scope' put: 'mcp:write'.
+  self deny: (router rejectionForPayload: p) isNil
+]
+
+{ #category : 'tests' }
+McpAuthTest >> testSupportedScopesDefaultsToRequiredScopes [
+  "With supportedScopes left unset, the router advertises exactly requiredScopes -- in the metadata
+   scopes_supported AND the WWW-Authenticate scope= -- so a router configured only with requiredScopes
+   behaves as before this field existed."
+  | router |
+  router := McpAuthRouter new.
+  router requiredScopes: #('mcp:use'); expectedAudience: nil; expectedIssuer: nil.
+  self assert: router supportedScopes equals: #('mcp:use').
+  self assert: (self includesCS: '"mcp:use"'
+    in: (self runRequest: (self get: '/.well-known/oauth-protected-resource') on: router)).
+  self assert: (self includesCS: 'scope="mcp:use"'
+    in: (self runRequest: (self post: self initBody headers: '') on: router))
 ]
 
 { #category : 'tests' }

@@ -28,6 +28,12 @@
 #                         (default: https://localhost:8443/mcp)
 #   MCP_USERID_CLAIM    - JWT claim carrying the GemStone userId (default: preferred_username)
 #   MCP_REQUIRED_SCOPES - space-separated scopes a token MUST carry (default: mcp:use)
+#   MCP_SUPPORTED_SCOPES - space-separated scopes to ADVERTISE (published as scopes_supported and in
+#                         the WWW-Authenticate scope=): what clients are told to request. MUST be a
+#                         superset of MCP_REQUIRED_SCOPES. Default: unset -> advertise exactly
+#                         MCP_REQUIRED_SCOPES. Set it to advertise an optional, requestable scope that
+#                         is NOT required of every token -- e.g. "mcp:use mcp:write" so clients request
+#                         the (role-gated) write scope while a token without it still gets read-only.
 #   MCP_WRITE_SCOPE     - scope granting write; a token lacking it gets a READ-ONLY worker (default: none)
 #   GS_MCP_READONLY     - 1 to force EVERY session read-only regardless of scope (default: 0)
 #   MCP_BIND_ADDRESS    - local address to bind (default: loopback only). Set to an interface address
@@ -52,6 +58,7 @@ MCP_ISSUER="${MCP_ISSUER:-https://localhost:8443/realms/gs-mcp}"
 MCP_AUDIENCE="${MCP_AUDIENCE:-https://localhost:8443/mcp}"
 MCP_USERID_CLAIM="${MCP_USERID_CLAIM:-preferred_username}"
 MCP_REQUIRED_SCOPES="${MCP_REQUIRED_SCOPES:-mcp:use}"
+MCP_SUPPORTED_SCOPES="${MCP_SUPPORTED_SCOPES:-}"
 MCP_WRITE_SCOPE="${MCP_WRITE_SCOPE:-}"
 GS_MCP_READONLY="${GS_MCP_READONLY:-0}"
 MCP_BIND_ADDRESS="${MCP_BIND_ADDRESS:-}"
@@ -88,7 +95,14 @@ fi
 SCOPES_ST=""
 for s in $MCP_REQUIRED_SCOPES; do SCOPES_ST="$SCOPES_ST '$s'"; done
 
+# Smalltalk array literal of the advertised scopes; blank when unset -> the router advertises exactly
+# requiredScopes (supportedScopes defaults to requiredScopes).
+SUPPORTED_ST=""
+for s in $MCP_SUPPORTED_SCOPES; do SUPPORTED_ST="$SUPPORTED_ST '$s'"; done
+
 # Optional config statements (blank when unset -- a blank line is fine inside a Smalltalk run block)
+SUPPORTED_LINE=""
+[ -n "$MCP_SUPPORTED_SCOPES" ] && SUPPORTED_LINE="r supportedScopes: #($SUPPORTED_ST )."
 WRITE_LINE=""
 [ -n "$MCP_WRITE_SCOPE" ] && WRITE_LINE="r writeScope: '$MCP_WRITE_SCOPE'."
 RO_LINE=""
@@ -114,6 +128,7 @@ r userIdClaim: '$MCP_USERID_CLAIM';
   expectedAudience: '$MCP_AUDIENCE';
   requiredScopes: #($SCOPES_ST );
   authorizationServers: #( '$MCP_ISSUER' ).
+$SUPPORTED_LINE
 $WRITE_LINE
 $RO_LINE
 $BIND_LINE
