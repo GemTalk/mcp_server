@@ -220,7 +220,14 @@ no shared state. A worker is read-only if **either** applies:
   `GS_MCP_READONLY=1 ./run-server.sh`. Every session that router opens is read-only.
 - **By OAuth scope (`McpAuthRouter`)** — give the router a `writeScope` (e.g. `./run-auth-server.sh`
   with `MCP_WRITE_SCOPE=mcp:write`): a token carrying that scope gets a read-write worker; a token
-  lacking it gets a read-only worker for that session.
+  lacking it gets a read-only worker for that session. For a client to actually *request* that scope,
+  the router must also **advertise** it: `supportedScopes` is the set published as `scopes_supported`
+  (RFC 9728 metadata) and offered in the `WWW-Authenticate` challenge — what clients are told to
+  request — and it is deliberately distinct from `requiredScopes`, what every token *must* carry.
+  Advertising the write scope without requiring it is the point: an entitled user is granted it and
+  gets read-write, while an unentitled user (the authorization server withholds it) still connects
+  read-only. `supportedScopes` defaults to `requiredScopes`, so widen it only to advertise an optional
+  scope like this.
 
 **What's gated:** everything that can persist a change or run arbitrary code — `execute_code`,
 `commit`, and all the mutation tools. Everything else (browsing, listing, search,
@@ -248,8 +255,8 @@ GS_MCP_READONLY=1 ./run-server.sh   # ...read-only (browse/search only; no accid
 `GS_PASS` to match your environment. `install.sh --grail` (or `GS_MCP_WITH_GRAIL=1 ./install.sh`)
 loads `load-grail.gs` — the base classes plus `McpServerWithGrail`; plain `install.sh` loads
 only the base `load.gs`. `run-server.sh` builds a base `McpRouter` instance and calls its
-`forkOnPort:` (`run-auth-server.sh` builds a Keycloak-configured `McpAuthRouter` — realm config as
-code, no commit), which launches a
+`forkOnPort:` (`run-auth-server.sh` builds an OIDC-configured `McpAuthRouter` — resource-server config
+as code, no commit), which launches a
 detached, independent front-end gem and returns; stop it with `./stop-server.sh` (by port), or the
 `System stopSession: <id>` / `kill <pid>` line it prints. (Grail, if installed, is picked up per
 worker gem.)
