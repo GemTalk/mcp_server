@@ -1,6 +1,6 @@
 "
 The JSON-RPC 2.0 / MCP routing layer. Given a parsed request Dictionary it routes
-initialize / tools/list / tools/call and notifications, invokes tools via the
+initialize / ping / tools/list / tools/call and notifications, invokes tools via the
 registry, and returns a response Dictionary (or nil for notifications). Aborts the
 transaction before each tools/call so the view reflects commits from other sessions.
 "
@@ -98,6 +98,7 @@ McpDispatcher >> handle: requestDict [
   id := requestDict at: 'id' ifAbsent: [nil].
   method isNil ifTrue: [^self errorFor: id code: -32600 message: 'Invalid Request'].
   method = 'initialize' ifTrue: [^self resultFor: id with: (self initializeResultFor: (requestDict at: 'params' ifAbsent: [Dictionary new]))].
+  method = 'ping' ifTrue: [^self resultFor: id with: self pingResult].
   method = 'tools/list' ifTrue: [^self resultFor: id with: self toolsListResult].
   method = 'tools/call' ifTrue: [
     ^self handleToolsCall: (requestDict at: 'params' ifAbsent: [Dictionary new]) id: id].
@@ -110,9 +111,18 @@ McpDispatcher >> handle: requestDict [
 { #category : 'dispatch' }
 McpDispatcher >> handleToolsCall: params id: id [
   "Validate arguments against the tool's schema, then refresh the view, invoke the tool, and wrap
-   the result. Bad arguments (unknown key / missing required) -> -32602 invalidParams BEFORE any
-   side effect. A raised error becomes an isError result carrying a structured kind (see
-   toolErrorContentFrom:)."
+   the result. A raised error becomes an isError result carrying a structured kind (see
+   toolErrorContentFrom:).
+
+   Two different failure envelopes, per MCP 2025-11-25 (server/tools, Error Handling), which splits
+   them by what the model can act on:
+     PROTOCOL error (-32602) for a malformed CallToolRequest -- a missing tool name -- and for an
+       unknown tool. The request itself is wrong; the model is unlikely to recover.
+     TOOL EXECUTION error (isError:true) for arguments that violate the TOOL'S OWN inputSchema.
+       These carry actionable feedback the model can use to self-correct and retry, so the spec
+       wants them in the result, not as a JSON-RPC error. (Before 2025-11-25 we answered -32602
+       here too; only the envelope changed -- the check still runs BEFORE the tool is invoked, so
+       a rejected call still has no side effect.)"
   | name tool args argErr |
   name := params at: 'name' ifAbsent: [nil].
   name isNil ifTrue: [^self errorFor: id code: -32602 message: 'Missing tool name' kind: 'invalidParams'].
@@ -123,7 +133,8 @@ McpDispatcher >> handleToolsCall: params id: id [
       message: '''' , name , ''' is not available: the server is read-only' kind: 'readOnly'].
   args := params at: 'arguments' ifAbsent: [Dictionary new].
   argErr := tool validationErrorFor: args.
-  argErr ifNotNil: [^self errorFor: id code: -32602 message: argErr kind: 'invalidParams'].
+  argErr ifNotNil: [
+    ^self resultFor: id with: (self structuredErrorContent: argErr kind: 'invalidParams')].
   System abortTransaction.
   ^[ self resultFor: id with: (self contentText: (tool callWith: args) isError: false) ]
    on: Error
@@ -168,6 +179,17 @@ McpDispatcher >> kindForError: ex [
 ]
 
 { #category : 'responses' }
+McpDispatcher >> pingResult [
+  "The MCP ping result: an EMPTY object. The spec (basic/utilities/ping) is a MUST -- 'the receiver
+   MUST respond promptly with an empty response' -- and either party may ping at any time, so this
+   is routed ahead of everything except initialize, is never read-only gated (it is not a tool),
+   and deliberately does no repository work (no abort, no transaction touch) so it stays cheap and
+   answers even when the image is busy."
+  ^Dictionary new
+
+]
+
+{ #category : 'responses' }
 McpDispatcher >> resultFor: id with: resultObj [
   | d |
   d := Dictionary new.
@@ -188,6 +210,24 @@ McpDispatcher >> setRegistry: aRegistry server: aServerOrNil [
 
 ]
 
+{ #category : 'responses' }
+McpDispatcher >> structuredErrorContent: aMessage kind: aKind [
+  "The shared tools/call TOOL EXECUTION error envelope: the human message in `content` text, PLUS
+   `structuredContent` {error:{kind,message}} so an agent can branch on the kind instead of parsing
+   prose. Used both for an error raised by a tool (toolErrorContentFrom:) and for arguments that
+   fail the tool's inputSchema (handleToolsCall:)."
+  | d struct |
+  d := self contentText: aMessage isError: true.
+  struct := Dictionary new.
+  struct at: 'error' put: (Dictionary new
+    at: 'kind' put: aKind;
+    at: 'message' put: aMessage;
+    yourself).
+  d at: 'structuredContent' put: struct.
+  ^d
+
+]
+
 { #category : 'read-only' }
 McpDispatcher >> toolAllowed: aToolName [
   "Whether aToolName may be listed/called now. Always yes when there's no server or it isn't
@@ -198,19 +238,11 @@ McpDispatcher >> toolAllowed: aToolName [
 
 { #category : 'responses' }
 McpDispatcher >> toolErrorContentFrom: ex [
-  "The tools/call error envelope for a raised error: the human message in `content` text (as
-   before), PLUS `structuredContent` {error:{kind,message}} so an agent can branch on the kind
-   instead of parsing prose. Keeps using `ex description` for the message text."
-  | msg d struct |
+  "The tools/call error envelope for a raised error (see structuredErrorContent:kind:). Uses
+   `ex description` for the message text -- `ex messageText` is often nil in GemStone."
+  | msg |
   msg := [ex description] on: Error do: [:e | ex messageText ifNil: ['(error)']].
-  d := self contentText: msg isError: true.
-  struct := Dictionary new.
-  struct at: 'error' put: (Dictionary new
-    at: 'kind' put: (self kindForError: ex);
-    at: 'message' put: msg;
-    yourself).
-  d at: 'structuredContent' put: struct.
-  ^d
+  ^self structuredErrorContent: msg kind: (self kindForError: ex)
 
 ]
 

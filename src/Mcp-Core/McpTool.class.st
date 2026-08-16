@@ -79,8 +79,10 @@ McpTool >> validationErrorFor: argsDict [
   ((schema at: 'additionalProperties' ifAbsent: [true]) == false) ifTrue: [
     extra := args keys reject: [:k | props includesKey: k].
     extra isEmpty ifFalse: [
-      ^'Unknown argument(s): ' , (self commaList: extra)
-        , '. Allowed: ' , (self commaList: props keys)]].
+      ^'Unknown argument(s): ' , (self commaList: extra) , '. '
+        , (props isEmpty
+            ifTrue: ['This tool takes no arguments.']
+            ifFalse: ['Allowed: ' , (self commaList: props keys)])]].
   missing := (schema at: 'required' ifAbsent: [#()]) reject: [:k | args includesKey: k].
   missing isEmpty ifFalse: [^'Missing required argument(s): ' , (self commaList: missing)].
   ^nil
