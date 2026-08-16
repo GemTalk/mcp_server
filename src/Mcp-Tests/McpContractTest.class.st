@@ -1,9 +1,11 @@
 "
 Contract / property tests over the MCP tool surface, driven through McpDispatcher>>handle: (the
 real JSON-RPC envelope). Covers the schema-strictness, argument-validation, structured-error, and
-kernel-guard behaviors: every tool schema is closed; unknown/missing args are -32602; a raised
-error carries a structured kind; and mutating a kernel class is refused. Read-only
-properties are added as those phases land.
+kernel-guard behaviors: every tool schema is closed; a raised error carries a structured kind; and
+mutating a kernel class is refused. Also pins the MCP 2025-11-25 split between the two tools/call
+failure envelopes -- arguments that violate a tool's own inputSchema are TOOL EXECUTION errors
+(isError:true, so the model can self-correct), while a malformed request (no tool name) and an
+unknown tool stay PROTOCOL errors (-32602). Read-only properties are added as those phases land.
 "
 Class {
 	#name : 'McpContractTest',
@@ -110,10 +112,36 @@ McpContractTest >> testKernelMutationRefusedThroughEnvelope [
 
 { #category : 'tests - validation' }
 McpContractTest >> testMissingRequiredArgumentRejected [
-  "#4: a missing required argument -> -32602."
+  "#4: a missing required argument fails the tool's inputSchema, so per MCP 2025-11-25 it is a TOOL
+   EXECUTION error (isError:true) carrying actionable text, not a JSON-RPC protocol error."
+  | result |
+  result := (self dispatch: (self toolCall: 'describe_class' args: Dictionary new)) at: 'result'.
+  self assert: (result at: 'isError').
+  self assert: (self includesCS: 'className'
+    in: ((result at: 'content') first at: 'text'))
+
+]
+
+{ #category : 'tests - validation' }
+McpContractTest >> testMissingToolNameIsProtocolError [
+  "The boundary: a call with no `name` is a malformed CallToolRequest -- the REQUEST is wrong, not
+   the arguments -- so it stays a protocol error (-32602), unlike an inputSchema violation."
   | resp |
-  resp := self dispatch: (self toolCall: 'describe_class' args: Dictionary new).
-  self assert: ((resp at: 'error') at: 'code') equals: -32602
+  resp := self dispatch: (self request: 'tools/call' params: Dictionary new).
+  self assert: ((resp at: 'error') at: 'code') equals: -32602.
+  self assert: (((resp at: 'error') at: 'data') at: 'kind') equals: 'invalidParams'
+
+]
+
+{ #category : 'tests - validation' }
+McpContractTest >> testNoArgumentToolReportsNoArguments [
+  "A tool with an empty (closed) schema must not render an empty 'Allowed: ' list when it rejects
+   an unknown argument -- it says so in words instead."
+  | text |
+  text := (((self dispatch: (self toolCall: 'status' args:
+    (Dictionary new at: 'bogus' put: 1; yourself))) at: 'result') at: 'content') first at: 'text'.
+  self assert: (self includesCS: 'takes no arguments' in: text).
+  self deny: (self includesCS: 'Allowed:' in: text)
 
 ]
 
@@ -124,6 +152,17 @@ McpContractTest >> testNotReadOnlyByDefault [
   names := self listedToolNames.
   self assert: names size equals: 31.
   self assert: (names includes: 'compile_method')
+
+]
+
+{ #category : 'tests - lifecycle' }
+McpContractTest >> testPingReturnsEmptyResult [
+  "MCP basic/utilities/ping is a MUST: the receiver MUST respond promptly with an EMPTY result.
+   Not an error, not a tool -- so it is answered even though `ping` is in no tool registry."
+  | resp |
+  resp := self dispatch: (self request: 'ping' params: nil).
+  self deny: (resp includesKey: 'error').
+  self assert: (resp at: 'result') isEmpty
 
 ]
 
@@ -223,13 +262,26 @@ McpContractTest >> testSyntaxErrorClassifiedAsCompileError [
 
 { #category : 'tests - validation' }
 McpContractTest >> testUnknownArgumentRejected [
-  "#4: an argument not in the schema -> -32602 with data.kind invalidParams (before any side effect)."
-  | resp err |
-  resp := self dispatch: (self toolCall: 'describe_class' args:
-    (Dictionary new at: 'className' put: 'Object'; at: 'bogus' put: 'x'; yourself)).
-  err := resp at: 'error'.
-  self assert: (err at: 'code') equals: -32602.
-  self assert: ((err at: 'data') at: 'kind') equals: 'invalidParams'
+  "#4: an argument not in the closed schema is refused BEFORE any side effect. Per MCP 2025-11-25
+   the envelope is a tool execution error -- isError:true plus structuredContent.error.kind so an
+   agent can still branch on the kind without parsing the prose."
+  | result |
+  result := (self dispatch: (self toolCall: 'describe_class' args:
+    (Dictionary new at: 'className' put: 'Object'; at: 'bogus' put: 'x'; yourself))) at: 'result'.
+  self assert: (result at: 'isError').
+  self assert: (((result at: 'structuredContent') at: 'error') at: 'kind') equals: 'invalidParams'.
+  self assert: (self includesCS: 'bogus' in: ((result at: 'content') first at: 'text'))
+
+]
+
+{ #category : 'tests - validation' }
+McpContractTest >> testUnknownToolIsProtocolError [
+  "The other side of the boundary: an unknown tool stays a protocol error (-32602 / kind notFound).
+   The spec keeps it there because the model cannot self-correct a tool that does not exist."
+  | resp |
+  resp := self dispatch: (self toolCall: 'no_such_tool' args: Dictionary new).
+  self assert: ((resp at: 'error') at: 'code') equals: -32602.
+  self assert: (((resp at: 'error') at: 'data') at: 'kind') equals: 'notFound'
 
 ]
 

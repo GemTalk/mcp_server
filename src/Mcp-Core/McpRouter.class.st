@@ -381,9 +381,15 @@ McpRouter >> originAllowed: req [
 
 { #category : 'routing' }
 McpRouter >> protocolVersionAllowed: req [
-  "MCP spec: a request carrying an unsupported MCP-Protocol-Version MUST be rejected (400). An
-   absent header is allowed -- the spec says to assume 2025-03-26, and the initialize request
-   legitimately carries no version yet. Header keys are lower-cased by parseHead:."
+  "MCP spec: a request carrying an invalid or unsupported MCP-Protocol-Version MUST be rejected
+   (400). An absent header is allowed: initialize legitimately carries no version yet, and for
+   later requests the spec's 'assume 2025-03-26' fallback applies only to a server with 'no other
+   way to identify the version'. We have one -- a request without the header still arrives on a
+   session that was opened by an initialize we negotiated (McpDispatcher>>initializeResultFor:) --
+   so we treat an absent header as that negotiated version rather than as 2025-03-26, which we
+   deliberately do not support (see supportedProtocolVersions on batching). Recording the
+   negotiated version per McpSession and enforcing it here would be strictly tighter; today the
+   header check is the only enforcement point. Header keys are lower-cased by parseHead:."
   | version |
   version := (req at: 'headers' ifAbsent: [Dictionary new]) at: 'mcp-protocol-version' ifAbsent: [nil].
   ^version isNil or: [McpDispatcher supportedProtocolVersions includes: version]
@@ -532,11 +538,20 @@ McpRouter >> serve: aClientSocket [
 
 { #category : 'routing' }
 McpRouter >> serveDelete: req on: conn [
-  "MCP session end: close and unmap the worker for the MCP-Session-Id header, if present."
+  "MCP session end: close and unmap the worker named by the MCP-Session-Id header. Answers the same
+   status codes as the POST path (serveRouted:sessionId:on:) so a client gets one consistent signal
+   from either verb -- required by the Streamable HTTP spec's session-management rules: a server
+   that requires a session id SHOULD answer a request without the header with 400, and once a
+   session is gone it MUST answer a request carrying that id with 404 (the client's cue to
+   re-initialize). Only a live session is closed and answered 200."
   | sid sess |
   sid := self sessionIdOf: req.
-  sess := sid isNil ifTrue: [nil] ifFalse: [mutex critical: [sessions removeKey: sid ifAbsent: [nil]]].
-  sess ifNotNil: [:s | s close].
+  sid isNil ifTrue: [
+    ^self writeSessionError: 'Missing MCP-Session-Id header' code: 400 reason: 'Bad Request' on: conn].
+  sess := mutex critical: [sessions removeKey: sid ifAbsent: [nil]].
+  sess isNil ifTrue: [
+    ^self writeSessionError: 'Unknown or expired session: ' , sid code: 404 reason: 'Not Found' on: conn].
+  sess close.
   conn writeStatus: 200 reason: 'OK' body: ''
 
 ]

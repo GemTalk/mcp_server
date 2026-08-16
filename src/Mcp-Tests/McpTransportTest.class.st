@@ -98,6 +98,16 @@ McpTransportTest >> simpleRequest: httpMethod [
 
 ]
 
+{ #category : 'helpers' }
+McpTransportTest >> simpleRequest: httpMethod sessionId: aSessionId [
+  "A raw HTTP request with the given verb and an MCP-Session-Id header, no body."
+  | crlf |
+  crlf := self crlf.
+  ^httpMethod , ' /mcp HTTP/1.1' , crlf , 'Host: localhost' , crlf ,
+   'MCP-Session-Id: ' , aSessionId , crlf , crlf
+
+]
+
 { #category : 'tests' }
 McpTransportTest >> testAbsentOriginServed [
   "No Origin header (non-browser clients like curl / Claude Code) passes the check -- routed, not 403."
@@ -168,8 +178,25 @@ McpTransportTest >> testContentLengthMatchesBody [
 ]
 
 { #category : 'tests' }
-McpTransportTest >> testDeleteReturns200 [
-  self assert: (self includesCS: 'HTTP/1.1 200 OK' in: (self runRequest: (self simpleRequest: 'DELETE')) output)
+McpTransportTest >> testDeleteUnknownSessionReturns404 [
+  "Streamable HTTP session management: once a session is gone the server MUST answer a request
+   carrying that id with 404, which is the client's cue to re-initialize. Same rule for DELETE as
+   for POST. (The 200 path needs a live worker gem, so it is covered by test.sh.)"
+  | out |
+  out := (self runRequest: (self simpleRequest: 'DELETE' sessionId: 'DEADBEEF')) output.
+  self assert: (self includesCS: 'HTTP/1.1 404 Not Found' in: out).
+  self assert: (self includesCS: 'DEADBEEF' in: out)
+
+]
+
+{ #category : 'tests' }
+McpTransportTest >> testDeleteWithoutSessionReturns400 [
+  "A server that requires a session id SHOULD answer a request without the header with 400 -- the
+   same answer the POST path gives (testPostWithoutSessionReturnsError)."
+  | out |
+  out := (self runRequest: (self simpleRequest: 'DELETE')) output.
+  self assert: (self includesCS: 'HTTP/1.1 400 Bad Request' in: out).
+  self assert: (self includesCS: 'MCP-Session-Id' in: out)
 
 ]
 

@@ -17,8 +17,12 @@ sessions** — each client gets its own isolated worker gem (see [Per-client ses
     id → **`404`** (a compliant client then re-initializes).
 - **GET `/mcp`** — opens the standalone server→client SSE stream (`text/event-stream`),
   held open with keepalive comments. No server-initiated messages yet, so it carries only keepalives.
-- **DELETE `/mcp`** — ends the session named by `MCP-Session-Id` (closes its worker); returns `200`.
+- **DELETE `/mcp`** — ends the session named by `MCP-Session-Id` (closes its worker). Answers the
+  same codes as the POST path: missing header → **`400`**, unknown/already-ended id → **`404`**,
+  live session → **`200`**.
 - Any other method → `405`.
+
+`ping` is answered with an empty result on every session, as the spec requires.
 
 **Security (per the MCP spec):** the server binds only to `127.0.0.1`, session ids are
 cryptographically-random 128-bit tokens, and every request's `Origin` header is validated to
@@ -42,6 +46,38 @@ curl -s localhost:8000/mcp -H 'MCP-Session-Id: <id>' \
 
 Works with the **MCP Inspector** / any MCP SDK client using the *Streamable HTTP* transport
 pointed at `http://localhost:8000/mcp` (such clients manage the `MCP-Session-Id` automatically).
+
+### Protocol conformance
+
+The server speaks MCP revisions **`2025-06-18`** and **`2025-11-25`** (`McpDispatcher class >>
+supportedProtocolVersions`, the single source of truth for both `initialize` negotiation and the
+`MCP-Protocol-Version` header check, so the two cannot drift). `initialize` echoes the client's
+version when supported, otherwise answers `2025-11-25`.
+
+`2025-03-26` is deliberately **not** supported: a server on that revision must accept JSON-RPC
+*batches*, which the single-object body parser does not. `2025-06-18` removed batching.
+
+| Requirement | Behaviour |
+|---|---|
+| `initialize` version negotiation | echo if supported, else our latest |
+| `ping` | empty result (spec MUST) |
+| `tools/list`, `tools/call` | implemented; `tools` is the only declared capability |
+| `resources/*`, `prompts/*`, `logging/*`, `completion/*` | undeclared and answered `-32601` |
+| Notification POST | `202 Accepted`, no body |
+| Invalid `Origin` | `403` |
+| Invalid/unsupported `MCP-Protocol-Version` | `400` |
+| Missing session id / unknown-expired session id | `400` / `404`, on both POST and DELETE |
+| Malformed body | `400` + `-32700` |
+| Tool input schemas | JSON Schema 2020-12 (no `$schema` needed), closed with `additionalProperties: false` |
+
+Not implemented, all optional at these revisions: pagination (`tools/list` returns every tool and
+no `nextCursor`), `listChanged` notifications, SSE resumability (`Last-Event-ID`), tool `title` /
+`annotations` / `icons` / `outputSchema`, server `instructions`, and `tasks`.
+
+The **draft `2026-07-28`** revision is a different protocol era — no `initialize`, no sessions, no
+GET stream, per-request `_meta`, and a mandatory `server/discover`. It is not implemented, and
+supporting it will need a decision about how per-client worker-gem isolation survives a protocol
+with no session id to key it on.
 
 ## Tools (31 base + 2 optional Grail)
 
@@ -131,8 +167,11 @@ These live on the optional `McpServerWithGrail` subclass, loaded only via `load-
 ## Tool-call safety
 
 - **Closed argument schemas** — every tool's input schema sets `additionalProperties: false` plus
-  its `required` list, so an unknown or missing argument is rejected up front with a JSON-RPC
-  `-32602` (`error.data.kind = "invalidParams"`) rather than being silently dropped.
+  its `required` list, so an unknown or missing argument is rejected up front, before the tool
+  runs, rather than being silently dropped. Per MCP 2025-11-25 the rejection comes back as a
+  **tool execution error** (`isError: true`, with `structuredContent.error.kind =
+  "invalidParams"`), because that is the form a model can read and self-correct from. A malformed
+  request — no tool name — and an unknown tool remain JSON-RPC **protocol** errors (`-32602`).
 - **Kernel-class guard** — the mutation tools refuse to modify a base/kernel class (one whose home
   dictionary is `Globals`); the refusal names the class and a remedy and carries `kind = "refused"`.
   Your own classes (in `UserGlobals`, or an application dictionary) stay freely mutable.
@@ -278,12 +317,13 @@ suite when `McpServerWithGrail` is installed:
   entry `handleJsonString:`.
 - `McpTransportTest` — `handleConnection:` driven over a **`McpMockSocket`** wrapped in a
   real `McpHttpConnection`, so the genuine HTTP parsing/writing runs with no TCP. Covers the
-  paths that spawn **no** worker gem: GET→SSE, DELETE→200, unknown verb→405, malformed→`-32700`,
+  paths that spawn **no** worker gem: GET→SSE, DELETE→`400`/`404`, unknown verb→405, malformed→`-32700`,
   a session-less POST→`400`, chunked delivery, EOF, Content-Length. (initialize and a routed tool
   call spawn a real worker, so they're exercised by the integration test instead.)
 - `McpContractTest` — contract / property tests over the tool surface, all driven through the real
   `McpDispatcher>>handle:` envelope: every tool schema is closed (`additionalProperties:false`),
-  unknown/missing arguments → `-32602`, a raised error carries a structured `kind`, kernel-class
+  unknown/missing arguments → an `isError` tool execution error while a missing tool name / unknown
+  tool stay `-32602`, `ping` → an empty result, a raised error carries a structured `kind`, kernel-class
   mutation is refused, and read-only hides + refuses the gated tools. Socket-less and worker-less,
   so it runs in `run-unit-tests.sh` with the others above.
 - `McpAuthTest` — the authenticated front end (`McpAuthRouter`): missing / non-bearer / garbage /

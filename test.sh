@@ -93,6 +93,14 @@ JSON
 )
 check "initialized notification returns 202"  '202'                      "$code"
 
+# ping is a MUST in the MCP spec: the receiver MUST answer with an EMPTY result.
+r=$(post <<'JSON'
+{"jsonrpc":"2.0","id":2,"method":"ping"}
+JSON
+)
+check "ping => empty result"                  '"result":{}'              "$r"
+check "ping is not an error"                  '"id":2'                   "$r"
+
 # --- tools/list ---
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":2,"method":"tools/list"}
@@ -180,6 +188,28 @@ JSON
 )
 check "unknown tool => -32602"                '-32602'                   "$r"
 
+# MCP 2025-11-25 splits the two tools/call failure envelopes: arguments that violate the
+# tool's own inputSchema are TOOL EXECUTION errors (isError, so the model can self-correct),
+# while a malformed request (no tool name) stays a PROTOCOL error.
+r=$(post <<'JSON'
+{"jsonrpc":"2.0","id":15,"method":"tools/call","params":{"name":"describe_class","arguments":{"className":"Object","bogus":"x"}}}
+JSON
+)
+check "unknown argument => isError true"      '"isError":true'           "$r"
+check "unknown argument => kind invalidParams" '"kind":"invalidParams"'  "$r"
+
+r=$(post <<'JSON'
+{"jsonrpc":"2.0","id":16,"method":"tools/call","params":{"arguments":{}}}
+JSON
+)
+check "missing tool name => -32602"           '-32602'                   "$r"
+
+r=$(post <<'JSON'
+{"jsonrpc":"2.0","id":17,"method":"tools/call","params":{"name":"status","arguments":{"bogus":1}}}
+JSON
+)
+check "no-arg tool names no allowed list"     'takes no arguments'       "$r"
+
 # ===========================================================================
 # Expanded tool set (full Jasper parity)
 # ===========================================================================
@@ -257,7 +287,7 @@ r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":30,"method":"tools/call","params":{"name":"find_senders","arguments":{"selector":"serveGetStream:"}}}
 JSON
 )
-check "find_senders finds the caller"          'buildRoutes'       "$r"
+check "find_senders finds the caller"          'serveGet:on:'      "$r"
 
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":31,"method":"tools/call","params":{"name":"find_references_to","arguments":{"name":"McpTool"}}}
@@ -338,9 +368,23 @@ r=$(curl -s -i -N -m 3 "$URL" 2>&1 | head -12)
 check "GET /mcp => text/event-stream"         'text/event-stream'        "$r"
 check "GET /mcp sends 'connected' comment"    ': connected'              "$r"
 
-# --- transport: DELETE ---
+# --- transport: DELETE (session termination) ---
+# Same status codes as the POST path: no header => 400, unknown id => 404, live id => 200.
+# Runs last, because the final DELETE ends this client's session.
 r=$(curl -s -i -m 10 -X DELETE "$URL" 2>&1 | head -1)
-check "DELETE /mcp => 200"                     '200'                     "$r"
+check "DELETE without session => 400"          '400'                     "$r"
+
+r=$(curl -s -i -m 10 -X DELETE "$URL" -H 'MCP-Session-Id: DEADBEEF' 2>&1 | head -1)
+check "DELETE unknown session => 404"          '404'                     "$r"
+
+r=$(curl -s -i -m 10 -X DELETE "$URL" -H "MCP-Session-Id: $SID" 2>&1 | head -1)
+check "DELETE live session => 200"             '200'                     "$r"
+
+# After termination the spec requires 404 for any request still carrying that id, which is
+# the client's cue to re-initialize.
+r=$(curl -s -i -m 10 "$URL" -H "MCP-Session-Id: $SID" \
+  --data-binary '{"jsonrpc":"2.0","id":18,"method":"tools/list"}' 2>&1 | head -1)
+check "POST after DELETE => 404"               '404'                     "$r"
 
 # ---------------------------------------------------------------------------
 echo
