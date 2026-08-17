@@ -26,9 +26,11 @@ Serves a `WWW-Authenticate: Bearer` challenge (with `error`/`error_description`/
 committed class state; forkOnPort: serializes it into the child gem's fork string): expectedAudience
 (REQUIRED -- the canonical resource identifier, also published as `resource` and used to derive the
 metadata URL), authorizationServers (REQUIRED, https), userIdClaim (default 'sub'), requiredScopes
-(default empty -> no scope check, also published as `scopes_supported`), expectedIssuer (default nil
--> skip that check), resourceMetadataUrl (derived unless overridden), writeScope, bindAddress, and the
-inherited readOnly. Configure a router and fork it, e.g. via run-auth-server.sh.
+(default empty -> no scope check), expectedIssuer (default nil -> skip that check), resourceMetadataUrl
+(derived unless overridden), writeScope, extraScopes, bindAddress, and the inherited readOnly. The
+advertised scope set (`scopes_supported`) is NOT configured: supportedScopes DERIVES it as the union
+of requiredScopes, writeScope and extraScopes. Configure a router and fork it, e.g. via
+run-auth-server.sh.
 
 THREE INVARIANTS distinguish this class from its superclass, and all are enforced in code rather
 than by a launch script, because runOnPort:/forkOnPort: can be called directly:
@@ -64,7 +66,7 @@ Class {
 		'authorizationServers',
 		'resourceMetadataUrl',
 		'requiredScopes',
-		'supportedScopes',
+		'extraScopes',
 		'expectedAudience',
 		'expectedIssuer',
 		'writeScope',
@@ -82,7 +84,7 @@ McpAuthRouter >> applyConfig: aConfigDict [
   authorizationServers := aConfigDict at: 'authorizationServers' ifAbsent: [authorizationServers].
   resourceMetadataUrl := aConfigDict at: 'resourceMetadataUrl' ifAbsent: [resourceMetadataUrl].
   requiredScopes := aConfigDict at: 'requiredScopes' ifAbsent: [requiredScopes].
-  supportedScopes := aConfigDict at: 'supportedScopes' ifAbsent: [supportedScopes].
+  extraScopes := aConfigDict at: 'extraScopes' ifAbsent: [extraScopes].
   expectedAudience := aConfigDict at: 'expectedAudience' ifAbsent: [expectedAudience].
   expectedIssuer := aConfigDict at: 'expectedIssuer' ifAbsent: [expectedIssuer].
   writeScope := aConfigDict at: 'writeScope' ifAbsent: [writeScope].
@@ -139,15 +141,15 @@ McpAuthRouter >> bindAddress: aHostAddressString [
 McpAuthRouter >> configDict [
   "Extend the base router config (McpRouter>>configDict) with the RS-layer / OIDC settings. Still
    identifiers + booleans only -- the JWT signing key is trusted Stone-side (addJwtKey), never here.
-   supportedScopes is serialized RAW (the ivar, not the requiredScopes fallback) so an unset value
-   round-trips as unset and keeps deriving from requiredScopes on the far side."
+   Only the three CONFIGURED scope fields cross the wire; supportedScopes is absent by design, since
+   the far side derives it from these."
   | d |
   d := super configDict.
   d at: 'userIdClaim' put: userIdClaim.
   d at: 'authorizationServers' put: authorizationServers.
   d at: 'resourceMetadataUrl' put: resourceMetadataUrl.
   d at: 'requiredScopes' put: requiredScopes.
-  d at: 'supportedScopes' put: supportedScopes.
+  d at: 'extraScopes' put: extraScopes.
   d at: 'expectedAudience' put: expectedAudience.
   d at: 'expectedIssuer' put: expectedIssuer.
   d at: 'writeScope' put: writeScope.
@@ -196,6 +198,23 @@ McpAuthRouter >> expectedIssuer: aStringOrNil [
 
 ]
 
+{ #category : 'validation' }
+McpAuthRouter >> extraScopes [
+  "Scopes to advertise that this router does not itself gate on -- see supportedScopes, which unions
+   them with requiredScopes and the writeScope. Empty by default."
+  ^extraScopes
+]
+
+{ #category : 'validation' }
+McpAuthRouter >> extraScopes: anArrayOfScopeStrings [
+  "Advertise scopes beyond the ones this router derives on its own. requiredScopes and the writeScope
+   are advertised automatically, so they do NOT belong here: this is for scopes the client must
+   request from the authorization server that mean nothing to this resource -- an OIDC scope such as
+   'profile' that the userIdClaim rides on, say. Listing a scope redundantly is harmless (the union
+   drops duplicates); listing an unnecessary one just enlarges what clients ask for."
+  extraScopes := anArrayOfScopeStrings
+]
+
 { #category : 'forking' }
 McpAuthRouter >> forkOnPort: aPort [
   "Refuse to fork without TLS or a conformant resource-server config. Checked HERE as well as in
@@ -212,14 +231,14 @@ McpAuthRouter >> initialize [
   "Seed the RS-layer config with safe instance-side defaults, on top of McpRouter>>initialize. There
    is NO class-side config state: a launch script / test configures the instance and forkOnPort:
    serializes it. Optional checks stay nil (= skip); userIdClaim defaults to the OIDC subject claim;
-   requiredScopes / authorizationServers default empty; supportedScopes empty means 'advertise exactly
-   requiredScopes' (see supportedScopes)."
+   requiredScopes / authorizationServers / extraScopes default empty, so an unconfigured router
+   advertises nothing (see supportedScopes, which derives the advertised set)."
   super initialize.
   userIdClaim := 'sub'.
   authorizationServers := #().
   resourceMetadataUrl := nil.
   requiredScopes := #().
-  supportedScopes := #().
+  extraScopes := #().
   expectedAudience := nil.
   expectedIssuer := nil.
   writeScope := nil.
@@ -400,9 +419,10 @@ McpAuthRouter >> requireResourceServerConfig [
       HTTPS'. The spec's localhost exemption covers redirect URIs, NOT authorization server
       endpoints, so there is deliberately no loopback escape here. expectedIssuer is held to the same
       rule when set: it names the same authorization server.
-    * requiredScopes subset-of supportedScopes -- a client is told to request supportedScopes, so a
-      scope that is required but not advertised can never be obtained and every token is refused."
-  | insecure unadvertised |
+   There is deliberately NO check that every required scope is advertised: supportedScopes derives
+   the advertised set as a union that always contains requiredScopes, so an unadvertised required
+   scope -- which no client could ever obtain -- cannot be configured in the first place."
+  | insecure |
   self expectedAudience isNil ifTrue: [
     ^self error: 'McpAuthRouter requires expectedAudience: the canonical resource identifier ' ,
       'clients use for this server (e.g. ''https://host:8443/mcp''). Token audience validation is ' ,
@@ -419,12 +439,6 @@ McpAuthRouter >> requireResourceServerConfig [
       (self spaceSeparated: insecure) ,
       '. All authorization server endpoints MUST be served over HTTPS (the spec''s localhost ' ,
       'exemption applies to redirect URIs, not to authorization server endpoints).'].
-  unadvertised := self requiredScopes reject: [:s | self supportedScopes includes: s].
-  unadvertised isEmpty ifFalse: [
-    ^self error: 'McpAuthRouter requires every requiredScope to be advertised in supportedScopes; ' ,
-      'these are required but not advertised: ' , (self spaceSeparated: unadvertised) ,
-      '. A client is told to request supportedScopes, so a required scope missing from it can never ' ,
-      'be obtained and every token would be refused insufficient_scope.'].
   ^self
 ]
 
@@ -565,9 +579,9 @@ McpAuthRouter >> serveProtectedResourceMetadata: req on: conn [
    and the client would see an unexplainable 401 loop. Reading it from the request Host header (as
    this method used to) also let the CALLER choose the identifier we publish: a request carrying
    `Host: evil.example.com` was told the resource was https://evil.example.com/mcp.
-   `scopes_supported` publishes supportedScopes (which defaults to requiredScopes): it is the client's
-   documented fallback for scope selection when a challenge carries no scope parameter, and it may
-   advertise MORE than is required (e.g. a role-gated write scope)."
+   `scopes_supported` publishes supportedScopes, the derived union: it is the client's documented
+   fallback for scope selection when a challenge carries no scope parameter, and it advertises MORE
+   than is required -- notably the role-gated write scope."
   | meta |
   meta := Dictionary new.
   meta at: 'resource' put: self expectedAudience.
@@ -606,23 +620,24 @@ McpAuthRouter >> spaceSeparated: aCollectionOfStrings [
 
 { #category : 'validation' }
 McpAuthRouter >> supportedScopes [
-  "The scopes this router ADVERTISES (published as `scopes_supported` in the Protected Resource
-   Metadata and offered in the WWW-Authenticate `scope=` challenge) -- i.e. what a client is told to
-   request. Distinct from requiredScopes, which is what a token MUST carry to be accepted: a scope
-   can be advertised without being required (e.g. a role-gated write scope that only some users are
-   granted). DEFAULTS to requiredScopes when not set explicitly -- 'advertise exactly what you
-   require', the spec's own scope-selection default -- so a router that only sets requiredScopes
-   behaves as before. Set supportedScopes: to advertise a SUPERSET of requiredScopes.
-   requireResourceServerConfig enforces requiredScopes subset-of supportedScopes."
-  ^supportedScopes isEmpty ifTrue: [self requiredScopes] ifFalse: [supportedScopes]
-]
-
-{ #category : 'validation' }
-McpAuthRouter >> supportedScopes: anArrayOfScopeStrings [
-  "Set the advertised scope list (scopes_supported + WWW-Authenticate scope=). Must be a SUPERSET of
-   requiredScopes (validated at fork/run in requireResourceServerConfig). Pass an empty array to
-   revert to the default of advertising exactly requiredScopes."
-  supportedScopes := anArrayOfScopeStrings
+  "The scopes this router ADVERTISES: published as `scopes_supported` in the Protected Resource
+   Metadata and offered in the WWW-Authenticate `scope=` challenge -- what a client is told to
+   request. DERIVED, not configured: the union of requiredScopes, the writeScope, and extraScopes.
+   Advertising is deliberately WIDER than requiring. requiredScopes is what a token MUST carry;
+   the writeScope is role-gated, so it must be requestable by everyone even though only some users
+   are granted it (a writeScope nobody can request leaves every session read-only forever); and
+   extraScopes carries scopes this router does not itself gate on but the client still needs.
+   Deriving rather than configuring means the two ways to get this wrong -- a required scope no
+   client is told to request, or an unrequestable writeScope -- are unrepresentable, so there is no
+   subset rule for a caller to maintain and none for requireResourceServerConfig to check.
+   Order is requiredScopes, then writeScope, then extraScopes, each first occurrence kept; OAuth
+   treats scope as a set, so the order is for stable output only."
+  | all |
+  all := OrderedCollection new.
+  requiredScopes do: [:s | (all includes: s) ifFalse: [all add: s]].
+  writeScope ifNotNil: [:w | (all includes: w) ifFalse: [all add: w]].
+  extraScopes do: [:s | (all includes: s) ifFalse: [all add: s]].
+  ^all asArray
 ]
 
 { #category : 'validation' }
@@ -746,7 +761,7 @@ McpAuthRouter >> writeAuthError: httpCode oauthError: errorCodeOrNil description
    insufficient_scope -- nil for a plain missing-token challenge), error_description, scope (when
    refusing for insufficient scope), and resource_metadata (RFC 9728) when a resourceMetadataUrl is
    configured."
-  | crlf params challenge reason err |
+  | crlf params challenge reason err advertised |
   crlf := String with: Character cr with: Character lf.
   params := OrderedCollection new.
   errorCodeOrNil ifNotNil: [:e |
@@ -754,14 +769,15 @@ McpAuthRouter >> writeAuthError: httpCode oauthError: errorCodeOrNil description
     "error_description is only meaningful alongside an error code (RFC 6750 3.1); a plain
      missing-token challenge carries neither and just invites the client to authenticate."
     aMessage ifNotNil: [:m | params add: 'error_description="' , m , '"']].
-  "scope advertises what the client should request -- supportedScopes (which defaults to
-   requiredScopes, and may be a superset). The Scope Selection Strategy makes this a client's first
-   choice for what to request, ahead of the metadata document's scopes_supported, and its example is
-   a 401. Without it on the initial 401 a client requests no scope at all, is issued a token lacking
-   them, and only discovers what it needed from the 403 that follows -- a wasted authorization round
-   trip on every first connection."
-  self supportedScopes isEmpty
-    ifFalse: [params add: 'scope="' , (self spaceSeparated: self supportedScopes) , '"'].
+  "scope advertises what the client should request -- supportedScopes, the derived union, so it also
+   offers the role-gated writeScope. The Scope Selection Strategy makes this a client's first choice
+   for what to request, ahead of the metadata document's scopes_supported, and its example is a 401.
+   Without it on the initial 401 a client requests no scope at all, is issued a token lacking them,
+   and only discovers what it needed from the 403 that follows -- a wasted authorization round trip
+   on every first connection."
+  advertised := self supportedScopes.
+  advertised isEmpty
+    ifFalse: [params add: 'scope="' , (self spaceSeparated: advertised) , '"'].
   self resourceMetadataUrl ifNotNil: [:u | params add: 'resource_metadata="' , u , '"'].
   challenge := 'WWW-Authenticate: Bearer'.
   params isEmpty ifFalse: [challenge := challenge , ' ' , (params inject: '' into: [:acc :p |
