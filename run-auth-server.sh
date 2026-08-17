@@ -36,6 +36,12 @@
 #                         for scopes the router does not gate on but the client must still request
 #                         from the authorization server -- e.g. "profile" so the userIdClaim is
 #                         present in the token.
+#                         NOTE offline_access: the MCP draft says a resource SHOULD NOT advertise it,
+#                         since refresh tokens are not a resource requirement. Listing it here is a
+#                         knowing deviation, needed when the IdP hard-rejects an authorization request
+#                         naming a scope the client was never assigned (Keycloak does) while the
+#                         client appends offline_access on its own -- then the resource advertising it
+#                         is the only way it reaches the client. Leave it out unless login needs it.
 #   MCP_WRITE_SCOPE     - scope granting write; a token lacking it gets a READ-ONLY worker (default: none).
 #                         Advertised automatically so clients can request it -- an unrequestable write
 #                         scope would leave every session read-only.

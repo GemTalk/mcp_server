@@ -58,6 +58,17 @@ configured scopes are flat and unrelated -- true of mcp:use / mcp:write today. T
 because there is no hierarchy API to test yet; introducing one (e.g. mcp:admin implying mcp:use)
 needs a design decision first, and the exact-match check must change at the same time.
 
+A KNOWN DEPLOYMENT DEVIATION, likewise untested here: the draft's ""SHOULD NOT include
+offline_access"" is asserted below against conformantRouter, but the geode test deployment DOES
+advertise offline_access (via MCP_EXTRA_SCOPES) and therefore deviates. Not an oversight -- an MCP
+client appends offline_access to its authorization request on its own, and Keycloak hard-rejects an
+authorization request naming a scope the client was not assigned (""Invalid scopes""). Since
+DCR-with-a-scope-field discards realm defaults, the only way that scope reaches the client is for
+this resource to advertise it, so dropping it breaks the browser login outright. These tests
+deliberately constrain the FIXTURE and not every deployment: a router is spec-clean unless an
+operator opts out, and this operator has, knowingly. The clean fix is client-side -- pin the client's
+requested scopes so it stops asking -- which would let this become an invariant test; untried so far.
+
 FIXTURES. Most tests drive McpAuthRouter>>handleConnection: through McpMockSocket, so they need no
 listening socket, no TLS, no IdP and no login -- run them anywhere. The per-request authorization
 tests (testRoutedRequestRequiresBearerToken and friends) need a real session, so they use
@@ -444,7 +455,11 @@ McpAuthConformanceTest >> testMetadataDeclaresScopesSupported [
 McpAuthConformanceTest >> testMetadataOmitsOfflineAccessFromScopesSupported [
   "draft, Refresh Tokens: 'MCP Servers (Protected Resources) SHOULD NOT include offline_access in
    WWW-Authenticate scope or Protected Resource Metadata scopes_supported, as refresh tokens are
-   not a resource requirement.' A forward guard: it holds vacuously until scopes_supported exists."
+   not a resource requirement' -- token lifetime is between the client and the authorization server.
+   A forward guard on a revision McpDispatcher does not yet claim. It no longer holds vacuously (it
+   once did, before scopes_supported was published): conformantRouter advertises mcp:use, so this
+   asserts something real about the fixture. It does NOT constrain every deployment, and the geode
+   test deployment knowingly deviates -- see the class comment's KNOWN GAPS."
   | meta scopes |
   meta := self jsonOf: (self driveRequest: (self getPath: '/.well-known/oauth-protected-resource')
     on: self conformantRouter).
