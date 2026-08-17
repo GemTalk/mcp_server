@@ -70,12 +70,11 @@ MCP_TLS_CERT="${MCP_TLS_CERT:-}"
 MCP_TLS_KEY="${MCP_TLS_KEY:-}"
 TOPAZ="$GEMSTONE/bin/topaz"
 
-# McpAuthRouter refuses to run without TLS (McpAuthRouter>>requireTls), so fail here with a clear
-# message rather than launching topaz only for the router to signal. The code is the real gate; this
-# is just a faster, friendlier version of the same rule.
-# McpAuthRouter also refuses a cleartext authorization server (requireResourceServerConfig). Fail here
-# with a clear message rather than launching topaz only for the router to signal. The code is the real
-# gate; this is just a faster, friendlier version of the same rule.
+# Two pre-flight checks follow. Each mirrors a rule McpAuthRouter enforces on itself, so the code is
+# the real gate and neither is load-bearing: they exist only to turn "launch topaz, watch the router
+# signal an error" into an immediate, readable message. If the router's rules change, these follow.
+
+# Mirrors McpAuthRouter>>requireResourceServerConfig: no cleartext authorization server.
 case "$MCP_ISSUER" in
   https://*) ;;
   *)
@@ -86,6 +85,7 @@ case "$MCP_ISSUER" in
     exit 1 ;;
 esac
 
+# Mirrors McpAuthRouter>>requireTls: no serving without a certificate and key.
 if [ -z "$MCP_TLS_CERT" ] || [ -z "$MCP_TLS_KEY" ]; then
   echo "ERROR: McpAuthRouter requires TLS. Set both MCP_TLS_CERT and MCP_TLS_KEY (the key must be" >&2
   echo "       an UNENCRYPTED PEM, and both paths are read by the GEM, so they must exist on the" >&2
