@@ -104,7 +104,12 @@ for s in $MCP_REQUIRED_SCOPES; do SCOPES_ST="$SCOPES_ST '$s'"; done
 EXTRA_ST=""
 for s in $MCP_EXTRA_SCOPES; do EXTRA_ST="$EXTRA_ST '$s'"; done
 
-# Optional config statements (blank when unset -- a blank line is fine inside a Smalltalk run block)
+# Optional config statements, each its OWN statement rather than a leg of the cascade below, because
+# an unset one expands to nothing and a cascade cannot carry an empty leg. None of these can be sent
+# unconditionally: writeScope: '' would be a scope no token carries (every session read-only, not
+# ungated) and bindAddress: '' is not loopback, so "unset" has to mean "never sent" and let
+# McpAuthRouter>>initialize supply the default. TLS is NOT here -- it is required, so it joins the
+# cascade; a guard on it would be unreachable after the check above.
 EXTRA_LINE=""
 [ -n "$MCP_EXTRA_SCOPES" ] && EXTRA_LINE="r extraScopes: #($EXTRA_ST )."
 WRITE_LINE=""
@@ -113,9 +118,6 @@ RO_LINE=""
 [ "$GS_MCP_READONLY" = "1" ] && RO_LINE="r readOnly: true."
 BIND_LINE=""
 [ -n "$MCP_BIND_ADDRESS" ] && BIND_LINE="r bindAddress: '$MCP_BIND_ADDRESS'."
-TLS_LINE=""
-[ -n "$MCP_TLS_CERT" ] && [ -n "$MCP_TLS_KEY" ] && \
-  TLS_LINE="r useTlsCertificateFile: '$MCP_TLS_CERT' privateKeyFile: '$MCP_TLS_KEY'."
 
 echo "Forking McpAuthRouter onto ${MCP_BIND_ADDRESS:-127.0.0.1}:$GS_MCP_PORT (issuer=$MCP_ISSUER; detached; this script returns)..."
 "$TOPAZ" -l <<TPZ
@@ -131,12 +133,12 @@ r userIdClaim: '$MCP_USERID_CLAIM';
   expectedIssuer: '$MCP_ISSUER';
   expectedAudience: '$MCP_AUDIENCE';
   requiredScopes: #($SCOPES_ST );
-  authorizationServers: #( '$MCP_ISSUER' ).
+  authorizationServers: #( '$MCP_ISSUER' );
+  useTlsCertificateFile: '$MCP_TLS_CERT' privateKeyFile: '$MCP_TLS_KEY'.
 $EXTRA_LINE
 $WRITE_LINE
 $RO_LINE
 $BIND_LINE
-$TLS_LINE
 r forkOnPort: $GS_MCP_PORT
 %
 logout
