@@ -260,13 +260,18 @@ no shared state. A worker is read-only if **either** applies:
 - **By OAuth scope (`McpAuthRouter`)** — give the router a `writeScope` (e.g. `./run-auth-server.sh`
   with `MCP_WRITE_SCOPE=mcp:write`): a token carrying that scope gets a read-write worker; a token
   lacking it gets a read-only worker for that session. For a client to actually *request* that scope,
-  the router must also **advertise** it: `supportedScopes` is the set published as `scopes_supported`
-  (RFC 9728 metadata) and offered in the `WWW-Authenticate` challenge — what clients are told to
-  request — and it is deliberately distinct from `requiredScopes`, what every token *must* carry.
-  Advertising the write scope without requiring it is the point: an entitled user is granted it and
-  gets read-write, while an unentitled user (the authorization server withholds it) still connects
-  read-only. `supportedScopes` defaults to `requiredScopes`, so widen it only to advertise an optional
-  scope like this.
+  the router must also **advertise** it — and it does so automatically, so there is nothing to keep
+  in sync. Advertising without requiring is the point: an entitled user is granted the scope and gets
+  read-write, while an unentitled user (the authorization server withholds it) still connects
+  read-only.
+
+`supportedScopes` is the set published as `scopes_supported` (RFC 9728 metadata) and offered in the
+`WWW-Authenticate` challenge — what clients are told to request, as distinct from `requiredScopes`,
+what every token *must* carry. It is **derived, not configured**: the union of `requiredScopes`, the
+`writeScope`, and `extraScopes`. Because it is a union, a required scope is always advertised and the
+write scope is always requestable — neither can be left out by a configuration slip, and there is no
+subset rule to observe. Set `extraScopes` only for scopes the router itself does not gate on but the
+client still needs to ask for, such as an authorization server's own `profile`.
 
 **What's gated:** everything that can persist a change or run arbitrary code — `execute_code`,
 `commit`, and all the mutation tools. Everything else (browsing, listing, search,
