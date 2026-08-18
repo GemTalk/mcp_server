@@ -102,11 +102,8 @@ McpServer >> assertRemovableDictionaryNamed: aName [
 
 { #category : 'schema building' }
 McpServer >> boolProperty: aDescription [
-  | d |
-  d := Dictionary new.
-  d at: 'type' put: 'boolean'.
-  d at: 'description' put: aDescription.
-  ^d
+  "See McpToolset class>>boolProperty:, the single implementation both roles share."
+  ^McpToolset boolProperty: aDescription
 
 ]
 
@@ -290,26 +287,16 @@ McpServer >> methodsReportFor: aBehavior label: aLabel [
 
 { #category : 'schema building' }
 McpServer >> objectSchema: propsDict required: requiredArray [
-  "Build a closed JSON-Schema object: additionalProperties is false so an unknown/hallucinated
-   argument is a detectable error (McpTool>>validationErrorFor:) rather than silently dropped.
-   Every tool's inputSchema is built through here, so this closes them all."
-  | d |
-  d := Dictionary new.
-  d at: 'type' put: 'object'.
-  d at: 'properties' put: propsDict.
-  d at: 'required' put: requiredArray.
-  d at: 'additionalProperties' put: false.
-  ^d
+  "See McpToolset class>>objectSchema:required:, the single implementation both roles share (it is
+   what closes every tool schema)."
+  ^McpToolset objectSchema: propsDict required: requiredArray
 
 ]
 
 { #category : 'schema building' }
 McpServer >> propString: aDescription [
-  | d |
-  d := Dictionary new.
-  d at: 'type' put: 'string'.
-  d at: 'description' put: aDescription.
-  ^d
+  "See McpToolset class>>propString:, the single implementation both roles share."
+  ^McpToolset propString: aDescription
 
 ]
 
