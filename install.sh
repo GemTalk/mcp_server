@@ -35,15 +35,40 @@ fi
 
 # Load the gs-mcp code as the Rowan project 'Mcp' from its load spec. Reaches RwSpecification
 # the same way $GEMSTONE/rowan3/bin/installProject.stone does (it isn't in the default symbol list).
+#
+# GRAIL WORKAROUND, and it is why this block is more than four lines: each src/*/package.st holds the
+# Tonel marker literal `Package { #name : '...' }`, and Rowan's reader resolves that class name
+# through the loading user's symbol list. Grail defines its OWN Package class (in PythonAst, a
+# ModuleAst subclass -- a Python AST node), and the Python dictionaries precede Globals, so Rowan
+# gets an AST node and the load dies with "a Package does not understand #at:ifAbsent:" -- before
+# any of our code loads, in BOTH plain and --grail modes. So: hide the shadowing dictionary for the
+# duration of the load, then put it back. Name resolution only matters while compiling, so
+# already-compiled Grail methods are unaffected, and the ensure: restores the dictionary even if the
+# load fails. If a crash ever does leave it out, restore it by hand with
+#   System myUserProfile insertDictionary: (AllUsers ... objectNamed: #PythonAst) at: <index>
+#
+# TAKE THIS OUT when Rowan resolves the Tonel marker robustly (reported to the Rowan developer
+# 2026-08-18) or when Grail renames its Package class. In an image WITHOUT Grail nothing here fires:
+# `objectNamed: #Package` is nil, so the block is a plain Rowan load.
 LOAD_BLOCK="run
-| specCls spec |
-specCls := (Rowan globalNamed: 'RwSpecification')
-  ifNil: [ (AllUsers userWithId: 'SystemUser' ifAbsent: []) objectNamed: 'RwSpecification' ].
-spec := specCls fromUrl: 'file://$REPO_DIR/rowan/specs/Mcp.ston'.
-spec diskUrl: 'file://$REPO_DIR'.
-spec resolve load.
-System commitTransaction.
-'Mcp project loaded via Rowan'
+| up shadow idx specCls spec result |
+up := System myUserProfile.
+shadow := (up objectNamed: #Package) isNil
+  ifTrue: [ nil ]
+  ifFalse: [ up symbolList detect: [:d | d includesKey: #Package ] ifNone: [ nil ] ].
+idx := shadow isNil ifTrue: [ 0 ] ifFalse: [ up symbolList indexOf: shadow ].
+shadow ifNotNil: [ up removeDictionaryAt: idx. System commitTransaction ].
+result := [
+  specCls := (Rowan globalNamed: 'RwSpecification')
+    ifNil: [ (AllUsers userWithId: 'SystemUser' ifAbsent: []) objectNamed: 'RwSpecification' ].
+  spec := specCls fromUrl: 'file://$REPO_DIR/rowan/specs/Mcp.ston'.
+  spec diskUrl: 'file://$REPO_DIR'.
+  spec resolve load.
+  System commitTransaction.
+  'Mcp project loaded via Rowan'
+] ensure: [
+  shadow ifNotNil: [ up insertDictionary: shadow at: idx. System commitTransaction ] ].
+result , (shadow isNil ifTrue: [ '' ] ifFalse: [ ' (hid ' , shadow name asString , ' for the load)' ])
 %"
 
 # With --grail, file in the optional Grail toolset + its test suite after the base load.
