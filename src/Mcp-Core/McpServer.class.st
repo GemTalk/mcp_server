@@ -17,7 +17,9 @@ Class {
 	#instVars : [
 		'dispatcher',
 		'toolRegistry',
-		'toolsets'
+		'toolsets',
+		'serverName',
+		'serverVersion'
 	],
 	#category : 'Mcp-Core'
 }
@@ -40,6 +42,22 @@ McpServer class >> coreReadOnlySafeToolNames [
       'status' 'refresh' 'abort'
       'list_test_classes' 'list_failing_tests' 'describe_test_failure'
       'run_test_class' 'run_test_method' )
+
+]
+
+{ #category : 'identity' }
+McpServer class >> defaultServerName [
+  "The name a stock GemStone MCP server reports in the initialize result's serverInfo. The single
+   home for this literal: the instance-side serverName answers it unless a deployment or a subclass
+   says otherwise, and McpDispatcher falls back to it when it has no server at all."
+  ^'gemstone-mcp'
+
+]
+
+{ #category : 'identity' }
+McpServer class >> defaultServerVersion [
+  "See defaultServerName."
+  ^'0.1.0'
 
 ]
 
@@ -463,6 +481,39 @@ McpServer >> resolveClass: aName [
   | obj |
   obj := System myUserProfile objectNamed: aName asSymbol.
   ^(obj isKindOf: Behavior) ifTrue: [obj] ifFalse: [nil]
+
+]
+
+{ #category : 'identity' }
+McpServer >> serverName [
+  "What this server calls itself in the initialize result's serverInfo (MCP lifecycle). Three ways to
+   set it, in precedence order: a SUBCLASS overrides this method; a DEPLOYMENT sets it in router
+   config, which the worker bootstrap passes to serverName:; otherwise the class default. A server
+   assembled from third-party toolsets needs this -- announcing itself as 'gemstone-mcp' would tell a
+   client the opposite of the truth."
+  ^serverName ifNil: [self class defaultServerName]
+
+]
+
+{ #category : 'identity' }
+McpServer >> serverName: aStringOrNil [
+  "Set the serverInfo name (nil restores the default). Sent by the worker bootstrap from router
+   config; see serverName."
+  serverName := aStringOrNil
+
+]
+
+{ #category : 'identity' }
+McpServer >> serverVersion [
+  "See serverName."
+  ^serverVersion ifNil: [self class defaultServerVersion]
+
+]
+
+{ #category : 'identity' }
+McpServer >> serverVersion: aStringOrNil [
+  "See serverName:."
+  serverVersion := aStringOrNil
 
 ]
 

@@ -197,6 +197,35 @@ McpContractTest >> testRaisedErrorCarriesStructuredKind [
 
 ]
 
+{ #category : 'tests - identity' }
+McpContractTest >> testServerInfoDefaultsToStockIdentity [
+  "An unconfigured server reports the stock identity, from the single home for those literals."
+  | info |
+  info := ((self dispatch: (self request: 'initialize' params: Dictionary new)) at: 'result')
+    at: 'serverInfo'.
+  self assert: (info at: 'name') equals: McpServer defaultServerName.
+  self assert: (info at: 'version') equals: McpServer defaultServerVersion
+
+]
+
+{ #category : 'tests - identity' }
+McpContractTest >> testServerInfoFollowsDeploymentConfig [
+  "A deployment assembled from toolsets may never subclass McpServer, so it sets its identity in
+   router config, which the worker bootstrap passes to serverName:/serverVersion:. That must reach the
+   initialize result -- note the dispatcher is built with the server, BEFORE these are set, so this
+   also pins that it asks rather than caching."
+  | s info |
+  s := McpServer new serverName: 'acme-db-mcp'; serverVersion: '2.5.0'; yourself.
+  info := (((McpDispatcher withToolRegistry: s toolRegistry server: s)
+    handle: (self request: 'initialize' params: Dictionary new)) at: 'result') at: 'serverInfo'.
+  self assert: (info at: 'name') equals: 'acme-db-mcp'.
+  self assert: (info at: 'version') equals: '2.5.0'.
+  "and nil restores the default rather than reporting an empty name"
+  s serverName: nil.
+  self assert: s serverName equals: McpServer defaultServerName
+
+]
+
 { #category : 'tests - toolsets' }
 McpContractTest >> testInstalledDefaultToolsetNamesIsCorePlusGrailWhenPresent [
   "The front end resolves the default surface with this (McpRouter>>effectiveToolsetNames). It is the

@@ -9,8 +9,6 @@ Class {
 	#superclass : 'Object',
 	#instVars : [
 		'toolRegistry',
-		'serverName',
-		'serverVersion',
 		'server'
 	],
 	#category : 'Mcp-Core'
@@ -162,8 +160,8 @@ McpDispatcher >> initializeResultFor: params [
   caps := Dictionary new.
   caps at: 'tools' put: tools.
   info := Dictionary new.
-  info at: 'name' put: serverName.
-  info at: 'version' put: serverVersion.
+  info at: 'name' put: self serverName.
+  info at: 'version' put: self serverVersion.
   d := Dictionary new.
   d at: 'protocolVersion' put: negotiated.
   d at: 'capabilities' put: caps.
@@ -204,12 +202,27 @@ McpDispatcher >> resultFor: id with: resultObj [
 
 ]
 
+{ #category : 'accessing' }
+McpDispatcher >> serverName [
+  "The serverInfo name to report: ASK the server rather than caching a copy, because the worker
+   bootstrap may set its name (from router config) AFTER this dispatcher was built -- the server is
+   constructed with its dispatcher, so a value cached at construction time would always be the
+   default. Falls back to the class default when there is no server (isolated dispatcher tests)."
+  ^server isNil ifTrue: [McpServer defaultServerName] ifFalse: [server serverName]
+
+]
+
+{ #category : 'accessing' }
+McpDispatcher >> serverVersion [
+  "See serverName."
+  ^server isNil ifTrue: [McpServer defaultServerVersion] ifFalse: [server serverVersion]
+
+]
+
 { #category : 'initialization' }
 McpDispatcher >> setRegistry: aRegistry server: aServerOrNil [
   toolRegistry := aRegistry.
   server := aServerOrNil.
-  serverName := 'gemstone-mcp'.
-  serverVersion := '0.1.0'.
   ^self
 
 ]
