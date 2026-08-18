@@ -39,9 +39,13 @@ McpDispatcherTest >> testHandleJsonString [
   "The worker entry (McpServer class>>handleJsonString:) parses + dispatches a raw JSON-RPC
    request in a per-gem worker instance and answers the response string; a notification -> ''."
   | out |
-  out := McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'.
-  self assert: (out includesString: '"tools"').
-  self assert: (McpServer handleJsonString: '{"jsonrpc":"2.0","method":"notifications/initialized"}') isEmpty
+  "Clear the cached worker instance before and after: SessionTemps outlives each test, so a server
+   left here would be reused by any later test that drives this entry -- with a different surface."
+  SessionTemps current removeKey: #McpServer ifAbsent: [nil].
+  [out := McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'.
+   self assert: (out includesString: '"tools"').
+   self assert: (McpServer handleJsonString: '{"jsonrpc":"2.0","method":"notifications/initialized"}') isEmpty]
+     ensure: [SessionTemps current removeKey: #McpServer ifAbsent: [nil]]
 
 ]
 

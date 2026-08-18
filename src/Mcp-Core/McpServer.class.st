@@ -6,8 +6,15 @@ the JSON response string via handleJsonString:.
 One instance runs in each per-client worker gem -- built lazily and cached in SessionTemps by the
 class-side handleJsonString:, and driven by the front end McpRouter over a GsTsExternalSession.
 This class has NO socket and knows nothing about HTTP or sessions: the transport and the per-client
-session routing live in McpRouter. The Grail subclass McpServerWithGrail adds the Python tools;
-the class-side handleJsonString: builds the most capable installed class.
+session routing live in McpRouter.
+
+Which tools a server offers is NOT fixed by its class: each server registers a list of McpToolset
+instances (see McpToolset), so a deployment -- or a vendor shipping only their own tools -- chooses the
+surface. The front end resolves both the worker class and the toolset list per session and pushes them
+into the worker gem in one call (prepareWorkerWithToolsets:readOnly:serverName:version:), so a worker
+never decides what it is. Subclass this to change BEHAVIOR (the kernel guards, the worker entry,
+dispatcher wiring, the advertised identity); write a toolset to add tools. A subclass is used only when
+it is NAMED in the router's workerClassName config.
 
 To start the server, see McpRouter (runOnPort: / forkOnPort:).
 "
@@ -73,14 +80,17 @@ McpServer class >> defaultToolsetNames [
 { #category : 'worker' }
 McpServer class >> handleJsonString: aRawJsonString [
   "Worker-gem entry the front end drives (via McpSession>>forward:, a blocking executeString:).
-   Lazily builds ONE worker instance per worker gem, cached in SessionTemps, to own the tool
-   registry + dispatcher, then handles the request in this session. Builds the most capable
-   installed class (the Grail subclass if present, else base). Answers the JSON response string
-   ('' for a notification)."
+   Answers the JSON response string ('' for a notification).
+   Normally the instance is already built and cached by prepareWorkerWithToolsets:... at session open;
+   the lazy build here covers a direct in-image send (topaz, a test) and instantiates THIS class -- the
+   class the sender named. It no longer looks for the Grail subclass: which server class and which
+   toolsets a worker uses is the front end's decision, pushed down per session, and Grail is a toolset
+   now rather than a rung in the hierarchy. A direct `McpServer handleJsonString:` therefore gets the
+   base tool surface; ask for a different one by name, or via McpServer installedDefaultToolsetNames."
   | srv |
   srv := SessionTemps current at: #McpServer otherwise: nil.
   srv isNil ifTrue: [
-    srv := ((System myUserProfile objectNamed: #McpServerWithGrail) ifNil: [McpServer] ifNotNil: [:c | c]) new.
+    srv := self new.
     SessionTemps current at: #McpServer put: srv].
   ^srv handleJsonString: aRawJsonString
 
@@ -114,6 +124,26 @@ McpServer class >> newWithToolsetNames: anArrayOfNames [
   "A server exposing ONLY the named toolsets -- how a vendor ships a server with their tools and none
    of the Smalltalk-development surface. Raises if a name does not resolve (toolsetClassNamed:)."
   ^super new initializeWithToolsetNames: anArrayOfNames
+
+]
+
+{ #category : 'worker' }
+McpServer class >> prepareWorkerWithToolsets: anArrayOfNames readOnly: aBoolean serverName: aNameOrNil version: aVersionOrNil [
+  "Prepare THIS worker gem for one client, in the single call the front end makes at session open
+   (McpSession>>prepareWorker). Sent to the class the front end NAMED, so `self` is the server class to
+   build -- a worker never chooses.
+   Order matters: the read-only flag is set FIRST, so the build can leave gated tools out of the
+   registry entirely (McpServer>>registerToolsets). Then the instance is built with the given toolsets
+   and identity and cached where handleJsonString: looks for it, which moves tool registration off the
+   client's first request and makes an unresolvable toolset fail here, at session open, rather than
+   mid-conversation. Answers a short line for the log."
+  | srv |
+  self sessionReadOnly: aBoolean.
+  srv := self newWithToolsetNames: anArrayOfNames.
+  srv serverName: aNameOrNil; serverVersion: aVersionOrNil.
+  SessionTemps current at: #McpServer put: srv.
+  ^self name asString , ' ready: ' , srv toolRegistry descriptors size printString , ' tool(s)'
+    , (aBoolean ifTrue: [' (read-only)'] ifFalse: [''])
 
 ]
 
@@ -197,7 +227,7 @@ McpServer >> boolProperty: aDescription [
 { #category : 'private' }
 McpServer >> capResult: aString [
   "Cap an arbitrary tool result at 50000 characters so a huge value can't swamp the
-   client. Shared by execute_code (and by eval_python/compile_python in McpServerWithGrail)."
+   client. Shared by execute_code (and by the Python tools in the optional Grail toolset)."
   ^aString size > 50000
     ifTrue: [(aString copyFrom: 1 to: 50000) , ' ...[truncated]']
     ifFalse: [aString]

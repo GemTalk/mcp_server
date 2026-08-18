@@ -398,6 +398,14 @@ McpRouter >> openSessionCreating: aOneArgBlock [
   | newId sess |
   newId := mutex critical: [self nextSessionId].
   sess := aOneArgBlock value: newId.
+  "Push this router's worker config, then prepare the worker gem -- both BEFORE the session is
+   registered, so no request can reach an unprepared worker. Resolving here (rather than in the
+   worker) is what lets an authenticated router later narrow the tool surface per principal."
+  sess workerClassName: self effectiveWorkerClassName;
+    toolsetNames: self effectiveToolsetNames;
+    serverName: self serverName;
+    serverVersion: self serverVersion;
+    prepareWorker.
   mutex critical: [sessions at: newId put: sess].
   ^sess
 

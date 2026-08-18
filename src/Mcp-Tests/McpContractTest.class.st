@@ -60,6 +60,16 @@ McpContractTest >> savingReadOnlyDo: aBlock [
 
 ]
 
+{ #category : 'helpers' }
+McpContractTest >> withFreshWorkerCacheDo: aBlock [
+  "Clear the per-session worker-instance cache BEFORE and after, so a test driving the class-side
+   handleJsonString: neither inherits a cached server nor leaks one into later tests. SessionTemps
+   outlives each test -- the whole suite runs in one gem session."
+  SessionTemps current removeKey: #McpServer ifAbsent: [nil].
+  ^[aBlock value] ensure: [SessionTemps current removeKey: #McpServer ifAbsent: [nil]]
+
+]
+
 { #category : 'tests - guard' }
 McpContractTest >> testAssertMutableClassRaisesRefused [
   "#2: the guard signals an McpError kinded #refused (and mutates nothing)."
@@ -194,6 +204,43 @@ McpContractTest >> testRaisedErrorCarriesStructuredKind [
   struct := result at: 'structuredContent'.
   self assert: ((struct at: 'error') includesKey: 'kind').
   self deny: ((struct at: 'error') at: 'message') isEmpty
+
+]
+
+{ #category : 'tests - worker' }
+McpContractTest >> testPrepareWorkerBuildsNamedSurfaceAndCaches [
+  "The bootstrap the front end sends at session open: it sets read-only, builds the named surface, and
+   caches the instance where handleJsonString: finds it -- so the client's first request has no build to
+   do and dispatches through what was prepared."
+  self withFreshWorkerCacheDo: [
+    self savingReadOnlyDo: [ | note listed |
+      note := McpServer
+        prepareWorkerWithToolsets: #('McpBrowsingToolset')
+        readOnly: false serverName: 'acme-db-mcp' version: '2.5.0'.
+      self assert: (self includesCS: 'McpServer ready' in: note).
+      listed := (((McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
+        indexOfSubCollection: 'describe_class') > 0).
+      self assert: listed.
+      "the prepared instance is what answers -- not a freshly built default surface"
+      self deny: ((McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
+        indexOfSubCollection: 'execute_code') > 0.
+      "and the configured identity is what initialize reports"
+      self assert: (self includesCS: 'acme-db-mcp'
+        in: (McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'))]]
+
+]
+
+{ #category : 'tests - worker' }
+McpContractTest >> testPrepareWorkerAppliesReadOnlyBeforeBuilding [
+  "Read-only must be set before the build, or the gated tools would already be registered."
+  self withFreshWorkerCacheDo: [
+    self savingReadOnlyDo: [ | out |
+      McpServer prepareWorkerWithToolsets: McpServer defaultToolsetNames
+        readOnly: true serverName: nil version: nil.
+      out := McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'.
+      self deny: (self includesCS: 'execute_code' in: out).
+      self deny: (self includesCS: 'compile_method' in: out).
+      self assert: (self includesCS: 'describe_class' in: out)]]
 
 ]
 

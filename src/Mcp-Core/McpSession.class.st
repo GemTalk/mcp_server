@@ -13,7 +13,12 @@ Class {
 		'id',
 		'worker',
 		'lastActivitySeconds',
-		'userId'
+		'userId',
+		'readOnly',
+		'workerClassName',
+		'toolsetNames',
+		'serverName',
+		'serverVersion'
 	],
 	#category : 'Mcp-Core'
 }
@@ -65,7 +70,7 @@ McpSession >> forward: aRawJsonString [
    response string ('' for a notification). BLOCKING executeString: -- reliable; forwarding is
    serialized (concurrency deferred). The request is embedded via printString for safe quoting."
   self touch.
-  ^worker executeString: 'McpServer handleJsonString: ' , aRawJsonString printString
+  ^worker executeString: (self workerExpressionFor: aRawJsonString)
 
 ]
 
@@ -96,6 +101,59 @@ McpSession >> newWorkerSession [
 ]
 
 { #category : 'initialization' }
+McpSession >> prepareWorker [
+  "Prepare this client's worker gem in ONE call, before any request reaches it: set read-only, resolve
+   the named toolsets, apply the advertised identity, and pre-build the server instance. The front end
+   calls this after configuring the session (McpRouter>>openSessionCreating:) and BEFORE the session is
+   registered, so there is no window in which a request could run unprepared.
+   One round trip replaces the conditional 'sessionReadOnly:' send this used to make, and it moves tool
+   registration off the client's first request. A worker class or toolset the worker cannot resolve
+   fails HERE, where the message can say what to fix -- see McpServer class>>toolsetClassNamed:."
+  ^[worker executeString: self workerBootstrapExpression]
+    on: Error
+    do: [:ex | self error: 'Could not prepare the MCP worker gem for session ' , id printString
+      , ' (worker class ' , self workerClassName , '): '
+      , ([ex description] on: Error do: [:x | ex class name asString])]
+
+]
+
+{ #category : 'private' }
+McpSession >> quotedNameArrayFor: aCollectionOfNames [
+  "aCollectionOfNames as a Smalltalk literal array of strings, e.g. #('McpBrowsingToolset' ) -- for
+   embedding in the worker bootstrap expression. Empty answers #(), which legitimately means a worker
+   with no tools at all."
+  | s |
+  s := WriteStream on: String new.
+  s nextPutAll: '#('.
+  (aCollectionOfNames ifNil: [#()]) do: [:n |
+    s nextPutAll: n asString printString; nextPut: Character space].
+  s nextPut: $).
+  ^s contents
+
+]
+
+{ #category : 'accessing' }
+McpSession >> readOnly [
+  "Whether this client's worker is read-only. Recorded when the session starts and applied to the
+   worker gem by prepareWorker."
+  ^readOnly == true
+
+]
+
+{ #category : 'accessing' }
+McpSession >> serverName: aStringOrNil [
+  "The serverInfo name this worker should advertise (nil = the worker's own default)."
+  serverName := aStringOrNil
+
+]
+
+{ #category : 'accessing' }
+McpSession >> serverVersion: aStringOrNil [
+  serverVersion := aStringOrNil
+
+]
+
+{ #category : 'initialization' }
 McpSession >> startWithId: anId [
   "Local worker login with full read-write access (see the readOnly: variant)."
   ^self startWithId: anId readOnly: false
@@ -112,7 +170,7 @@ McpSession >> startWithId: anId readOnly: aBoolean [
   worker := self newWorkerSession.
   worker useOnetimePassword.
   worker login.
-  aBoolean ifTrue: [worker executeString: 'McpServer sessionReadOnly: true'].
+  readOnly := aBoolean.
   self touch.
   ^self
 
@@ -139,9 +197,17 @@ McpSession >> startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
   worker username: aUserId.
   worker jwtPassword: aJwtString.
   worker login.
-  aBoolean ifTrue: [worker executeString: 'McpServer sessionReadOnly: true'].
+  readOnly := aBoolean.
   self touch.
   ^self
+
+]
+
+{ #category : 'accessing' }
+McpSession >> toolsetNames: aCollectionOfNamesOrNil [
+  "The toolsets this worker should register, as resolved by the front end
+   (McpRouter>>effectiveToolsetNames)."
+  toolsetNames := aCollectionOfNamesOrNil
 
 ]
 
@@ -156,5 +222,43 @@ McpSession >> touch [
 { #category : 'accessing' }
 McpSession >> userId [
   ^userId
+
+]
+
+{ #category : 'private' }
+McpSession >> workerBootstrapExpression [
+  "The one expression prepareWorker runs in the worker gem. Sent to the worker CLASS the front end
+   named, so the worker instantiates what it is told rather than choosing for itself. Names are plain
+   identifiers (McpRouter validated them when the router was configured) and the strings are embedded
+   via printString, so this cannot smuggle anything into the worker's compiler."
+  ^self workerClassName
+    , ' prepareWorkerWithToolsets: ' , (self quotedNameArrayFor: toolsetNames)
+    , ' readOnly: ' , self readOnly printString
+    , ' serverName: ' , (serverName isNil ifTrue: ['nil'] ifFalse: [serverName printString])
+    , ' version: ' , (serverVersion isNil ifTrue: ['nil'] ifFalse: [serverVersion printString])
+
+]
+
+{ #category : 'accessing' }
+McpSession >> workerClassName [
+  "The class this session's worker instantiates and dispatches through. Set by the front end
+   (McpRouter>>effectiveWorkerClassName); McpServer when nothing is configured, which also keeps a
+   directly-created session usable."
+  ^workerClassName ifNil: ['McpServer']
+
+]
+
+{ #category : 'accessing' }
+McpSession >> workerClassName: aNameOrNil [
+  workerClassName := aNameOrNil
+
+]
+
+{ #category : 'routing' }
+McpSession >> workerExpressionFor: aRawJsonString [
+  "The expression forward: runs in the worker gem: the NAMED worker class handles the request, so the
+   worker never decides which server class to build. The request body is embedded via printString for
+   safe quoting."
+  ^self workerClassName , ' handleJsonString: ' , aRawJsonString printString
 
 ]
