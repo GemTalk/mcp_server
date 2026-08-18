@@ -16,10 +16,41 @@ Class {
 	#superclass : 'McpBase',
 	#instVars : [
 		'dispatcher',
-		'toolRegistry'
+		'toolRegistry',
+		'toolsets'
 	],
 	#category : 'Mcp-Core'
 }
+
+{ #category : 'read-only' }
+McpServer class >> coreReadOnlySafeToolNames [
+  "The AUDIT list: every CORE tool that cannot persist a change, and so may run in a read-only
+   session. This is no longer what the gate consults -- each toolset declares its own safe names and
+   the server answers their union (see the instance-side readOnlySafeToolNames) -- because a
+   third-party toolset must be able to declare its own. It is kept as the one place a reviewer can
+   read the whole core answer at once, and McpContractTest pins the union of the seven core toolsets
+   against it, so a tool cannot silently become 'safe'.
+   FAIL-CLOSED throughout: a toolset lists nothing by default. Note run_test_* / list_failing_tests
+   ARE safe: read-only forbids execute_code and the mutation tools, so no NEW code can be introduced
+   this session, and a test can only run already-committed (trusted) code."
+  ^#( 'describe_class' 'export_class_source' 'get_class_definition' 'get_class_hierarchy'
+      'get_method_source' 'list_methods'
+      'list_all_classes' 'list_classes' 'list_dictionaries' 'list_dictionary_entries'
+      'find_implementors' 'find_references_to' 'find_senders' 'search_method_source'
+      'status' 'refresh' 'abort'
+      'list_test_classes' 'list_failing_tests' 'describe_test_failure'
+      'run_test_class' 'run_test_method' )
+
+]
+
+{ #category : 'toolsets' }
+McpServer class >> defaultToolsetNames [
+  "The core tool surface: the seven toolsets a plain McpServer registers, in registration order.
+   A deployment that wants a different surface names its own (see McpToolset)."
+  ^#( 'McpBrowsingToolset' 'McpExecutionToolset' 'McpListingToolset' 'McpMutationToolset'
+      'McpSearchToolset' 'McpSessionToolset' 'McpTestingToolset' )
+
+]
 
 { #category : 'worker' }
 McpServer class >> handleJsonString: aRawJsonString [
@@ -44,23 +75,6 @@ McpServer class >> new [
 ]
 
 { #category : 'read-only' }
-McpServer class >> readOnlySafeToolNames [
-  "The allow-list of tools permitted when a session is read-only. FAIL-CLOSED: membership is by
-   inclusion, so any tool NOT listed here (including a future one) is treated as dangerous and
-   gated. Safe = cannot persist a change. Note run_test_* / list_failing_tests ARE safe: read-only
-   forbids execute_code and the mutation tools, so no NEW code can be introduced this session, and a
-   test can only run already-committed (trusted) code."
-  ^#( 'describe_class' 'export_class_source' 'get_class_definition' 'get_class_hierarchy'
-      'get_method_source' 'list_methods'
-      'list_all_classes' 'list_classes' 'list_dictionaries' 'list_dictionary_entries'
-      'find_implementors' 'find_references_to' 'find_senders' 'search_method_source'
-      'status' 'refresh' 'abort'
-      'list_test_classes' 'list_failing_tests' 'describe_test_failure'
-      'run_test_class' 'run_test_method' )
-
-]
-
-{ #category : 'read-only' }
 McpServer class >> sessionReadOnly: aBoolean [
   "Mark (or clear) read-only for the CURRENT worker session. The opening router sets this in the
    worker gem when the session should be read-only -- a router configured read-only (a localhost
@@ -69,6 +83,23 @@ McpServer class >> sessionReadOnly: aBoolean [
    needs no commit, and is private to that gem -- which is why two routers (one read-only, one not)
    can run at once with no shared state."
   SessionTemps current at: #McpReadOnly put: aBoolean
+
+]
+
+{ #category : 'toolsets' }
+McpServer class >> toolsetClassNamed: aName [
+  "The McpToolset subclass named aName, resolved in THIS gem's symbol list. Raises naming both the
+   toolset and where it has to live if it is missing or is not a toolset: a worker gem may log in as
+   a different user than the front end (McpAuthRouter), so a toolset belongs in a dictionary in the
+   WORKER's symbol list -- Published, not the operator's UserGlobals."
+  | cls |
+  cls := System myUserProfile objectNamed: aName asSymbol.
+  (cls isKindOf: Behavior) ifFalse: [
+    ^self error: 'Toolset not found: ' , aName asString
+      , '. It must be installed in a symbol dictionary in this gem''s symbol list (e.g. Published).'].
+  (cls inheritsFrom: McpToolset) ifFalse: [
+    ^self error: 'Not a toolset: ' , aName asString , ' is not a subclass of McpToolset.'].
+  ^cls
 
 ]
 
@@ -215,15 +246,20 @@ McpServer >> handleJsonString: aRawJsonString [
 
 { #category : 'initialization' }
 McpServer >> initialize [
+  "Build the registry + dispatcher, then let each of my toolsets register its tools. Which toolsets
+   those are is the whole tool surface of this server (self class defaultToolsetNames here)."
+  ^self initializeWithToolsetNames: self class defaultToolsetNames
+
+]
+
+{ #category : 'initialization' }
+McpServer >> initializeWithToolsetNames: anArrayOfNames [
+  "As initialize, but with an explicit tool surface: resolve each named toolset (raising if one is
+   missing -- see McpServer class>>toolsetClassNamed:) and register it, in the order given."
   toolRegistry := McpToolRegistry new.
   dispatcher := McpDispatcher withToolRegistry: toolRegistry server: self.
-  self registerBrowsingTools.
-  self registerExecutionTools.
-  self registerListingTools.
-  self registerMutationTools.
-  self registerSearchTools.
-  self registerSessionTools.
-  self registerTestTools.
+  toolsets := anArrayOfNames collect: [:n | (self class toolsetClassNamed: n) on: self].
+  toolsets do: [:ts | ts registerOn: toolRegistry].
   ^self
 
 ]
@@ -251,8 +287,9 @@ McpServer >> isReadOnly [
 { #category : 'read-only' }
 McpServer >> isToolAllowed: aToolName [
   "Whether aToolName may run right now: always when not read-only; only the read-only-safe tools
-   when read-only."
-  ^self isReadOnly not or: [self class readOnlySafeToolNames includes: aToolName]
+   when read-only. Asks THIS server's toolsets (readOnlySafeToolNames), so a third-party toolset's
+   own declaration is honored."
+  ^self isReadOnly not or: [self readOnlySafeToolNames includes: aToolName]
 
 ]
 
@@ -309,6 +346,18 @@ McpServer >> protectedDictionaryNames [
 
 ]
 
+{ #category : 'read-only' }
+McpServer >> readOnlySafeToolNames [
+  "The tools THIS server may run in a read-only session: the union of what its toolsets declare
+   (McpToolset>>readOnlySafeToolNames, empty by default -- fail closed). For the default surface this
+   equals the audit list, McpServer class>>coreReadOnlySafeToolNames, which McpContractTest pins."
+  | names |
+  names := OrderedCollection new.
+  toolsets do: [:ts | names addAll: ts readOnlySafeToolNames].
+  ^names asArray
+
+]
+
 { #category : 'private' }
 McpServer >> recompileMethodsFrom: oldClass into: newClass named: classNameSymbol [
   "Recompile every instance- and class-side method of oldClass onto newClass, preserving
@@ -344,235 +393,6 @@ McpServer >> recompileMethodsFrom: oldClass into: newClass named: classNameSymbo
         s nextPutAll: '  ' , (f at: 1) , ' ' , classNameString , '>>' , (f at: 2) asString , ' - ' , (f at: 3) printString;
           nextPut: Character lf]].
   ^s contents
-
-]
-
-{ #category : 'tool registration' }
-McpServer >> registerBrowsingTools [
-  "Handlers live in the 'tools - browsing' category."
-  | classArg |
-  classArg := self objectSchema:
-    (Dictionary new at: 'className' put: (self propString: 'Name of the class'); yourself)
-    required: (Array with: 'className').
-  toolRegistry name: 'describe_class'
-    description: 'Describe a class: superclass, instance variables, and selectors.'
-    inputSchema: classArg do: [:args | self tool_describe_class: args].
-  toolRegistry name: 'export_class_source'
-    description: 'Export a class as a Topaz file-in (class definition plus all methods).'
-    inputSchema: classArg do: [:args | self tool_export_class_source: args].
-  toolRegistry name: 'get_class_definition'
-    description: 'Return the class definition (superclass, instance/class variables, pools) as a source expression.'
-    inputSchema: classArg do: [:args | self tool_get_class_definition: args].
-  toolRegistry name: 'get_class_hierarchy'
-    description: 'Show the superclass chain (top-down, indented) and the direct subclasses of a class.'
-    inputSchema: classArg do: [:args | self tool_get_class_hierarchy: args].
-  toolRegistry name: 'get_method_source'
-    description: 'Return the source code of a method. Set meta=true for the class-side method.'
-    inputSchema: (self objectSchema:
-      (Dictionary new
-        at: 'className' put: (self propString: 'Name of the class');
-        at: 'selector' put: (self propString: 'Method selector, e.g. printOn:');
-        at: 'meta' put: (self boolProperty: 'true for the class-side method (default false)');
-        yourself)
-      required: (Array with: 'className' with: 'selector'))
-    do: [:args | self tool_get_method_source: args].
-  toolRegistry name: 'list_methods'
-    description: 'List a class instance-side and class-side method selectors, grouped by category.'
-    inputSchema: classArg do: [:args | self tool_list_methods: args].
-  ^self
-
-]
-
-{ #category : 'tool registration' }
-McpServer >> registerExecutionTools [
-  "Handlers live in the 'tools - execution' category."
-  toolRegistry
-    name: 'execute_code'
-    description: 'Execute GemStone Smalltalk code and return the printString of the result. Accepts a single expression or a sequence of statements.'
-    inputSchema: (self objectSchema:
-        (Dictionary new at: 'code' put: (self propString: 'Smalltalk source to evaluate'); yourself)
-        required: (Array with: 'code'))
-    do: [:args | self tool_execute_code: args].
-  ^self
-
-]
-
-{ #category : 'tool registration' }
-McpServer >> registerListingTools [
-  "Handlers live in the 'tools - listing' category."
-  | noArgs dictArg |
-  noArgs := self objectSchema: Dictionary new required: #().
-  dictArg := self objectSchema:
-    (Dictionary new at: 'dictionaryName' put: (self propString: 'Name of the symbol dictionary'); yourself)
-    required: (Array with: 'dictionaryName').
-  toolRegistry name: 'list_all_classes'
-    description: 'List every class across all dictionaries in the symbol list, tagged with its dictionary.'
-    inputSchema: noArgs do: [:args | self tool_list_all_classes: args].
-  toolRegistry name: 'list_classes'
-    description: 'List the classes defined in a given symbol dictionary.'
-    inputSchema: dictArg do: [:args | self tool_list_classes: args].
-  toolRegistry name: 'list_dictionaries'
-    description: 'List the symbol dictionaries in the current symbol list, in lookup order.'
-    inputSchema: noArgs do: [:args | self tool_list_dictionaries: args].
-  toolRegistry name: 'list_dictionary_entries'
-    description: 'List every entry in a symbol dictionary, tagged as (class) or (global).'
-    inputSchema: dictArg do: [:args | self tool_list_dictionary_entries: args].
-  ^self
-
-]
-
-{ #category : 'tool registration' }
-McpServer >> registerMutationTools [
-  "Handlers live in the 'tools - mutation' category."
-  | classArg dictArg |
-  classArg := self objectSchema:
-    (Dictionary new at: 'className' put: (self propString: 'Name of the class'); yourself)
-    required: (Array with: 'className').
-  dictArg := self objectSchema:
-    (Dictionary new at: 'dictionaryName' put: (self propString: 'Name of the symbol dictionary'); yourself)
-    required: (Array with: 'dictionaryName').
-  toolRegistry name: 'add_dictionary'
-    description: 'Create a new symbol dictionary, append it to the user symbol list, and commit.'
-    inputSchema: dictArg do: [:args | self tool_add_dictionary: args].
-  toolRegistry name: 'compile_class_definition'
-    description: 'Evaluate a class-definition expression (e.g. Object subclass: ... inDictionary: ...), then commit. The source must evaluate to a class; other expressions are rejected (use execute_code for those). On a shape-changing redefinition of an existing class, by default recompiles its existing methods onto the new version (a raw redefine drops them) and reports any that fail; refused if the class has subclasses.'
-    inputSchema: (self objectSchema:
-      (Dictionary new
-        at: 'source' put: (self propString: 'Full class-definition Smalltalk expression including the subclass: send and inDictionary:');
-        at: 'recompileMethods' put: (self boolProperty: 'Default true: after a shape change, recompile the class existing methods onto the new version and report failures (refused if the class has subclasses). False: redefine raw, dropping all methods.');
-        yourself)
-      required: (Array with: 'source'))
-    do: [:args | self tool_compile_class_definition: args].
-  toolRegistry name: 'compile_method'
-    description: 'Compile (add or update) a method on a class, then commit. Set meta=true for class-side. Category defaults to "mcp".'
-    inputSchema: (self objectSchema:
-      (Dictionary new
-        at: 'className' put: (self propString: 'Name of the class');
-        at: 'source' put: (self propString: 'Full method source including the selector line');
-        at: 'category' put: (self propString: 'Method category (optional, default mcp)');
-        at: 'meta' put: (self boolProperty: 'true for the class-side method (default false)');
-        yourself)
-      required: (Array with: 'className' with: 'source'))
-    do: [:args | self tool_compile_method: args].
-  toolRegistry name: 'delete_class'
-    description: 'Remove a class from its dictionary and commit. Destructive.'
-    inputSchema: classArg do: [:args | self tool_delete_class: args].
-  toolRegistry name: 'delete_method'
-    description: 'Remove a method from a class and commit. Set meta=true for the class-side method. Destructive.'
-    inputSchema: (self objectSchema:
-      (Dictionary new
-        at: 'className' put: (self propString: 'Name of the class');
-        at: 'selector' put: (self propString: 'Selector of the method to remove');
-        at: 'meta' put: (self boolProperty: 'true for the class-side method (default false)');
-        yourself)
-      required: (Array with: 'className' with: 'selector'))
-    do: [:args | self tool_delete_method: args].
-  toolRegistry name: 'remove_dictionary'
-    description: 'Remove a symbol dictionary from the user symbol list and commit. Destructive.'
-    inputSchema: dictArg do: [:args | self tool_remove_dictionary: args].
-  toolRegistry name: 'set_class_comment'
-    description: 'Set (replace) the class comment and commit.'
-    inputSchema: (self objectSchema:
-      (Dictionary new
-        at: 'className' put: (self propString: 'Name of the class');
-        at: 'comment' put: (self propString: 'New comment text');
-        yourself)
-      required: (Array with: 'className' with: 'comment'))
-    do: [:args | self tool_set_class_comment: args].
-  ^self
-
-]
-
-{ #category : 'tool registration' }
-McpServer >> registerSearchTools [
-  "Handlers live in the 'tools - search' category."
-  | selectorArg |
-  selectorArg := self objectSchema:
-    (Dictionary new at: 'selector' put: (self propString: 'Method selector to search for'); yourself)
-    required: (Array with: 'selector').
-  toolRegistry name: 'find_implementors'
-    description: 'Find all methods that implement a given selector.'
-    inputSchema: selectorArg do: [:args | self tool_find_implementors: args].
-  toolRegistry name: 'find_references_to'
-    description: 'Find all methods that reference a named global (e.g. a class or shared variable).'
-    inputSchema: (self objectSchema:
-      (Dictionary new at: 'name' put: (self propString: 'Name of the global / class to find references to'); yourself)
-      required: (Array with: 'name'))
-    do: [:args | self tool_find_references_to: args].
-  toolRegistry name: 'find_senders'
-    description: 'Find all methods that send a given selector. Capped at 200 results (senders of a common selector can number in the thousands).'
-    inputSchema: selectorArg do: [:args | self tool_find_senders: args].
-  toolRegistry name: 'search_method_source'
-    description: 'Search method source code for a substring. Optionally scope to one dictionary (recommended; searching all dictionaries scans the kernel and can be slow). Capped at 200 hits.'
-    inputSchema: (self objectSchema:
-      (Dictionary new
-        at: 'pattern' put: (self propString: 'Substring to search for in method source (case-sensitive)');
-        at: 'dictionaryName' put: (self propString: 'Optional: limit the search to this dictionary');
-        yourself)
-      required: (Array with: 'pattern'))
-    do: [:args | self tool_search_method_source: args].
-  ^self
-
-]
-
-{ #category : 'tool registration' }
-McpServer >> registerSessionTools [
-  "Handlers live in the 'tools - session' category."
-  | noArgs |
-  noArgs := self objectSchema: Dictionary new required: #().
-  toolRegistry name: 'abort'
-    description: 'Abort the current transaction, discarding uncommitted changes and refreshing the session view.'
-    inputSchema: noArgs do: [:args | self tool_abort: args].
-  toolRegistry name: 'commit'
-    description: 'Commit the current transaction, persisting all changes.'
-    inputSchema: noArgs do: [:args | self tool_commit: args].
-  toolRegistry name: 'refresh'
-    description: 'Refresh the session view to see changes committed by other sessions (aborts any uncommitted work).'
-    inputSchema: noArgs do: [:args | self tool_refresh: args].
-  toolRegistry name: 'status'
-    description: 'Report the GemStone session: user, session id, stone, and whether there are uncommitted changes.'
-    inputSchema: noArgs do: [:args | self tool_status: args].
-  ^self
-
-]
-
-{ #category : 'tool registration' }
-McpServer >> registerTestTools [
-  "Handlers live in the 'tools - testing' category."
-  | noArgs classArg methodArg |
-  noArgs := self objectSchema: Dictionary new required: #().
-  classArg := self objectSchema:
-    (Dictionary new at: 'className' put: (self propString: 'Name of the TestCase subclass'); yourself)
-    required: (Array with: 'className').
-  methodArg := self objectSchema:
-    (Dictionary new
-      at: 'className' put: (self propString: 'Name of the TestCase subclass');
-      at: 'selector' put: (self propString: 'Test method selector, e.g. testFoo');
-      yourself)
-    required: (Array with: 'className' with: 'selector').
-  toolRegistry name: 'describe_test_failure'
-    description: 'Re-run a single test method and return the failure or error detail.'
-    inputSchema: methodArg do: [:args | self tool_describe_test_failure: args].
-  toolRegistry name: 'list_failing_tests'
-    description: 'Run test classes (a given list, or all TestCase subclasses) and list only the failing/erroring test methods.'
-    inputSchema: (self objectSchema:
-      (Dictionary new at: 'classNames' put:
-        (Dictionary new at: 'type' put: 'array';
-          at: 'items' put: (Dictionary new at: 'type' put: 'string'; yourself);
-          at: 'description' put: 'Optional: TestCase subclass names to run (default: all)'; yourself);
-        yourself)
-      required: #())
-    do: [:args | self tool_list_failing_tests: args].
-  toolRegistry name: 'list_test_classes'
-    description: 'List all TestCase subclasses in the symbol list.'
-    inputSchema: noArgs do: [:args | self tool_list_test_classes: args].
-  toolRegistry name: 'run_test_class'
-    description: 'Run all test methods in a TestCase subclass and report the result.'
-    inputSchema: classArg do: [:args | self tool_run_test_class: args].
-  toolRegistry name: 'run_test_method'
-    description: 'Run a single test method and report the result.'
-    inputSchema: methodArg do: [:args | self tool_run_test_method: args].
-  ^self
 
 ]
 
@@ -991,5 +811,12 @@ McpServer >> tool_status: args [
 { #category : 'accessing' }
 McpServer >> toolRegistry [
   ^toolRegistry
+
+]
+
+{ #category : 'accessing' }
+McpServer >> toolsets [
+  "My toolsets, in registration order -- this server's tool surface (see McpToolset)."
+  ^toolsets
 
 ]

@@ -198,6 +198,44 @@ McpContractTest >> testRaisedErrorCarriesStructuredKind [
 ]
 
 { #category : 'tests - read-only' }
+McpContractTest >> testCoreReadOnlyAllowListIsPinned [
+  "The read-only allow-list is now distributed -- each toolset declares its own safe names and the
+   server answers their union -- so pin that union against the audit list
+   (McpServer class>>coreReadOnlySafeToolNames). Without this, a new core tool could quietly become
+   'safe', or drop out of the gate, with no single place showing it."
+  | union pinned |
+  union := McpServer new readOnlySafeToolNames asSortedCollection asArray.
+  pinned := McpServer coreReadOnlySafeToolNames asSortedCollection asArray.
+  self assert: union equals: pinned
+
+]
+
+{ #category : 'tests - read-only' }
+McpContractTest >> testToolsetSafeNamesAreItsOwnTools [
+  "A toolset may only vouch for tools it actually provides: every name in its readOnlySafeToolNames
+   must be one of its toolNames. Catches a copy-paste that would whitelist another toolset's tool."
+  McpServer new toolsets do: [:ts |
+    ts readOnlySafeToolNames do: [:name |
+      self assert: (ts toolNames includes: name)]]
+
+]
+
+{ #category : 'tests - registry' }
+McpContractTest >> testToolsetsCoverEveryRegisteredTool [
+  "toolNames is what config diagnostics and the pinned test above rely on, so it must not drift from
+   what registerOn: actually registers: the union of the toolsets' toolNames is exactly the set of
+   registered tools."
+  | server declared registered |
+  server := McpServer new.
+  declared := OrderedCollection new.
+  server toolsets do: [:ts | declared addAll: ts toolNames].
+  registered := server toolRegistry descriptors collect: [:d | d at: 'name'].
+  self assert: declared asSortedCollection asArray
+    equals: registered asSortedCollection asArray
+
+]
+
+{ #category : 'tests - read-only' }
 McpContractTest >> testReadOnlyAllowsSafeToolCall [
   "#7: a safe (read) tool still works while read-only."
   self savingReadOnlyDo: [ | result |
