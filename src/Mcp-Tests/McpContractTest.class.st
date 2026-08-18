@@ -197,6 +197,79 @@ McpContractTest >> testRaisedErrorCarriesStructuredKind [
 
 ]
 
+{ #category : 'tests - toolsets' }
+McpContractTest >> testInstalledDefaultToolsetNamesIsCorePlusGrailWhenPresent [
+  "The front end resolves the default surface with this (McpRouter>>effectiveToolsetNames). It is the
+   core seven, plus McpGrailToolset only when that optional file is loaded -- so assert
+   image-agnostically: the core names are always there, and any extra is the Grail toolset."
+  | installed |
+  installed := McpServer installedDefaultToolsetNames.
+  McpServer defaultToolsetNames do: [:n | self assert: (installed includes: n)].
+  (installed reject: [:n | McpServer defaultToolsetNames includes: n]) do: [:extra |
+    self assert: extra equals: 'McpGrailToolset']
+
+]
+
+{ #category : 'tests - toolsets' }
+McpContractTest >> testReadOnlyBuildDropsUnsafeToolsetWhole [
+  "Build-time gating (McpServer>>registerToolsets): when the worker is already read-only as the server
+   is built -- the production path -- an all-unsafe toolset contributes NOTHING to the registry, and a
+   mixed one keeps only its safe tools. Stronger than refusing on call: the tool is not there at all."
+  self savingReadOnlyDo: [ | names |
+    McpServer sessionReadOnly: true.
+    names := (McpServer newWithToolsetNames: #('McpMutationToolset' 'McpSessionToolset'))
+      toolRegistry descriptors collect: [:d | d at: 'name'].
+    self deny: (names includes: 'compile_method').   "all-unsafe toolset: dropped whole"
+    self deny: (names includes: 'delete_class').
+    self deny: (names includes: 'commit').           "mixed toolset: unsafe tool pruned"
+    self assert: (names includes: 'abort').          "mixed toolset: safe tools kept"
+    self assert: (names includes: 'status')]
+
+]
+
+{ #category : 'tests - toolsets' }
+McpContractTest >> testServerBuiltWithOneToolsetExposesOnlyItsTools [
+  "The vendor requirement: a server assembled from chosen toolsets exposes ONLY their tools, with none
+   of the development surface. This is what subclassing could never express."
+  | names |
+  names := (McpServer newWithToolsetNames: #('McpBrowsingToolset')) toolRegistry descriptors
+    collect: [:d | d at: 'name'].
+  self assert: names asSortedCollection asArray
+    equals: McpBrowsingToolset new toolNames asSortedCollection asArray.
+  self deny: (names includes: 'execute_code').
+  self deny: (names includes: 'compile_method').
+  self deny: (names includes: 'commit')
+
+]
+
+{ #category : 'tests - toolsets' }
+McpContractTest >> testUnknownToolsetNameIsRefusedByName [
+  "A misnamed toolset must fail loudly at build time, naming the toolset (the front end validates at
+   startup and the worker bootstrap re-checks, but this is the message both surface)."
+  | msg |
+  msg := [McpServer newWithToolsetNames: #('McpNoSuchToolset'). nil]
+    on: Error do: [:e | [e description] on: Error do: [:x | e messageText]].
+  self deny: msg isNil.
+  self assert: (self includesCS: 'McpNoSuchToolset' in: msg)
+
+]
+
+{ #category : 'tests - read-only' }
+McpContractTest >> testReadOnlyDistinguishesGatedFromUnknownTool [
+  "The boundary the read-only build introduces: a gated tool is pruned from the registry, so both it
+   and a nonexistent tool are registry misses -- but they must NOT answer the same. The gated one is
+   -32601/readOnly ('exists, forbidden here'), a typo stays -32602/notFound."
+  self savingReadOnlyDo: [ | gated unknown |
+    McpServer sessionReadOnly: true.
+    gated := (self dispatch: (self toolCall: 'commit' args: Dictionary new)) at: 'error'.
+    unknown := (self dispatch: (self toolCall: 'no_such_tool' args: Dictionary new)) at: 'error'.
+    self assert: (gated at: 'code') equals: -32601.
+    self assert: ((gated at: 'data') at: 'kind') equals: 'readOnly'.
+    self assert: (unknown at: 'code') equals: -32602.
+    self assert: ((unknown at: 'data') at: 'kind') equals: 'notFound']
+
+]
+
 { #category : 'tests - read-only' }
 McpContractTest >> testCoreReadOnlyAllowListIsPinned [
   "The read-only allow-list is now distributed -- each toolset declares its own safe names and the

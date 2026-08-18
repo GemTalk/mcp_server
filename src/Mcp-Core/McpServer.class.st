@@ -68,9 +68,34 @@ McpServer class >> handleJsonString: aRawJsonString [
 
 ]
 
+{ #category : 'toolsets' }
+McpServer class >> installedDefaultToolsetNames [
+  "The default surface for a deployment that names none: the core toolsets, plus the optional Grail
+   (Python) toolset when its file has been loaded into this image. Resolved in THIS gem's symbol
+   list, and by the FRONT END once per session -- a worker never chooses its own tool surface (see
+   McpRouter>>effectiveToolsetNames)."
+  | names |
+  names := self defaultToolsetNames.
+  ^(System myUserProfile objectNamed: #McpGrailToolset) isNil
+    ifTrue: [names]
+    ifFalse: [names , (Array with: 'McpGrailToolset')]
+
+]
+
 { #category : 'instance creation' }
 McpServer class >> new [
+  "A server with the core tool surface (defaultToolsetNames). Kept as the plain constructor because
+   it is what the tests and any in-image user expect; a deployment choosing its own surface uses
+   newWithToolsetNames:."
   ^super new initialize
+
+]
+
+{ #category : 'instance creation' }
+McpServer class >> newWithToolsetNames: anArrayOfNames [
+  "A server exposing ONLY the named toolsets -- how a vendor ships a server with their tools and none
+   of the Smalltalk-development surface. Raises if a name does not resolve (toolsetClassNamed:)."
+  ^super new initializeWithToolsetNames: anArrayOfNames
 
 ]
 
@@ -100,6 +125,19 @@ McpServer class >> toolsetClassNamed: aName [
   (cls inheritsFrom: McpToolset) ifFalse: [
     ^self error: 'Not a toolset: ' , aName asString , ' is not a subclass of McpToolset.'].
   ^cls
+
+]
+
+{ #category : 'read-only' }
+McpServer >> allToolNames [
+  "Every tool my toolsets provide, whether or not it is currently REGISTERED -- a read-only build
+   prunes the unsafe ones from the registry (registerToolsets). Lets the dispatcher tell a gated tool
+   ('exists, but this session is read-only') from a nonexistent one, which the client needs: they are
+   different errors and only one of them is worth reporting to a user as a permission problem."
+  | names |
+  names := OrderedCollection new.
+  toolsets do: [:ts | names addAll: ts toolNames].
+  ^names asArray
 
 ]
 
@@ -259,7 +297,7 @@ McpServer >> initializeWithToolsetNames: anArrayOfNames [
   toolRegistry := McpToolRegistry new.
   dispatcher := McpDispatcher withToolRegistry: toolRegistry server: self.
   toolsets := anArrayOfNames collect: [:n | (self class toolsetClassNamed: n) on: self].
-  toolsets do: [:ts | ts registerOn: toolRegistry].
+  self registerToolsets.
   ^self
 
 ]
@@ -393,6 +431,29 @@ McpServer >> recompileMethodsFrom: oldClass into: newClass named: classNameSymbo
         s nextPutAll: '  ' , (f at: 1) , ' ' , classNameString , '>>' , (f at: 2) asString , ' - ' , (f at: 3) printString;
           nextPut: Character lf]].
   ^s contents
+
+]
+
+{ #category : 'initialization' }
+McpServer >> registerToolsets [
+  "Register my toolsets' tools, honoring read-only at BUILD time: a toolset that declares nothing
+   read-only-safe is skipped whole, and a mixed one (McpSessionToolset) keeps only its safe tools --
+   so in a read-only worker a gated tool is never in the registry at all, which is a stronger gate
+   than refusing it on call. Applies whenever read-only is known BEFORE the server is built, which is
+   both the production path (the front end sets the flag as it opens the session) and what the
+   read-only tests do.
+   The client is still told the truth about a pruned tool: McpDispatcher answers a gated name with
+   kind 'readOnly' rather than 'notFound' (see readOnlyGated:), so 'forbidden here' never masquerades
+   as 'no such tool'. Its isToolAllowed: check also still runs, covering a server whose flag was set
+   after it was built and a toolset whose toolNames drift from what it registers."
+  self isReadOnly ifFalse: [^toolsets do: [:ts | ts registerOn: toolRegistry]].
+  toolsets do: [:ts | | safe |
+    safe := ts readOnlySafeToolNames.
+    safe isEmpty ifFalse: [
+      ts registerOn: toolRegistry.
+      (ts toolNames reject: [:n | safe includes: n])
+        do: [:n | toolRegistry removeToolNamed: n]]].
+  ^self
 
 ]
 

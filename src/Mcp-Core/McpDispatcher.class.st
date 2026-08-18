@@ -127,8 +127,12 @@ McpDispatcher >> handleToolsCall: params id: id [
   name := params at: 'name' ifAbsent: [nil].
   name isNil ifTrue: [^self errorFor: id code: -32602 message: 'Missing tool name' kind: 'invalidParams'].
   tool := toolRegistry at: name.
-  tool isNil ifTrue: [^self errorFor: id code: -32602 message: 'Unknown tool: ' , name kind: 'notFound'].
-  (self toolAllowed: name) ifFalse: [
+  (tool isNil and: [(self readOnlyGated: name) not]) ifTrue: [
+    ^self errorFor: id code: -32602 message: 'Unknown tool: ' , name kind: 'notFound'].
+  "Read-only refusal, for a gated tool whether or not it is still in the registry: a read-only worker
+   built by the front end never registers its unsafe tools (McpServer>>registerToolsets), but the
+   client must still learn that the tool EXISTS and is forbidden -- not that it is unknown."
+  (tool isNil or: [(self toolAllowed: name) not]) ifTrue: [
     ^self errorFor: id code: -32601
       message: '''' , name , ''' is not available: the server is read-only' kind: 'readOnly'].
   args := params at: 'arguments' ifAbsent: [Dictionary new].
@@ -225,6 +229,16 @@ McpDispatcher >> structuredErrorContent: aMessage kind: aKind [
     yourself).
   d at: 'structuredContent' put: struct.
   ^d
+
+]
+
+{ #category : 'read-only' }
+McpDispatcher >> readOnlyGated: aToolName [
+  "Whether aToolName is one of the server's own tools that this read-only session may not run --
+   i.e. absent from the registry (or refused) because of read-only, not because it does not exist.
+   False when there is no server (isolated dispatcher tests), so an unknown tool stays 'notFound'."
+  ^server notNil
+    and: [(server allToolNames includes: aToolName) and: [(server isToolAllowed: aToolName) not]]
 
 ]
 
