@@ -6,9 +6,11 @@
 # extent0.rowan3 seed). Logs in via topaz, ensures the Published dictionary exists,
 # resolves+loads the project, and commits.
 #
-#   --grail   after the Rowan load, also file in the optional GemStone-Python (Grail) tools
-#             (McpServerWithGrail + its test, via load-grail.gs); only valid on an image that
-#             has Grail/ModuleAst. Equivalently, set GS_MCP_WITH_GRAIL=1.
+#   --grail   after the Rowan load, also file in the optional GemStone-Python (Grail) toolset
+#             (McpGrailToolset + its test, via load-grail.gs); only valid on an image that
+#             has Grail/ModuleAst. Equivalently, set GS_MCP_WITH_GRAIL=1. Once loaded, the
+#             toolset joins the default tool surface automatically (see
+#             McpServer class>>installedDefaultToolsetNames).
 #
 # Configure these (or export before running):
 #   GEMSTONE       - GemStone product directory (defaults to $GEMSTONE if set)
@@ -44,7 +46,7 @@ System commitTransaction.
 'Mcp project loaded via Rowan'
 %"
 
-# With --grail, file in the optional Grail subclass + its test suite after the base load.
+# With --grail, file in the optional Grail toolset + its test suite after the base load.
 MODE="rowan"
 if [ -n "$WITH_GRAIL" ]; then
   LOAD_BLOCK="$LOAD_BLOCK

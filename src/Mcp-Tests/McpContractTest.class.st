@@ -192,6 +192,25 @@ McpContractTest >> testProtectedClassPredicate [
 
 ]
 
+{ #category : 'tests - guard' }
+McpContractTest >> testKernelGuardIgnoresShadowingDictionary [
+  "#2: the guard must not be fooled by symbol-list ORDER. A dictionary earlier in the symbol list that
+   also binds a kernel name (exactly what Grail's Python dictionary does with Object) once made
+   dictionaryAndSymbolOf: answer that dictionary, so Object read as unprotected and the mutation tools
+   would have modified kernel classes. Simulates the shadow, so this holds in any image.
+   No commit and no dispatcher here -- a tools/call would abort the transaction and undo the fixture."
+  | up shadow |
+  up := System myUserProfile.
+  shadow := SymbolDictionary new.
+  shadow at: #Object put: Object.
+  shadow at: #McpShadowProbe put: 42.
+  up insertDictionary: shadow at: 1.
+  [self assert: (up dictionaryAndSymbolOf: Object) first == shadow.  "the shadow really does win"
+   self assert: (McpServer new isProtectedClass: Object)]            "...and the guard still refuses"
+    ensure: [up removeDictionaryAt: (up symbolList indexOf: shadow)]
+
+]
+
 { #category : 'tests - errors' }
 McpContractTest >> testRaisedErrorCarriesStructuredKind [
   "#10: a tool that raises yields an isError result whose content keeps the real message AND whose

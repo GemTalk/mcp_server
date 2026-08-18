@@ -195,10 +195,13 @@ McpServer >> assertMutableClass: aClass [
    protected/kernel class. Called by every mutation tool before it changes anything. NB: this
    guards the structured mutation tools only -- execute_code is the deliberate escape hatch (and is
    itself gated in read-only mode)."
-  | arr where |
+  | where |
   (self isProtectedClass: aClass) ifFalse: [^aClass].
-  arr := System myUserProfile dictionaryAndSymbolOf: aClass.
-  where := arr isNil ifTrue: ['no user dictionary'] ifFalse: [(arr at: 1) name asString].
+  where := self protectedDictionaryNames
+    detect: [:dictName | (self dictNamed: dictName)
+      ifNil: [false]
+      ifNotNil: [:d | (d at: aClass name asSymbol ifAbsent: [nil]) == aClass]]
+    ifNone: ['no user dictionary'].
   ^McpError signalKind: #refused message:
     'Refused: ' , aClass name asString , ' is a protected class (home dictionary ' , where
       , '); MCP mutation tools do not modify kernel/system classes. Remedy: target one of your own '
@@ -352,13 +355,19 @@ McpServer >> initializeWithToolsetNames: anArrayOfNames [
 
 { #category : 'guards' }
 McpServer >> isProtectedClass: aClass [
-  "True if aClass is a kernel/system class that mutation tools must not modify -- judged by its home
-   symbol dictionary being one of protectedDictionaryNames. A class resident in no dictionary is
-   treated as protected (conservative)."
-  | arr |
-  arr := System myUserProfile dictionaryAndSymbolOf: aClass.
-  arr isNil ifTrue: [^true].
-  ^self protectedDictionaryNames includes: (arr at: 1) name asString
+  "True if aClass is a kernel/system class that mutation tools must not modify: a protected dictionary
+   (protectedDictionaryNames) binds this very class under its own name. A class no dictionary in the
+   symbol list binds at all is treated as protected (conservative).
+   Deliberately NOT judged by dictionaryAndSymbolOf:, which answers the FIRST dictionary in the symbol
+   list binding the name -- in a Grail image the Python dictionary also binds Object and precedes
+   Globals, so that test reported Object as UNPROTECTED and the mutation tools would have modified
+   kernel classes. Asking the protected dictionaries directly cannot be fooled by symbol-list order."
+  | name |
+  name := aClass name asSymbol.
+  self protectedDictionaryNames do: [:dictName |
+    (self dictNamed: dictName) ifNotNil: [:d |
+      (d at: name ifAbsent: [nil]) == aClass ifTrue: [^true]]].
+  ^(System myUserProfile dictionaryAndSymbolOf: aClass) isNil
 
 ]
 
