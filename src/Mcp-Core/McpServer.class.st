@@ -54,9 +54,11 @@ McpServer class >> coreReadOnlySafeToolNames [
 
 { #category : 'identity' }
 McpServer class >> defaultServerName [
-  "The name a stock GemStone MCP server reports in the initialize result's serverInfo. The single
-   home for this literal: the instance-side serverName answers it unless a deployment or a subclass
-   says otherwise, and McpDispatcher falls back to it when it has no server at all."
+  "The name a stock GemStone MCP server reports in the initialize result's serverInfo, and THE HOOK A
+   SUBCLASS SHOULD OVERRIDE to name itself (see McpFixtureServer): overriding here keeps the name a
+   default that router config can still relabel, which is what an operator running two instances of
+   one product needs. The single home for this literal -- the instance-side serverName answers it
+   unless a deployment set one, and McpDispatcher falls back to it when it has no server at all."
   ^'gemstone-mcp'
 
 ]
@@ -525,11 +527,14 @@ McpServer >> resolveClass: aName [
 
 { #category : 'identity' }
 McpServer >> serverName [
-  "What this server calls itself in the initialize result's serverInfo (MCP lifecycle). Three ways to
-   set it, in precedence order: a SUBCLASS overrides this method; a DEPLOYMENT sets it in router
-   config, which the worker bootstrap passes to serverName:; otherwise the class default. A server
-   assembled from third-party toolsets needs this -- announcing itself as 'gemstone-mcp' would tell a
-   client the opposite of the truth."
+  "What this server calls itself in the initialize result's serverInfo (MCP lifecycle). A server
+   assembled from third-party toolsets needs to be able to say so -- announcing itself as
+   'gemstone-mcp' would tell a client the opposite of the truth.
+   Precedence: a DEPLOYMENT's router config (the ivar, set by the worker bootstrap through serverName:)
+   beats the class default, and a subclass names itself by overriding that class default
+   (defaultServerName) -- so a subclass stays relabelable per deployment. A subclass CAN override this
+   method instead and thereby win over config, since it then never reads the ivar; that is a
+   deliberate lock, not the encouraged path."
   ^serverName ifNil: [self class defaultServerName]
 
 ]

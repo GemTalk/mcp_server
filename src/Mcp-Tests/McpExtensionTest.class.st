@@ -142,16 +142,25 @@ McpExtensionTest >> testNamedSubclassAnswersTheWorkerEntry [
 ]
 
 { #category : 'tests - worker class' }
-McpExtensionTest >> testSubclassIdentityBeatsRouterConfig [
-  "Identity precedence: a subclass that overrides serverName cannot be renamed by a deployment (config
-   only fills the ivar the default implementation reads), while a plain server takes the config value.
-   Both directions pinned, since only the pair documents the rule."
+McpExtensionTest >> testRouterConfigRelabelsASubclassThatNamesItself [
+  "Identity precedence, in both directions -- only the pair documents the rule. A subclass names itself
+   by overriding the class-side default, so it applies when a deployment says nothing; and a deployment
+   can still relabel it, which an operator running two instances of one product needs. Same for a plain
+   server, whose default is the stock name."
   | fixture plain |
-  fixture := McpFixtureServer new serverName: 'from-config'; serverVersion: '1.1.1'; yourself.
+  fixture := McpFixtureServer new.
   self assert: fixture serverName equals: 'fixture-mcp'.
   self assert: fixture serverVersion equals: '9.9.9'.
-  plain := McpServer new serverName: 'from-config'; yourself.
-  self assert: plain serverName equals: 'from-config'
+  fixture serverName: 'billing-mcp'; serverVersion: '1.1.1'.
+  self assert: fixture serverName equals: 'billing-mcp'.
+  self assert: fixture serverVersion equals: '1.1.1'.
+  "nil restores the subclass's default rather than the stock name"
+  fixture serverName: nil.
+  self assert: fixture serverName equals: 'fixture-mcp'.
+  plain := McpServer new.
+  self assert: plain serverName equals: 'gemstone-mcp'.
+  plain serverName: 'billing-mcp'.
+  self assert: plain serverName equals: 'billing-mcp'
 
 ]
 
@@ -167,7 +176,17 @@ McpExtensionTest >> testBootstrapBuildsTheNamedSubclassWithItsNamedToolsets [
     out := McpFixtureServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'.
     self assert: (self includesCS: 'fixture_echo' in: out).
     self deny: (self includesCS: 'execute_code' in: out).
-    self deny: (self includesCS: 'describe_class' in: out)]
+    self deny: (self includesCS: 'describe_class' in: out).
+    "with no identity in config the subclass's own default is reported"
+    out := McpFixtureServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'.
+    self assert: (self includesCS: 'fixture-mcp' in: out)].
+  "...and a deployment that DOES name the server in config relabels it, through the same bootstrap"
+  self withFreshWorkerCacheDo: [ | out |
+    McpFixtureServer prepareWorkerWithToolsets: #('McpFixtureToolset')
+      readOnly: false serverName: 'billing-mcp' version: '1.1.1'.
+    out := McpFixtureServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'.
+    self assert: (self includesCS: 'billing-mcp' in: out).
+    self deny: (self includesCS: 'fixture-mcp' in: out)]
 
 ]
 
