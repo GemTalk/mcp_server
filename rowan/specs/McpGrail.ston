@@ -1,0 +1,18 @@
+RwLoadSpecificationV2 {
+	#projectName : 'Mcp',
+	#gitUrl : 'git@code.gemtalksystems.com:johnf/mcp_server.git',
+	#revision : 'main',
+	#projectSpecFile : 'rowan/project.ston',
+	#componentNames : [
+		'Core',
+		'Grail'
+	],
+	#platformProperties : {
+		'gemstone' : {
+			'allusers' : {
+				#defaultSymbolDictName : 'Published'
+			}
+		}
+	},
+	#comment : 'Load spec for a GRAIL-EQUIPPED image: Core plus the optional Python toolset. install.sh --grail resolves this instead of Mcp.ston. Loading it into an image without Grail fails to compile, by design.'
+}
