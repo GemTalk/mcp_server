@@ -1,7 +1,7 @@
 "
 Abstract superclass of the tool packs an McpServer registers: one toolset owns a related group of
-MCP tools -- their names, descriptions, JSON schemas, and (eventually) their handlers -- and
-registers them on a tool registry via registerOn:.
+MCP tools -- their names, descriptions, JSON schemas AND their handlers -- and registers them on a
+tool registry via registerOn:.
 
 Toolsets, not subclasses, are how a deployment chooses its tool surface. A worker server is built
 with a list of toolset names (McpServer class>>newWithToolsetNames:), which the front end resolves
@@ -10,18 +10,24 @@ of the Smalltalk-development surface, and two independent tool packs can be comb
 inheritance could never do).
 
 To write your own: subclass this, implement registerOn: (one toolRegistry name:description:
-inputSchema:do: send per tool, building schemas with the helpers here), implement toolNames, and
-declare readOnlySafeToolNames -- which defaults to NONE, so a tool is gated in a read-only session
-until it is deliberately listed as unable to persist a change. Then name your class in the router's
-toolsetNames config. Your class must be visible in the WORKER gem's symbol list (Published, not the
-operator's UserGlobals), because the worker may log in as a different user.
+inputSchema:do: send per tool, building schemas with the helpers here, each block calling one of your
+own tool_* handlers), implement toolNames, and declare readOnlySafeToolNames -- which defaults to
+NONE, so a tool is gated in a read-only session until it is deliberately listed as unable to persist
+a change. Then name your class in the router's toolsetNames config. Your class must be visible in the
+WORKER gem's symbol list (Published, not the operator's UserGlobals), because the worker may log in
+as a different user.
 
-The schema builders are BOTH class- and instance-side: the class-side methods are the single
-implementation, and the instance-side ones let a registerOn: body read as `self objectSchema: ...`.
+The schema builders and the image-lookup helpers every toolset needs (resolveClass:, dictNamed:,
+linesFrom:, capResult:) are BOTH class- and instance-side: the class-side methods are the single
+implementation -- McpServer's kernel guards reach dictNamed: that way, so the lookup has one home --
+and the instance-side ones let a registerOn: or handler body read as `self objectSchema: ...` /
+`self resolveClass: ...`.
 
-NB the `server` reference: today a core toolset's handlers still live on McpServer, so its blocks
-delegate to `server` (see McpServer). That is a transitional seam -- as handlers move onto their
-toolsets the blocks become `[:args | self tool_x: args]` and the reference falls away.
+NB the `server` reference: a toolset's handlers own their own work, but SERVER-LEVEL POLICY stays on
+the server, which is what a subclass overrides to change behavior. So a handler that mutates the
+image asks the server for its kernel guard (`server assertMutableClass:`) rather than deciding for
+itself -- see McpMutationToolset. Handlers that need no policy never touch `server` at all
+(McpGrailToolset and McpFixtureToolset are examples).
 "
 Class {
 	#name : 'McpToolset',
@@ -42,6 +48,36 @@ McpToolset class >> boolProperty: aDescription [
 
 ]
 
+{ #category : 'private' }
+McpToolset class >> capResult: aString [
+  "Cap an arbitrary tool result at 50000 characters so a huge value can't swamp the client. Shared by
+   execute_code and the Python tools of the optional Grail toolset."
+  ^aString size > 50000
+    ifTrue: [(aString copyFrom: 1 to: 50000) , ' ...[truncated]']
+    ifFalse: [aString]
+
+]
+
+{ #category : 'private' }
+McpToolset class >> dictNamed: aName [
+  "Find a symbol dictionary by name in the current symbol list, or nil."
+  System myUserProfile symbolList do: [:d | d name asString = aName ifTrue: [^d]].
+  ^nil
+
+]
+
+{ #category : 'private' }
+McpToolset class >> linesFrom: aCollectionOfStrings [
+  "Sort the strings and join them one per line; '(none)' if empty."
+  | s |
+  aCollectionOfStrings isEmpty ifTrue: [^'(none)'].
+  s := WriteStream on: String new.
+  (aCollectionOfStrings asSortedCollection asArray) do: [:n |
+    s nextPutAll: n asString; nextPut: Character lf].
+  ^s contents
+
+]
+
 { #category : 'schema building' }
 McpToolset class >> objectSchema: propsDict required: requiredArray [
   "Build a closed JSON-Schema object: additionalProperties is false so an unknown/hallucinated
@@ -59,8 +95,8 @@ McpToolset class >> objectSchema: propsDict required: requiredArray [
 
 { #category : 'instance creation' }
 McpToolset class >> on: aServer [
-  "A toolset for aServer, the McpServer whose registry it registers on (and, for a core toolset,
-   whose handlers its blocks still call -- see the class comment)."
+  "A toolset for aServer, the McpServer whose registry it registers on (and whose server-level policy
+   -- the kernel guards -- its handlers consult; see the class comment)."
   ^self new setServer: aServer
 
 ]
@@ -75,9 +111,36 @@ McpToolset class >> propString: aDescription [
 
 ]
 
+{ #category : 'private' }
+McpToolset class >> resolveClass: aName [
+  "Resolve a class by name in the current symbol list, or nil if the name is unbound or not a class."
+  | obj |
+  obj := System myUserProfile objectNamed: aName asSymbol.
+  ^(obj isKindOf: Behavior) ifTrue: [obj] ifFalse: [nil]
+
+]
+
 { #category : 'schema building' }
 McpToolset >> boolProperty: aDescription [
   ^self class boolProperty: aDescription
+
+]
+
+{ #category : 'private' }
+McpToolset >> capResult: aString [
+  ^self class capResult: aString
+
+]
+
+{ #category : 'private' }
+McpToolset >> dictNamed: aName [
+  ^self class dictNamed: aName
+
+]
+
+{ #category : 'private' }
+McpToolset >> linesFrom: aCollectionOfStrings [
+  ^self class linesFrom: aCollectionOfStrings
 
 ]
 
@@ -110,9 +173,16 @@ McpToolset >> registerOn: aToolRegistry [
 
 ]
 
+{ #category : 'private' }
+McpToolset >> resolveClass: aName [
+  ^self class resolveClass: aName
+
+]
+
 { #category : 'accessing' }
 McpToolset >> server [
-  "The McpServer this toolset registers on (see the class comment on this transitional seam)."
+  "The McpServer this toolset registers on, and the home of the server-level policy a handler must
+   respect -- the kernel guards. nil for a toolset built without one (see the class comment)."
   ^server
 
 ]

@@ -3,9 +3,9 @@ A third-party toolset, in miniature: one tool (fixture_echo) that the extension 
 developer can add tools without touching McpServer, combine them with the core toolsets, and have
 read-only honor their own safety declaration.
 
-Written the way a real third-party toolset should be: it OWNS its handler rather than delegating to
-the server (the core toolsets still delegate -- see McpToolset), and it declares its tool read-only
-safe because echoing an argument cannot persist anything.
+Written the way a real third-party toolset should be: it owns its handler, needs nothing from the
+server (echoing a string consults no server-level policy -- see McpToolset), and declares its tool
+read-only safe because echoing an argument cannot persist anything.
 "
 Class {
 	#name : 'McpFixtureToolset',

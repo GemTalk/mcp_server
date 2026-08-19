@@ -47,8 +47,9 @@ McpGrailToolsetTest >> includesCS: aSubstring in: aString [
 { #category : 'helpers' }
 McpGrailToolsetTest >> mcp [
   "A fresh Grail TOOLSET whose tool_* handlers we exercise directly (no socket, no dispatcher).
-   Attached to a server because the handlers use its shared output cap (capResult:)."
-  ^McpGrailToolset on: McpServer new
+   Built with no server at all, which is the point of a self-contained toolset: its handlers need
+   nothing from McpServer, not even the shared output cap (McpToolset>>capResult:)."
+  ^McpGrailToolset new
 
 ]
 

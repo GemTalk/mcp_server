@@ -6,9 +6,6 @@ transaction the worker is in.)
 The one MIXED toolset: abort, refresh and status only read (aborting discards uncommitted work
 rather than persisting any), while commit persists and so is NOT read-only-safe. That is why
 read-only screens individual tools and not just whole toolsets -- see McpToolset.
-
-Handlers still live on McpServer (category 'tools - session'); see McpToolset's class comment on that
-transitional seam.
 "
 Class {
 	#name : 'McpSessionToolset',
@@ -30,17 +27,48 @@ McpSessionToolset >> registerOn: aToolRegistry [
   noArgs := self objectSchema: Dictionary new required: #().
   aToolRegistry name: 'abort'
     description: 'Abort the current transaction, discarding uncommitted changes and refreshing the session view.'
-    inputSchema: noArgs do: [:args | server tool_abort: args].
+    inputSchema: noArgs do: [:args | self tool_abort: args].
   aToolRegistry name: 'commit'
     description: 'Commit the current transaction, persisting all changes.'
-    inputSchema: noArgs do: [:args | server tool_commit: args].
+    inputSchema: noArgs do: [:args | self tool_commit: args].
   aToolRegistry name: 'refresh'
     description: 'Refresh the session view to see changes committed by other sessions (aborts any uncommitted work).'
-    inputSchema: noArgs do: [:args | server tool_refresh: args].
+    inputSchema: noArgs do: [:args | self tool_refresh: args].
   aToolRegistry name: 'status'
     description: 'Report the GemStone session: user, session id, stone, and whether there are uncommitted changes.'
-    inputSchema: noArgs do: [:args | server tool_status: args].
+    inputSchema: noArgs do: [:args | self tool_status: args].
   ^self
+
+]
+
+{ #category : 'tools - session' }
+McpSessionToolset >> tool_abort: args [
+  System abortTransaction.
+  ^'Transaction aborted; view refreshed.'
+
+]
+
+{ #category : 'tools - session' }
+McpSessionToolset >> tool_commit: args [
+  ^System commitTransaction
+    ifTrue: ['Transaction committed.']
+    ifFalse: ['Commit failed due to conflicts; the transaction is still open.']
+
+]
+
+{ #category : 'tools - session' }
+McpSessionToolset >> tool_refresh: args [
+  System abortTransaction.
+  ^'View refreshed.'
+
+]
+
+{ #category : 'tools - session' }
+McpSessionToolset >> tool_status: args [
+  ^'user=' , System myUserProfile userId ,
+   ' session=' , System session printString ,
+   ' stone=' , System stoneName ,
+   ' uncommittedChanges=' , System needsCommit printString
 
 ]
 
