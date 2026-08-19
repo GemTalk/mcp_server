@@ -149,10 +149,11 @@ with no session id to key it on.
 
 **Python (optional — the `McpGrailToolset`)**
 
-These live in the optional `McpGrailToolset`, filed in only by `load-grail.gs` /
-`install.sh --grail` into a Grail-equipped image. Once loaded it joins the default tool surface
-automatically (`McpServer class>>installedDefaultToolsetNames`), or can be named explicitly in a
-router's `toolsetNames`.
+These live in the optional `McpGrailToolset`, in its own Rowan packages (`Mcp-Grail`,
+`Mcp-Grail-Tests`) which only `install.sh --grail` loads — they reference `ModuleAst` and
+`BaseException`, so they cannot compile in an image without Grail. Once loaded the toolset joins the
+default tool surface automatically (`McpServer class>>installedDefaultToolsetNames`), or can be named
+explicitly in a router's `toolsetNames`.
 
 | Tool | Arguments | Result |
 |------|-----------|--------|
@@ -324,7 +325,7 @@ forbidden here" from "no such tool". A tool absent because its toolset was never
 export GEMSTONE=/path/to/GemStone64Bit3.7.x   # product dir
 export GS_USER=DataCurator GS_PASS=...         # GemStone credentials
 
-./install.sh                        # file in the base classes and commit
+./install.sh                        # load the base classes (Rowan project 'Mcp') and commit
 ./install.sh --grail                # ...and the optional Grail/Python toolset (Grail image only)
 GS_MCP_PORT=8000 ./run-server.sh    # fork a detached, independent localhost server gem and return
 GS_MCP_READONLY=1 ./run-server.sh   # ...read-only (browse/search only; no accidental mutation)
@@ -335,8 +336,9 @@ GS_MCP_WORKER_CLASS=MyMcpServer ./run-server.sh                        # ...a su
 
 `install.sh` and the `run-*.sh` scripts use topaz; set `GEMSTONE`, `GS_STONE`, `GS_USER`,
 `GS_PASS` to match your environment. `install.sh` loads the code as the Rowan project `Mcp` (see
-`rowan/`); `--grail` (or `GS_MCP_WITH_GRAIL=1`) additionally files in `load-grail.gs` —
-`McpGrailToolset` plus its test suite. `run-server.sh` builds a base `McpRouter` instance and calls
+`rowan/`); `--grail` (or `GS_MCP_WITH_GRAIL=1`) resolves a different **load spec** —
+`rowan/specs/McpGrail.ston`, which adds the `Grail` component (`Mcp-Grail` + `Mcp-Grail-Tests`) to
+`Core` — so everything is Rowan-managed, with no topaz file-in step. `run-server.sh` builds a base `McpRouter` instance and calls
 its `forkOnPort:` (`run-auth-server.sh` builds an OIDC-configured `McpAuthRouter` — resource-server
 config as code, no commit), which launches a detached, independent front-end gem and returns; stop it
 with `./stop-server.sh` (by port), or the `System stopSession: <id>` / `kill <pid>` line it prints.
@@ -347,10 +349,15 @@ A loaded Grail toolset is picked up automatically, per session, by the front end
 > class name through the loading user's symbol list — where **Grail defines its own `Package`** (in
 > `PythonAst`, a `ModuleAst` subclass), ahead of `Globals`. Rowan then gets a Python AST node and the
 > load dies with *"a Package does not understand #at:ifAbsent:"*, in **both** plain and `--grail`
-> modes, before any of our code loads. `install.sh` hides the shadowing dictionary for the duration of
-> the load and restores it in an `ensure:`; in an image without Grail nothing fires. Reported to the
-> Rowan developer 2026-08-18 — the block is commented for removal once Rowan resolves the marker
-> robustly, or Grail renames its class.
+> modes, before any of our code loads. `install.sh` moves that one **binding** aside for the duration
+> of the load and puts it back afterwards; in an image without Grail nothing fires.
+>
+> Two details it learned the hard way. It removes the single `#Package` key rather than the whole
+> dictionary, because hiding all of `PythonAst` also hides `ModuleAst` — and then `--grail` cannot
+> compile. And the restore runs on the normal path (`on: Error do:`, not `ensure:`), because topaz's
+> `iferr 1 : exit 1` ends the session *at* the error and skips an unwind — which once left a Grail
+> image with no `PythonAst` at all. Reported to the Rowan developer 2026-08-18; the block is commented
+> for removal once Rowan resolves the marker robustly, or Grail renames its class.
 
 ## Test
 

@@ -1,0 +1,24 @@
+RwLoadComponent {
+	#name : 'Grail',
+	#projectNames : [ ],
+	#componentNames : [ ],
+	#packageNames : [
+		'Mcp-Grail',
+		'Mcp-Grail-Tests'
+	],
+	#conditionalPackageMapSpecs : {
+		'gemstone' : {
+			'allusers' : {
+				#packageNameToPlatformPropertiesMap : {
+					'Mcp-Grail' : {
+						'symbolDictName' : 'Published'
+					},
+					'Mcp-Grail-Tests' : {
+						'symbolDictName' : 'Published'
+					}
+				}
+			}
+		}
+	},
+	#comment : 'Optional GemStone-Python (Grail) toolset. Loads ONLY into an image that has Grail: its methods reference ModuleAst and BaseException, which cannot be compiled otherwise. Not part of the default load spec -- use rowan/specs/McpGrail.ston (install.sh --grail).'
+}
