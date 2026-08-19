@@ -684,19 +684,6 @@ McpRouter >> serverName: aStringOrNil [
 
 ]
 
-{ #category : 'worker identity' }
-McpRouter >> serverVersion [
-  "The serverInfo version this router's workers advertise, or nil for the worker's own default."
-  ^serverVersion
-
-]
-
-{ #category : 'worker identity' }
-McpRouter >> serverVersion: aStringOrNil [
-  serverVersion := aStringOrNil
-
-]
-
 { #category : 'routing' }
 McpRouter >> serveRouted: body sessionId: sid on: conn [
   "Route a non-initialize request to the client's worker by session id (required). Relay the
@@ -709,6 +696,19 @@ McpRouter >> serveRouted: body sessionId: sid on: conn [
   resp isEmpty
     ifTrue: [conn writeStatus: 202 reason: 'Accepted' body: '']
     ifFalse: [conn writeJson: resp]
+
+]
+
+{ #category : 'worker identity' }
+McpRouter >> serverVersion [
+  "The serverInfo version this router's workers advertise, or nil for the worker's own default."
+  ^serverVersion
+
+]
+
+{ #category : 'worker identity' }
+McpRouter >> serverVersion: aStringOrNil [
+  serverVersion := aStringOrNil
 
 ]
 

@@ -191,6 +191,16 @@ McpDispatcher >> pingResult [
 
 ]
 
+{ #category : 'read-only' }
+McpDispatcher >> readOnlyGated: aToolName [
+  "Whether aToolName is one of the server's own tools that this read-only session may not run --
+   i.e. absent from the registry (or refused) because of read-only, not because it does not exist.
+   False when there is no server (isolated dispatcher tests), so an unknown tool stays 'notFound'."
+  ^server notNil
+    and: [(server allToolNames includes: aToolName) and: [(server isToolAllowed: aToolName) not]]
+
+]
+
 { #category : 'responses' }
 McpDispatcher >> resultFor: id with: resultObj [
   | d |
@@ -242,16 +252,6 @@ McpDispatcher >> structuredErrorContent: aMessage kind: aKind [
     yourself).
   d at: 'structuredContent' put: struct.
   ^d
-
-]
-
-{ #category : 'read-only' }
-McpDispatcher >> readOnlyGated: aToolName [
-  "Whether aToolName is one of the server's own tools that this read-only session may not run --
-   i.e. absent from the registry (or refused) because of read-only, not because it does not exist.
-   False when there is no server (isolated dispatcher tests), so an unknown tool stays 'notFound'."
-  ^server notNil
-    and: [(server allToolNames includes: aToolName) and: [(server isToolAllowed: aToolName) not]]
 
 ]
 

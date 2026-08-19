@@ -40,34 +40,29 @@ McpExtensionTest >> request: methodName params: paramsDict [
 
 ]
 
-{ #category : 'helpers' }
-McpExtensionTest >> toolCall: toolName args: argsDict [
-  ^self request: 'tools/call' params:
-    (Dictionary new at: 'name' put: toolName; at: 'arguments' put: argsDict; yourself)
-
-]
-
-{ #category : 'helpers' }
-McpExtensionTest >> toolNamesOf: aServer [
-  ^(aServer toolRegistry descriptors collect: [:d | d at: 'name']) asSortedCollection asArray
-
-]
-
-{ #category : 'helpers' }
-McpExtensionTest >> withFreshWorkerCacheDo: aBlock [
-  "Clear the per-session worker-instance cache before and after: SessionTemps outlives a test, so a
-   server cached by one test would answer for another -- with a different class and surface."
-  SessionTemps current removeKey: #McpServer ifAbsent: [nil].
-  ^[aBlock value] ensure: [SessionTemps current removeKey: #McpServer ifAbsent: [nil]]
-
-]
-
-{ #category : 'helpers' }
-McpExtensionTest >> withReadOnlyDo: aBlock [
-  "Run aBlock in a read-only session, clearing the flag before and after (see McpContractTest)."
-  SessionTemps current removeKey: #McpReadOnly ifAbsent: [nil].
-  ^[McpServer sessionReadOnly: true. aBlock value]
-    ensure: [SessionTemps current removeKey: #McpReadOnly ifAbsent: [nil]]
+{ #category : 'tests - worker class' }
+McpExtensionTest >> testBootstrapBuildsTheNamedSubclassWithItsNamedToolsets [
+  "The whole per-session handshake in one call, as the front end makes it: the named CLASS is what gets
+   built, with the named TOOLSETS and nothing else, cached for the first request."
+  self withFreshWorkerCacheDo: [ | note out |
+    note := McpFixtureServer
+      prepareWorkerWithToolsets: #('McpFixtureToolset')
+      readOnly: false serverName: nil version: nil.
+    self assert: (self includesCS: 'McpFixtureServer ready' in: note).
+    out := McpFixtureServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'.
+    self assert: (self includesCS: 'fixture_echo' in: out).
+    self deny: (self includesCS: 'execute_code' in: out).
+    self deny: (self includesCS: 'describe_class' in: out).
+    "with no identity in config the subclass's own default is reported"
+    out := McpFixtureServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'.
+    self assert: (self includesCS: 'fixture-mcp' in: out)].
+  "...and a deployment that DOES name the server in config relabels it, through the same bootstrap"
+  self withFreshWorkerCacheDo: [ | out |
+    McpFixtureServer prepareWorkerWithToolsets: #('McpFixtureToolset')
+      readOnly: false serverName: 'billing-mcp' version: '1.1.1'.
+    out := McpFixtureServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'.
+    self assert: (self includesCS: 'billing-mcp' in: out).
+    self deny: (self includesCS: 'fixture-mcp' in: out)]
 
 ]
 
@@ -102,34 +97,6 @@ McpExtensionTest >> testFixtureToolsetRunsThroughTheRealEnvelope [
 
 ]
 
-{ #category : 'tests - composition' }
-McpExtensionTest >> testVendorServerExposesOnlyItsOwnTools [
-  "THE requirement behind toolsets: a vendor ships a server with their tools and NONE of the
-   Smalltalk-development surface -- no execute_code, no mutation tools, no session control."
-  | names |
-  names := self toolNamesOf: (McpServer newWithToolsetNames: #('McpFixtureToolset')).
-  self assert: names equals: #('fixture_echo').
-  #('execute_code' 'compile_method' 'compile_class_definition' 'delete_class' 'commit'
-    'describe_class' 'run_test_class') do: [:absent |
-      self deny: (names includes: absent)]
-
-]
-
-{ #category : 'tests - read-only' }
-McpExtensionTest >> testToolsetDecidesItsOwnReadOnlySafety [
-  "A toolset's own readOnlySafeToolNames is honored: the fixture tool survives a read-only build
-   because its toolset vouches for it, while the core mutating tools are dropped. Nothing central had
-   to be edited to allow a third-party tool through."
-  self withReadOnlyDo: [ | names |
-    names := self toolNamesOf: (McpServer newWithToolsetNames:
-      (McpServer defaultToolsetNames , (Array with: 'McpFixtureToolset'))).
-    self assert: (names includes: 'fixture_echo').
-    self assert: (names includes: 'describe_class').
-    self deny: (names includes: 'execute_code').
-    self deny: (names includes: 'compile_method')]
-
-]
-
 { #category : 'tests - worker class' }
 McpExtensionTest >> testNamedSubclassAnswersTheWorkerEntry [
   "A worker dispatches through the class the front end NAMED: sending the class-side entry to the
@@ -141,6 +108,25 @@ McpExtensionTest >> testNamedSubclassAnswersTheWorkerEntry [
 
 ]
 
+{ #category : 'tests - worker class' }
+McpExtensionTest >> testRouterCarriesTheNamedClassAndToolsetsToTheSession [
+  "The front end resolves both and hands them to the session, which names the class in the expression
+   it runs in the worker gem. No login needed -- the wiring is what is under test."
+  | r sess |
+  r := McpRouter new.
+  r workerClassName: 'McpFixtureServer'; toolsetNames: #('McpFixtureToolset');
+    serverName: 'acme'; serverVersion: '3.0'.
+  self assert: r validateWorkerConfig notNil.   "both names resolve in this image"
+  sess := r openSessionCreating: [:id | McpStubSession new].
+  self assert: sess workerClassName equals: 'McpFixtureServer'.
+  self assert: sess wasPrepared.   "configured AND prepared, before the session is registered"
+  self assert: (self includesCS: 'McpFixtureServer handleJsonString:'
+    in: (sess workerExpressionFor: '{"jsonrpc":"2.0"}')).
+  self assert: (self includesCS: 'McpFixtureServer prepareWorkerWithToolsets:'
+    in: sess workerBootstrapExpression).
+  self assert: (self includesCS: '''McpFixtureToolset''' in: sess workerBootstrapExpression)
+
+]
 { #category : 'tests - worker class' }
 McpExtensionTest >> testRouterConfigRelabelsASubclassThatNamesItself [
   "Identity precedence, in both directions -- only the pair documents the rule. A subclass names itself
@@ -164,48 +150,62 @@ McpExtensionTest >> testRouterConfigRelabelsASubclassThatNamesItself [
 
 ]
 
-{ #category : 'tests - worker class' }
-McpExtensionTest >> testBootstrapBuildsTheNamedSubclassWithItsNamedToolsets [
-  "The whole per-session handshake in one call, as the front end makes it: the named CLASS is what gets
-   built, with the named TOOLSETS and nothing else, cached for the first request."
-  self withFreshWorkerCacheDo: [ | note out |
-    note := McpFixtureServer
-      prepareWorkerWithToolsets: #('McpFixtureToolset')
-      readOnly: false serverName: nil version: nil.
-    self assert: (self includesCS: 'McpFixtureServer ready' in: note).
-    out := McpFixtureServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'.
-    self assert: (self includesCS: 'fixture_echo' in: out).
-    self deny: (self includesCS: 'execute_code' in: out).
-    self deny: (self includesCS: 'describe_class' in: out).
-    "with no identity in config the subclass's own default is reported"
-    out := McpFixtureServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'.
-    self assert: (self includesCS: 'fixture-mcp' in: out)].
-  "...and a deployment that DOES name the server in config relabels it, through the same bootstrap"
-  self withFreshWorkerCacheDo: [ | out |
-    McpFixtureServer prepareWorkerWithToolsets: #('McpFixtureToolset')
-      readOnly: false serverName: 'billing-mcp' version: '1.1.1'.
-    out := McpFixtureServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'.
-    self assert: (self includesCS: 'billing-mcp' in: out).
-    self deny: (self includesCS: 'fixture-mcp' in: out)]
+{ #category : 'tests - read-only' }
+McpExtensionTest >> testToolsetDecidesItsOwnReadOnlySafety [
+  "A toolset's own readOnlySafeToolNames is honored: the fixture tool survives a read-only build
+   because its toolset vouches for it, while the core mutating tools are dropped. Nothing central had
+   to be edited to allow a third-party tool through."
+  self withReadOnlyDo: [ | names |
+    names := self toolNamesOf: (McpServer newWithToolsetNames:
+      (McpServer defaultToolsetNames , (Array with: 'McpFixtureToolset'))).
+    self assert: (names includes: 'fixture_echo').
+    self assert: (names includes: 'describe_class').
+    self deny: (names includes: 'execute_code').
+    self deny: (names includes: 'compile_method')]
 
 ]
 
-{ #category : 'tests - worker class' }
-McpExtensionTest >> testRouterCarriesTheNamedClassAndToolsetsToTheSession [
-  "The front end resolves both and hands them to the session, which names the class in the expression
-   it runs in the worker gem. No login needed -- the wiring is what is under test."
-  | r sess |
-  r := McpRouter new.
-  r workerClassName: 'McpFixtureServer'; toolsetNames: #('McpFixtureToolset');
-    serverName: 'acme'; serverVersion: '3.0'.
-  self assert: r validateWorkerConfig notNil.   "both names resolve in this image"
-  sess := r openSessionCreating: [:id | McpStubSession new].
-  self assert: sess workerClassName equals: 'McpFixtureServer'.
-  self assert: sess wasPrepared.   "configured AND prepared, before the session is registered"
-  self assert: (self includesCS: 'McpFixtureServer handleJsonString:'
-    in: (sess workerExpressionFor: '{"jsonrpc":"2.0"}')).
-  self assert: (self includesCS: 'McpFixtureServer prepareWorkerWithToolsets:'
-    in: sess workerBootstrapExpression).
-  self assert: (self includesCS: '''McpFixtureToolset''' in: sess workerBootstrapExpression)
+{ #category : 'tests - composition' }
+McpExtensionTest >> testVendorServerExposesOnlyItsOwnTools [
+  "THE requirement behind toolsets: a vendor ships a server with their tools and NONE of the
+   Smalltalk-development surface -- no execute_code, no mutation tools, no session control."
+  | names |
+  names := self toolNamesOf: (McpServer newWithToolsetNames: #('McpFixtureToolset')).
+  self assert: names equals: #('fixture_echo').
+  #('execute_code' 'compile_method' 'compile_class_definition' 'delete_class' 'commit'
+    'describe_class' 'run_test_class') do: [:absent |
+      self deny: (names includes: absent)]
 
 ]
+
+{ #category : 'helpers' }
+McpExtensionTest >> toolCall: toolName args: argsDict [
+  ^self request: 'tools/call' params:
+    (Dictionary new at: 'name' put: toolName; at: 'arguments' put: argsDict; yourself)
+
+]
+
+{ #category : 'helpers' }
+McpExtensionTest >> toolNamesOf: aServer [
+  ^(aServer toolRegistry descriptors collect: [:d | d at: 'name']) asSortedCollection asArray
+
+]
+
+{ #category : 'helpers' }
+McpExtensionTest >> withFreshWorkerCacheDo: aBlock [
+  "Clear the per-session worker-instance cache before and after: SessionTemps outlives a test, so a
+   server cached by one test would answer for another -- with a different class and surface."
+  SessionTemps current removeKey: #McpServer ifAbsent: [nil].
+  ^[aBlock value] ensure: [SessionTemps current removeKey: #McpServer ifAbsent: [nil]]
+
+]
+
+{ #category : 'helpers' }
+McpExtensionTest >> withReadOnlyDo: aBlock [
+  "Run aBlock in a read-only session, clearing the flag before and after (see McpContractTest)."
+  SessionTemps current removeKey: #McpReadOnly ifAbsent: [nil].
+  ^[McpServer sessionReadOnly: true. aBlock value]
+    ensure: [SessionTemps current removeKey: #McpReadOnly ifAbsent: [nil]]
+
+]
+

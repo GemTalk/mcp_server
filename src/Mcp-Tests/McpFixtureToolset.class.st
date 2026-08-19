@@ -33,14 +33,14 @@ McpFixtureToolset >> registerOn: aToolRegistry [
 
 ]
 
+{ #category : 'tools - fixture' }
+McpFixtureToolset >> tool_fixture_echo: args [
+  ^'echo: ' , (args at: 'text')
+
+]
 { #category : 'accessing' }
 McpFixtureToolset >> toolNames [
   ^#( 'fixture_echo' )
 
 ]
 
-{ #category : 'tools - fixture' }
-McpFixtureToolset >> tool_fixture_echo: args [
-  ^'echo: ' , (args at: 'text')
-
-]

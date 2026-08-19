@@ -118,22 +118,6 @@ McpTransportTest >> testAbsentOriginServed [
 
 ]
 
-{ #category : 'tests' }
-McpTransportTest >> testBaseRouterIsLoopbackOnly [
-  "A base McpRouter performs NO authentication, so it must not be bindable to a reachable address:
-   bindAddress answers loopback, there is deliberately no setter, and 'bindAddress' is not a config
-   key (so it cannot arrive via a fork string either)."
-  | r |
-  r := McpRouter new.
-  self assert: r bindAddress equals: '127.0.0.1'.
-  self deny: (McpRouter canUnderstand: #bindAddress:).
-  self deny: (r configDict includesKey: 'bindAddress').
-  "and a fork string cannot smuggle one in"
-  r applyConfig: (Dictionary new at: 'bindAddress' put: '0.0.0.0'; yourself).
-  self assert: r bindAddress equals: '127.0.0.1'
-
-]
-
 { #category : 'tests - worker config' }
 McpTransportTest >> testBadWorkerOrToolsetNameIsRefusedAtConfigTime [
   "A class name from config is interpolated into an executeString: in the worker gem, so anything that
@@ -147,43 +131,19 @@ McpTransportTest >> testBadWorkerOrToolsetNameIsRefusedAtConfigTime [
 
 ]
 
-{ #category : 'tests - worker config' }
-McpTransportTest >> testWorkerConfigDefaultsAreResolvedByTheFrontEnd [
-  "Unconfigured: the worker class is McpServer and the tool surface is the installed default. Both are
-   resolved HERE (front end) and pushed to the worker, which never chooses for itself."
+{ #category : 'tests' }
+McpTransportTest >> testBaseRouterIsLoopbackOnly [
+  "A base McpRouter performs NO authentication, so it must not be bindable to a reachable address:
+   bindAddress answers loopback, there is deliberately no setter, and 'bindAddress' is not a config
+   key (so it cannot arrive via a fork string either)."
   | r |
   r := McpRouter new.
-  self assert: r workerClassName isNil.
-  self assert: r toolsetNames isNil.
-  self assert: r serverName isNil.
-  self assert: r effectiveWorkerClassName equals: 'McpServer'.
-  self assert: r effectiveToolsetNames equals: McpServer installedDefaultToolsetNames.
-  "configured values win, and an EMPTY toolset list is legal -- a server with no tools"
-  r workerClassName: 'McpFixtureServerProbe'; toolsetNames: #().
-  self assert: r effectiveWorkerClassName equals: 'McpFixtureServerProbe'.
-  self assert: r effectiveToolsetNames isEmpty
-
-]
-
-{ #category : 'tests - worker config' }
-McpTransportTest >> testValidateWorkerConfigRefusesUnusableNames [
-  "runOnPort: validates before binding: a well-formed name that does not resolve to a usable class
-   must fail at startup, naming it. Covers both the worker class and a toolset."
-  | msg |
-  msg := [(McpRouter new workerClassName: 'McpNoSuchServerClass') validateWorkerConfig. nil]
-    on: Error do: [:e | [e description] on: Error do: [:x | e messageText]].
-  self deny: msg isNil.
-  self assert: (self includesCS: 'McpNoSuchServerClass' in: msg).
-  "a class that exists but is not an McpServer is refused too"
-  msg := [(McpRouter new workerClassName: 'Object') validateWorkerConfig. nil]
-    on: Error do: [:e | [e description] on: Error do: [:x | e messageText]].
-  self deny: msg isNil.
-  msg := [(McpRouter new toolsetNames: #('McpNoSuchToolset')) validateWorkerConfig. nil]
-    on: Error do: [:e | [e description] on: Error do: [:x | e messageText]].
-  self deny: msg isNil.
-  self assert: (self includesCS: 'McpNoSuchToolset' in: msg).
-  "and a default router validates clean"
-  self assert: McpRouter new validateWorkerConfig notNil
+  self assert: r bindAddress equals: '127.0.0.1'.
+  self deny: (McpRouter canUnderstand: #bindAddress:).
+  self deny: (r configDict includesKey: 'bindAddress').
+  "and a fork string cannot smuggle one in"
+  r applyConfig: (Dictionary new at: 'bindAddress' put: '0.0.0.0'; yourself).
+  self assert: r bindAddress equals: '127.0.0.1'
 
 ]
 
@@ -386,3 +346,43 @@ McpTransportTest >> testUnsupportedProtocolVersionReturns400 [
   self assert: (self includesCS: 'Unsupported MCP-Protocol-Version' in: out)
 
 ]
+{ #category : 'tests - worker config' }
+McpTransportTest >> testValidateWorkerConfigRefusesUnusableNames [
+  "runOnPort: validates before binding: a well-formed name that does not resolve to a usable class
+   must fail at startup, naming it. Covers both the worker class and a toolset."
+  | msg |
+  msg := [(McpRouter new workerClassName: 'McpNoSuchServerClass') validateWorkerConfig. nil]
+    on: Error do: [:e | [e description] on: Error do: [:x | e messageText]].
+  self deny: msg isNil.
+  self assert: (self includesCS: 'McpNoSuchServerClass' in: msg).
+  "a class that exists but is not an McpServer is refused too"
+  msg := [(McpRouter new workerClassName: 'Object') validateWorkerConfig. nil]
+    on: Error do: [:e | [e description] on: Error do: [:x | e messageText]].
+  self deny: msg isNil.
+  msg := [(McpRouter new toolsetNames: #('McpNoSuchToolset')) validateWorkerConfig. nil]
+    on: Error do: [:e | [e description] on: Error do: [:x | e messageText]].
+  self deny: msg isNil.
+  self assert: (self includesCS: 'McpNoSuchToolset' in: msg).
+  "and a default router validates clean"
+  self assert: McpRouter new validateWorkerConfig notNil
+
+]
+
+{ #category : 'tests - worker config' }
+McpTransportTest >> testWorkerConfigDefaultsAreResolvedByTheFrontEnd [
+  "Unconfigured: the worker class is McpServer and the tool surface is the installed default. Both are
+   resolved HERE (front end) and pushed to the worker, which never chooses for itself."
+  | r |
+  r := McpRouter new.
+  self assert: r workerClassName isNil.
+  self assert: r toolsetNames isNil.
+  self assert: r serverName isNil.
+  self assert: r effectiveWorkerClassName equals: 'McpServer'.
+  self assert: r effectiveToolsetNames equals: McpServer installedDefaultToolsetNames.
+  "configured values win, and an EMPTY toolset list is legal -- a server with no tools"
+  r workerClassName: 'McpFixtureServerProbe'; toolsetNames: #().
+  self assert: r effectiveWorkerClassName equals: 'McpFixtureServerProbe'.
+  self assert: r effectiveToolsetNames isEmpty
+
+]
+
