@@ -1,10 +1,11 @@
 RwLoadSpecificationV2 {
 	#projectName : 'Mcp',
 	#gitUrl : 'git@code.gemtalksystems.com:johnf/mcp_server.git',
-	#revision : 'main',
+	#revision : 'auth',
 	#projectSpecFile : 'rowan/project.ston',
 	#componentNames : [
 		'Core',
+		'Auth',
 		'Grail'
 	],
 	#platformProperties : {
@@ -14,5 +15,5 @@ RwLoadSpecificationV2 {
 			}
 		}
 	},
-	#comment : 'Load spec for a GRAIL-EQUIPPED image: Core plus the optional Python toolset. install.sh --grail resolves this instead of Mcp.ston. Loading it into an image without Grail fails to compile, by design.'
+	#comment : 'Load spec for a GRAIL-EQUIPPED image: everything Mcp.ston loads on this branch (Core + Auth) plus the optional Python toolset. install.sh --grail resolves this instead of Mcp.ston. Keep the component list in step with Mcp.ston on whichever branch you are on -- on auth that means Auth stays in, or --grail would silently drop the authenticated front end. Loading it into an image without Grail fails to compile, by design.'
 }
