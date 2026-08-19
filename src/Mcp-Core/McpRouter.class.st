@@ -7,6 +7,12 @@ other request is forwarded to that client's worker. The worker runs the actual t
 (McpServer, per gem). This class owns only the socket, the id -> McpSession map (mutex-guarded)
 and the idle-session reaper -- it never parses a tool call itself.
 
+It also decides WHAT each worker is: per session it resolves the worker class (workerClassName) and
+the tool surface (toolsetNames, defaulting to the installed toolsets) and pushes them into the worker
+gem in one call, so a worker never chooses for itself. Resolving here rather than at boot is also what
+will let an authenticated router narrow the surface per token, since the token is only visible on this
+side.
+
 IMPORTANT: runOnPort: is BLOCKING and is meant to be the main activity of a dedicated gem. Forked
 GsProcesses only run while the gem is actively executing Smalltalk, so a background fork in an idle
 GCI session would never serve requests.
@@ -22,6 +28,13 @@ Detached, independent (survives logout); stop it by port with ./stop-server.sh:
     McpRouter new forkOnPort: 8000
 Read-only (a localhost convenience so a single user cannot accidentally mutate the image):
     (McpRouter new readOnly: true) forkOnPort: 8000
+Choose the tool surface -- e.g. a vendor's own tools with none of the Smalltalk-development ones.
+An empty list is legal and means a server offering no tools at all:
+    (McpRouter new toolsetNames: #('AcmeDbToolset'); serverName: 'acme-db-mcp'; serverVersion: '2.5.0')
+      forkOnPort: 8000
+Name an McpServer subclass for the workers (nothing auto-detects one -- subclass to change BEHAVIOR;
+to add tools write an McpToolset instead):
+    (McpRouter new workerClassName: 'AcmeDbServer') forkOnPort: 8000
 TLS (serve HTTPS): give the instance a PEM cert + UNENCRYPTED private key, then run/fork:
     (McpRouter new useTlsCertificateFile: '/path/server.crt' privateKeyFile: '/path/server.key')
       forkOnPort: 8443
