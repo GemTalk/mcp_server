@@ -127,6 +127,7 @@ McpExtensionTest >> testRouterCarriesTheNamedClassAndToolsetsToTheSession [
   self assert: (self includesCS: '''McpFixtureToolset''' in: sess workerBootstrapExpression)
 
 ]
+
 { #category : 'tests - worker class' }
 McpExtensionTest >> testRouterConfigRelabelsASubclassThatNamesItself [
   "Identity precedence, in both directions -- only the pair documents the rule. A subclass names itself
@@ -147,6 +148,30 @@ McpExtensionTest >> testRouterConfigRelabelsASubclassThatNamesItself [
   self assert: plain serverName equals: 'gemstone-mcp'.
   plain serverName: 'billing-mcp'.
   self assert: plain serverName equals: 'billing-mcp'
+
+]
+
+{ #category : 'tests - guards' }
+McpExtensionTest >> testSubclassGuardPolicyReachesEveryToolset [
+  "Where the kernel guard lives, proved rather than asserted: the POLICY is the server's, so hardening
+   it in a subclass (McpFixtureServer protects the shared Published dictionary too) hardens every tool
+   pack that server registers. The same toolset class, asked the same question, answers differently
+   depending only on which server it was built for -- so a third-party toolset gets the deployment's
+   answer without knowing the policy exists; what it must not do is hold an answer of its own.
+   Uses the dictionary guard rather than the class guard because it needs no fixture and resolves no
+   dictionary, so it holds in an image where Published does not exist. The class guard's forwarding is
+   covered by McpContractTest."
+  | plain hardened |
+  plain := McpMutationToolset on: McpServer new.
+  hardened := McpMutationToolset on: McpFixtureServer new.
+  self assert: (plain assertRemovableDictionaryNamed: 'Published') equals: 'Published'.
+  self assert: ([hardened assertRemovableDictionaryNamed: 'Published'. #noRaise]
+    on: McpError do: [:e | e kind]) equals: #refused.
+  "and the tightening is additive: Globals stays protected on both, so a subclass adds to the guard
+   rather than replacing it"
+  (Array with: plain with: hardened) do: [:ts |
+    self assert: ([ts assertRemovableDictionaryNamed: 'Globals'. #noRaise]
+      on: McpError do: [:e | e kind]) equals: #refused]
 
 ]
 
@@ -208,4 +233,3 @@ McpExtensionTest >> withReadOnlyDo: aBlock [
     ensure: [SessionTemps current removeKey: #McpReadOnly ifAbsent: [nil]]
 
 ]
-

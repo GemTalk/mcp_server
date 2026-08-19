@@ -23,11 +23,15 @@ implementation -- McpServer's kernel guards reach dictNamed: that way, so the lo
 and the instance-side ones let a registerOn: or handler body read as `self objectSchema: ...` /
 `self resolveClass: ...`.
 
-NB the `server` reference: a toolset's handlers own their own work, but SERVER-LEVEL POLICY stays on
-the server, which is what a subclass overrides to change behavior. So a handler that mutates the
-image asks the server for its kernel guard (`server assertMutableClass:`) rather than deciding for
-itself -- see McpMutationToolset. Handlers that need no policy never touch `server` at all
-(McpGrailToolset and McpFixtureToolset are examples).
+NB the `server` reference: a toolset's handlers own their own work, but the POLICY question 'may this
+be modified at all?' is one answer per deployment, not per tool pack -- so it stays on McpServer
+(protectedDictionaryNames / isProtectedClass:), which is what a subclass overrides to change
+behavior, and the guards here forward to it. A mutating handler writes `self assertMutableClass: cls`
+exactly as it writes `self resolveClass:`; see McpMutationToolset. A toolset is free to impose a
+STRICTER guard of its own on top (or, knowing what it is doing, to skip these and answer to the
+server's read-only gate alone) -- what it must not do is answer the deployment's question
+differently. Handlers that need no policy never touch `server` at all (McpGrailToolset and
+McpFixtureToolset are examples).
 "
 Class {
 	#name : 'McpToolset',
@@ -117,6 +121,37 @@ McpToolset class >> resolveClass: aName [
   | obj |
   obj := System myUserProfile objectNamed: aName asSymbol.
   ^(obj isKindOf: Behavior) ifTrue: [obj] ifFalse: [nil]
+
+]
+
+{ #category : 'guards' }
+McpToolset >> assertMutableClass: aClass [
+  "Answer aClass, or refuse (signal McpError kind:#refused) if it is a protected/kernel class. Every
+   handler that changes a class should pass through here FIRST -- structured mutation never modifies
+   kernel/system classes; execute_code is the deliberate escape hatch, and a deployment that wants
+   even that closed simply does not register McpExecutionToolset.
+   The answer comes from the SERVER, because what counts as protected is one policy per deployment
+   (McpServer>>isProtectedClass:, overridable in a subclass) and two toolsets must not disagree about
+   it. FAIL-CLOSED when there is no server: a toolset that cannot consult the policy refuses to mutate
+   rather than assuming it may."
+  server isNil ifTrue: [
+    ^McpError signalKind: #refused message:
+      'Refused: cannot modify ' , aClass name asString , ' -- this toolset has no server to ask which '
+        , 'classes are protected. Build it with McpToolset class>>on: so it can consult the '
+        , 'deployment''s kernel guard.'].
+  ^server assertMutableClass: aClass
+
+]
+
+{ #category : 'guards' }
+McpToolset >> assertRemovableDictionaryNamed: aName [
+  "Answer aName, or refuse (McpError kind:#refused) if it names a protected system dictionary. Same
+   forward-and-fail-closed rule as assertMutableClass:, for removing a symbol dictionary."
+  server isNil ifTrue: [
+    ^McpError signalKind: #refused message:
+      'Refused: cannot remove dictionary ' , aName asString , ' -- this toolset has no server to ask '
+        , 'which dictionaries are protected. Build it with McpToolset class>>on:.'].
+  ^server assertRemovableDictionaryNamed: aName
 
 ]
 

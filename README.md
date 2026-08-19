@@ -202,7 +202,7 @@ explicitly in a router's `toolsetNames`.
 | `McpRouter` | front end: accept loop, HTTP, routing, the `MCP-Session-Id → McpSession` map, and the idle reaper. Owns the socket; never runs a tool |
 | `McpAuthRouter` | network-facing `McpRouter` subclass: requires an OAuth/JWT bearer token, logs each worker in as its own GemStone user, serves the `WWW-Authenticate` challenge + RFC 9728 metadata, validates token claims/scopes, adds TLS, and (via `writeScope`) can open a session read-only |
 | `McpServer` | per-client worker: the single-client MCP server that runs inside each worker gem — registry, dispatcher, the kernel guards, read-only gating, identity. The tools themselves belong to its toolsets, and which of those it registers is not fixed by the class. No socket |
-| `McpToolset` | abstract tool pack: `registerOn:` (its tools + schemas), its `tool_*` handlers, `toolNames`, `readOnlySafeToolNames` (empty by default — fail closed), plus the shared schema builders and image-lookup helpers. **Subclass this to add tools**; a deployment picks the list |
+| `McpToolset` | abstract tool pack: `registerOn:` (its tools + schemas), its `tool_*` handlers, `toolNames`, `readOnlySafeToolNames` (empty by default — fail closed), plus the shared schema builders, image-lookup helpers, and the kernel guards (which forward to the server's policy). **Subclass this to add tools**; a deployment picks the list |
 | `McpBrowsingToolset`, `McpExecutionToolset`, `McpListingToolset`, `McpMutationToolset`, `McpSearchToolset`, `McpSessionToolset`, `McpTestingToolset` | the seven core toolsets, one per tool family. A deployment can expose any subset — or none of them, alongside its own |
 | `McpGrailToolset` | optional Python toolset (`eval_python`, `compile_python`), filed in only on a Grail image. Needs nothing from the server, so it doubles as the worked example for a third-party toolset |
 | `McpSession` | one client's isolated worker handle: a `GsTsExternalSession` gem + session id + last-activity + the worker class/toolsets/identity the front end resolved. `prepareWorker` sets the gem up in one call; `forward:` runs a request in it (`<workerClass> handleJsonString: …`); `close` stops it |
@@ -448,9 +448,12 @@ declare `readOnlySafeToolNames` for whichever of your tools cannot persist a cha
 on the same class, taking the parsed argument dictionary and returning a `String`; the inherited
 `resolveClass:`, `dictNamed:`, `linesFrom:` and `capResult:` helpers cover the usual image lookups
 and output capping. `McpFixtureToolset` (in `Mcp-Tests`) and `McpGrailToolset` are small worked
-examples. A handler that *mutates* the image should route through the server's kernel guard
-(`server assertMutableClass:`), which is server-level policy rather than the toolset's to decide —
-`McpMutationToolset` shows the pattern.
+examples. A handler that *mutates* the image should pass through the inherited kernel guard
+(`self assertMutableClass: cls`) before it changes anything; that forwards to the server, because
+what counts as protected is one answer per deployment rather than each toolset's to invent, and a
+subclass can tighten it for every toolset at once. `McpMutationToolset` shows the pattern. Your
+toolset may layer a *stricter* guard of its own on top; a toolset built with no server refuses to
+mutate at all, fail-closed.
 
 Errors raised inside a handler are caught by the dispatcher and returned as an MCP error result
 (`isError: true`) carrying a structured `kind`. If your tools can raise exceptions **outside** the

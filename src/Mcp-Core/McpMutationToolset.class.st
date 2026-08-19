@@ -3,11 +3,11 @@ The tools that change the image and commit: define/redefine a class, compile or 
 set a class comment, add or remove a symbol dictionary.
 
 NONE are read-only-safe (readOnlySafeToolNames is inherited, i.e. empty), so a read-only session
-drops this toolset whole. Every handler additionally asks the SERVER for its kernel guard
-(server assertMutableClass: / assertRemovableDictionaryNamed:), so even a read-write session cannot
-modify a protected class. That guard deliberately stays on McpServer rather than moving here with the
-handlers: what counts as protected is server-level policy, and overriding it is exactly what
-subclassing McpServer is for.
+drops this toolset whole. Every handler additionally passes through the inherited kernel guard
+(self assertMutableClass: / self assertRemovableDictionaryNamed:, see McpToolset) before it changes
+anything, so even a read-write session cannot modify a protected class. That guard FORWARDS to the
+server, which is where the policy lives and where a subclass overrides it: what counts as protected
+is one answer per deployment, not one per tool pack.
 "
 Class {
 	#name : 'McpMutationToolset',
@@ -152,7 +152,7 @@ McpMutationToolset >> tool_compile_class_definition: args [
   recompile := (args at: 'recompileMethods' ifAbsent: [true]) ~~ false.
   name := self classNameFromDefinition: source.
   existing := name notNil ifTrue: [self resolveClass: name] ifFalse: [nil].
-  existing ifNotNil: [:c | server assertMutableClass: c].  "refuse redefining a kernel class (any recompile setting)"
+  existing ifNotNil: [:c | self assertMutableClass: c].  "refuse redefining a kernel class (any recompile setting)"
   oldClass := recompile ifTrue: [existing] ifFalse: [nil].
   (recompile and: [oldClass notNil and: [oldClass subclasses isEmpty not]]) ifTrue: [
     ^'Refused: ' , name asString , ' has subclasses '
@@ -177,7 +177,7 @@ McpMutationToolset >> tool_compile_method: args [
   ^cls isNil
     ifTrue: ['Class not found: ' , (args at: 'className')]
     ifFalse: [
-      server assertMutableClass: cls.
+      self assertMutableClass: cls.
       target := ((args at: 'meta' ifAbsent: [false]) == true) ifTrue: [cls class] ifFalse: [cls].
       errs := target
         compileMethod: (args at: 'source')
@@ -196,7 +196,7 @@ McpMutationToolset >> tool_delete_class: args [
   ^cls isNil
     ifTrue: ['Class not found: ' , (args at: 'className')]
     ifFalse: [
-      server assertMutableClass: cls.
+      self assertMutableClass: cls.
       arr := System myUserProfile dictionaryAndSymbolOf: cls.
       arr isNil
         ifTrue: ['Class is not resident in a dictionary: ' , (args at: 'className')]
@@ -214,7 +214,7 @@ McpMutationToolset >> tool_delete_method: args [
   ^cls isNil
     ifTrue: ['Class not found: ' , (args at: 'className')]
     ifFalse: [
-      server assertMutableClass: cls.
+      self assertMutableClass: cls.
       target := ((args at: 'meta' ifAbsent: [false]) == true) ifTrue: [cls class] ifFalse: [cls].
       sel := (args at: 'selector') asSymbol.
       (target selectors includes: sel)
@@ -232,7 +232,7 @@ McpMutationToolset >> tool_remove_dictionary: args [
   dict := self dictNamed: name.
   ^dict isNil
     ifTrue: ['Dictionary not found: ' , name]
-    ifFalse: [server assertRemovableDictionaryNamed: name.
+    ifFalse: [self assertRemovableDictionaryNamed: name.
       up := System myUserProfile.
       up removeDictionaryAt: (up symbolList indexOf: dict).
       up symbolList do: [:d | (d at: name asSymbol ifAbsent: [nil]) == dict ifTrue: [d removeKey: name asSymbol ifAbsent: [nil]]].
@@ -246,7 +246,7 @@ McpMutationToolset >> tool_set_class_comment: args [
   | cls |
   cls := self resolveClass: (args at: 'className').
   ^cls isNil ifTrue: ['Class not found: ' , (args at: 'className')] ifFalse: [
-    server assertMutableClass: cls.
+    self assertMutableClass: cls.
     cls comment: (args at: 'comment').
     System commitTransaction.
     'Comment set on ' , cls name asString , ' and committed.']

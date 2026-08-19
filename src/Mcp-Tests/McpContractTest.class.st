@@ -419,6 +419,37 @@ McpContractTest >> testSyntaxErrorClassifiedAsCompileError [
 
 ]
 
+{ #category : 'tests - guard' }
+McpContractTest >> testToolsetGuardFailsClosedWithNoServer [
+  "FAIL-CLOSED: a toolset built with no server cannot ask which classes are protected, so it refuses
+   to mutate rather than assuming it may -- and says so as an ordinary #refused, the same kind the
+   server's own guard raises, so a client sees no new error shape."
+  | ts classKind dictKind |
+  ts := McpMutationToolset new.
+  classKind := [ts assertMutableClass: Object. #noRaise] on: McpError do: [:e | e kind].
+  dictKind := [ts assertRemovableDictionaryNamed: 'UserGlobals'. #noRaise]
+    on: McpError do: [:e | e kind].
+  self assert: classKind equals: #refused.
+  self assert: dictKind equals: #refused
+
+]
+
+{ #category : 'tests - guard' }
+McpContractTest >> testToolsetGuardForwardsToTheServer [
+  "A toolset's guard is a forward, not a second opinion: with a server attached it answers exactly
+   what that server's policy says -- refusing a kernel class, passing a user class through."
+  | ts probe |
+  ts := McpMutationToolset on: McpServer new.
+  self assert: ([ts assertMutableClass: Object. #noRaise] on: McpError do: [:e | e kind])
+    equals: #refused.
+  probe := Object subclass: 'McpGuardForwardProbe'
+    instVarNames: #() classVars: #() classInstVars: #()
+    poolDictionaries: #() inDictionary: UserGlobals options: #().
+  [self assert: (ts assertMutableClass: probe) == probe]
+    ensure: [UserGlobals removeKey: #McpGuardForwardProbe ifAbsent: [nil]]
+
+]
+
 { #category : 'tests - read-only' }
 McpContractTest >> testToolsetSafeNamesAreItsOwnTools [
   "A toolset may only vouch for tools it actually provides: every name in its readOnlySafeToolNames
@@ -497,6 +528,7 @@ McpContractTest >> toolCall: toolName args: argsDict [
     (Dictionary new at: 'name' put: toolName; at: 'arguments' put: argsDict; yourself)
 
 ]
+
 { #category : 'helpers' }
 McpContractTest >> withFreshWorkerCacheDo: aBlock [
   "Clear the per-session worker-instance cache BEFORE and after, so a test driving the class-side
@@ -506,4 +538,3 @@ McpContractTest >> withFreshWorkerCacheDo: aBlock [
   ^[aBlock value] ensure: [SessionTemps current removeKey: #McpServer ifAbsent: [nil]]
 
 ]
-
