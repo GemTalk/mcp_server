@@ -346,6 +346,7 @@ McpTransportTest >> testUnsupportedProtocolVersionReturns400 [
   self assert: (self includesCS: 'Unsupported MCP-Protocol-Version' in: out)
 
 ]
+
 { #category : 'tests - worker config' }
 McpTransportTest >> testValidateWorkerConfigRefusesUnusableNames [
   "runOnPort: validates before binding: a well-formed name that does not resolve to a usable class
@@ -385,4 +386,3 @@ McpTransportTest >> testWorkerConfigDefaultsAreResolvedByTheFrontEnd [
   self assert: r effectiveToolsetNames isEmpty
 
 ]
-

@@ -10,8 +10,9 @@ wanting python tools AND their own had to inherit from. It is picked up automati
 McpServer class>>installedDefaultToolsetNames once this package is loaded, or named explicitly in a
 router's toolsetNames.
 
-Unlike the core toolsets this one owns its handlers (see McpToolset), so it also serves as the worked
-example for a third-party toolset. NOT read-only-safe: readOnlySafeToolNames is inherited (empty), so
+Like every toolset it owns its handlers (see McpToolset), and needing no server-level policy it never
+touches `server` at all -- so it also serves as the worked example for a third-party toolset. NOT
+read-only-safe: readOnlySafeToolNames is inherited (empty), so
 a read-only session drops both tools -- running arbitrary Python can persist anything.
 
 The handlers DO catch Python exceptions, unlike every core tool, and they have to: Grail models them
@@ -51,18 +52,18 @@ McpGrailToolset >> registerOn: aToolRegistry [
 { #category : 'tools - python' }
 McpGrailToolset >> tool_compile_python: args [
   "Transpile Python source to Smalltalk via Grail and answer the generated source. capResult: is the
-   server's shared 50k output cap; Python errors become #pythonError (withPythonErrorsAsMcpError:)."
+   shared 50k output cap (McpToolset); Python errors become #pythonError (withPythonErrorsAsMcpError:)."
   ^self withPythonErrorsAsMcpError: [
-    server capResult: (ModuleAst parseSource: (args at: 'code')) smalltalkSource]
+    self capResult: (ModuleAst parseSource: (args at: 'code')) smalltalkSource]
 
 ]
 
 { #category : 'tools - python' }
 McpGrailToolset >> tool_eval_python: args [
   "Evaluate Python source via Grail and answer the printString of the result. capResult: is the
-   server's shared 50k output cap; Python errors become #pythonError (withPythonErrorsAsMcpError:)."
+   shared 50k output cap (McpToolset); Python errors become #pythonError (withPythonErrorsAsMcpError:)."
   ^self withPythonErrorsAsMcpError: [
-    server capResult: (ModuleAst evaluateSource: (args at: 'code')) printString]
+    self capResult: (ModuleAst evaluateSource: (args at: 'code')) printString]
 
 ]
 
@@ -86,4 +87,3 @@ McpGrailToolset >> withPythonErrorsAsMcpError: aBlock [
       ex class name asString , ': ' , ([ex description] on: Error do: [:x | '(no detail available)'])]
 
 ]
-

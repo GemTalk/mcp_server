@@ -1,16 +1,30 @@
 "
 The class-browsing tools: describe a class, export its source, read its definition, walk its
 hierarchy, read one method's source, list its selectors by category. All read-only-safe -- nothing
-here can persist a change.
-
-Handlers still live on McpServer (category 'tools - browsing'); see McpToolset's class comment on
-that transitional seam.
+here can persist a change, so none of these handlers needs the server's kernel guard.
 "
 Class {
 	#name : 'McpBrowsingToolset',
 	#superclass : 'McpToolset',
 	#category : 'Mcp-Core'
 }
+
+{ #category : 'private' }
+McpBrowsingToolset >> methodsReportFor: aBehavior label: aLabel [
+  "Group aBehavior's selectors by category into a readable report."
+  | byCat s |
+  byCat := Dictionary new.
+  aBehavior selectors do: [:sel | | cat |
+    cat := (aBehavior categoryOfSelector: sel) ifNil: [#'(uncategorized)'].
+    (byCat at: cat asString ifAbsentPut: [OrderedCollection new]) add: sel asString].
+  s := WriteStream on: String new.
+  s nextPutAll: aLabel; nextPutAll: ' methods:'; nextPut: Character lf.
+  byCat keys asSortedCollection do: [:cat |
+    s nextPutAll: '  '; nextPutAll: cat; nextPut: Character lf.
+    (byCat at: cat) asSortedCollection do: [:sel | s nextPutAll: '    '; nextPutAll: sel; nextPut: Character lf]].
+  ^s contents
+
+]
 
 { #category : 'read-only' }
 McpBrowsingToolset >> readOnlySafeToolNames [
@@ -27,16 +41,16 @@ McpBrowsingToolset >> registerOn: aToolRegistry [
     required: (Array with: 'className').
   aToolRegistry name: 'describe_class'
     description: 'Describe a class: superclass, instance variables, and selectors.'
-    inputSchema: classArg do: [:args | server tool_describe_class: args].
+    inputSchema: classArg do: [:args | self tool_describe_class: args].
   aToolRegistry name: 'export_class_source'
     description: 'Export a class as a Topaz file-in (class definition plus all methods).'
-    inputSchema: classArg do: [:args | server tool_export_class_source: args].
+    inputSchema: classArg do: [:args | self tool_export_class_source: args].
   aToolRegistry name: 'get_class_definition'
     description: 'Return the class definition (superclass, instance/class variables, pools) as a source expression.'
-    inputSchema: classArg do: [:args | server tool_get_class_definition: args].
+    inputSchema: classArg do: [:args | self tool_get_class_definition: args].
   aToolRegistry name: 'get_class_hierarchy'
     description: 'Show the superclass chain (top-down, indented) and the direct subclasses of a class.'
-    inputSchema: classArg do: [:args | server tool_get_class_hierarchy: args].
+    inputSchema: classArg do: [:args | self tool_get_class_hierarchy: args].
   aToolRegistry name: 'get_method_source'
     description: 'Return the source code of a method. Set meta=true for the class-side method.'
     inputSchema: (self objectSchema:
@@ -46,11 +60,87 @@ McpBrowsingToolset >> registerOn: aToolRegistry [
         at: 'meta' put: (self boolProperty: 'true for the class-side method (default false)');
         yourself)
       required: (Array with: 'className' with: 'selector'))
-    do: [:args | server tool_get_method_source: args].
+    do: [:args | self tool_get_method_source: args].
   aToolRegistry name: 'list_methods'
     description: 'List a class instance-side and class-side method selectors, grouped by category.'
-    inputSchema: classArg do: [:args | server tool_list_methods: args].
+    inputSchema: classArg do: [:args | self tool_list_methods: args].
   ^self
+
+]
+
+{ #category : 'tools - browsing' }
+McpBrowsingToolset >> tool_describe_class: args [
+  | cls nl |
+  cls := self resolveClass: (args at: 'className').
+  nl := String with: Character lf.
+  ^cls isNil
+    ifTrue: ['Class not found: ' , (args at: 'className')]
+    ifFalse: [
+      'name=' , cls name , nl ,
+      'superclass=' , (cls superclass isNil ifTrue: ['nil'] ifFalse: [cls superclass name]) , nl ,
+      'instVarNames=' , cls instVarNames printString , nl ,
+      'selectors=' , (cls selectors asSortedCollection asArray) printString]
+
+]
+
+{ #category : 'tools - browsing' }
+McpBrowsingToolset >> tool_export_class_source: args [
+  | cls |
+  cls := self resolveClass: (args at: 'className').
+  ^cls isNil ifTrue: ['Class not found: ' , (args at: 'className')] ifFalse: [cls fileOutClass]
+
+]
+
+{ #category : 'tools - browsing' }
+McpBrowsingToolset >> tool_get_class_definition: args [
+  | cls |
+  cls := self resolveClass: (args at: 'className').
+  ^cls isNil ifTrue: ['Class not found: ' , (args at: 'className')] ifFalse: [cls definition]
+
+]
+
+{ #category : 'tools - browsing' }
+McpBrowsingToolset >> tool_get_class_hierarchy: args [
+  | cls s chain c subs |
+  cls := self resolveClass: (args at: 'className').
+  ^cls isNil ifTrue: ['Class not found: ' , (args at: 'className')] ifFalse: [
+    s := WriteStream on: String new.
+    chain := OrderedCollection new. c := cls.
+    [c notNil] whileTrue: [chain addFirst: c. c := c superclass].
+    1 to: chain size do: [:i |
+      ((i - 1) * 2) timesRepeat: [s nextPut: Character space].
+      s nextPutAll: (chain at: i) name asString; nextPut: Character lf].
+    s nextPutAll: 'Direct subclasses:'; nextPut: Character lf.
+    subs := (cls subclasses collect: [:x | x name asString]).
+    subs isEmpty
+      ifTrue: [s nextPutAll: '  (none)']
+      ifFalse: [subs asSortedCollection do: [:n | s nextPutAll: '  '; nextPutAll: n; nextPut: Character lf]].
+    s contents]
+
+]
+
+{ #category : 'tools - browsing' }
+McpBrowsingToolset >> tool_get_method_source: args [
+  | cls target src |
+  cls := self resolveClass: (args at: 'className').
+  ^cls isNil
+    ifTrue: ['Class not found: ' , (args at: 'className')]
+    ifFalse: [
+      target := ((args at: 'meta' ifAbsent: [false]) == true) ifTrue: [cls class] ifFalse: [cls].
+      src := [target sourceCodeAt: (args at: 'selector') asSymbol] on: Error do: [:ex | nil].
+      src isNil
+        ifTrue: ['No such method: ' , (args at: 'className') , '>>' , (args at: 'selector')]
+        ifFalse: [src]]
+
+]
+
+{ #category : 'tools - browsing' }
+McpBrowsingToolset >> tool_list_methods: args [
+  | cls |
+  cls := self resolveClass: (args at: 'className').
+  ^cls isNil ifTrue: ['Class not found: ' , (args at: 'className')] ifFalse: [
+    (self methodsReportFor: cls label: 'Instance') , (String with: Character lf)
+      , (self methodsReportFor: cls class label: 'Class')]
 
 ]
 

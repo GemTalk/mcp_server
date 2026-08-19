@@ -201,10 +201,10 @@ explicitly in a router's `toolsetNames`.
 | `McpBase` | abstract superclass of the router + worker; holds only the two shared helpers (`parseBody:`, `log:`) |
 | `McpRouter` | front end: accept loop, HTTP, routing, the `MCP-Session-Id → McpSession` map, and the idle reaper. Owns the socket; never runs a tool |
 | `McpAuthRouter` | network-facing `McpRouter` subclass: requires an OAuth/JWT bearer token, logs each worker in as its own GemStone user, serves the `WWW-Authenticate` challenge + RFC 9728 metadata, validates token claims/scopes, adds TLS, and (via `writeScope`) can open a session read-only |
-| `McpServer` | per-client worker: the single-client MCP server that runs inside each worker gem — registry, dispatcher, the `tool_*` handlers, the kernel guards, read-only gating, identity. Which *tools* it offers is not fixed by the class: it registers a list of toolsets. No socket |
-| `McpToolset` | abstract tool pack: `registerOn:` (its tools + schemas), `toolNames`, `readOnlySafeToolNames` (empty by default — fail closed), plus the shared schema builders. **Subclass this to add tools**; a deployment picks the list |
+| `McpServer` | per-client worker: the single-client MCP server that runs inside each worker gem — registry, dispatcher, the kernel guards, read-only gating, identity. The tools themselves belong to its toolsets, and which of those it registers is not fixed by the class. No socket |
+| `McpToolset` | abstract tool pack: `registerOn:` (its tools + schemas), its `tool_*` handlers, `toolNames`, `readOnlySafeToolNames` (empty by default — fail closed), plus the shared schema builders, image-lookup helpers, and the kernel guards (which forward to the server's policy). **Subclass this to add tools**; a deployment picks the list |
 | `McpBrowsingToolset`, `McpExecutionToolset`, `McpListingToolset`, `McpMutationToolset`, `McpSearchToolset`, `McpSessionToolset`, `McpTestingToolset` | the seven core toolsets, one per tool family. A deployment can expose any subset — or none of them, alongside its own |
-| `McpGrailToolset` | optional Python toolset (`eval_python`, `compile_python`), filed in only on a Grail image. It owns its handlers, so it doubles as the worked example for a third-party toolset |
+| `McpGrailToolset` | optional Python toolset (`eval_python`, `compile_python`), filed in only on a Grail image. Needs nothing from the server, so it doubles as the worked example for a third-party toolset |
 | `McpSession` | one client's isolated worker handle: a `GsTsExternalSession` gem + session id + last-activity + the worker class/toolsets/identity the front end resolved. `prepareWorker` sets the gem up in one call; `forward:` runs a request in it (`<workerClass> handleJsonString: …`); `close` stops it |
 | `McpHttpConnection` | reads one HTTP/1.1 request, writes one JSON response (incl. `MCP-Session-Id`) |
 | `McpDispatcher` | JSON-RPC 2.0 / MCP routing (`initialize`, `tools/list`, `tools/call`); read-only tool gating; structured error kinds |
@@ -366,8 +366,8 @@ Two complementary suites:
 **Unit tests (in-image, no socket)** — `./run-unit-tests.sh` logs in via topaz and runs the base
 `GsTestCase` suites against the server's logic directly (milliseconds, no network), plus the Grail
 suite when `McpGrailToolset` is installed:
-- `McpToolTest` — every `tool_*` handler called directly (grouped by the `tools - *`
-  categories). Tests operate on throwaway fixtures rather than on the production classes: a
+- `McpToolTest` — every `tool_*` handler called directly on its owning toolset (grouped by the
+  `tools - *` categories). Tests operate on throwaway fixtures rather than on the production classes: a
   plain `McpTestFixture` and a `McpTestSuiteFixture` (a `GsTestCase` subclass with passing/
   failing/erroring tests, for the test-runner tools), both classes in `UserGlobals`, plus a
   `McpTestDict` symbol dictionary of its own. All are cleaned up in `tearDown`.
@@ -445,8 +445,15 @@ first is the one you usually want.
 `objectSchema:required:` / `propString:` / `boolProperty:` helpers), implement `toolNames`, and
 declare `readOnlySafeToolNames` for whichever of your tools cannot persist a change — the default is
 *none*, so an undeclared tool is gated in a read-only session. Write the handlers as instance methods
-taking the parsed argument dictionary and returning a `String`. `McpFixtureToolset` (in `Mcp-Tests`)
-and `McpGrailToolset` are small worked examples.
+on the same class, taking the parsed argument dictionary and returning a `String`; the inherited
+`resolveClass:`, `dictNamed:`, `linesFrom:` and `capResult:` helpers cover the usual image lookups
+and output capping. `McpFixtureToolset` (in `Mcp-Tests`) and `McpGrailToolset` are small worked
+examples. A handler that *mutates* the image should pass through the inherited kernel guard
+(`self assertMutableClass: cls`) before it changes anything; that forwards to the server, because
+what counts as protected is one answer per deployment rather than each toolset's to invent, and a
+subclass can tighten it for every toolset at once. `McpMutationToolset` shows the pattern. Your
+toolset may layer a *stricter* guard of its own on top; a toolset built with no server refuses to
+mutate at all, fail-closed.
 
 Errors raised inside a handler are caught by the dispatcher and returned as an MCP error result
 (`isError: true`) carrying a structured `kind`. If your tools can raise exceptions **outside** the
@@ -515,6 +522,5 @@ server for their own software, exposing only their tools. The Python tools deleg
 Future work: true concurrent cross-client forwarding; server-initiated SSE messages (which would let
 `notifications/tools/list_changed` announce a surface change); an external OIDC identity provider;
 mapping **OAuth scopes to toolsets**, so a token's scopes select what it may see rather than only
-whether it may write; an optional `serverInfo.title` for a per-deployment label distinct from the
-product name; and moving each toolset's handlers onto the toolset itself (they still live on
-`McpServer` for the core seven).
+whether it may write; and an optional `serverInfo.title` for a per-deployment label distinct from the
+product name.
