@@ -38,9 +38,9 @@ McpFixtureToolset >> tool_fixture_echo: args [
   ^'echo: ' , (args at: 'text')
 
 ]
+
 { #category : 'accessing' }
 McpFixtureToolset >> toolNames [
   ^#( 'fixture_echo' )
 
 ]
-

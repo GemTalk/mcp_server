@@ -114,6 +114,7 @@ McpGrailToolsetTest >> testGrailToolsetIsGatedInReadOnlySession [
       ensure: [SessionTemps current removeKey: #McpReadOnly ifAbsent: [nil]]
 
 ]
+
 { #category : 'tests' }
 McpGrailToolsetTest >> testGrailToolsetJoinsTheInstalledDefaultSurface [
   "On a Grail-equipped image the optional toolset is picked up automatically: the front end resolves
@@ -201,4 +202,3 @@ McpGrailToolsetTest >> toolCall: toolName args: argsDict [
     (Dictionary new at: 'name' put: toolName; at: 'arguments' put: argsDict; yourself)
 
 ]
-

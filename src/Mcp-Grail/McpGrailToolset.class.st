@@ -87,4 +87,3 @@ McpGrailToolset >> withPythonErrorsAsMcpError: aBlock [
       ex class name asString , ': ' , ([ex description] on: Error do: [:x | '(no detail available)'])]
 
 ]
-
