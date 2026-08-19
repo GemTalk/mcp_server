@@ -404,8 +404,9 @@ suite when `McpGrailToolset` is installed:
 Run a single suite while a server is up via the `run_test_class` tool (e.g. `run_test_class
 McpToolTest`). `./run-unit-tests.sh` runs the socket-less suites — `McpToolTest`, `McpDispatcherTest`,
 `McpTransportTest`, `McpContractTest`, `McpExtensionTest` (**124 tests**, **133 with the 9 in
-`McpGrailToolsetTest`** on a Grail image) — and exits 0 when all pass. `McpAuthTest` (16) needs
-netldi, so run it with `run_test_class` or the scripts.
+`McpGrailToolsetTest`** on a Grail image) — and exits 0 when all pass. `McpAuthTest` (24) and
+`McpAuthConformanceTest` (25) live on the `auth` branch and need netldi, so run them there with
+`run_test_class` or the scripts — 173 tests in total on that branch.
 
 > Note: a test helper must never reuse a SUnit framework selector (`run:`, `setUp`, …) — doing
 > so shadows the framework method and silently breaks `suite run`. The transport helper is named
