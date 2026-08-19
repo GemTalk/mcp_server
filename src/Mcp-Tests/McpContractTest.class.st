@@ -70,6 +70,19 @@ McpContractTest >> testAssertMutableClassRaisesRefused [
 
 ]
 
+{ #category : 'tests - read-only' }
+McpContractTest >> testCoreReadOnlyAllowListIsPinned [
+  "The read-only allow-list is now distributed -- each toolset declares its own safe names and the
+   server answers their union -- so pin that union against the audit list
+   (McpServer class>>coreReadOnlySafeToolNames). Without this, a new core tool could quietly become
+   'safe', or drop out of the gate, with no single place showing it."
+  | union pinned |
+  union := McpServer new readOnlySafeToolNames asSortedCollection asArray.
+  pinned := McpServer coreReadOnlySafeToolNames asSortedCollection asArray.
+  self assert: union equals: pinned
+
+]
+
 { #category : 'tests - registry' }
 McpContractTest >> testEveryDescriptorIsWellFormed [
   "Every tools/list descriptor has a non-empty name + description and an inputSchema."
@@ -91,6 +104,38 @@ McpContractTest >> testEverySchemaIsClosed [
     schema := d at: 'inputSchema'.
     self assert: (schema at: 'type') equals: 'object'.
     self assert: (schema at: 'additionalProperties' ifAbsent: [true]) == false]
+
+]
+
+{ #category : 'tests - toolsets' }
+McpContractTest >> testInstalledDefaultToolsetNamesIsCorePlusGrailWhenPresent [
+  "The front end resolves the default surface with this (McpRouter>>effectiveToolsetNames). It is the
+   core seven, plus McpGrailToolset only when that optional file is loaded -- so assert
+   image-agnostically: the core names are always there, and any extra is the Grail toolset."
+  | installed |
+  installed := McpServer installedDefaultToolsetNames.
+  McpServer defaultToolsetNames do: [:n | self assert: (installed includes: n)].
+  (installed reject: [:n | McpServer defaultToolsetNames includes: n]) do: [:extra |
+    self assert: extra equals: 'McpGrailToolset']
+
+]
+
+{ #category : 'tests - guard' }
+McpContractTest >> testKernelGuardIgnoresShadowingDictionary [
+  "#2: the guard must not be fooled by symbol-list ORDER. A dictionary earlier in the symbol list that
+   also binds a kernel name (exactly what Grail's Python dictionary does with Object) once made
+   dictionaryAndSymbolOf: answer that dictionary, so Object read as unprotected and the mutation tools
+   would have modified kernel classes. Simulates the shadow, so this holds in any image.
+   No commit and no dispatcher here -- a tools/call would abort the transaction and undo the fixture."
+  | up shadow |
+  up := System myUserProfile.
+  shadow := SymbolDictionary new.
+  shadow at: #Object put: Object.
+  shadow at: #McpShadowProbe put: 42.
+  up insertDictionary: shadow at: 1.
+  [self assert: (up dictionaryAndSymbolOf: Object) first == shadow.  "the shadow really does win"
+   self assert: (McpServer new isProtectedClass: Object)]            "...and the guard still refuses"
+    ensure: [up removeDictionaryAt: (up symbolList indexOf: shadow)]
 
 ]
 
@@ -166,6 +211,43 @@ McpContractTest >> testPingReturnsEmptyResult [
 
 ]
 
+{ #category : 'tests - worker' }
+McpContractTest >> testPrepareWorkerAppliesReadOnlyBeforeBuilding [
+  "Read-only must be set before the build, or the gated tools would already be registered."
+  self withFreshWorkerCacheDo: [
+    self savingReadOnlyDo: [ | out |
+      McpServer prepareWorkerWithToolsets: McpServer defaultToolsetNames
+        readOnly: true serverName: nil version: nil.
+      out := McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'.
+      self deny: (self includesCS: 'execute_code' in: out).
+      self deny: (self includesCS: 'compile_method' in: out).
+      self assert: (self includesCS: 'describe_class' in: out)]]
+
+]
+
+{ #category : 'tests - worker' }
+McpContractTest >> testPrepareWorkerBuildsNamedSurfaceAndCaches [
+  "The bootstrap the front end sends at session open: it sets read-only, builds the named surface, and
+   caches the instance where handleJsonString: finds it -- so the client's first request has no build to
+   do and dispatches through what was prepared."
+  self withFreshWorkerCacheDo: [
+    self savingReadOnlyDo: [ | note listed |
+      note := McpServer
+        prepareWorkerWithToolsets: #('McpBrowsingToolset')
+        readOnly: false serverName: 'acme-db-mcp' version: '2.5.0'.
+      self assert: (self includesCS: 'McpServer ready' in: note).
+      listed := (((McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
+        indexOfSubCollection: 'describe_class') > 0).
+      self assert: listed.
+      "the prepared instance is what answers -- not a freshly built default surface"
+      self deny: ((McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
+        indexOfSubCollection: 'execute_code') > 0.
+      "and the configured identity is what initialize reports"
+      self assert: (self includesCS: 'acme-db-mcp'
+        in: (McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'))]]
+
+]
+
 { #category : 'tests - guard' }
 McpContractTest >> testProtectedClassPredicate [
   "#2: a class whose home dictionary is Globals (the base classes) is protected; a class in a user
@@ -205,6 +287,39 @@ McpContractTest >> testReadOnlyAllowsSafeToolCall [
     result := (self dispatch: (self toolCall: 'describe_class' args:
       (Dictionary new at: 'className' put: 'Object'; yourself))) at: 'result'.
     self deny: (result at: 'isError')]
+
+]
+
+{ #category : 'tests - toolsets' }
+McpContractTest >> testReadOnlyBuildDropsUnsafeToolsetWhole [
+  "Build-time gating (McpServer>>registerToolsets): when the worker is already read-only as the server
+   is built -- the production path -- an all-unsafe toolset contributes NOTHING to the registry, and a
+   mixed one keeps only its safe tools. Stronger than refusing on call: the tool is not there at all."
+  self savingReadOnlyDo: [ | names |
+    McpServer sessionReadOnly: true.
+    names := (McpServer newWithToolsetNames: #('McpMutationToolset' 'McpSessionToolset'))
+      toolRegistry descriptors collect: [:d | d at: 'name'].
+    self deny: (names includes: 'compile_method').   "all-unsafe toolset: dropped whole"
+    self deny: (names includes: 'delete_class').
+    self deny: (names includes: 'commit').           "mixed toolset: unsafe tool pruned"
+    self assert: (names includes: 'abort').          "mixed toolset: safe tools kept"
+    self assert: (names includes: 'status')]
+
+]
+
+{ #category : 'tests - read-only' }
+McpContractTest >> testReadOnlyDistinguishesGatedFromUnknownTool [
+  "The boundary the read-only build introduces: a gated tool is pruned from the registry, so both it
+   and a nonexistent tool are registry misses -- but they must NOT answer the same. The gated one is
+   -32601/readOnly ('exists, forbidden here'), a typo stays -32602/notFound."
+  self savingReadOnlyDo: [ | gated unknown |
+    McpServer sessionReadOnly: true.
+    gated := (self dispatch: (self toolCall: 'commit' args: Dictionary new)) at: 'error'.
+    unknown := (self dispatch: (self toolCall: 'no_such_tool' args: Dictionary new)) at: 'error'.
+    self assert: (gated at: 'code') equals: -32601.
+    self assert: ((gated at: 'data') at: 'kind') equals: 'readOnly'.
+    self assert: (unknown at: 'code') equals: -32602.
+    self assert: ((unknown at: 'data') at: 'kind') equals: 'notFound']
 
 ]
 
@@ -248,6 +363,50 @@ McpContractTest >> testReadOnlyHidesDangerousToolsFromList [
 
 ]
 
+{ #category : 'tests - toolsets' }
+McpContractTest >> testServerBuiltWithOneToolsetExposesOnlyItsTools [
+  "The vendor requirement: a server assembled from chosen toolsets exposes ONLY their tools, with none
+   of the development surface. This is what subclassing could never express."
+  | names |
+  names := (McpServer newWithToolsetNames: #('McpBrowsingToolset')) toolRegistry descriptors
+    collect: [:d | d at: 'name'].
+  self assert: names asSortedCollection asArray
+    equals: McpBrowsingToolset new toolNames asSortedCollection asArray.
+  self deny: (names includes: 'execute_code').
+  self deny: (names includes: 'compile_method').
+  self deny: (names includes: 'commit')
+
+]
+
+{ #category : 'tests - identity' }
+McpContractTest >> testServerInfoDefaultsToStockIdentity [
+  "An unconfigured server reports the stock identity, from the single home for those literals."
+  | info |
+  info := ((self dispatch: (self request: 'initialize' params: Dictionary new)) at: 'result')
+    at: 'serverInfo'.
+  self assert: (info at: 'name') equals: McpServer defaultServerName.
+  self assert: (info at: 'version') equals: McpServer defaultServerVersion
+
+]
+
+{ #category : 'tests - identity' }
+McpContractTest >> testServerInfoFollowsDeploymentConfig [
+  "A deployment assembled from toolsets may never subclass McpServer, so it sets its identity in
+   router config, which the worker bootstrap passes to serverName:/serverVersion:. That must reach the
+   initialize result -- note the dispatcher is built with the server, BEFORE these are set, so this
+   also pins that it asks rather than caching."
+  | s info |
+  s := McpServer new serverName: 'acme-db-mcp'; serverVersion: '2.5.0'; yourself.
+  info := (((McpDispatcher withToolRegistry: s toolRegistry server: s)
+    handle: (self request: 'initialize' params: Dictionary new)) at: 'result') at: 'serverInfo'.
+  self assert: (info at: 'name') equals: 'acme-db-mcp'.
+  self assert: (info at: 'version') equals: '2.5.0'.
+  "and nil restores the default rather than reporting an empty name"
+  s serverName: nil.
+  self assert: s serverName equals: McpServer defaultServerName
+
+]
+
 { #category : 'tests - errors' }
 McpContractTest >> testSyntaxErrorClassifiedAsCompileError [
   "#10: a transpile-time (syntax / undefined-name) error is classified 'compileError' -- distinct
@@ -257,6 +416,31 @@ McpContractTest >> testSyntaxErrorClassifiedAsCompileError [
     (Dictionary new at: 'code' put: '1 +'; yourself))) at: 'result'.
   self assert: (result at: 'isError').
   self assert: (((result at: 'structuredContent') at: 'error') at: 'kind') equals: 'compileError'
+
+]
+
+{ #category : 'tests - read-only' }
+McpContractTest >> testToolsetSafeNamesAreItsOwnTools [
+  "A toolset may only vouch for tools it actually provides: every name in its readOnlySafeToolNames
+   must be one of its toolNames. Catches a copy-paste that would whitelist another toolset's tool."
+  McpServer new toolsets do: [:ts |
+    ts readOnlySafeToolNames do: [:name |
+      self assert: (ts toolNames includes: name)]]
+
+]
+
+{ #category : 'tests - registry' }
+McpContractTest >> testToolsetsCoverEveryRegisteredTool [
+  "toolNames is what config diagnostics and the pinned test above rely on, so it must not drift from
+   what registerOn: actually registers: the union of the toolsets' toolNames is exactly the set of
+   registered tools."
+  | server declared registered |
+  server := McpServer new.
+  declared := OrderedCollection new.
+  server toolsets do: [:ts | declared addAll: ts toolNames].
+  registered := server toolRegistry descriptors collect: [:d | d at: 'name'].
+  self assert: declared asSortedCollection asArray
+    equals: registered asSortedCollection asArray
 
 ]
 
@@ -285,6 +469,18 @@ McpContractTest >> testUnknownToolIsProtocolError [
 
 ]
 
+{ #category : 'tests - toolsets' }
+McpContractTest >> testUnknownToolsetNameIsRefusedByName [
+  "A misnamed toolset must fail loudly at build time, naming the toolset (the front end validates at
+   startup and the worker bootstrap re-checks, but this is the message both surface)."
+  | msg |
+  msg := [McpServer newWithToolsetNames: #('McpNoSuchToolset'). nil]
+    on: Error do: [:e | [e description] on: Error do: [:x | e messageText]].
+  self deny: msg isNil.
+  self assert: (self includesCS: 'McpNoSuchToolset' in: msg)
+
+]
+
 { #category : 'tests - validation' }
 McpContractTest >> testValidArgumentsAccepted [
   "A well-formed call is not rejected by validation (describe_class is read-only -> not isError)."
@@ -301,3 +497,13 @@ McpContractTest >> toolCall: toolName args: argsDict [
     (Dictionary new at: 'name' put: toolName; at: 'arguments' put: argsDict; yourself)
 
 ]
+{ #category : 'helpers' }
+McpContractTest >> withFreshWorkerCacheDo: aBlock [
+  "Clear the per-session worker-instance cache BEFORE and after, so a test driving the class-side
+   handleJsonString: neither inherits a cached server nor leaks one into later tests. SessionTemps
+   outlives each test -- the whole suite runs in one gem session."
+  SessionTemps current removeKey: #McpServer ifAbsent: [nil].
+  ^[aBlock value] ensure: [SessionTemps current removeKey: #McpServer ifAbsent: [nil]]
+
+]
+

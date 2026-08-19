@@ -113,6 +113,26 @@ McpAuthTest >> testAudienceMismatchRejected401 [
 ]
 
 { #category : 'tests' }
+McpAuthTest >> testAuthRouterResolvesWorkerConfigForItsSessions [
+  "An authenticated router resolves the worker class and tool surface exactly like the base one, and
+   hands them to each session it opens -- openSessionForUser:jwt: goes through openSessionCreating:,
+   so nothing here is auth-specific except who the worker logs in as. Uses a stub session, so no JWT
+   user and no gem are needed.
+   Worth pinning on this branch because it is the path a per-token surface will hook into: narrowing
+   toolsetNames by the token's scopes can only happen where the token is, i.e. in the front end."
+  | r sess |
+  r := McpAuthRouter new.
+  self assert: r effectiveWorkerClassName equals: 'McpServer'.
+  self assert: r effectiveToolsetNames equals: McpServer installedDefaultToolsetNames.
+  r workerClassName: 'McpFixtureServer'; toolsetNames: #('McpFixtureToolset'); serverName: 'acme-db-mcp'.
+  sess := r openSessionCreating: [:id | McpStubSession new].
+  self assert: sess workerClassName equals: 'McpFixtureServer'.
+  self assert: sess wasPrepared.
+  self assert: (sess workerExpressionFor: '{}') equals: 'McpFixtureServer handleJsonString: ''{}'''
+
+]
+
+{ #category : 'tests' }
 McpAuthTest >> testBindAddressIsConfigurableButDefaultsToLoopback [
   "McpAuthRouter DOES take a bindAddress -- every request must carry a bearer token -- but it still
    starts on loopback, so reachability is something the caller asks for explicitly."
@@ -140,9 +160,19 @@ McpAuthTest >> testConfigJsonRoundTripsCarriesRsKeys [
     requiredScopes: #('mcp:use');
     extraScopes: #('profile');
     expectedIssuer: 'https://issuer';
-    writeScope: 'mcp:write'.
+    writeScope: 'mcp:write';
+    workerClassName: 'McpFixtureServer';
+    toolsetNames: #('McpFixtureToolset');
+    serverName: 'acme-db-mcp';
+    serverVersion: '2.5.0'.
   dst := McpAuthRouter new applyConfigJson: src configJson.
   self assert: dst readOnly.
+  "the worker-config keys inherited from McpRouter travel too -- McpAuthRouter extends the base
+   allow-list via super, so an authenticated deployment can pick its tool surface the same way"
+  self assert: dst workerClassName equals: 'McpFixtureServer'.
+  self assert: dst toolsetNames equals: #('McpFixtureToolset').
+  self assert: dst serverName equals: 'acme-db-mcp'.
+  self assert: dst serverVersion equals: '2.5.0'.
   self assert: dst allowedOriginHosts equals: #('example.com').
   self assert: dst bindAddress equals: '172.16.73.10'.
   self assert: dst userIdClaim equals: 'preferred_username'.

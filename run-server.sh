@@ -4,9 +4,10 @@
 # McpRouter forkOnPort: spawns a separate gem (via GsTsExternalSession) whose blocking main
 # activity is the accept loop, and detaches it -- so the server keeps running after this script's
 # topaz session logs out. (A background GsProcess fork inside a GCI session would freeze when the
-# session goes idle; a dedicated gem's own activity does not.) The front end is always McpRouter;
-# each per-client worker gem independently loads the most capable installed worker class (the Grail
-# subclass if its file was loaded, otherwise the base McpServer).
+# session goes idle; a dedicated gem's own activity does not.) The front end is always McpRouter; it
+# resolves the worker class and the tool surface ONCE PER SESSION and pushes them into each per-client
+# worker gem, which never chooses for itself. Unconfigured, that is McpServer with the core toolsets
+# plus the Grail (python) toolset when its optional file has been loaded.
 #
 # This script does NOT block -- it returns once the server is forked. To stop the server, run
 # ./stop-server.sh (by port), or use the `System stopSession: <id>` / `kill <pid>` line it prints.
@@ -23,6 +24,10 @@
 #   GS_MCP_PORT- listen port      (default: 8000)
 #   GS_MCP_READONLY - 1 to open a read-only server (mutating tools hidden + refused; a localhost
 #                     convenience so a single user cannot accidentally mutate the image). Default 0.
+#   GS_MCP_WORKER_CLASS - McpServer subclass the workers should instantiate (default McpServer).
+#                     Subclass to change BEHAVIOR; to add tools write a toolset instead.
+#   GS_MCP_TOOLSETS - space-separated McpToolset names to expose instead of the default surface,
+#                     e.g. "McpBrowsingToolset McpSearchToolset". Empty means the default.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -32,9 +37,22 @@ GS_USER="${GS_USER:-DataCurator}"
 GS_PASS="${GS_PASS:-swordfish}"
 GS_MCP_PORT="${GS_MCP_PORT:-8000}"
 GS_MCP_READONLY="${GS_MCP_READONLY:-0}"
+GS_MCP_WORKER_CLASS="${GS_MCP_WORKER_CLASS:-}"
+GS_MCP_TOOLSETS="${GS_MCP_TOOLSETS:-}"
 TOPAZ="$GEMSTONE/bin/topaz"
 
 [ "$GS_MCP_READONLY" = "1" ] && RO="true" || RO="false"
+
+# Optional worker-class / toolset configuration, as extra Smalltalk setter sends on the router.
+CONFIG=""
+[ -n "$GS_MCP_WORKER_CLASS" ] && CONFIG="$CONFIG
+r workerClassName: '$GS_MCP_WORKER_CLASS'."
+if [ -n "$GS_MCP_TOOLSETS" ]; then
+  LITERALS=""
+  for t in $GS_MCP_TOOLSETS; do LITERALS="$LITERALS '$t'"; done
+  CONFIG="$CONFIG
+r toolsetNames: #($LITERALS)."
+fi
 echo "Forking McpRouter (readOnly=$RO) onto 127.0.0.1:$GS_MCP_PORT (detached; this script returns)..."
 "$TOPAZ" -l <<TPZ
 set gemstone $GS_STONE
@@ -43,7 +61,10 @@ set password $GS_PASS
 login
 iferr 1 stk
 run
-(McpRouter new readOnly: $RO) forkOnPort: $GS_MCP_PORT
+| r |
+r := McpRouter new.
+r readOnly: $RO.$CONFIG
+r forkOnPort: $GS_MCP_PORT
 %
 logout
 exit

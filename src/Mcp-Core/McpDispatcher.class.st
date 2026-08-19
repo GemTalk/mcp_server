@@ -9,8 +9,6 @@ Class {
 	#superclass : 'Object',
 	#instVars : [
 		'toolRegistry',
-		'serverName',
-		'serverVersion',
 		'server'
 	],
 	#category : 'Mcp-Core'
@@ -127,8 +125,12 @@ McpDispatcher >> handleToolsCall: params id: id [
   name := params at: 'name' ifAbsent: [nil].
   name isNil ifTrue: [^self errorFor: id code: -32602 message: 'Missing tool name' kind: 'invalidParams'].
   tool := toolRegistry at: name.
-  tool isNil ifTrue: [^self errorFor: id code: -32602 message: 'Unknown tool: ' , name kind: 'notFound'].
-  (self toolAllowed: name) ifFalse: [
+  (tool isNil and: [(self readOnlyGated: name) not]) ifTrue: [
+    ^self errorFor: id code: -32602 message: 'Unknown tool: ' , name kind: 'notFound'].
+  "Read-only refusal, for a gated tool whether or not it is still in the registry: a read-only worker
+   built by the front end never registers its unsafe tools (McpServer>>registerToolsets), but the
+   client must still learn that the tool EXISTS and is forbidden -- not that it is unknown."
+  (tool isNil or: [(self toolAllowed: name) not]) ifTrue: [
     ^self errorFor: id code: -32601
       message: '''' , name , ''' is not available: the server is read-only' kind: 'readOnly'].
   args := params at: 'arguments' ifAbsent: [Dictionary new].
@@ -158,8 +160,8 @@ McpDispatcher >> initializeResultFor: params [
   caps := Dictionary new.
   caps at: 'tools' put: tools.
   info := Dictionary new.
-  info at: 'name' put: serverName.
-  info at: 'version' put: serverVersion.
+  info at: 'name' put: self serverName.
+  info at: 'version' put: self serverVersion.
   d := Dictionary new.
   d at: 'protocolVersion' put: negotiated.
   d at: 'capabilities' put: caps.
@@ -189,6 +191,16 @@ McpDispatcher >> pingResult [
 
 ]
 
+{ #category : 'read-only' }
+McpDispatcher >> readOnlyGated: aToolName [
+  "Whether aToolName is one of the server's own tools that this read-only session may not run --
+   i.e. absent from the registry (or refused) because of read-only, not because it does not exist.
+   False when there is no server (isolated dispatcher tests), so an unknown tool stays 'notFound'."
+  ^server notNil
+    and: [(server allToolNames includes: aToolName) and: [(server isToolAllowed: aToolName) not]]
+
+]
+
 { #category : 'responses' }
 McpDispatcher >> resultFor: id with: resultObj [
   | d |
@@ -200,12 +212,27 @@ McpDispatcher >> resultFor: id with: resultObj [
 
 ]
 
+{ #category : 'accessing' }
+McpDispatcher >> serverName [
+  "The serverInfo name to report: ASK the server rather than caching a copy, because the worker
+   bootstrap may set its name (from router config) AFTER this dispatcher was built -- the server is
+   constructed with its dispatcher, so a value cached at construction time would always be the
+   default. Falls back to the class default when there is no server (isolated dispatcher tests)."
+  ^server isNil ifTrue: [McpServer defaultServerName] ifFalse: [server serverName]
+
+]
+
+{ #category : 'accessing' }
+McpDispatcher >> serverVersion [
+  "See serverName."
+  ^server isNil ifTrue: [McpServer defaultServerVersion] ifFalse: [server serverVersion]
+
+]
+
 { #category : 'initialization' }
 McpDispatcher >> setRegistry: aRegistry server: aServerOrNil [
   toolRegistry := aRegistry.
   server := aServerOrNil.
-  serverName := 'gemstone-mcp'.
-  serverVersion := '0.1.0'.
   ^self
 
 ]

@@ -118,6 +118,19 @@ McpTransportTest >> testAbsentOriginServed [
 
 ]
 
+{ #category : 'tests - worker config' }
+McpTransportTest >> testBadWorkerOrToolsetNameIsRefusedAtConfigTime [
+  "A class name from config is interpolated into an executeString: in the worker gem, so anything that
+   is not a plain identifier must be refused when the router is configured -- not carried to the
+   worker. A typo should stop the server starting rather than break every request."
+  #('' 'has space' 'has-dash' '9leading' 'quote''s' 'Semi;colon') do: [:bad |
+    self should: [McpRouter new workerClassName: bad] raise: Error.
+    self should: [McpRouter new toolsetNames: (Array with: bad)] raise: Error].
+  "a legal identifier is accepted, and a Symbol is stored as a String (JSON-safe for the fork string)"
+  self assert: (McpRouter new workerClassName: #McpServer; workerClassName) equals: 'McpServer'
+
+]
+
 { #category : 'tests' }
 McpTransportTest >> testBaseRouterIsLoopbackOnly [
   "A base McpRouter performs NO authentication, so it must not be bindable to a reachable address:
@@ -153,10 +166,18 @@ McpTransportTest >> testConfigJsonRoundTrips [
   | src dst |
   src := McpRouter new.
   src readOnly: true;
-    allowedOriginHosts: #('example.com').
+    allowedOriginHosts: #('example.com');
+    workerClassName: 'McpServer';
+    toolsetNames: #('McpBrowsingToolset');
+    serverName: 'acme-db-mcp';
+    serverVersion: '2.5.0'.
   dst := McpRouter new applyConfigJson: src configJson.
   self assert: dst readOnly.
   self assert: dst allowedOriginHosts equals: #('example.com').
+  self assert: dst workerClassName equals: 'McpServer'.
+  self assert: dst toolsetNames equals: #('McpBrowsingToolset').
+  self assert: dst serverName equals: 'acme-db-mcp'.
+  self assert: dst serverVersion equals: '2.5.0'.
   self assert: dst tlsCertificateFile isNil.     "unset optional stays nil through the round-trip"
   self assert: dst tlsPrivateKeyFile isNil.
   "an unconfigured router round-trips to its safe defaults -- read-write on, loopback origins"
@@ -325,3 +346,43 @@ McpTransportTest >> testUnsupportedProtocolVersionReturns400 [
   self assert: (self includesCS: 'Unsupported MCP-Protocol-Version' in: out)
 
 ]
+{ #category : 'tests - worker config' }
+McpTransportTest >> testValidateWorkerConfigRefusesUnusableNames [
+  "runOnPort: validates before binding: a well-formed name that does not resolve to a usable class
+   must fail at startup, naming it. Covers both the worker class and a toolset."
+  | msg |
+  msg := [(McpRouter new workerClassName: 'McpNoSuchServerClass') validateWorkerConfig. nil]
+    on: Error do: [:e | [e description] on: Error do: [:x | e messageText]].
+  self deny: msg isNil.
+  self assert: (self includesCS: 'McpNoSuchServerClass' in: msg).
+  "a class that exists but is not an McpServer is refused too"
+  msg := [(McpRouter new workerClassName: 'Object') validateWorkerConfig. nil]
+    on: Error do: [:e | [e description] on: Error do: [:x | e messageText]].
+  self deny: msg isNil.
+  msg := [(McpRouter new toolsetNames: #('McpNoSuchToolset')) validateWorkerConfig. nil]
+    on: Error do: [:e | [e description] on: Error do: [:x | e messageText]].
+  self deny: msg isNil.
+  self assert: (self includesCS: 'McpNoSuchToolset' in: msg).
+  "and a default router validates clean"
+  self assert: McpRouter new validateWorkerConfig notNil
+
+]
+
+{ #category : 'tests - worker config' }
+McpTransportTest >> testWorkerConfigDefaultsAreResolvedByTheFrontEnd [
+  "Unconfigured: the worker class is McpServer and the tool surface is the installed default. Both are
+   resolved HERE (front end) and pushed to the worker, which never chooses for itself."
+  | r |
+  r := McpRouter new.
+  self assert: r workerClassName isNil.
+  self assert: r toolsetNames isNil.
+  self assert: r serverName isNil.
+  self assert: r effectiveWorkerClassName equals: 'McpServer'.
+  self assert: r effectiveToolsetNames equals: McpServer installedDefaultToolsetNames.
+  "configured values win, and an EMPTY toolset list is legal -- a server with no tools"
+  r workerClassName: 'McpFixtureServerProbe'; toolsetNames: #().
+  self assert: r effectiveWorkerClassName equals: 'McpFixtureServerProbe'.
+  self assert: r effectiveToolsetNames isEmpty
+
+]
+

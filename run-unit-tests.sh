@@ -42,10 +42,10 @@ login
 iferr 1 stk
 run
 | s classes grailTest |
-classes := #( 'McpToolTest' 'McpDispatcherTest' 'McpTransportTest' 'McpContractTest' 'McpAuthTest'
-  'McpAuthConformanceTest' ) asOrderedCollection.
-grailTest := System myUserProfile objectNamed: #McpServerWithGrailTest.
-grailTest ifNotNil: [classes add: 'McpServerWithGrailTest'].
+classes := #( 'McpToolTest' 'McpDispatcherTest' 'McpTransportTest' 'McpContractTest'
+  'McpExtensionTest' 'McpAuthTest' 'McpAuthConformanceTest' ) asOrderedCollection.
+grailTest := System myUserProfile objectNamed: #McpGrailToolsetTest.
+grailTest ifNotNil: [classes add: 'McpGrailToolsetTest'].
 s := WriteStream on: String new.
 classes do: [:nm | | res |
   res := (System myUserProfile objectNamed: nm asSymbol) suite run.

@@ -7,6 +7,12 @@ other request is forwarded to that client's worker. The worker runs the actual t
 (McpServer, per gem). This class owns only the socket, the id -> McpSession map (mutex-guarded)
 and the idle-session reaper -- it never parses a tool call itself.
 
+It also decides WHAT each worker is: per session it resolves the worker class (workerClassName) and
+the tool surface (toolsetNames, defaulting to the installed toolsets) and pushes them into the worker
+gem in one call, so a worker never chooses for itself. Resolving here rather than at boot is also what
+will let an authenticated router narrow the surface per token, since the token is only visible on this
+side.
+
 IMPORTANT: runOnPort: is BLOCKING and is meant to be the main activity of a dedicated gem. Forked
 GsProcesses only run while the gem is actively executing Smalltalk, so a background fork in an idle
 GCI session would never serve requests.
@@ -22,6 +28,13 @@ Detached, independent (survives logout); stop it by port with ./stop-server.sh:
     McpRouter new forkOnPort: 8000
 Read-only (a localhost convenience so a single user cannot accidentally mutate the image):
     (McpRouter new readOnly: true) forkOnPort: 8000
+Choose the tool surface -- e.g. a vendor's own tools with none of the Smalltalk-development ones.
+An empty list is legal and means a server offering no tools at all:
+    (McpRouter new toolsetNames: #('AcmeDbToolset'); serverName: 'acme-db-mcp'; serverVersion: '2.5.0')
+      forkOnPort: 8000
+Name an McpServer subclass for the workers (nothing auto-detects one -- subclass to change BEHAVIOR;
+to add tools write an McpToolset instead):
+    (McpRouter new workerClassName: 'AcmeDbServer') forkOnPort: 8000
 TLS (serve HTTPS): give the instance a PEM cert + UNENCRYPTED private key, then run/fork:
     (McpRouter new useTlsCertificateFile: '/path/server.crt' privateKeyFile: '/path/server.key')
       forkOnPort: 8443
@@ -46,7 +59,11 @@ Class {
 		'allowedOriginHosts',
 		'tlsCertificateFile',
 		'tlsPrivateKeyFile',
-		'readOnly'
+		'readOnly',
+		'workerClassName',
+		'toolsetNames',
+		'serverName',
+		'serverVersion'
 	],
 	#category : 'Mcp-Core'
 }
@@ -113,6 +130,10 @@ McpRouter >> applyConfig: aConfigDict [
   tlsCertificateFile := aConfigDict at: 'tlsCertificateFile' ifAbsent: [tlsCertificateFile].
   tlsPrivateKeyFile := aConfigDict at: 'tlsPrivateKeyFile' ifAbsent: [tlsPrivateKeyFile].
   readOnly := aConfigDict at: 'readOnly' ifAbsent: [readOnly].
+  workerClassName := aConfigDict at: 'workerClassName' ifAbsent: [workerClassName].
+  toolsetNames := aConfigDict at: 'toolsetNames' ifAbsent: [toolsetNames].
+  serverName := aConfigDict at: 'serverName' ifAbsent: [serverName].
+  serverVersion := aConfigDict at: 'serverVersion' ifAbsent: [serverVersion].
   ^self
 
 ]
@@ -182,6 +203,10 @@ McpRouter >> configDict [
   d at: 'tlsCertificateFile' put: tlsCertificateFile.
   d at: 'tlsPrivateKeyFile' put: tlsPrivateKeyFile.
   d at: 'readOnly' put: readOnly.
+  d at: 'workerClassName' put: workerClassName.
+  d at: 'toolsetNames' put: toolsetNames.
+  d at: 'serverName' put: serverName.
+  d at: 'serverVersion' put: serverVersion.
   ^d
 
 ]
@@ -214,6 +239,27 @@ McpRouter >> disableTls [
   "Return THIS router to plaintext HTTP (clear its cert + key)."
   tlsCertificateFile := nil.
   tlsPrivateKeyFile := nil
+
+]
+
+{ #category : 'toolsets' }
+McpRouter >> effectiveToolsetNames [
+  "The toolsets this router's NEXT worker will register: the configured list, or the installed default
+   surface. Resolved HERE, in the front end, and pushed into the worker at session open -- a worker
+   never chooses its own tool surface. Probed per session rather than cached, so a Grail install that
+   lands after this router started is picked up by the next client.
+   This is where scope-driven selection will hook in: an authenticated router can narrow the list per
+   principal, which is only possible on this side, because this is where the token is."
+  ^toolsetNames ifNil: [McpServer installedDefaultToolsetNames]
+
+]
+
+{ #category : 'worker class' }
+McpRouter >> effectiveWorkerClassName [
+  "The class this router's workers instantiate: the configured name, or McpServer. Named on every
+   forwarded request (McpSession>>workerExpressionFor:), so the worker gem is told rather than
+   deciding."
+  ^workerClassName ifNil: ['McpServer']
 
 ]
 
@@ -311,6 +357,10 @@ McpRouter >> initialize [
   tlsCertificateFile := nil.
   tlsPrivateKeyFile := nil.
   readOnly := false.
+  workerClassName := nil.  "nil = McpServer"
+  toolsetNames := nil.     "nil = the installed default surface, resolved per session"
+  serverName := nil.       "nil = the worker's own default (McpServer class>>defaultServerName)"
+  serverVersion := nil.
   ^self
 
 ]
@@ -361,6 +411,14 @@ McpRouter >> openSessionCreating: aOneArgBlock [
   | newId sess |
   newId := mutex critical: [self nextSessionId].
   sess := aOneArgBlock value: newId.
+  "Push this router's worker config, then prepare the worker gem -- both BEFORE the session is
+   registered, so no request can reach an unprepared worker. Resolving here (rather than in the
+   worker) is what lets an authenticated router later narrow the tool surface per principal."
+  sess workerClassName: self effectiveWorkerClassName;
+    toolsetNames: self effectiveToolsetNames;
+    serverName: self serverName;
+    serverVersion: self serverVersion;
+    prepareWorker.
   mutex critical: [sessions at: newId put: sess].
   ^sess
 
@@ -503,11 +561,16 @@ McpRouter >> runOnPort: aPort [
   "Bind a localhost-only listener and run the accept loop until #stop.
    BLOCKING: this is meant to be the gem's main activity (forked GsProcesses
    only run while the gem is actively executing Smalltalk)."
+  self validateWorkerConfig.
   serverSocket := self makeListenerOnPort: aPort.
   isRunning := true.
   self forkReaper.
   self log: self class name asString , ' listening on ' ,
     (self tlsEnabled ifTrue: ['https'] ifFalse: ['http']) , '://' , self bindAddress , ':' , aPort printString.
+  self log: 'workers: ' , self effectiveWorkerClassName , ', toolsets: ' ,
+    (self effectiveToolsetNames isEmpty
+      ifTrue: ['(none -- this router offers no tools)']
+      ifFalse: [self effectiveToolsetNames inject: '' into: [:a :b | a isEmpty ifTrue: [b] ifFalse: [a , ' ' , b]]]).
   [isRunning] whileTrue: [
     "Gate the accept on readiness rather than acceptTimeoutMs:: for a GsSecureSocket listener
      acceptTimeoutMs: RAISES on an idle timeout (it treats the nil from a plain-socket timeout as a
@@ -606,6 +669,21 @@ McpRouter >> servePost: req on: conn [
 
 ]
 
+{ #category : 'worker identity' }
+McpRouter >> serverName [
+  "The serverInfo name this router's workers advertise, or nil to let the worker answer its own
+   default. A deployment assembled from third-party toolsets sets this, since it may never subclass
+   McpServer -- see McpServer>>serverName."
+  ^serverName
+
+]
+
+{ #category : 'worker identity' }
+McpRouter >> serverName: aStringOrNil [
+  serverName := aStringOrNil
+
+]
+
 { #category : 'routing' }
 McpRouter >> serveRouted: body sessionId: sid on: conn [
   "Route a non-initialize request to the client's worker by session id (required). Relay the
@@ -618,6 +696,19 @@ McpRouter >> serveRouted: body sessionId: sid on: conn [
   resp isEmpty
     ifTrue: [conn writeStatus: 202 reason: 'Accepted' body: '']
     ifFalse: [conn writeJson: resp]
+
+]
+
+{ #category : 'worker identity' }
+McpRouter >> serverVersion [
+  "The serverInfo version this router's workers advertise, or nil for the worker's own default."
+  ^serverVersion
+
+]
+
+{ #category : 'worker identity' }
+McpRouter >> serverVersion: aStringOrNil [
+  serverVersion := aStringOrNil
 
 ]
 
@@ -694,12 +785,85 @@ McpRouter >> tlsPrivateKeyFile: aPathOrNil [
 
 ]
 
+{ #category : 'toolsets' }
+McpRouter >> toolsetNames [
+  "The toolsets this router asks its workers to register, or nil for the installed default surface
+   (see effectiveToolsetNames). Names, not classes: they cross a gem boundary."
+  ^toolsetNames
+
+]
+
+{ #category : 'toolsets' }
+McpRouter >> toolsetNames: aCollectionOfNamesOrNil [
+  "Choose this router's tool surface by naming toolsets -- e.g. only a vendor's own, with none of the
+   Smalltalk-development tools. Each name is validated as an identifier (validatedClassName:) because
+   it is interpolated into an executeString: in the worker gem. An EMPTY collection is legal and means
+   a server with no tools at all."
+  toolsetNames := aCollectionOfNamesOrNil isNil
+    ifTrue: [nil]
+    ifFalse: [(aCollectionOfNamesOrNil collect: [:n | self validatedClassName: n]) asArray]
+
+]
+
 { #category : 'tls' }
 McpRouter >> useTlsCertificateFile: certPath privateKeyFile: keyPath [
   "Enable TLS on THIS router only. Both files must be readable by the gem when the listener binds.
    Pass the same path twice for a combined cert+key PEM."
   tlsCertificateFile := certPath.
   tlsPrivateKeyFile := keyPath
+
+]
+
+{ #category : 'config' }
+McpRouter >> validatedClassName: aName [
+  "aName as a String, or raise: it must be a plain Smalltalk identifier (a letter, then letters,
+   digits or underscores). Class and toolset names from config are interpolated into an executeString:
+   in the worker gem, so anything else must fail HERE, when the router is configured, rather than on
+   every request. Not a privilege boundary -- whoever sets router config can already run code in this
+   image -- but a typo should stop a server from starting, not half-break it."
+  | s |
+  s := aName asString.
+  (s notEmpty
+    and: [s first isLetter
+    and: [(s detect: [:c | (c isLetter or: [c isDigit or: [c == $_]]) not] ifNone: [nil]) isNil]])
+      ifFalse: [^self error: 'Not a valid class name: ' , s printString
+        , '. Expected a Smalltalk identifier (a letter, then letters, digits or underscores).'].
+  ^s
+
+]
+
+{ #category : 'config' }
+McpRouter >> validateWorkerConfig [
+  "Resolve what this router will ask its workers to build, BEFORE binding a port (runOnPort:), so a
+   name that cannot be used fails at startup with a clear message instead of at a client's first
+   request. Checked in the FRONT END's symbol list; the worker bootstrap checks again in the worker's,
+   which can differ under McpAuthRouter (see McpServer class>>toolsetClassNamed:)."
+  | cls |
+  cls := System myUserProfile objectNamed: self effectiveWorkerClassName asSymbol.
+  ((cls isKindOf: Behavior) and: [cls == McpServer or: [cls inheritsFrom: McpServer]]) ifFalse: [
+    ^self error: 'Worker class not usable: ' , self effectiveWorkerClassName
+      , ' must be McpServer or a subclass, installed in a symbol dictionary in the worker''s symbol '
+      , 'list (e.g. Published).'].
+  self effectiveToolsetNames do: [:n | McpServer toolsetClassNamed: n].
+  ^self
+
+]
+
+{ #category : 'worker class' }
+McpRouter >> workerClassName [
+  "The McpServer subclass this router's workers instantiate, or nil for McpServer itself. Subclassing
+   is for changing BEHAVIOR (kernel guards, the worker entry, dispatcher wiring); to add tools, write
+   a toolset instead (see McpToolset) -- but a subclass is only ever used if it is NAMED here."
+  ^workerClassName
+
+]
+
+{ #category : 'worker class' }
+McpRouter >> workerClassName: aNameOrNil [
+  "Name the worker class (nil restores McpServer). Validated as an identifier -- see
+   validatedClassName:. The class must be visible in the WORKER gem's symbol list, which under
+   McpAuthRouter belongs to the authenticated user, so Published rather than UserGlobals."
+  workerClassName := aNameOrNil isNil ifTrue: [nil] ifFalse: [self validatedClassName: aNameOrNil]
 
 ]
 
