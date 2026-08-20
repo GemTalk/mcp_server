@@ -149,11 +149,11 @@ with no session id to key it on.
 
 **Python (optional — the `McpGrailToolset`)**
 
-These live in the optional `McpGrailToolset`, in its own Rowan packages (`Mcp-Grail`,
-`Mcp-Grail-Tests`) which only `install.sh --grail` loads — they reference `ModuleAst` and
-`BaseException`, so they cannot compile in an image without Grail. Once loaded the toolset joins the
-default tool surface automatically (`McpServer class>>installedDefaultToolsetNames`), or can be named
-explicitly in a router's `toolsetNames`.
+These live in the optional `McpGrailToolset`, in its own source group (`src/grail/`) which only
+`install.sh --grail` loads — they reference `ModuleAst` and `BaseException`, so they cannot compile in
+an image without Grail. Once loaded the toolset joins the default tool surface automatically
+(`McpServer class>>installedDefaultToolsetNames`), or can be named explicitly in a router's
+`toolsetNames`.
 
 | Tool | Arguments | Result |
 |------|-----------|--------|
@@ -325,7 +325,7 @@ forbidden here" from "no such tool". A tool absent because its toolset was never
 export GEMSTONE=/path/to/GemStone64Bit3.7.x   # product dir
 export GS_USER=DataCurator GS_PASS=...         # GemStone credentials
 
-./install.sh                        # load the base classes (Rowan project 'Mcp') and commit
+./install.sh                        # file in the classes (core + tests + auth) and commit
 ./install.sh --grail                # ...and the optional Grail/Python toolset (Grail image only)
 GS_MCP_PORT=8000 ./run-server.sh    # fork a detached, independent localhost server gem and return
 GS_MCP_READONLY=1 ./run-server.sh   # ...read-only (browse/search only; no accidental mutation)
@@ -335,29 +335,63 @@ GS_MCP_WORKER_CLASS=MyMcpServer ./run-server.sh                        # ...a su
 ```
 
 `install.sh` and the `run-*.sh` scripts use topaz; set `GEMSTONE`, `GS_STONE`, `GS_USER`,
-`GS_PASS` to match your environment. `install.sh` loads the code as the Rowan project `Mcp` (see
-`rowan/`); `--grail` (or `GS_MCP_WITH_GRAIL=1`) resolves a different **load spec** —
-`rowan/specs/McpGrail.ston`, which adds the `Grail` component (`Mcp-Grail` + `Mcp-Grail-Tests`) to
-`Core` — so everything is Rowan-managed, with no topaz file-in step. `run-server.sh` builds a base `McpRouter` instance and calls
+`GS_PASS` to match your environment. `install.sh` files the code in with topaz from `load.gs` —
+which on this branch includes `src/auth/`, since the OAuth front end is the point of it; `--grail`
+(or `GS_MCP_WITH_GRAIL=1`) files in `load-grail.gs` instead, which adds the `src/grail/` group on
+top. `run-server.sh` builds a base `McpRouter` instance and calls
 its `forkOnPort:` (`run-auth-server.sh` builds an OIDC-configured `McpAuthRouter` — resource-server
 config as code, no commit), which launches a detached, independent front-end gem and returns; stop it
 with `./stop-server.sh` (by port), or the `System stopSession: <id>` / `kill <pid>` line it prints.
 A loaded Grail toolset is picked up automatically, per session, by the front end.
 
-> **Installing into a Grail image needs a workaround, and `install.sh` applies it.** Every
-> `src/*/package.st` holds the Tonel marker literal `Package { #name : '…' }`, and Rowan resolves that
-> class name through the loading user's symbol list — where **Grail defines its own `Package`** (in
-> `PythonAst`, a `ModuleAst` subclass), ahead of `Globals`. Rowan then gets a Python AST node and the
-> load dies with *"a Package does not understand #at:ifAbsent:"*, in **both** plain and `--grail`
-> modes, before any of our code loads. `install.sh` moves that one **binding** aside for the duration
-> of the load and puts it back afterwards; in an image without Grail nothing fires.
->
-> Two details it learned the hard way. It removes the single `#Package` key rather than the whole
-> dictionary, because hiding all of `PythonAst` also hides `ModuleAst` — and then `--grail` cannot
-> compile. And the restore runs on the normal path (`on: Error do:`, not `ensure:`), because topaz's
-> `iferr 1 : exit 1` ends the session *at* the error and skips an unwind — which once left a Grail
-> image with no `PythonAst` at all. Reported to the Rowan developer 2026-08-18; the block is commented
-> for removal once Rowan resolves the marker robustly, or Grail renames its class.
+### Source layout
+
+The classes live on disk as plain **topaz file-outs** — canonical `Class>>fileOutClass` output,
+grouped by area, with one loader per group:
+
+```
+src/core/    17 classes  the server itself: protocol, transport, dispatch, toolsets
+src/tests/    9 classes  the SUnit suites and their fixtures
+src/auth/     3 classes  the OAuth/OIDC front end McpAuthRouter + its two suites
+src/grail/    2 classes  the optional GemStone-Python toolset + its suite
+load.gs                  files in core + tests + auth, then commits
+load-grail.gs            files in core + tests + auth + grail, then commits
+```
+
+Each group's `load.gs` names its files in dependency order, and every `input` path is relative to the
+**repository root** — `install.sh` `cd`s there before starting topaz, so run any loader from the root
+too. There is no package manager in the loop: a `.gs` file-out files into any image topaz can log
+into, on any GemStone version, with no Rowan and no Tonel.
+
+> **Why each group loader pre-declares its class names.** The classes reference each other in both
+> directions (`McpDispatcher` asks `McpServer` for its name; `McpServer` builds an `McpDispatcher`),
+> so no file order can put every class ahead of its first mention — the compiler would report
+> `undefined symbol` and the file-in would stop. So each loader first binds its class names to `nil`
+> in `Published`. That is enough, because the compiler binds a global by its **association**, and
+> each class definition then fills that same association in; a method compiled before its referent
+> still ends up pointing at the real class. Existing keys are left alone, so re-installing over a
+> loaded image changes nothing.
+
+> **Migrating an image that previously loaded the Rowan project.** Filing these `.gs` files over
+> classes the Rowan `Mcp` project had loaded fails at the *first* method with *"Duplicate definition
+> of signalKind:message: in McpError"* (error 2318) — observed 2026-08-19 on a Rowan 3.5.0 + Grail
+> image, while the identical file-in into a Rowan-free image loaded every class with no compiler
+> errors. The mechanism is not pinned down (topaz's own `removeallmethods` / `removeallclassmethods`
+> do clear the class when run on their own, and a plain `compileMethod:dictionaries:category:`
+> recompiles happily), so treat it as a property of Rowan-managed classes rather than of the
+> file-outs. Install into an image that never loaded the Rowan `Mcp` project, or remove the `Mcp*`
+> keys from `Published` and commit before running `install.sh`.
+
+To regenerate a file-out after changing a class in the image, have topaz write `fileOutClass`
+straight to its file — do not transcribe an `export_class_source` result, which drifts on trailing
+whitespace:
+
+```smalltalk
+| s f |
+s := McpServer fileOutClass.
+f := GsFile openWriteOnServer: '/path/to/gs-mcp/src/core/McpServer.gs'.  "no mode: argument"
+f nextPutAll: s; close.
+```
 
 ## Test
 
@@ -447,7 +481,7 @@ declare `readOnlySafeToolNames` for whichever of your tools cannot persist a cha
 *none*, so an undeclared tool is gated in a read-only session. Write the handlers as instance methods
 on the same class, taking the parsed argument dictionary and returning a `String`; the inherited
 `resolveClass:`, `dictNamed:`, `linesFrom:` and `capResult:` helpers cover the usual image lookups
-and output capping. `McpFixtureToolset` (in `Mcp-Tests`) and `McpGrailToolset` are small worked
+and output capping. `McpFixtureToolset` (in `src/tests/`) and `McpGrailToolset` are small worked
 examples. A handler that *mutates* the image should pass through the inherited kernel guard
 (`self assertMutableClass: cls`) before it changes anything; that forwards to the server, because
 what counts as protected is one answer per deployment rather than each toolset's to invent, and a
