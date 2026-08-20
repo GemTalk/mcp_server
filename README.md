@@ -5,6 +5,10 @@ GemStone Smalltalk. It runs **inside** the image and executes tool calls directl
 Node.js process, no GCI/FFI bridge. The goal is to replace the GCI-based Jasper MCP
 server with one that any MCP client can reach over plain HTTP.
 
+Development is in two branches. The `main` branch includes the standard server (localhost-only, single-user,
+multi-client) with scripts to install and run it on a 3.7.5 stone. The `auth` branch adds a network-facing,
+secure-transport, multi-user server with JWT authentication from an external OIDC IdP (requires 3.7.6).
+
 ## Transport
 
 A single endpoint, `/mcp`, implementing the MCP **Streamable HTTP** transport with **per-client
@@ -57,7 +61,7 @@ version when supported, otherwise answers `2025-11-25`.
 `2025-03-26` is deliberately **not** supported: a server on that revision must accept JSON-RPC
 *batches*, which the single-object body parser does not. `2025-06-18` removed batching.
 
-| Requirement | Behaviour |
+| Requirement | Behavior |
 |---|---|
 | `initialize` version negotiation | echo if supported, else our latest |
 | `ping` | empty result (spec MUST) |
@@ -215,7 +219,7 @@ an image without Grail. Once loaded the toolset joins the default tool surface a
 Built on existing image facilities: `GsSocket` (TCP), `JsonParser parse:` and
 `Object>>asJson` (JSON), and `String>>evaluate` (the `execute_code` engine).
 
-## Why a dedicated gem (important)
+## Why a dedicated gem
 
 Forked `GsProcess`es **only run while the gem is actively executing Smalltalk**. A
 GCI-driven session (like the Jasper VS Code session) is parked in the C client between
@@ -261,7 +265,7 @@ tools itself (those run in the per-client `McpServer` workers):
   the tool in its own session and returns the response, which the front end relays. Missing id →
   `400`; unknown/expired → `404` (a compliant client re-initializes).
 - **DELETE** closes the worker; and an **idle reaper** (a background `GsProcess`) closes any
-  session idle beyond **5 minutes** (`sessionIdleTimeoutSeconds`), so abandoned test gems don't
+  session idle beyond **30 minutes** (`sessionIdleTimeoutSeconds`), so abandoned test gems don't
   pile up.
 
 Isolation comes from each worker being a separate gem = a separate transaction view. Forwarding is
