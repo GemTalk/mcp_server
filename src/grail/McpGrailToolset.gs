@@ -14,15 +14,15 @@ McpToolset subclass: 'McpGrailToolset'
 expectvalue /Class
 doit
 McpGrailToolset comment: 
-'The optional GemStone-Python (Grail) tools: eval_python and compile_python. Its own package because
-it loads ONLY into a Grail-equipped image -- a method referencing ModuleAst cannot be compiled
-without Grail present -- so it is reached through a separate load spec (rowan/specs/McpGrail.ston,
-i.e. install.sh --grail) rather than the default one.
+'The optional GemStone-Python (Grail) tools: eval_python and compile_python. Its own source group
+(src/grail/) because it loads ONLY into a Grail-equipped image -- a method referencing ModuleAst
+cannot be compiled without Grail present -- so it is reached through a separate loader
+(load-grail.gs, i.e. install.sh --grail) rather than the default one.
 
 A toolset rather than a server subclass, which is the point: python tools can now be combined with
 anyone else''s tools, whereas the old McpServerWithGrail was a rung in the hierarchy that a developer
 wanting python tools AND their own had to inherit from. It is picked up automatically by
-McpServer class>>installedDefaultToolsetNames once this package is loaded, or named explicitly in a
+McpServer class>>installedDefaultToolsetNames once this group is loaded, or named explicitly in a
 router''s toolsetNames.
 
 Like every toolset it owns its handlers (see McpToolset), and needing no server-level policy it never
@@ -38,7 +38,7 @@ gem down instead of answering the client. withPythonErrorsAsMcpError: converts t
 kinded #pythonError, which the dispatcher then reports as an ordinary isError result. Smalltalk Errors
 are deliberately left to the dispatcher, which already classifies them.
 
-No ModuleAst capability check is performed: this package only loads into an image that has Grail.'
+No ModuleAst capability check is performed: this group only loads into an image that has Grail.'
 %
 expectvalue /Class
 doit
