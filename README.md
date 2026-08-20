@@ -361,6 +361,9 @@ Each group's `load.gs` names its files in dependency order, and every `input` pa
 too. There is no package manager in the loop: a `.gs` file-out files into any image topaz can log
 into, on any GemStone version, with no Rowan and no Tonel.
 
+Each class keeps a `category:` matching its group (`Mcp-Core`, `Mcp-Tests`, `Mcp-Grail`) — nothing
+reads it, but it groups the classes in a browser the same way the directories group them on disk.
+
 > **Why each group loader pre-declares its class names.** The classes reference each other in both
 > directions (`McpDispatcher` asks `McpServer` for its name; `McpServer` builds an `McpDispatcher`),
 > so no file order can put every class ahead of its first mention — the compiler would report
