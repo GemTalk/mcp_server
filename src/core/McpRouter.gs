@@ -490,12 +490,17 @@ category: 'sessions'
 method: McpRouter
 reapIdleSessions
   "Close and unmap client sessions idle longer than sessionIdleTimeoutSeconds. Collect + unmap
-   under the mutex; close (a blocking logout) outside it. Answers the number reaped."
+   under the mutex; close (a blocking logout) outside it. Answers the number reaped.
+   A session with a call in flight is never reaped, however long it has run: McpSession>>forward:
+   stamps the activity clock when the call STARTS, so a request that outlives the idle timeout would
+   otherwise have its worker logged out from under it. That could not happen while forwarding blocked
+   the whole gem -- the reaper could not run either -- so the guard arrives with the non-blocking
+   forward (see McpSession>>runWorker:)."
   | expired timeout |
   timeout := self sessionIdleTimeoutSeconds.
   expired := mutex critical: [
     | old |
-    old := sessions values select: [:s | s idleSeconds > timeout].
+    old := sessions values select: [:s | s idleSeconds > timeout and: [s isBusy not]].
     old do: [:s | sessions removeKey: s id ifAbsent: [nil]].
     old].
   expired do: [:s | [s close] on: Error do: [:e | nil]].
@@ -628,9 +633,10 @@ method: McpRouter
 servePost: req on: conn
   "Front-end router (per-client sessions). `initialize` opens a per-client worker gem and returns
    its id in the MCP-Session-Id header; every other request is routed by that id to the client's
-   worker (an isolated session). A valid id is required for non-initialize requests. Forwarding is
-   a blocking executeString: to the worker -- reliable and serialized (concurrency is a deferred
-   follow-up); the id -> session map is guarded by the mutex. Only enough of the body is parsed
+   worker (an isolated session). A valid id is required for non-initialize requests. Forwarding does
+   not block the front-end gem (McpSession>>runWorker:), so requests from different clients really do
+   run concurrently -- serve: already gives each connection its own GsProcess; the id -> session map
+   is guarded by the mutex, and one client's worker by that session's own. Only enough of the body is parsed
    here to route it (is it initialize? is it well-formed?); full request handling is the worker's."
   | body parsed method |
   body := req at: 'body' ifAbsent: [''].
