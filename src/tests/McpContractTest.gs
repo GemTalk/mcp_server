@@ -219,7 +219,7 @@ testPrepareWorkerAppliesReadOnlyBeforeBuilding
   self withFreshWorkerCacheDo: [
     self savingReadOnlyDo: [ | out |
       McpServer prepareWorkerWithToolsets: McpServer defaultToolsetNames
-        readOnly: true serverName: nil version: nil.
+        readOnly: true serverName: nil title: nil version: nil.
       out := McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'.
       self deny: (self includesCS: 'execute_code' in: out).
       self deny: (self includesCS: 'compile_method' in: out).
@@ -235,7 +235,7 @@ testPrepareWorkerBuildsNamedSurfaceAndCaches
     self savingReadOnlyDo: [ | note listed |
       note := McpServer
         prepareWorkerWithToolsets: #('McpBrowsingToolset')
-        readOnly: false serverName: 'acme-db-mcp' version: '2.5.0'.
+        readOnly: false serverName: 'acme-db-mcp' title: 'Acme Labels - sandbox' version: '2.5.0'.
       self assert: (self includesCS: 'McpServer ready' in: note).
       listed := (((McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
         indexOfSubCollection: 'describe_class') > 0).
@@ -376,24 +376,34 @@ testServerInfoDefaultsToStockIdentity
   info := ((self dispatch: (self request: 'initialize' params: Dictionary new)) at: 'result')
     at: 'serverInfo'.
   self assert: (info at: 'name') equals: McpServer defaultServerName.
-  self assert: (info at: 'version') equals: McpServer defaultServerVersion
+  self assert: (info at: 'version') equals: McpServer defaultServerVersion.
+  "and reports NO title -- an instance label exists only when a human set one"
+  self deny: (info includesKey: 'title')
 %
 category: 'tests - identity'
 method: McpContractTest
 testServerInfoFollowsDeploymentConfig
   "A deployment assembled from toolsets may never subclass McpServer, so it sets its identity in
-   router config, which the worker bootstrap passes to serverName:/serverVersion:. That must reach the
-   initialize result -- note the dispatcher is built with the server, BEFORE these are set, so this
-   also pins that it asks rather than caching."
-  | s info |
-  s := McpServer new serverName: 'acme-db-mcp'; serverVersion: '2.5.0'; yourself.
-  info := (((McpDispatcher withToolRegistry: s toolRegistry server: s)
-    handle: (self request: 'initialize' params: Dictionary new)) at: 'result') at: 'serverInfo'.
+   router config, which the worker bootstrap passes to serverName:/serverTitle:/serverVersion:. That
+   must reach the initialize result -- note the dispatcher is built with the server, BEFORE these are
+   set, so this also pins that it asks rather than caching."
+  | s dsp info |
+  s := McpServer new serverName: 'acme-db-mcp'; serverTitle: 'Acme Labels - production';
+    serverVersion: '2.5.0'; yourself.
+  dsp := McpDispatcher withToolRegistry: s toolRegistry server: s.
+  info := ((dsp handle: (self request: 'initialize' params: Dictionary new)) at: 'result')
+    at: 'serverInfo'.
   self assert: (info at: 'name') equals: 'acme-db-mcp'.
+  self assert: (info at: 'title') equals: 'Acme Labels - production'.
   self assert: (info at: 'version') equals: '2.5.0'.
   "and nil restores the default rather than reporting an empty name"
   s serverName: nil.
-  self assert: s serverName equals: McpServer defaultServerName
+  self assert: s serverName equals: McpServer defaultServerName.
+  "clearing the title makes the KEY disappear again -- not an empty or null title"
+  s serverTitle: nil.
+  info := ((dsp handle: (self request: 'initialize' params: Dictionary new)) at: 'result')
+    at: 'serverInfo'.
+  self deny: (info includesKey: 'title')
 %
 category: 'tests - errors'
 method: McpContractTest

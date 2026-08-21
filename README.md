@@ -74,6 +74,10 @@ version when supported, otherwise answers `2025-11-25`.
 | Malformed body | `400` + `-32700` |
 | Tool input schemas | JSON Schema 2020-12 (no `$schema` needed), closed with `additionalProperties: false` |
 
+`serverInfo.title` is sent when a deployment configures one (see *Writing your own MCP server*) and
+omitted otherwise, so a client falls back to displaying `name`. That is the **server**'s title; a
+**tool** `title` is not implemented.
+
 Not implemented, all optional at these revisions: pagination (`tools/list` returns every tool and
 no `nextCursor`), `listChanged` notifications, SSE resumability (`Last-Event-ID`), tool `title` /
 `annotations` / `icons` / `outputSchema`, server `instructions`, and `tasks`.
@@ -254,7 +258,7 @@ tools itself (those run in the per-client `McpServer` workers):
 
 - **`initialize`** → the front end opens a `McpSession` (a `GsTsExternalSession` worker gem,
   logged in as the current user via a one-time password), **prepares** it with a single
-  `prepareWorkerWithToolsets:readOnly:serverName:version:` call — which sets read-only, resolves the
+  `prepareWorkerWithToolsets:readOnly:serverName:title:version:` call — which sets read-only, resolves the
   named toolsets, applies the advertised identity, and pre-builds the server so the client's first
   request has no registration to do — assigns a server-side id, and returns it in the
   **`MCP-Session-Id`** response header. A worker class or toolset the worker gem cannot resolve fails
@@ -528,9 +532,14 @@ Then name your toolsets when you launch a router:
 ```smalltalk
 (McpRouter new
   toolsetNames: #('AcmeDbToolset');           "only your tools -- no execute_code, no mutation tools"
-  serverName: 'acme-db-mcp'; serverVersion: '2.5.0')
+  serverName: 'acme-db-mcp'; serverVersion: '2.5.0';
+  serverTitle: 'Acme Labels - sandbox')       "which INSTANCE this is, for a human"
     forkOnPort: 8000
 ```
+
+Relabel the server when you configure one: `serverName` / `serverVersion` say which *product* this is,
+`serverTitle` says which *instance* a human is looking at — see [Server identity](#server-identity)
+below.
 
 Toolsets **compose** — `#('AcmeDbToolset' 'McpBrowsingToolset')` gives your tools plus class
 browsing, and two unrelated vendors' toolsets can be combined. This is the reason tools live in
@@ -544,10 +553,38 @@ it):
 (McpRouter new workerClassName: 'AcmeDbServer'; toolsetNames: #('AcmeDbToolset')) forkOnPort: 8000
 ```
 
-To name your server, override the **class-side** `defaultServerName` / `defaultServerVersion`. That
-keeps the name a default a deployment can still relabel through router config — an operator running
-two instances of your product needs that. Overriding the instance-side `serverName` instead wins over
-config, which is a deliberate lock rather than the normal path.
+### Server identity
+
+The `initialize` result's `serverInfo` carries three fields, and they answer different questions:
+
+| Field | Means | Set by |
+|---|---|---|
+| `name` | **which software this is** | the product: override class-side `defaultServerName`, or set router config `serverName` for a toolset-composed server with no `McpServer` subclass |
+| `version` | which release of that software | same |
+| `title` | **which instance this is**, for a human | the operator: router config `serverTitle` |
+
+`name` is the programmatic identifier and `title` is the display string (MCP `BaseMetadata`); when
+there is no `title` a client displays the `name`. So the two shapes are:
+
+```smalltalk
+"same software, three stones -- name stays truthful, humans can tell them apart"
+(McpRouter new serverTitle: 'GemStone - geode teststone 3.7.6') forkOnPort: 8000
+(McpRouter new readOnly: true; serverTitle: 'GemStone (read-only)') forkOnPort: 8001
+"a different product assembled from toolsets, with no McpServer subclass"
+(McpRouter new toolsetNames: #('AcmeDbToolset');
+   serverName: 'acme-db-mcp'; serverVersion: '2.5.0';
+   serverTitle: 'Acme Labels - sandbox') forkOnPort: 8002
+```
+
+To name your **product**, override the **class-side** `defaultServerName` / `defaultServerVersion`.
+That keeps the name a default a deployment can still relabel through router config — the path for a
+server assembled from toolsets that never subclasses `McpServer`. Overriding the instance-side
+`serverName` instead wins over config, which is a deliberate lock rather than the normal path.
+
+There is **no default title**: class-side `defaultServerTitle` answers `nil` and the `title` key is
+then left out of `serverInfo` entirely (not sent as `null` or `''`). A title being present therefore
+means a human deliberately labeled that instance. A product that wants its own display name overrides
+`defaultServerTitle`; per-box labeling stays the operator's `serverTitle`.
 
 > **Where your classes must live:** a worker gem may log in as a *different user* than the front end
 > (under `McpAuthRouter`, as the token's own GemStone user), so your toolsets and any worker subclass

@@ -4,7 +4,7 @@ expectvalue /Class
 doit
 McpBase subclass: 'McpServer'
   instVarNames: #( dispatcher toolRegistry toolsets
-                    serverName serverVersion)
+                    serverName serverTitle serverVersion)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -29,7 +29,8 @@ session routing live in McpRouter.
 Which tools a server offers is NOT fixed by its class: each server registers a list of McpToolset
 instances (see McpToolset), so a deployment -- or a vendor shipping only their own tools -- chooses the
 surface. The front end resolves both the worker class and the toolset list per session and pushes them
-into the worker gem in one call (prepareWorkerWithToolsets:readOnly:serverName:version:), so a worker
+into the worker gem in one call (prepareWorkerWithToolsets:readOnly:serverName:title:version:), so a
+worker
 never decides what it is. Subclass this to change BEHAVIOR (the kernel guards, the worker entry,
 dispatcher wiring, the advertised identity); write a toolset to add tools. A subclass is used only when
 it is NAMED in the router''s workerClassName config.
@@ -68,11 +69,26 @@ category: 'identity'
 classmethod: McpServer
 defaultServerName
   "The name a stock GemStone MCP server reports in the initialize result's serverInfo, and THE HOOK A
-   SUBCLASS SHOULD OVERRIDE to name itself (see McpFixtureServer): overriding here keeps the name a
-   default that router config can still relabel, which is what an operator running two instances of
-   one product needs. The single home for this literal -- the instance-side serverName answers it
+   SUBCLASS SHOULD OVERRIDE to name itself (see McpFixtureServer). serverInfo.name says WHICH SOFTWARE
+   this is, so it is the product's to set, not the operator's: an operator running two instances of one
+   product wants defaultServerTitle / router config serverTitle: instead, which labels the INSTANCE and
+   leaves every instance reporting the same truthful name. Router config can still relabel the name --
+   that path is for a server assembled from toolsets with no McpServer subclass to override, i.e. a
+   different product. The single home for this literal -- the instance-side serverName answers it
    unless a deployment set one, and McpDispatcher falls back to it when it has no server at all."
   ^'gemstone-mcp'
+%
+category: 'identity'
+classmethod: McpServer
+defaultServerTitle
+  "The display title a stock GemStone MCP server reports -- deliberately nil, and the hook A PRODUCT
+   OVERRIDES to give itself a human-readable display name. serverInfo.title says WHICH INSTANCE this
+   is (MCP BaseMetadata: name is programmatic, title is for UI), so it is normally the operator's to
+   set through router config serverTitle:.
+   nil means 'no instance label': McpDispatcher OMITS the title key entirely rather than sending null,
+   and a client falls back to displaying the name, exactly as before titles existed. A title being
+   present therefore means a human deliberately labeled that instance."
+  ^nil
 %
 category: 'identity'
 classmethod: McpServer
@@ -136,7 +152,7 @@ newWithToolsetNames: anArrayOfNames
 %
 category: 'worker'
 classmethod: McpServer
-prepareWorkerWithToolsets: anArrayOfNames readOnly: aBoolean serverName: aNameOrNil version: aVersionOrNil
+prepareWorkerWithToolsets: anArrayOfNames readOnly: aBoolean serverName: aNameOrNil title: aTitleOrNil version: aVersionOrNil
   "Prepare THIS worker gem for one client, in the single call the front end makes at session open
    (McpSession>>prepareWorker). Sent to the class the front end NAMED, so `self` is the server class to
    build -- a worker never chooses.
@@ -148,7 +164,7 @@ prepareWorkerWithToolsets: anArrayOfNames readOnly: aBoolean serverName: aNameOr
   | srv |
   self sessionReadOnly: aBoolean.
   srv := self newWithToolsetNames: anArrayOfNames.
-  srv serverName: aNameOrNil; serverVersion: aVersionOrNil.
+  srv serverName: aNameOrNil; serverTitle: aTitleOrNil; serverVersion: aVersionOrNil.
   SessionTemps current at: #McpServer put: srv.
   ^self name asString , ' ready: ' , srv toolRegistry descriptors size printString , ' tool(s)'
     , (aBoolean ifTrue: [' (read-only)'] ifFalse: [''])
@@ -336,9 +352,10 @@ registerToolsets
 category: 'identity'
 method: McpServer
 serverName
-  "What this server calls itself in the initialize result's serverInfo (MCP lifecycle). A server
+  "What SOFTWARE this server is, in the initialize result's serverInfo (MCP lifecycle). A server
    assembled from third-party toolsets needs to be able to say so -- announcing itself as
-   'gemstone-mcp' would tell a client the opposite of the truth.
+   'gemstone-mcp' would tell a client the opposite of the truth. This is not the field that tells two
+   deployments of the SAME software apart; that is serverTitle.
    Precedence: a DEPLOYMENT's router config (the ivar, set by the worker bootstrap through serverName:)
    beats the class default, and a subclass names itself by overriding that class default
    (defaultServerName) -- so a subclass stays relabelable per deployment. A subclass CAN override this
@@ -352,6 +369,23 @@ serverName: aStringOrNil
   "Set the serverInfo name (nil restores the default). Sent by the worker bootstrap from router
    config; see serverName."
   serverName := aStringOrNil
+%
+category: 'identity'
+method: McpServer
+serverTitle
+  "The human-readable label for THIS INSTANCE, reported as serverInfo.title -- 'GemStone - geode
+   teststone 3.7.6', 'GemStone (read-only)'. nil (the stock answer) means the instance carries no
+   label and the title key is omitted from serverInfo; see defaultServerTitle.
+   Same precedence as serverName: a deployment's router config beats the class default, which a
+   product overrides."
+  ^serverTitle ifNil: [self class defaultServerTitle]
+%
+category: 'identity'
+method: McpServer
+serverTitle: aStringOrNil
+  "Set the serverInfo title (nil restores the default, which is normally no title at all). Sent by
+   the worker bootstrap from router config; see serverTitle."
+  serverTitle := aStringOrNil
 %
 category: 'identity'
 method: McpServer

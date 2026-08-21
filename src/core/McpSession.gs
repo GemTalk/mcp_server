@@ -5,7 +5,7 @@ doit
 Object subclass: 'McpSession'
   instVarNames: #( id worker lastActivitySeconds
                     userId readOnly workerClassName toolsetNames
-                    serverName serverVersion)
+                    serverName serverTitle serverVersion)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -144,6 +144,12 @@ serverName: aStringOrNil
 %
 category: 'accessing'
 method: McpSession
+serverTitle: aStringOrNil
+  "The serverInfo title this worker should advertise (nil = no instance label, so no title key)."
+  serverTitle := aStringOrNil
+%
+category: 'accessing'
+method: McpSession
 serverVersion: aStringOrNil
   serverVersion := aStringOrNil
 %
@@ -218,11 +224,14 @@ workerBootstrapExpression
   "The one expression prepareWorker runs in the worker gem. Sent to the worker CLASS the front end
    named, so the worker instantiates what it is told rather than choosing for itself. Names are plain
    identifiers (McpRouter validated them when the router was configured) and the strings are embedded
-   via printString, so this cannot smuggle anything into the worker's compiler."
+   via printString, so this cannot smuggle anything into the worker's compiler. That printString is
+   load-bearing for the title in particular: unlike a name or a version it is free-form operator prose,
+   so quotes in it must be doubled rather than closing the literal."
   ^self workerClassName
     , ' prepareWorkerWithToolsets: ' , (self quotedNameArrayFor: toolsetNames)
     , ' readOnly: ' , self readOnly printString
     , ' serverName: ' , (serverName isNil ifTrue: ['nil'] ifFalse: [serverName printString])
+    , ' title: ' , (serverTitle isNil ifTrue: ['nil'] ifFalse: [serverTitle printString])
     , ' version: ' , (serverVersion isNil ifTrue: ['nil'] ifFalse: [serverVersion printString])
 %
 category: 'accessing'

@@ -167,6 +167,9 @@ initializeResultFor: params
   caps at: 'tools' put: tools.
   info := Dictionary new.
   info at: 'name' put: self serverName.
+  "title is OMITTED when nil rather than sent as null: an absent title is what tells a client to
+   display the name instead, so a present title always means a human labeled this instance."
+  self serverTitle ifNotNil: [:t | info at: 'title' put: t].
   info at: 'version' put: self serverVersion.
   d := Dictionary new.
   d at: 'protocolVersion' put: negotiated.
@@ -220,6 +223,13 @@ serverName
    constructed with its dispatcher, so a value cached at construction time would always be the
    default. Falls back to the class default when there is no server (isolated dispatcher tests)."
   ^server isNil ifTrue: [McpServer defaultServerName] ifFalse: [server serverName]
+%
+category: 'accessing'
+method: McpDispatcher
+serverTitle
+  "The serverInfo title to report, or nil for none -- see serverName for why this asks the server
+   rather than caching. A nil answer means initializeResultFor: leaves the title key out entirely."
+  ^server isNil ifTrue: [McpServer defaultServerTitle] ifFalse: [server serverTitle]
 %
 category: 'accessing'
 method: McpDispatcher

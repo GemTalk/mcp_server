@@ -6,7 +6,7 @@ McpBase subclass: 'McpRouter'
   instVarNames: #( isRunning mutex routesTable
                     serverSocket sessions allowedOriginHosts tlsCertificateFile
                     tlsPrivateKeyFile readOnly workerClassName toolsetNames
-                    serverName serverVersion)
+                    serverName serverTitle serverVersion)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -46,8 +46,13 @@ Detached, independent (survives logout); stop it by port with ./stop-server.sh:
     McpRouter new forkOnPort: 8000
 Read-only (a localhost convenience so a single user cannot accidentally mutate the image):
     (McpRouter new readOnly: true) forkOnPort: 8000
+Label THIS INSTANCE for humans -- what an operator running two instances of one product needs. The
+name and version stay truthful (every box reports the same software); only the display title differs:
+    (McpRouter new serverTitle: ''GemStone - geode teststone 3.7.6'') forkOnPort: 8000
+    (McpRouter new readOnly: true; serverTitle: ''GemStone (read-only)'') forkOnPort: 8001
 Choose the tool surface -- e.g. a vendor''s own tools with none of the Smalltalk-development ones.
-An empty list is legal and means a server offering no tools at all:
+An empty list is legal and means a server offering no tools at all. serverName says which SOFTWARE
+this is, so it is set here (a different product), not to distinguish deployments:
     (McpRouter new toolsetNames: #(''AcmeDbToolset''); serverName: ''acme-db-mcp''; serverVersion: ''2.5.0'')
       forkOnPort: 8000
 Name an McpServer subclass for the workers (nothing auto-detects one -- subclass to change BEHAVIOR;
@@ -133,6 +138,7 @@ applyConfig: aConfigDict
   workerClassName := aConfigDict at: 'workerClassName' ifAbsent: [workerClassName].
   toolsetNames := aConfigDict at: 'toolsetNames' ifAbsent: [toolsetNames].
   serverName := aConfigDict at: 'serverName' ifAbsent: [serverName].
+  serverTitle := aConfigDict at: 'serverTitle' ifAbsent: [serverTitle].
   serverVersion := aConfigDict at: 'serverVersion' ifAbsent: [serverVersion].
   ^self
 %
@@ -190,8 +196,8 @@ method: McpRouter
 configDict
   "This router's deployment config as a Dictionary of JSON-safe values, for serialization into the
    fork string (forkOnPort:). FIXED KEY ALLOW-LIST: only these keys travel, so a future ivar cannot
-   silently start carrying a secret. Values are host lists, file PATHS, and booleans -- never key
-   material. Subclasses add their keys via super."
+   silently start carrying a secret. Values are host lists, file PATHS, booleans, and display strings
+   -- never key material. Subclasses add their keys via super."
   | d |
   d := Dictionary new.
   d at: 'allowedOriginHosts' put: allowedOriginHosts.
@@ -201,6 +207,7 @@ configDict
   d at: 'workerClassName' put: workerClassName.
   d at: 'toolsetNames' put: toolsetNames.
   d at: 'serverName' put: serverName.
+  d at: 'serverTitle' put: serverTitle.
   d at: 'serverVersion' put: serverVersion.
   ^d
 %
@@ -345,6 +352,7 @@ initialize
   workerClassName := nil.  "nil = McpServer"
   toolsetNames := nil.     "nil = the installed default surface, resolved per session"
   serverName := nil.       "nil = the worker's own default (McpServer class>>defaultServerName)"
+  serverTitle := nil.      "nil = no instance label, so no serverInfo title key at all"
   serverVersion := nil.
   ^self
 %
@@ -398,6 +406,7 @@ openSessionCreating: aOneArgBlock
   sess workerClassName: self effectiveWorkerClassName;
     toolsetNames: self effectiveToolsetNames;
     serverName: self serverName;
+    serverTitle: self serverTitle;
     serverVersion: self serverVersion;
     prepareWorker.
   mutex critical: [sessions at: newId put: sess].
@@ -657,6 +666,20 @@ serveRouted: body sessionId: sid on: conn
   resp isEmpty
     ifTrue: [conn writeStatus: 202 reason: 'Accepted' body: '']
     ifFalse: [conn writeJson: resp]
+%
+category: 'worker identity'
+method: McpRouter
+serverTitle
+  "The serverInfo title this router's workers advertise -- the human-readable label for THIS
+   deployment ('GemStone - geode teststone 3.7.6'), which is what an operator running two instances of
+   one product sets rather than relabeling serverName. nil (the default) means no instance label, and
+   the title key is left out of serverInfo entirely -- see McpServer>>serverTitle."
+  ^serverTitle
+%
+category: 'worker identity'
+method: McpRouter
+serverTitle: aStringOrNil
+  serverTitle := aStringOrNil
 %
 category: 'worker identity'
 method: McpRouter

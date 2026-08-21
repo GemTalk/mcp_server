@@ -169,6 +169,7 @@ testConfigJsonRoundTrips
     workerClassName: 'McpServer';
     toolsetNames: #('McpBrowsingToolset');
     serverName: 'acme-db-mcp';
+    serverTitle: 'Acme Labels - production';
     serverVersion: '2.5.0'.
   dst := McpRouter new applyConfigJson: src configJson.
   self assert: dst readOnly.
@@ -176,6 +177,7 @@ testConfigJsonRoundTrips
   self assert: dst workerClassName equals: 'McpServer'.
   self assert: dst toolsetNames equals: #('McpBrowsingToolset').
   self assert: dst serverName equals: 'acme-db-mcp'.
+  self assert: dst serverTitle equals: 'Acme Labels - production'.
   self assert: dst serverVersion equals: '2.5.0'.
   self assert: dst tlsCertificateFile isNil.     "unset optional stays nil through the round-trip"
   self assert: dst tlsPrivateKeyFile isNil.
@@ -360,6 +362,7 @@ testWorkerConfigDefaultsAreResolvedByTheFrontEnd
   self assert: r workerClassName isNil.
   self assert: r toolsetNames isNil.
   self assert: r serverName isNil.
+  self assert: r serverTitle isNil.   "no instance label until an operator sets one"
   self assert: r effectiveWorkerClassName equals: 'McpServer'.
   self assert: r effectiveToolsetNames equals: McpServer installedDefaultToolsetNames.
   "configured values win, and an EMPTY toolset list is legal -- a server with no tools"
