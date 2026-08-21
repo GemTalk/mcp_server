@@ -300,6 +300,27 @@ write scope is always requestable — neither can be left out by a configuration
 subset rule to observe. Set `extraScopes` only for scopes the router itself does not gate on but the
 client still needs to ask for, such as an authorization server's own `profile`.
 
+**Configuring the authorization server (Keycloak).** Keycloak's own
+[MCP authorization server guide](https://www.keycloak.org/securing-apps/mcp-authz-server) recommends
+the shape this router already expects: define `mcp:*` client scopes, and bind an **audience mapper**
+to them so a token carries the resource identifier this router checks as `expectedAudience`. It
+recommends binding the audience to a *scope* rather than to an RFC 8707 `resource` indicator, because
+Keycloak has not implemented resource indicators — so bind the mapper to a scope every client
+requests, i.e. one of the router's `requiredScopes` (say `mcp:use`), and every token comes out with
+the right audience without any per-client setup.
+
+That choice interacts with `extraScopes` in one Keycloak-specific way worth knowing before you deploy.
+A client that registers dynamically (RFC 7591) and sends a `scope` field is assigned **only** the
+scopes it asked for — Keycloak drops the realm's default client scopes — so anything the token needs
+must be advertised or the client is never assigned it. In practice that means
+`MCP_EXTRA_SCOPES="profile offline_access"`: `profile` because `MCP_USERID_CLAIM` is typically
+`preferred_username` on Keycloak (the claim defaults to `sub`) and the `profile` scope is what emits
+it, and `offline_access` because clients ask for it to get a refresh token. Advertising
+`offline_access` runs against MCP's SEP-2207, which says a resource SHOULD NOT list it since refresh
+tokens are not a resource requirement — but on Keycloak, advertising is the only mechanism by which a
+dynamically-registered client can come to hold that scope, so it is the supported configuration here
+rather than a workaround.
+
 **What's gated:** everything that can persist a change or run arbitrary code — `execute_code`,
 `commit`, and all the mutation tools. Everything else (browsing, listing, search,
 `status`/`refresh`/`abort`, and the test-runner tools) stays available.
