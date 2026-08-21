@@ -1,0 +1,4 @@
+# GitHub Linguist maps the .gs extension to JavaScript (Google Apps Script) by
+# default, which mislabels this repo. Our .gs files are GemStone Smalltalk
+# class file-outs and topaz load scripts.
+*.gs linguist-language=Smalltalk
