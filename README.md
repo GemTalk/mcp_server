@@ -5,9 +5,9 @@ GemStone Smalltalk. It runs **inside** the image and executes tool calls directl
 Node.js process, no GCI/FFI bridge. The goal is to replace the GCI-based Jasper MCP
 server with one that any MCP client can reach over plain HTTP.
 
-Development is in two branches. The `main` branch includes the standard server (localhost-only, single-user,
-multi-client) with scripts to install and run it on a 3.7.5 stone. The `auth` branch adds a network-facing,
-secure-transport, multi-user server with JWT authentication from an external OIDC IdP (requires 3.7.6).
+A note about versions: `run-server.sh` is safe to use on a 3.7.5 stone, but `run-auth-server.sh`
+needs 3.7.6 due to a bug in connecting to an external OIDC IdP. Instructions for installing and
+running are later in this document.
 
 ## Transport
 
