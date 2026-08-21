@@ -63,7 +63,7 @@ testBootstrapBuildsTheNamedSubclassWithItsNamedToolsets
   self withFreshWorkerCacheDo: [ | note out |
     note := McpFixtureServer
       prepareWorkerWithToolsets: #('McpFixtureToolset')
-      readOnly: false serverName: nil version: nil.
+      readOnly: false serverName: nil title: nil version: nil.
     self assert: (self includesCS: 'McpFixtureServer ready' in: note).
     out := McpFixtureServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'.
     self assert: (self includesCS: 'fixture_echo' in: out).
@@ -75,9 +75,10 @@ testBootstrapBuildsTheNamedSubclassWithItsNamedToolsets
   "...and a deployment that DOES name the server in config relabels it, through the same bootstrap"
   self withFreshWorkerCacheDo: [ | out |
     McpFixtureServer prepareWorkerWithToolsets: #('McpFixtureToolset')
-      readOnly: false serverName: 'billing-mcp' version: '1.1.1'.
+      readOnly: false serverName: 'billing-mcp' title: 'Billing - staging' version: '1.1.1'.
     out := McpFixtureServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'.
     self assert: (self includesCS: 'billing-mcp' in: out).
+    self assert: (self includesCS: 'Billing - staging' in: out).
     self deny: (self includesCS: 'fixture-mcp' in: out)]
 %
 category: 'tests - composition'
@@ -127,7 +128,7 @@ testRouterCarriesTheNamedClassAndToolsetsToTheSession
   | r sess |
   r := McpRouter new.
   r workerClassName: 'McpFixtureServer'; toolsetNames: #('McpFixtureToolset');
-    serverName: 'acme'; serverVersion: '3.0'.
+    serverName: 'acme'; serverTitle: 'Acme - box 7'; serverVersion: '3.0'.
   self assert: r validateWorkerConfig notNil.   "both names resolve in this image"
   sess := r openSessionCreating: [:id | McpStubSession new].
   self assert: sess workerClassName equals: 'McpFixtureServer'.
@@ -136,27 +137,36 @@ testRouterCarriesTheNamedClassAndToolsetsToTheSession
     in: (sess workerExpressionFor: '{"jsonrpc":"2.0"}')).
   self assert: (self includesCS: 'McpFixtureServer prepareWorkerWithToolsets:'
     in: sess workerBootstrapExpression).
-  self assert: (self includesCS: '''McpFixtureToolset''' in: sess workerBootstrapExpression)
+  self assert: (self includesCS: '''McpFixtureToolset''' in: sess workerBootstrapExpression).
+  "the instance label travels down the same pipeline, quoted for the worker's compiler"
+  self assert: (self includesCS: 'title: ''Acme - box 7''' in: sess workerBootstrapExpression)
 %
 category: 'tests - worker class'
 method: McpExtensionTest
 testRouterConfigRelabelsASubclassThatNamesItself
   "Identity precedence, in both directions -- only the pair documents the rule. A subclass names itself
    by overriding the class-side default, so it applies when a deployment says nothing; and a deployment
-   can still relabel it, which an operator running two instances of one product needs. Same for a plain
-   server, whose default is the stock name."
+   can still relabel it -- which for the NAME means 'a different product', since an operator running two
+   instances of one product sets serverTitle instead. Same for a plain server, whose default is the
+   stock name."
   | fixture plain |
   fixture := McpFixtureServer new.
   self assert: fixture serverName equals: 'fixture-mcp'.
   self assert: fixture serverVersion equals: '9.9.9'.
-  fixture serverName: 'billing-mcp'; serverVersion: '1.1.1'.
+  "the fixture names itself but does NOT title itself: an instance label is the operator's to set"
+  self assert: fixture serverTitle isNil.
+  fixture serverName: 'billing-mcp'; serverTitle: 'Billing - staging'; serverVersion: '1.1.1'.
   self assert: fixture serverName equals: 'billing-mcp'.
+  self assert: fixture serverTitle equals: 'Billing - staging'.
   self assert: fixture serverVersion equals: '1.1.1'.
-  "nil restores the subclass's default rather than the stock name"
+  "nil restores the subclass's default rather than the stock name -- and for the title, no title"
   fixture serverName: nil.
   self assert: fixture serverName equals: 'fixture-mcp'.
+  fixture serverTitle: nil.
+  self assert: fixture serverTitle isNil.
   plain := McpServer new.
   self assert: plain serverName equals: 'gemstone-mcp'.
+  self assert: plain serverTitle isNil.
   plain serverName: 'billing-mcp'.
   self assert: plain serverName equals: 'billing-mcp'
 %

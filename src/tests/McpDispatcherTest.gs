@@ -69,6 +69,8 @@ testInitialize
   result := (self dispatch: (self request: 'initialize' params: Dictionary new)) at: 'result'.
   self assert: (result at: 'protocolVersion') equals: '2025-11-25'.
   self assert: ((result at: 'serverInfo') at: 'name') equals: 'gemstone-mcp'.
+  "no title unless a deployment set one: the key is absent, not null, so a client displays the name"
+  self deny: ((result at: 'serverInfo') includesKey: 'title').
   self assert: ((result at: 'capabilities') includesKey: 'tools')
 %
 category: 'tests'
