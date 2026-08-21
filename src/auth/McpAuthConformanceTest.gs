@@ -60,9 +60,11 @@ matter here, and NOT monotonically -- 2025-06-18 is stricter on one point than i
    well-known URI), and ADDS the Scope Selection Strategy: servers SHOULD put scope in the
    WWW-Authenticate challenge, and scopes_supported in the metadata document is the client''s
    documented fallback.
- * draft -- adds RFC 9207 iss handling and Client ID Metadata Documents (both client/AS-side, not
-   ours), plus two server-side items: scope hierarchies (see KNOWN GAPS) and "MCP Servers SHOULD
-   NOT include offline_access in WWW-Authenticate scope or scopes_supported".
+ * draft -- adds RFC 9207 iss handling and Client ID Metadata Documents (CIMD; client/AS-side, not
+   ours today, though it is a candidate route away from the deviation below), plus two server-side
+   items: scope hierarchies (see KNOWN GAPS) and, from SEP-2207 (status Final, so it binds
+   independently of which revision we claim), "MCP Servers SHOULD NOT include offline_access in
+   WWW-Authenticate scope or scopes_supported".
 Where revisions disagree, these tests assert the STRICTEST reading, on the assumption that each
 revision tightens rather than loosens.
 
@@ -73,16 +75,27 @@ configured scopes are flat and unrelated -- true of mcp:use / mcp:write today. T
 because there is no hierarchy API to test yet; introducing one (e.g. mcp:admin implying mcp:use)
 needs a design decision first, and the exact-match check must change at the same time.
 
-A KNOWN DEPLOYMENT DEVIATION, likewise untested here: the draft''s "SHOULD NOT include
+A KNOWN DEPLOYMENT DEVIATION, likewise untested here: the SEP-2207 rule "SHOULD NOT include
 offline_access" is asserted below against conformantRouter, but the geode test deployment DOES
-advertise offline_access (via MCP_EXTRA_SCOPES) and therefore deviates. Not an oversight -- an MCP
-client appends offline_access to its authorization request on its own, and Keycloak hard-rejects an
-authorization request naming a scope the client was not assigned ("Invalid scopes"). Since
-DCR-with-a-scope-field discards realm defaults, the only way that scope reaches the client is for
-this resource to advertise it, so dropping it breaks the browser login outright. These tests
-deliberately constrain the FIXTURE and not every deployment: a router is spec-clean unless an
-operator opts out, and this operator has, knowingly. The clean fix is client-side -- pin the client''s
-requested scopes so it stops asking -- which would let this become an invariant test; untried so far.
+advertise offline_access (via MCP_EXTRA_SCOPES) and therefore deviates. Not an oversight. It is what
+this pair of conditions forces: a client that appends offline_access to its authorization request on
+its own, plus an authorization server that rejects a request naming a scope that client was never
+assigned. Authorization servers gating scopes per client behave that way (Keycloak and Authelia
+reject before any login page; others silently narrow the grant and need none of this). Keycloak
+compounds it -- an RFC 7591 registration carrying a scope field REPLACES the realm defaults -- so the
+resource advertising the scope is the only way it ever reaches the client, and omitting it breaks the
+browser login outright rather than merely shortening sessions. These tests deliberately constrain the
+FIXTURE and not every deployment: a router is spec-clean unless an operator opts out, and this
+operator has, knowingly.
+
+Two candidate exits, neither taken. Pinning the requested scopes CLIENT-side was tried and FAILED
+(2026-08-20): the client kept appending offline_access regardless, so a fresh authorization still
+produced an offline session. Nothing on the SERVER side can substitute either -- client registration
+policies only validate a registration and protocol mappers only emit claims; neither can assign a
+client scope. The remaining candidate is CIMD, where the client is identified by a URL serving its
+own metadata and no registration record exists to have its scopes replaced; untested, and it depends
+on both the client and the authorization server supporting it, so it cannot be the documented answer
+yet. Until one lands, advertising is the remedy and this test constrains the fixture only.
 
 FIXTURES. Most tests drive McpAuthRouter>>handleConnection: through McpMockSocket, so they need no
 listening socket, no TLS, no IdP and no login -- run them anywhere. The per-request authorization
@@ -441,13 +454,14 @@ testMetadataDeclaresScopesSupported
 category: 'tests - protected resource metadata'
 method: McpAuthConformanceTest
 testMetadataOmitsOfflineAccessFromScopesSupported
-  "draft, Refresh Tokens: 'MCP Servers (Protected Resources) SHOULD NOT include offline_access in
-   WWW-Authenticate scope or Protected Resource Metadata scopes_supported, as refresh tokens are
-   not a resource requirement' -- token lifetime is between the client and the authorization server.
-   A forward guard on a revision McpDispatcher does not yet claim. It no longer holds vacuously (it
-   once did, before scopes_supported was published): conformantRouter advertises mcp:use, so this
-   asserts something real about the fixture. It does NOT constrain every deployment, and the geode
-   test deployment knowingly deviates -- see the class comment's KNOWN GAPS."
+  "SEP-2207 (status Final), Refresh Tokens: 'MCP Servers (Protected Resources) SHOULD NOT include
+   offline_access in WWW-Authenticate scope or Protected Resource Metadata scopes_supported, as
+   refresh tokens are not a resource requirement' -- token lifetime is between the client and the
+   authorization server. Being Final, it binds independently of which protocol revision
+   McpDispatcher claims. It no longer holds vacuously (it once did, before scopes_supported was
+   published): conformantRouter advertises mcp:use, so this asserts something real about the
+   fixture. It does NOT constrain every deployment, and the geode test deployment knowingly
+   deviates -- see the class comment's KNOWN GAPS."
   | meta scopes |
   meta := self jsonOf: (self driveRequest: (self getPath: '/.well-known/oauth-protected-resource')
     on: self conformantRouter).

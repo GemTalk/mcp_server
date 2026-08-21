@@ -36,12 +36,19 @@
 #                         for scopes the router does not gate on but the client must still request
 #                         from the authorization server -- e.g. "profile" so the userIdClaim is
 #                         present in the token.
-#                         NOTE offline_access: the MCP draft says a resource SHOULD NOT advertise it,
-#                         since refresh tokens are not a resource requirement. Listing it here is a
-#                         knowing deviation, needed when the IdP hard-rejects an authorization request
-#                         naming a scope the client was never assigned (Keycloak does) while the
-#                         client appends offline_access on its own -- then the resource advertising it
-#                         is the only way it reaches the client. Leave it out unless login needs it.
+#                         NOTE offline_access: MCP SEP-2207 (status Final) says a resource SHOULD NOT
+#                         advertise it, since refresh tokens are not a resource requirement. List it
+#                         anyway when BOTH hold: the client appends offline_access to its
+#                         authorization request on its own, AND the authorization server rejects a
+#                         request naming a scope that client was never assigned. Servers that gate
+#                         scopes per client behave that way (Keycloak and Authelia both reject before
+#                         any login page); others silently narrow the grant instead and need nothing
+#                         here. Where the server ALSO replaces its own defaults with whatever a
+#                         dynamic registration asked for (Keycloak, with RFC 7591), the resource
+#                         advertising the scope is the only way it ever reaches the client -- so
+#                         omitting it breaks login outright rather than merely shortening sessions.
+#                         This is the general remedy for that combination, not a fix for one vendor.
+#                         Leave it out unless login needs it.
 #   MCP_WRITE_SCOPE     - scope granting write; a token lacking it gets a READ-ONLY worker (default: none).
 #                         Advertised automatically so clients can request it -- an unrequestable write
 #                         scope would leave every session read-only.
