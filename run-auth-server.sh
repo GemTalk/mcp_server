@@ -53,6 +53,10 @@
 #                         Advertised automatically so clients can request it -- an unrequestable write
 #                         scope would leave every session read-only.
 #   GS_MCP_READONLY     - 1 to force EVERY session read-only regardless of scope (default: 0)
+#   GS_MCP_TITLE        - human-readable label for THIS INSTANCE, reported as serverInfo.title, e.g.
+#                         "GemStone - geode teststone 3.7.6". Empty means no title at all: the key is
+#                         omitted and clients display the server name. Use this -- not a relabeled
+#                         serverName -- to tell two deployments of the same software apart.
 #   MCP_BIND_ADDRESS    - local address to bind (default: loopback only). Set to an interface address
 #                         (e.g. 172.16.73.10) or 0.0.0.0 to accept connections from other hosts.
 #                         Safe here precisely because this router requires a bearer token; never do
@@ -78,6 +82,7 @@ MCP_REQUIRED_SCOPES="${MCP_REQUIRED_SCOPES:-mcp:use}"
 MCP_EXTRA_SCOPES="${MCP_EXTRA_SCOPES:-}"
 MCP_WRITE_SCOPE="${MCP_WRITE_SCOPE:-}"
 GS_MCP_READONLY="${GS_MCP_READONLY:-0}"
+GS_MCP_TITLE="${GS_MCP_TITLE:-}"
 MCP_BIND_ADDRESS="${MCP_BIND_ADDRESS:-}"
 MCP_TLS_CERT="${MCP_TLS_CERT:-}"
 MCP_TLS_KEY="${MCP_TLS_KEY:-}"
@@ -131,6 +136,10 @@ RO_LINE=""
 [ "$GS_MCP_READONLY" = "1" ] && RO_LINE="r readOnly: true."
 BIND_LINE=""
 [ -n "$MCP_BIND_ADDRESS" ] && BIND_LINE="r bindAddress: '$MCP_BIND_ADDRESS'."
+# Free-form operator text, unlike every other value here, so double any embedded quote rather than
+# letting it close the literal.
+TITLE_LINE=""
+[ -n "$GS_MCP_TITLE" ] && TITLE_LINE="r serverTitle: '$(printf '%s' "$GS_MCP_TITLE" | sed "s/'/''/g")'."
 
 echo "Forking McpAuthRouter onto ${MCP_BIND_ADDRESS:-127.0.0.1}:$GS_MCP_PORT (issuer=$MCP_ISSUER; detached; this script returns)..."
 "$TOPAZ" -l <<TPZ
@@ -152,6 +161,7 @@ $EXTRA_LINE
 $WRITE_LINE
 $RO_LINE
 $BIND_LINE
+$TITLE_LINE
 r forkOnPort: $GS_MCP_PORT
 %
 logout
