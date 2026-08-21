@@ -28,6 +28,10 @@
 #                     Subclass to change BEHAVIOR; to add tools write a toolset instead.
 #   GS_MCP_TOOLSETS - space-separated McpToolset names to expose instead of the default surface,
 #                     e.g. "McpBrowsingToolset McpSearchToolset". Empty means the default.
+#   GS_MCP_TITLE    - human-readable label for THIS INSTANCE, reported as serverInfo.title, e.g.
+#                     "GemStone - staging (gs64stone)". Empty means no title at all: the key is
+#                     omitted and clients display the server name. Use this -- not a relabeled
+#                     serverName -- to tell two deployments of the same software apart.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -39,6 +43,7 @@ GS_MCP_PORT="${GS_MCP_PORT:-8000}"
 GS_MCP_READONLY="${GS_MCP_READONLY:-0}"
 GS_MCP_WORKER_CLASS="${GS_MCP_WORKER_CLASS:-}"
 GS_MCP_TOOLSETS="${GS_MCP_TOOLSETS:-}"
+GS_MCP_TITLE="${GS_MCP_TITLE:-}"
 TOPAZ="$GEMSTONE/bin/topaz"
 
 [ "$GS_MCP_READONLY" = "1" ] && RO="true" || RO="false"
@@ -52,6 +57,11 @@ if [ -n "$GS_MCP_TOOLSETS" ]; then
   for t in $GS_MCP_TOOLSETS; do LITERALS="$LITERALS '$t'"; done
   CONFIG="$CONFIG
 r toolsetNames: #($LITERALS)."
+fi
+# Free-form operator text, so double any embedded quote rather than letting it close the literal.
+if [ -n "$GS_MCP_TITLE" ]; then
+  CONFIG="$CONFIG
+r serverTitle: '$(printf '%s' "$GS_MCP_TITLE" | sed "s/'/''/g")'."
 fi
 echo "Forking McpRouter (readOnly=$RO) onto 127.0.0.1:$GS_MCP_PORT (detached; this script returns)..."
 "$TOPAZ" -l <<TPZ
