@@ -153,36 +153,19 @@ readOnly
 category: 'private'
 method: McpSession
 runWorker: anExpressionString
-  "Run anExpressionString in this session's worker gem and answer its result, WITHOUT stalling the
-   front-end gem. The single place that drives the worker.
-
-   A blocking executeString: blocks inside GCI, in C, so while it runs the front end executes no
-   Smalltalk at all: every other GsProcess is frozen -- other clients' requests, the accept loop,
-   the idle reaper, and any open SSE stream (whose keepalives therefore stopped exactly when a long
-   tool call made them matter most). Measured on 3.7.5: a 5-second worker call froze a 100ms ticker
-   for 5.3 seconds. nbExecute: starts the call and waitForResultForSeconds:otherwise: waits on the
-   session's socket, which suspends only THIS GsProcess; over the same 5-second call the ticker
-   never missed a tick. Since McpRouter>>serve: already forks a GsProcess per connection, this is
-   also what makes concurrent clients genuinely concurrent rather than serialized behind GCI.
-
-   Three details are load-bearing:
-   (1) The result is read with #lastResult, NOT #nbResult. Both #isResultAvailable and
-       #waitForResultForSeconds:otherwise: consume the result internally (they send #nbResult
-       themselves and cache it), so a later #nbResult fails with 'no Nb call in progress'.
-   (2) #lastResult is read only once #isCallInProgress answers false. After a wait that timed out it
-       still holds the PREVIOUS call's value, so reading it early would answer one request with
-       another request's response.
-   (3) The wait is re-entered until the call finishes rather than given a deadline, so a worker still
-       gets as long as it takes -- exactly the old semantics. A timeout is now possible, but it is a
-       new policy and belongs in its own change.
-
-   The mutex serializes access to the worker: GCI allows only one call in flight per session (a
-   second fails with 'operation in progress'), and a client may legitimately have two requests
-   outstanding at once. The blocking executeString: used to serialize those by freezing the whole
-   gem, so this is where that accidental guarantee is made explicit.
-
-   A worker-side error arrives here as the same GciError a blocking executeString: raised -- callers'
-   handlers are unaffected -- and leaves the worker usable for the next request."
+  "Run anExpressionString in this session's worker gem and answer its result -- the one place that
+   drives the worker, and non-blocking on purpose. A blocking executeString: blocks in C, so while
+   one ran the front-end gem executed no Smalltalk and NO GsProcess in it ran: other clients'
+   requests, the accept loop, the reaper, every open SSE stream. A wait on the session's socket
+   suspends only THIS GsProcess.
+   Two traps in that API, each able to corrupt a response silently. The result must be read with
+   #lastResult, because #waitForResultForSeconds: consumes it internally and a later #nbResult then
+   fails. And it must be read only once #isCallInProgress answers false, because after a wait that
+   timed out #lastResult still holds the PREVIOUS call's value. No deadline is imposed, so a worker
+   still gets as long as it takes.
+   The mutex is what keeps two requests from colliding in one worker -- GCI allows one call in flight
+   per session, which the blocking call used to guarantee by freezing the gem. A worker-side error
+   arrives as the same GciError as before, and leaves the worker usable."
   ^self workerMutex critical: [
     worker nbExecute: anExpressionString.
     [worker isCallInProgress]
