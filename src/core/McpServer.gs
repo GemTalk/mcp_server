@@ -107,7 +107,7 @@ defaultToolsetNames
 category: 'worker'
 classmethod: McpServer
 handleJsonString: aRawJsonString
-  "Worker-gem entry the front end drives (via McpSession>>forward:, a blocking executeString:).
+  "Worker-gem entry the front end drives (via McpSession>>forward:, over GCI).
    Answers the JSON response string ('' for a notification).
    Normally the instance is already built and cached by prepareWorkerWithToolsets:... at session open;
    the lazy build here covers a direct in-image send (topaz, a test) and instantiates THIS class -- the
