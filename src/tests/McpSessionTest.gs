@@ -162,6 +162,25 @@ testReaperLeavesASessionWithACallInFlightAlone
   self assert: (self waitUpTo: 2000 for: [sess isBusy not]).
   self assert: r reapIdleSessions equals: 1
 %
+category: 'tests - session open'
+method: McpSessionTest
+testStartCachesTheWorkerIdsSoAPrintCannotClobberAResult
+  "GsTsExternalSession>>printOn: sends #stoneSessionId and #gemProcessId, and each is a memoizing
+   REMOTE call -- so printing a worker that nothing has queried overwrites its lastResult, and a
+   print between the nbExecute: and the lastResult read in #runWorker: would answer a client with
+   the gem's pid. Session open fetches both once, while nothing is in flight, which leaves the
+   kernel's instance variables set for the worker's life so any later print is inert. Assert that
+   the fetch happened at open rather than through the forwarding path, that it is not repeated, and
+   that the session carries the two values to log in place of the worker."
+  | sess w |
+  sess := McpMockSession startWithId: 'ids'.
+  w := sess mockWorker.
+  self assert: w idFetchCount equals: 2.
+  self assert: w expressions isEmpty.
+  self assert: sess workerStoneSession equals: w stoneSessionId.
+  self assert: sess workerPid equals: w gemProcessId.
+  self assert: w idFetchCount equals: 2
+%
 category: 'tests - forwarding'
 method: McpSessionTest
 testWorkerErrorPropagatesAndLeavesTheSessionUsable

@@ -6,7 +6,8 @@ Object subclass: 'McpMockWorker'
   instVarNames: #( expressions currentExpression inProgress
                     waitsRemaining waitsBeforeDone waitMs nextResult
                     lastResult errorOnComplete waitCount blockingExecuteCount
-                    overlapDetected staleReadAttempted loginCount)
+                    overlapDetected staleReadAttempted loginCount stoneSessionId
+                    gemProcessId idFetchCount)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -30,7 +31,10 @@ each verified against GemStone 3.7.5:
     to make a test fail loudly if that value ever escapes;
   - a second call while one is in flight fails (real GCI: `operation in progress`), which is what
     the per-session mutex exists to prevent. That overlap is recorded as well as raised, so a
-    violation inside a forked GsProcess cannot be swallowed.
+    violation inside a forked GsProcess cannot be swallowed;
+  - the two identity accessors, stoneSessionId and gemProcessId, memoize a REMOTE call, so the
+    first send of each overwrites lastResult -- the clobber McpSession>>cacheWorkerIds defuses by
+    fetching them at login, before any request can be in flight.
 Its waits really do wait a few milliseconds, so a forked GsProcess gets to run during one.
 The blocking executeString: is implemented too, and counted: a test asserts it is never used.'
 %
@@ -79,6 +83,26 @@ expressions
   "Every expression handed to this worker, in order."
   ^expressions
 %
+category: 'session protocol'
+method: McpMockWorker
+gemProcessId
+  "A memoizing REMOTE accessor in the real class: the first send performs a GCI call and so
+   overwrites lastResult, later sends are inert. Modelled because that clobber is the whole reason
+   McpSession>>cacheWorkerIds fetches these once at login. It is not counted as a blocking forward
+   (blockingExecuteCount) -- it is a deliberate blocking call at session open, counted as
+   #idFetchCount instead."
+  gemProcessId ifNil: [
+    idFetchCount := idFetchCount + 1.
+    lastResult := gemProcessId := 4242].
+  ^gemProcessId
+%
+category: 'instrumentation'
+method: McpMockWorker
+idFetchCount
+  "How many of the two identity accessors actually called out. Two after one #cacheWorkerIds, and it
+   must stay at two however often they are sent again."
+  ^idFetchCount
+%
 category: 'initialization'
 method: McpMockWorker
 initialize
@@ -92,6 +116,7 @@ initialize
   loginCount := 0.
   overlapDetected := false.
   staleReadAttempted := false.
+  idFetchCount := 0.
   ^self
 %
 category: 'session protocol'
@@ -171,6 +196,15 @@ staleResult: anObject
   "Seed lastResult as a completed earlier call would have left it, so a premature read answers
    this recognisably wrong value rather than nil."
   lastResult := anObject
+%
+category: 'session protocol'
+method: McpMockWorker
+stoneSessionId
+  "The other memoizing REMOTE accessor printOn: sends -- see #gemProcessId."
+  stoneSessionId ifNil: [
+    idFetchCount := idFetchCount + 1.
+    lastResult := stoneSessionId := 77].
+  ^stoneSessionId
 %
 category: 'session protocol'
 method: McpMockWorker

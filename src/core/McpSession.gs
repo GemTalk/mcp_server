@@ -5,7 +5,8 @@ doit
 Object subclass: 'McpSession'
   instVarNames: #( id worker workerMutex
                     lastActivitySeconds userId readOnly workerClassName
-                    toolsetNames serverName serverTitle serverVersion)
+                    toolsetNames serverName serverTitle serverVersion
+                    workerPid workerStoneSession)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -24,7 +25,10 @@ freezes every other GsProcess in the front end -- including other clients'' requ
 makes McpRouter''s per-connection GsProcesses actually concurrent. Access to the worker is
 serialized by a mutex, since GCI allows only one call in flight per session. Idle sessions are
 reaped after a timeout, but never while a call is in flight (#isBusy). Workers log in as the
-current user for now; userId is reserved for later per-user auth.'
+current user for now; userId is reserved for later per-user auth. The worker''s stone session id
+and OS process id are captured at login (#cacheWorkerIds): they are what correlate a session with
+a gem in ps, and fetching them there also makes the kernel''s printOn: -- which sends those same
+two remote accessors -- harmless afterwards.'
 %
 expectvalue /Class
 doit
@@ -63,6 +67,29 @@ startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
   ^self new startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
 %
 ! ------------------- Instance methods for McpSession
+category: 'initialization'
+method: McpSession
+cacheWorkerIds
+  "Fetch the worker gem's stone session id and OS process id once, immediately after login, and hold
+   them here. Two independent reasons, either of which would justify the two calls.
+   Diagnostics: these are what tie an Mcp-Session-Id to a gem in ps and to a row in
+   System currentSessions. Log THESE, never the worker itself.
+   Safety: GsTsExternalSession>>printOn: sends these same two accessors, and each is a memoizing
+   REMOTE call -- so printing a worker that nothing has queried performs a GCI call, which overwrites
+   that worker's lastResult. A print between the nbExecute: and the lastResult read in #runWorker:
+   would then answer a client with the gem's pid where its JSON-RPC response belongs. Fetching them
+   here leaves the kernel's own instance variables set for the worker's whole life (only logout
+   clears them), so any later print is inert.
+   Both sends are BLOCKING GCI calls, deliberately: they run at login, where the gem already blocks
+   on #login for far longer, and this is the one moment when nothing is in flight. Never send them
+   from the forwarding path.
+   The two round trips cannot be folded into one. It is the ACCESSOR sends that populate those
+   instance variables, so fetching both values in a single executeString: would leave printOn: still
+   calling out. Do not add #stoneSessionSerial either: a third memoizing remote accessor, another
+   round trip, and printOn: does not reach it."
+  workerStoneSession := worker stoneSessionId.
+  workerPid := worker gemProcessId
+%
 category: 'lifecycle'
 method: McpSession
 close
@@ -207,6 +234,7 @@ startWithId: anId readOnly: aBoolean
   worker := self newWorkerSession.
   worker useOnetimePassword.
   worker login.
+  self cacheWorkerIds.
   readOnly := aBoolean.
   self touch.
   ^self
@@ -232,6 +260,7 @@ startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
   worker username: aUserId.
   worker jwtPassword: aJwtString.
   worker login.
+  self cacheWorkerIds.
   readOnly := aBoolean.
   self touch.
   ^self
@@ -301,6 +330,22 @@ workerMutex
    session in the id -> session map: the first send always happens before any request can reach
    this session, so no two GsProcesses can race to create it."
   ^workerMutex ifNil: [workerMutex := Semaphore forMutualExclusion]
+%
+category: 'accessing'
+method: McpSession
+workerPid
+  "The worker gem's OS process id, captured at login by #cacheWorkerIds -- what matches this session
+   to a gem in ps or to its gem log. Log this instead of the worker, which cannot be printed without
+   side effects."
+  ^workerPid
+%
+category: 'accessing'
+method: McpSession
+workerStoneSession
+  "The worker gem's stone session id, captured at login by #cacheWorkerIds -- what matches this
+   session to a row in System currentSessions. Log this instead of the worker, which cannot be
+   printed without side effects."
+  ^workerStoneSession
 %
 category: 'private'
 method: McpSession
