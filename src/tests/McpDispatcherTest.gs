@@ -75,6 +75,23 @@ testInitialize
 %
 category: 'tests'
 method: McpDispatcherTest
+testInitializeDeclaresLoggingAndNothingElse
+  "A server may send only what it has declared, and must not declare what it cannot do. 'logging'
+   is what permits notifications/message -- the carrier for the front end's idle warning and
+   session-ending notice. The absences are as deliberate as the presence: no listChanged (a
+   session's tool surface is fixed at initialize), no resources, prompts or completions."
+  | caps |
+  caps := ((self dispatch: (self request: 'initialize' params: Dictionary new)) at: 'result')
+    at: 'capabilities'.
+  self assert: (caps includesKey: 'logging').
+  self assert: (caps at: 'logging') isEmpty.
+  self deny: ((caps at: 'tools') includesKey: 'listChanged').
+  self deny: (caps includesKey: 'resources').
+  self deny: (caps includesKey: 'prompts').
+  self deny: (caps includesKey: 'completions')
+%
+category: 'tests'
+method: McpDispatcherTest
 testInitializeFallsBackForUnsupportedVersion
   "An unsupported requested protocolVersion falls back to our preferred (latest) version. 2025-03-26
    is unsupported on purpose: it mandates receiving JSON-RPC batches, which we don't handle."
@@ -101,6 +118,30 @@ category: 'tests'
 method: McpDispatcherTest
 testNotificationReturnsNil
   self assert: (self dispatch: (self notification: 'notifications/initialized')) isNil
+%
+category: 'tests'
+method: McpDispatcherTest
+testSetLogLevelAnswersAnEmptyResult
+  "Declaring the logging capability promises logging/setLevel. The worker answers it (and validates
+   the level) so a directly driven McpServer is not left with an unanswered request; the level that
+   governs delivery is recorded by the FRONT END as the request passes through, since only the front
+   end generates these notifications and owns the stream -- see McpRouter>>noteLogLevelFrom:sessionId:."
+  | resp |
+  resp := self dispatch: (self request: 'logging/setLevel' params:
+    (Dictionary new at: 'level' put: 'debug'; yourself)).
+  self assert: (resp at: 'result') isEmpty.
+  self deny: (resp includesKey: 'error')
+%
+category: 'tests'
+method: McpDispatcherTest
+testSetLogLevelRejectsAnUnknownLevel
+  "One validation, in one place: the front end declines to record a level it does not recognise and
+   lets the request come here to be refused, so the two can never answer differently."
+  | err |
+  err := (self dispatch: (self request: 'logging/setLevel' params:
+    (Dictionary new at: 'level' put: 'chatty'; yourself))) at: 'error'.
+  self assert: (err at: 'code') equals: -32602.
+  self assert: ((err at: 'message') findString: 'emergency' startingAt: 1) > 0
 %
 category: 'tests'
 method: McpDispatcherTest

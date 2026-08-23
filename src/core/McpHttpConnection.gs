@@ -16,7 +16,14 @@ doit
 McpHttpConnection comment: 
 'Wraps a single accepted client GsSocket and speaks just enough HTTP/1.1 to serve
 the MCP transport: read one request (request line + headers + Content-Length body)
-and write a single application/json response with Connection: close. No keep-alive.'
+and write a single application/json response with Connection: close. No keep-alive.
+
+It also writes the standalone SSE stream (text/event-stream) McpRouter holds open for
+server-to-client messages. Every write on that stream goes through #writeSse:, which waits for the
+socket to be WRITABLE first: GsSocket>>write: suspends the calling GsProcess until the socket can
+take the bytes and has no timeout of its own, so a client that stops reading would otherwise park
+a stream''s GsProcess forever. Disconnection is reported the same way throughout -- a nil from a
+write -- and #clientHasClosed spots it a poll earlier, on the read side.'
 %
 expectvalue /Class
 doit
@@ -32,6 +39,23 @@ on: aSocket
   ^self new setSocket: aSocket
 %
 ! ------------------- Instance methods for McpHttpConnection
+category: 'reading'
+method: McpHttpConnection
+clientHasClosed
+  "Whether the peer has gone away, detected on the READ side and without ever blocking.
+   Needed because a write to a peer that closed normally SUCCEEDS into the socket buffer and only
+   the next write sees the reset: on a stream whose only traffic is a keepalive every 15 seconds
+   that leaves a dead client's socket and its GsProcess alive for up to two intervals. An
+   established SSE stream is write-only -- the client sends nothing more on it -- so readable data
+   means EOF, and anything else means junk we can ignore rather than a live request.
+   readWillNotBlockWithin: 0 reports current readiness only, so this never suspends. An error from
+   either send is itself a disconnect."
+  | ready chunk |
+  ready := [socket readWillNotBlockWithin: 0] on: Error do: [:ex | true].
+  ready == true ifFalse: [^false].
+  chunk := [socket readString: 4096] on: Error do: [:ex | nil].
+  ^chunk isNil or: [chunk isEmpty]
+%
 category: 'closing'
 method: McpHttpConnection
 close
@@ -97,6 +121,14 @@ setSocket: aSocket
   socket := aSocket.
   ^self
 %
+category: 'writing-sse'
+method: McpHttpConnection
+sseWriteTimeoutMs
+  "How long #writeSse: waits for a stalled stream to become writable before treating the client as
+   gone. A full TCP window for five seconds on a connection carrying a keepalive and the odd
+   notification means the peer has stopped reading, not that it is merely slow."
+  ^5000
+%
 category: 'writing'
 method: McpHttpConnection
 writeJson: aJsonString
@@ -112,12 +144,23 @@ writeJson: aJsonString sessionId: anIdOrNil
 %
 category: 'writing-sse'
 method: McpHttpConnection
+writeSse: aFrameString
+  "Write one complete SSE frame, but only once the socket can take it. GsSocket>>write: suspends
+   the calling GsProcess until the socket is ready to write and has NO TIMEOUT, so a client that
+   stops reading would park this stream's GsProcess indefinitely, holding a socket -- the write-side
+   twin of the readWillNotBlockWithin: guard the accept loop already uses. A socket still not
+   writable after #sseWriteTimeoutMs answers nil, which every caller already reads as a disconnect."
+  (socket writeWillNotBlockWithin: self sseWriteTimeoutMs) == true ifFalse: [^nil].
+  ^socket write: aFrameString
+%
+category: 'writing-sse'
+method: McpHttpConnection
 writeSseComment: aString
-  "Write an SSE comment line (used for keepalives). Returns nil if the write fails
-   (e.g. the client disconnected)."
+  "Write an SSE comment line -- ignored by the client, and what keeps a proxy or NAT table from
+   dropping an idle stream. Returns nil if the write fails (e.g. the client disconnected)."
   | lf |
   lf := String with: Character lf.
-  ^socket write: ': ' , aString , lf , lf
+  ^self writeSse: ': ' , aString , lf , lf
 %
 category: 'writing-sse'
 method: McpHttpConnection
@@ -125,7 +168,7 @@ writeSseData: aJsonString
   "Write one SSE 'message' event carrying aJsonString. Returns nil on write failure."
   | lf |
   lf := String with: Character lf.
-  ^socket write: 'event: message' , lf , 'data: ' , aJsonString , lf , lf
+  ^self writeSse: 'event: message' , lf , 'data: ' , aJsonString , lf , lf
 %
 category: 'writing-sse'
 method: McpHttpConnection

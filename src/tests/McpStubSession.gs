@@ -35,6 +35,16 @@ prepareWorker
   wasPrepared := true.
   ^self
 %
+category: 'initialization'
+method: McpStubSession
+startWithId: anId
+  "Record the id and stamp the activity clock -- everything McpSession>>startWithId: does EXCEPT
+   spawn and log in a gem. That is what lets a router test register a real, findable, reapable
+   session (and drain its outbox) without a NETLDI."
+  id := anId.
+  readOnly := false.
+  ^self touch
+%
 category: 'accessing'
 method: McpStubSession
 wasPrepared

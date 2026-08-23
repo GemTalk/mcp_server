@@ -284,7 +284,7 @@ JSON
 check "find_implementors finds runOnPort:"     'McpRouter>>runOnPort:' "$r"
 
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":30,"method":"tools/call","params":{"name":"find_senders","arguments":{"selector":"serveGetStream:"}}}
+{"jsonrpc":"2.0","id":30,"method":"tools/call","params":{"name":"find_senders","arguments":{"selector":"serveGetStream:forSession:"}}}
 JSON
 )
 check "find_senders finds the caller"          'serveGet:on:'      "$r"
@@ -364,9 +364,42 @@ JSON
 check "delete_class removes the class"         'Deleted class'           "$r"
 
 # --- transport: SSE GET stream ---
+# The standalone stream is the ONLY way this server can speak first, and it is session-scoped: the
+# same 400/404/200 gates as POST and DELETE. It used to answer any anonymous GET with a stream that
+# belonged to no session -- attachable to no outbox, and still sending keepalives long after the
+# reaper had logged out the gem it was opened for.
 r=$(curl -s -i -N -m 3 "$URL" 2>&1 | head -12)
+check "GET /mcp without a session id => 400"  'HTTP/1.1 400'             "$r"
+r=$(curl -s -i -N -m 3 "$URL" -H 'MCP-Session-Id: DEADBEEF' 2>&1 | head -12)
+check "GET /mcp with a dead session id => 404" 'HTTP/1.1 404'            "$r"
+r=$(curl -s -i -N -m 3 "$URL" -H "MCP-Session-Id: $SID" 2>&1 | head -12)
 check "GET /mcp => text/event-stream"         'text/event-stream'        "$r"
 check "GET /mcp sends 'connected' comment"    ': connected'              "$r"
+
+# --- transport: a POSTed JSON-RPC response ---
+# How a client answers a request the SERVER sent it (today a liveness ping): a body with an id and
+# no method. The spec wants 202 Accepted and no body. This used to be forwarded to the worker, whose
+# dispatcher saw no method and answered -32600 Invalid Request with a 200 -- so a client's reply to
+# a server ping came back to it as an error.
+r=$(curl -s -i -m 10 "$URL" -H "MCP-Session-Id: $SID" \
+  --data-binary '{"jsonrpc":"2.0","id":"srv-999","result":{}}' 2>&1)
+check "a POSTed JSON-RPC response => 202"     'HTTP/1.1 202'             "$r"
+echo "$r" | grep -q -- '-32600' && verdict='answered -32600' || verdict='no error body'
+check "...and not routed to the worker"       'no error body'            "$verdict"
+
+# --- transport: logging/setLevel ---
+# Declaring the logging capability promises this method. The front end snoops the level as it passes
+# (it generates the notifications and owns the stream); the worker answers it.
+r=$(post <<'JSON'
+{"jsonrpc":"2.0","id":43,"method":"logging/setLevel","params":{"level":"debug"}}
+JSON
+)
+check "logging/setLevel is accepted"          '"result"'                 "$r"
+r=$(post <<'JSON'
+{"jsonrpc":"2.0","id":44,"method":"logging/setLevel","params":{"level":"chatty"}}
+JSON
+)
+check "logging/setLevel rejects a bad level"  '-32602'                   "$r"
 
 # --- transport: a slow call must not block another client ---
 # The property the whole front end rests on: one client's long tool call does not stop the server.
@@ -395,9 +428,29 @@ wait "$slow_pid" || true
 check "the slow call still returned its own result" '"text":"4321"'        "$(cat "$SLOW_OUT")"
 rm -f "$SLOW_OUT"
 
+# --- transport: ending a session closes its open stream ---
+# The only end-to-end exercise of the drain loop: a stream is held open, the session is ended, and
+# the loop must notice and finish. Ending a session marks its outbox CLOSING rather than closed
+# precisely so the loop gets one more pass -- that is what lets the reaper deliver a session-ending
+# notice instead of cutting the client off with the gem. If the loop ignored it, this curl would sit
+# there until its own timeout.
+STREAM_OUT="$(mktemp "${TMPDIR:-/tmp}/mcp-stream.XXXXXX")"
+curl -s -N -m 30 "$URL" -H "MCP-Session-Id: $SID" >"$STREAM_OUT" 2>&1 &
+stream_pid=$!
+sleep 1                       # let the stream attach to the session's outbox
+started=$SECONDS
+curl -s -m 10 -X DELETE "$URL" -H "MCP-Session-Id: $SID" >/dev/null 2>&1
+wait "$stream_pid" || true
+elapsed=$((SECONDS - started))
+[ "$elapsed" -lt 5 ] && verdict="closed" || verdict="hung for ${elapsed}s"
+check "ending a session closes its stream (${elapsed}s)" 'closed'        "$verdict"
+check "...having delivered what was queued"   ': connected'              "$(cat "$STREAM_OUT")"
+rm -f "$STREAM_OUT"
+
 # --- transport: DELETE (session termination) ---
 # Same status codes as the POST path: no header => 400, unknown id => 404, live id => 200.
-# Runs last, because the final DELETE ends this client's session.
+# The live-id case ran just above (it is what closed the stream), so this id is now gone: what is
+# left to check here is the two error gates and the 404 a client meets afterwards.
 r=$(curl -s -i -m 10 -X DELETE "$URL" 2>&1 | head -1)
 check "DELETE without session => 400"          '400'                     "$r"
 
@@ -405,7 +458,7 @@ r=$(curl -s -i -m 10 -X DELETE "$URL" -H 'MCP-Session-Id: DEADBEEF' 2>&1 | head 
 check "DELETE unknown session => 404"          '404'                     "$r"
 
 r=$(curl -s -i -m 10 -X DELETE "$URL" -H "MCP-Session-Id: $SID" 2>&1 | head -1)
-check "DELETE live session => 200"             '200'                     "$r"
+check "DELETE an already-ended session => 404" '404'                     "$r"
 
 # After termination the spec requires 404 for any request still carrying that id, which is
 # the client's cue to re-initialize.

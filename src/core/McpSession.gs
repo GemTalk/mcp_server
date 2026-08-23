@@ -6,7 +6,8 @@ Object subclass: 'McpSession'
   instVarNames: #( id worker workerMutex
                     lastActivitySeconds userId readOnly workerClassName
                     toolsetNames serverName serverTitle serverVersion
-                    workerPid workerStoneSession)
+                    workerPid workerStoneSession outbox logLevel
+                    probeState idleWarned)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -28,7 +29,18 @@ reaped after a timeout, but never while a call is in flight (#isBusy). Workers l
 current user for now; userId is reserved for later per-user auth. The worker''s stone session id
 and OS process id are captured at login (#cacheWorkerIds): they are what correlate a session with
 a gem in ps, and fetching them there also makes the kernel''s printOn: -- which sends those same
-two remote accessors -- harmless afterwards.'
+two remote accessors -- harmless afterwards.
+
+A session also carries the state the SERVER-INITIATED side of the transport needs, all of it held
+by the front end and none of it in the worker: an McpOutbox of messages waiting for this client''s
+SSE stream, the log level the client asked for (logging/setLevel), and what the last liveness probe
+found. That last one is why reaping is no longer a single clock. #touch -- real MCP traffic -- is
+the only thing that resets the idle cycle. A ping the client ANSWERS proves it is still there
+(#noteAlive) and earns a genuine warning before the deadline; a ping it never answers proves it is
+gone (#noteProbeUnanswered) and frees the gem early, without waiting out the full timeout. What an
+answered ping deliberately does NOT do is stamp the activity clock: if it did, every well-behaved
+client would hold its worker gem and its transaction view forever, and the warning would only ever
+reach clients unable to act on it.'
 %
 expectvalue /Class
 doit
@@ -38,6 +50,11 @@ McpSession category: 'Mcp-Core'
 removeallmethods McpSession
 removeallclassmethods McpSession
 ! ------------------- Class methods for McpSession
+category: 'instance creation'
+classmethod: McpSession
+new
+  ^super new initialize
+%
 category: 'instance creation'
 classmethod: McpSession
 startWithId: anId
@@ -67,6 +84,18 @@ startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
   ^self new startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
 %
 ! ------------------- Instance methods for McpSession
+category: 'logging'
+method: McpSession
+allowsLogLevel: aLevelString
+  "Whether a notifications/message at aLevelString is at or above the severity this client asked
+   for with logging/setLevel. An unknown level is let through rather than swallowed: dropping a
+   message because the SERVER mislabelled it would hide exactly the events worth seeing."
+  | wanted sending |
+  wanted := McpBase logLevelRank: self logLevel.
+  sending := McpBase logLevelRank: aLevelString.
+  (wanted isNil or: [sending isNil]) ifTrue: [^true].
+  ^sending >= wanted
+%
 category: 'initialization'
 method: McpSession
 cacheWorkerIds
@@ -94,7 +123,12 @@ category: 'lifecycle'
 method: McpSession
 close
   "Terminate the worker gem. It is attached (the front end drives it via executeString:), so a
-   logout stops it."
+   logout stops it.
+   The outbox is only marked CLOSING, not closed: whatever is queued -- a session-ending notice
+   above all -- is still owed to the client, and the drain loop closes the outbox itself once it has
+   written it. Closing outright here would kill the stream in the same instant as the gem and drop
+   the one message explaining why."
+  outbox ifNotNil: [:o | o beginClosing].
   [worker logout] on: Error do: [:e | nil].
   ^self
 %
@@ -120,6 +154,25 @@ idleSeconds
 %
 category: 'activity'
 method: McpSession
+idleWarned
+  "Whether this client has already been told its session is nearing the idle deadline. Cleared by
+   #touch, so the warning is sent once per idle period rather than on every reaper cycle."
+  ^idleWarned == true
+%
+category: 'initialization'
+method: McpSession
+initialize
+  "Seed the front-end-side state. The outbox is built HERE rather than on demand: nothing prepares
+   it the way #prepareWorker prepares the worker before the session is registered, so two
+   GsProcesses -- an arriving GET stream and the reaper -- really could race to create it."
+  outbox := McpOutbox new.
+  logLevel := nil.
+  probeState := nil.
+  idleWarned := false.
+  ^self
+%
+category: 'activity'
+method: McpSession
 isBusy
   "Whether a call into this session's worker gem is in flight. Asked by the idle reaper: #forward:
    stamps the activity clock when a call STARTS, so a request that runs longer than the idle timeout
@@ -128,10 +181,48 @@ isBusy
    either. Cheap: it reads the external session's own state and makes no GCI call."
   ^worker notNil and: [worker isCallInProgress]
 %
+category: 'liveness'
+method: McpSession
+isKnownAlive
+  "Whether this client answered its liveness ping. Only such a session is worth warning: it has an
+   open stream and something at the other end of it."
+  ^probeState == #alive
+%
+category: 'liveness'
+method: McpSession
+isKnownGone
+  "Whether a liveness ping this client was sent went unanswered. The reaper frees such a session's
+   worker gem immediately: the ping went down a stream the client itself opened, so silence is
+   evidence, not merely absent traffic."
+  ^probeState == #gone
+%
+category: 'liveness'
+method: McpSession
+isProbeOutstanding
+  "Whether a liveness ping is waiting for its answer, so the reaper neither sends another nor
+   decides anything yet."
+  ^probeState == #sent
+%
 category: 'accessing'
 method: McpSession
 lastActivitySeconds
   ^lastActivitySeconds
+%
+category: 'logging'
+method: McpSession
+logLevel
+  "The minimum severity this client wants in notifications/message. 'info' until it says otherwise
+   with logging/setLevel -- quiet enough to keep debug chatter off the stream, low enough that the
+   idle warning (a 'warning') is never filtered out by default."
+  ^logLevel ifNil: ['info']
+%
+category: 'logging'
+method: McpSession
+logLevel: aLevelString
+  "Record the level from logging/setLevel. The front end enforces it, because the front end is what
+   generates these notifications and owns the stream they go down -- see
+   McpRouter>>noteLogLevelFrom:sessionId:."
+  logLevel := aLevelString
 %
 category: 'initialization'
 method: McpSession
@@ -139,6 +230,44 @@ newWorkerSession
   "A fresh, not-yet-logged-in GsTsExternalSession worker gem on localhost. GsTsExternalSession is
    assumed present -- it exists in every supported image (GemStone 3.6.2+)."
   ^GsTsExternalSession newDefaultForGemHost: 'localhost'
+%
+category: 'activity'
+method: McpSession
+noteAlive
+  "The client answered a liveness ping. It is there; its worker gem is spared the early reap and
+   earns a real warning before the idle deadline. Deliberately NOT #touch -- see the class comment."
+  probeState := #alive.
+  ^self
+%
+category: 'activity'
+method: McpSession
+noteIdleWarned
+  "Remember that the near-the-deadline warning has been sent for this idle period."
+  idleWarned := true.
+  ^self
+%
+category: 'activity'
+method: McpSession
+noteProbeSent
+  "A liveness ping is on its way; the reaper waits for the answer rather than sending another."
+  probeState := #sent.
+  ^self
+%
+category: 'activity'
+method: McpSession
+noteProbeUnanswered
+  "The liveness ping timed out. Only a ping actually in flight can fail this way -- a session the
+   client has since spoken to has already been reset by #touch, and must not be marked gone by a
+   verdict on a probe that no longer applies."
+  probeState == #sent ifTrue: [probeState := #gone].
+  ^self
+%
+category: 'accessing'
+method: McpSession
+outbox
+  "This session's queue of server-initiated messages, waiting for its SSE stream. Front-end state:
+   the worker gem neither has one nor could write to it."
+  ^outbox
 %
 category: 'initialization'
 method: McpSession
@@ -275,8 +404,12 @@ toolsetNames: aCollectionOfNamesOrNil
 category: 'activity'
 method: McpSession
 touch
-  "Record now (GMT seconds) as the last activity, for idle-timeout reaping."
+  "Record now (GMT seconds) as the last activity, for idle-timeout reaping, and start the idle cycle
+   over: a client that has just made a real MCP call needs no warning and no liveness probe, and
+   whatever the last probe concluded is now out of date."
   lastActivitySeconds := System timeGmt.
+  probeState := nil.
+  idleWarned := false.
   ^self
 %
 category: 'accessing'

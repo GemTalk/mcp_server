@@ -82,9 +82,10 @@ run
 names := #( 'McpError' 'McpTool' 'McpToolRegistry' 'McpToolset' 'McpBrowsingToolset'
   'McpExecutionToolset' 'McpListingToolset' 'McpMutationToolset' 'McpSearchToolset'
   'McpSessionToolset' 'McpTestingToolset' 'McpHttpConnection' 'McpDispatcher' 'McpBase'
-  'McpServer' 'McpSession' 'McpRouter' 'McpMockSocket' 'McpMockWorker' 'McpMockSession'
-  'McpStubSession' 'McpFixtureToolset' 'McpFixtureServer' 'McpToolTest' 'McpDispatcherTest'
-  'McpTransportTest' 'McpContractTest' 'McpExtensionTest' 'McpSessionTest' 'McpAuthRouter'
+  'McpServer' 'McpOutbox' 'McpSession' 'McpRouter' 'McpMockSocket' 'McpMockWorker'
+  'McpMockSession' 'McpStubSession' 'McpFixtureToolset' 'McpFixtureServer' 'McpFixtureRouter'
+  'McpToolTest' 'McpDispatcherTest' 'McpTransportTest' 'McpContractTest' 'McpExtensionTest'
+  'McpSessionTest' 'McpOutboxTest' 'McpStreamTest' 'McpAuthRouter'
   'McpAuthTest' 'McpAuthConformanceTest' ) asOrderedCollection.
 '$LOAD_FILE' = 'load-grail.gs'
   ifTrue: [ names add: 'McpGrailToolset'; add: 'McpGrailToolsetTest' ].

@@ -236,11 +236,18 @@ testForeignOriginReturns403
 %
 category: 'tests'
 method: McpTransportTest
-testGetOpensSseStream
+testGetWithoutASessionIdIsRefused
+  "The GET stream is SESSION-SCOPED, like every other verb: no MCP-Session-Id header -> 400. This
+   test used to assert the opposite -- that a bare GET opened a stream -- which was the defect. A
+   stream the server cannot name a session for can be attached to no outbox, and it also outlived
+   its session: once the reaper dropped a session and logged out its gem, nothing touched that
+   client's GET socket, so the keepalives went on advertising a healthy stream over a worker that
+   was gone. What the stream then DOES is McpStreamTest's subject; this is the verb-level gate,
+   alongside the POST and DELETE ones."
   | out |
   out := (self runRequest: (self simpleRequest: 'GET')) output.
-  self assert: (self includesCS: 'text/event-stream' in: out).
-  self assert: (self includesCS: ': connected' in: out)
+  self assert: (self includesCS: 'HTTP/1.1 400 Bad Request' in: out).
+  self deny: (self includesCS: 'text/event-stream' in: out)
 %
 category: 'tests'
 method: McpTransportTest

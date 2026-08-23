@@ -6,7 +6,8 @@ McpBase subclass: 'McpRouter'
   instVarNames: #( isRunning mutex routesTable
                     serverSocket sessions allowedOriginHosts tlsCertificateFile
                     tlsPrivateKeyFile readOnly workerClassName toolsetNames
-                    serverName serverTitle serverVersion)
+                    serverName serverTitle serverVersion pendingRequests
+                    pendingMutex serverRequestCounter)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -30,6 +31,16 @@ the tool surface (toolsetNames, defaulting to the installed toolsets) and pushes
 gem in one call, so a worker never chooses for itself. Resolving here rather than at boot is also what
 will let an authenticated router narrow the surface per token, since the token is only visible on this
 side.
+
+It is also the only place that can SPEAK FIRST. Streamable HTTP gives a server no socket to call
+out on, and the one connection it may write to unprompted is the standalone SSE stream a client
+opens with GET -- accepted by THIS process, and a socket is a file descriptor meaningful only inside
+the process that owns it, so the stream can live nowhere else. Each session therefore has an
+McpOutbox here (never in the worker gem), the GET handler drains it, and this class keeps the
+pending-request table that correlates a server-initiated request with the JSON-RPC response the
+client POSTs back. What that buys today is the idle story: a session IS a gem with its own
+transaction view, so reaping one discards uncommitted work -- and now a client is pinged, warned in
+time to commit, and told when its session ends, instead of discovering it through a cold 404.
 
 IMPORTANT: runOnPort: is BLOCKING and is meant to be the main activity of a dedicated gem. Forked
 GsProcesses only run while the gem is actively executing Smalltalk, so a background fork in an idle
@@ -124,6 +135,25 @@ allowedOriginHosts: aCollectionOfHostStrings
   "Replace this router's Origin-host allowlist (hosts compared lower-cased; include loopback if you
    still want local browsers to connect)."
   allowedOriginHosts := aCollectionOfHostStrings
+%
+category: 'server-initiated'
+method: McpRouter
+announceSessionEnd: sess
+  "Tell a client on its own stream that its session has just ended, and stop the stream cleanly.
+   #beginClosing -- not #close -- is what makes this land: it refuses anything further while leaving
+   the queued notice deliverable, so the drain loop writes it and closes the outbox itself. Closing
+   outright here would drop the notice on the floor as the gem went away.
+   Best-effort by design: a client that never opened a GET stream cannot be told, and still learns
+   from the 404 on its next call. That is a defensible outcome, but a chosen one."
+  | reason |
+  reason := sess isKnownGone
+    ifTrue: ['it did not answer a liveness ping']
+    ifFalse: ['it was idle for over ' , (self sessionIdleTimeoutSeconds // 60) printString , ' minutes'].
+  self enqueueLog: 'This MCP session has ended because ' , reason ,
+      '. Its GemStone worker gem has been released, and any uncommitted changes in it are gone. ' ,
+      'Send initialize to start a new session.'
+    level: 'warning' toSession: sess.
+  sess outbox beginClosing
 %
 category: 'config'
 method: McpRouter
@@ -239,6 +269,24 @@ disableTls
   tlsCertificateFile := nil.
   tlsPrivateKeyFile := nil
 %
+category: 'server-initiated'
+method: McpRouter
+drainOutbox: outbox to: conn
+  "Write everything waiting in outbox to the SSE stream, oldest first. Answers false as soon as a
+   write fails, which is how the drain loop learns the client is gone.
+   A gap is admitted rather than hidden: if the overflow policy discarded messages, the client is
+   told how many before the survivors arrive. That notice is NOT filtered by the client's log level,
+   unlike the messages it reports on -- it describes a failure of delivery, not something that
+   happened in the image."
+  | dropped |
+  dropped := outbox takeDroppedCount.
+  dropped > 0 ifTrue: [
+    (conn writeSseData: (self logNotification: dropped printString ,
+        ' server message(s) for this session were dropped: its outbox overflowed.'
+      level: 'warning') asJson) ifNil: [^false]].
+  outbox drain do: [:each | (conn writeSseData: each) ifNil: [^false]].
+  ^true
+%
 category: 'toolsets'
 method: McpRouter
 effectiveToolsetNames
@@ -257,6 +305,33 @@ effectiveWorkerClassName
    forwarded request (McpSession>>workerExpressionFor:), so the worker gem is told rather than
    deciding."
   ^workerClassName ifNil: ['McpServer']
+%
+category: 'server-initiated'
+method: McpRouter
+enqueueLog: aString level: aLevelString toSession: sess
+  "Queue a notifications/message on sess's stream, unless the client asked for a higher severity
+   than this one (logging/setLevel). Answers whether it was queued."
+  (sess allowsLogLevel: aLevelString) ifFalse: [^false].
+  ^sess outbox add: (self logNotification: aString level: aLevelString) asJson
+%
+category: 'server-initiated'
+method: McpRouter
+expirePendingRequests
+  "Drop server-initiated requests the client never answered, and mark their sessions accordingly.
+   EVERY pending request is timed out, without exception: an unanswered ping has to decide something
+   -- liveness failed -- and must never leave a session waiting for an answer that is not coming.
+   Answers how many expired."
+  | now expired |
+  now := System timeGmt.
+  expired := pendingMutex critical: [
+    | old |
+    old := pendingRequests values select: [:e |
+      now - (e at: 'sentAt') > self pendingRequestTimeoutSeconds].
+    old do: [:e | pendingRequests removeKey: (e at: 'id') ifAbsent: [nil]].
+    old].
+  expired do: [:e |
+    (self sessionAt: (e at: 'sessionId')) ifNotNil: [:sess | sess noteProbeUnanswered]].
+  ^expired size
 %
 category: 'forking'
 method: McpRouter
@@ -294,13 +369,13 @@ forkOnPort: aPort
 category: 'sessions'
 method: McpRouter
 forkReaper
-  "Fork the background reaper GsProcess: every reaperIntervalSeconds, reap idle sessions. Runs
-   during the accept loop's waits (like the per-connection handlers) and exits when the server
-   stops."
+  "Fork the background maintenance GsProcess: every reaperIntervalSeconds, one pass over the
+   sessions (see #maintainSessions). Runs during the accept loop's waits (like the per-connection
+   handlers) and exits when the server stops."
   [[isRunning] whileTrue: [
      (Delay forSeconds: self reaperIntervalSeconds) wait.
-     [self reapIdleSessions] on: Error do: [:e |
-       self log: 'reapIdleSessions error: ' , ([e description] on: Error do: [:x | e class name asString])]]] fork
+     [self maintainSessions] on: Error do: [:e |
+       self log: 'maintainSessions error: ' , ([e description] on: Error do: [:x | e class name asString])]]] fork
 %
 category: 'running'
 method: McpRouter
@@ -334,6 +409,14 @@ hostOfOrigin: aString
   (rest indexOf: $/) > 0 ifTrue: [cut := cut min: (rest indexOf: $/)].
   ^rest copyFrom: 1 to: cut - 1
 %
+category: 'sessions'
+method: McpRouter
+idleWarningLeadSeconds
+  "How long before the idle deadline a session is probed and then warned. Five minutes: long enough
+   that a model told 'commit or make a call' can actually do so, short enough that the probe is a
+   fair test of whether anyone is still there."
+  ^300
+%
 category: 'initialization'
 method: McpRouter
 initialize
@@ -354,7 +437,61 @@ initialize
   serverName := nil.       "nil = the worker's own default (McpServer class>>defaultServerName)"
   serverTitle := nil.      "nil = no instance label, so no serverInfo title key at all"
   serverVersion := nil.
+  "server-initiated messaging: the requests this server has sent and is waiting to be answered.
+   Its OWN mutex, not the session-map one -- that is held across reapIdleSessions, and correlating
+   a client's ping reply must not queue behind another client's login."
+  pendingRequests := Dictionary new.
+  pendingMutex := Semaphore forMutualExclusion.
+  serverRequestCounter := 0.
   ^self
+%
+category: 'running'
+method: McpRouter
+isRunning
+  "Whether this router's accept loop is up. Set by runOnPort:, cleared by #stop. Read as a SEND
+   (not the instance variable) by the SSE drain loop, so a test can hold a stream open against a
+   router that never bound a socket -- see McpFixtureRouter."
+  ^isRunning == true
+%
+category: 'running'
+method: McpRouter
+keepaliveIntervalSeconds
+  "How often an otherwise silent SSE stream gets a comment line. Comfortably under the usual 30-60
+   second proxy and NAT idle timeouts, which is the only thing this interval has to beat."
+  ^15
+%
+category: 'sessions'
+method: McpRouter
+maintainIdleSession: sess pastThreshold: thresholdSeconds
+  "One session's turn in the idle window (see #probeIdleSessions). Answers whether a message was
+   sent to it."
+  sess isBusy ifTrue: [^false].
+  sess idleSeconds <= thresholdSeconds ifTrue: [^false].
+  "past the deadline as well -- reapIdleSessions has this one; do not spend a ping on it"
+  sess idleSeconds > self sessionIdleTimeoutSeconds ifTrue: [^false].
+  "a client with no stream can receive neither a ping nor a warning. Skipping it is not an
+   oversight: pinging it would record an unanswered probe and reap its gem EARLY for the sole
+   offence of not opening a stream."
+  sess outbox hasStream ifFalse: [^false].
+  sess isProbeOutstanding ifTrue: [^false].    "answer still owed; decide on a later pass"
+  sess isKnownGone ifTrue: [^false].           "already decided; reapIdleSessions frees it"
+  sess isKnownAlive ifFalse: [^self probeSession: sess].
+  sess idleWarned ifTrue: [^false].
+  ^self warnIdleSession: sess
+%
+category: 'sessions'
+method: McpRouter
+maintainSessions
+  "One pass of session housekeeping, run on the reaper's GsProcess. The order is the point:
+     1. time out server-initiated requests nobody answered -- that is what marks a probed session
+        gone;
+     2. probe, then warn, sessions drifting toward the idle deadline;
+     3. reap what is idle or gone, telling each client on its stream first.
+   Reaping last means a session found gone in step 1 is freed in the same pass rather than the next.
+   Answers the number reaped."
+  self expirePendingRequests.
+  self probeIdleSessions.
+  ^self reapIdleSessions
 %
 category: 'running'
 method: McpRouter
@@ -372,6 +509,15 @@ makeListenerOnPort: aPort
     ifNil: [^self error: 'makeServer failed on port ' , aPort printString , ': ' , sock lastErrorString].
   ^sock
 %
+category: 'server-initiated'
+method: McpRouter
+nextServerRequestId
+  "A fresh id for a request THIS server sends. Its own namespace ('srv-N'), so a server-originated
+   id can never be confused with a client-originated one in the pending table or in a log line."
+  ^pendingMutex critical: [
+    serverRequestCounter := serverRequestCounter + 1.
+    'srv-' , serverRequestCounter printString]
+%
 category: 'sessions'
 method: McpRouter
 nextSessionId
@@ -381,6 +527,22 @@ nextSessionId
   | id |
   [id := self randomSessionToken. sessions includesKey: id] whileTrue: [].
   ^id
+%
+category: 'routing'
+method: McpRouter
+noteLogLevelFrom: parsed sessionId: sid
+  "Record the level from a logging/setLevel request as it passes through; the request still goes on
+   to the worker, which answers it. The front end has to snoop rather than merely route it, because
+   the front end is what generates every notifications/message this server sends and owns the stream
+   they go down -- a worker gem can do neither.
+   A level naming nothing is left alone here and refused by the worker's dispatcher (-32602), so
+   there is one validation rather than two answers that could disagree."
+  | params level |
+  params := parsed at: 'params' ifAbsent: [nil].
+  (params isKindOf: Dictionary) ifFalse: [^self].
+  level := params at: 'level' ifAbsent: [nil].
+  (McpBase isLogLevel: level) ifFalse: [^self].
+  (self sessionAt: sid) ifNotNil: [:sess | sess logLevel: level]
 %
 category: 'sessions'
 method: McpRouter
@@ -423,6 +585,45 @@ originAllowed: req
   origin := (req at: 'headers' ifAbsent: [Dictionary new]) at: 'origin' ifAbsent: [nil].
   origin isNil ifTrue: [^true].
   ^self allowedOriginHosts includes: (self hostOfOrigin: origin) asLowercase
+%
+category: 'server-initiated'
+method: McpRouter
+pendingRequestTimeoutSeconds
+  "How long a server-initiated request may go unanswered before it is treated as failed. Well under
+   the reaper interval, so a ping sent on one pass has always been decided by the next."
+  ^30
+%
+category: 'sessions'
+method: McpRouter
+probeIdleSessions
+  "Work the window between 'quiet' and 'reaped' for every session, and answer how many messages went
+   out. Two steps per session, a pass apart (see #maintainIdleSession:pastThreshold:): a liveness
+   ping first, and only for a client that answered it, the warning.
+   That order is what makes the warning worth sending. It costs a gem its own transaction view when
+   a session is reaped, so a client that is still there deserves the chance to commit -- and a client
+   that is not there should not be waited out for the full timeout.
+   Iterates a snapshot: a session may be reaped, or a new one registered, while this runs."
+  | sent threshold |
+  sent := 0.
+  threshold := self sessionIdleTimeoutSeconds - self idleWarningLeadSeconds.
+  (mutex critical: [sessions values asArray]) do: [:sess |
+    [(self maintainIdleSession: sess pastThreshold: threshold) ifTrue: [sent := sent + 1]]
+      on: Error
+      do: [:e | self log: 'probeIdleSessions error: ' ,
+             ([e description] on: Error do: [:x | e class name asString])]].
+  ^sent
+%
+category: 'server-initiated'
+method: McpRouter
+probeSession: sess
+  "Send a server-initiated ping down this session's stream, and answer whether it was queued.
+   Ping is bidirectional in MCP -- either party may send it, and the receiver MUST respond promptly
+   -- which makes it the one sanctioned way to tell 'the human walked away but the client is alive'
+   from 'the client is gone'. There is no MCP method for either question, so nothing is invented
+   here that a client would not already understand."
+  (self sendRequest: 'ping' params: nil toSession: sess) isNil ifTrue: [^false].
+  sess noteProbeSent.
+  ^true
 %
 category: 'routing'
 method: McpRouter
@@ -489,21 +690,30 @@ reaperIntervalSeconds
 category: 'sessions'
 method: McpRouter
 reapIdleSessions
-  "Close and unmap client sessions idle longer than sessionIdleTimeoutSeconds. Collect + unmap
-   under the mutex; close (a blocking logout) outside it. Answers the number reaped.
-   A session with a call in flight is never reaped, however long it has run: McpSession>>forward:
-   stamps the activity clock when the call STARTS, so a request that outlives the idle timeout would
-   otherwise have its worker logged out from under it. That could not happen while forwarding blocked
-   the whole gem -- the reaper could not run either -- so the guard arrives with the non-blocking
-   forward (see McpSession>>runWorker:)."
+  "Close and unmap client sessions whose worker gem should be released, and answer how many.
+   Collect + unmap under the mutex; close (a blocking logout) outside it.
+   TWO grounds now, not one: a session idle longer than sessionIdleTimeoutSeconds, and a session
+   whose liveness ping went unanswered (#isKnownGone). The second is evidence, not merely absent
+   traffic -- the ping went down a stream the client itself opened -- so that gem is freed without
+   waiting out the whole timeout.
+   A session with a call in flight is never reaped on either ground, however long it has run:
+   McpSession>>forward: stamps the activity clock when the call STARTS, so a request that outlives
+   the idle timeout would otherwise have its worker logged out from under it. That could not happen
+   while forwarding blocked the whole gem -- the reaper could not run either -- so the guard arrives
+   with the non-blocking forward (see McpSession>>runWorker:).
+   Each session is told on its own stream before it goes (#announceSessionEnd:); a session reaped for
+   idleness is by definition one making no calls, so the stream is the only way to reach it."
   | expired timeout |
   timeout := self sessionIdleTimeoutSeconds.
   expired := mutex critical: [
     | old |
-    old := sessions values select: [:s | s idleSeconds > timeout and: [s isBusy not]].
+    old := sessions values select: [:s |
+      s isBusy not and: [s isKnownGone or: [s idleSeconds > timeout]]].
     old do: [:s | sessions removeKey: s id ifAbsent: [nil]].
     old].
-  expired do: [:s | [s close] on: Error do: [:e | nil]].
+  expired do: [:s |
+    [self announceSessionEnd: s] on: Error do: [:e | nil].
+    [s close] on: Error do: [:e | nil]].
   expired isEmpty ifFalse: [self log: 'Reaped ' , expired size printString , ' idle MCP session(s).'].
   ^expired size
 %
@@ -515,6 +725,24 @@ requestAuthorized: req on: conn
    override answers false to refuse the request, and is responsible for having written the error
    response itself -- see McpAuthRouter>>requestAuthorized:on:."
   ^true
+%
+category: 'server-initiated'
+method: McpRouter
+resolvePendingRequest: anId forSession: sess
+  "Match a client's POSTed JSON-RPC response to the request this server sent it. Answers the pending
+   entry, or nil for an id we are not waiting on -- a duplicate, a late answer to a request already
+   timed out, or one we never issued. Those are ignored rather than refused: a client must not be
+   made to fail because the server has forgotten.
+   Today the only server-initiated request is the liveness ping, and ANY answer to it -- result or
+   error -- proves the client is there, which is all #noteAlive claims. Note what it does not do:
+   stamp the activity clock. Liveness spares the gem an early reap and earns a warning; only real
+   MCP traffic (#touch) restarts the idle cycle."
+  | entry |
+  anId isNil ifTrue: [^nil].
+  entry := pendingMutex critical: [pendingRequests removeKey: anId ifAbsent: [nil]].
+  entry isNil ifTrue: [^nil].
+  sess noteAlive.
+  ^entry
 %
 category: 'running'
 method: McpRouter
@@ -571,6 +799,33 @@ runOnPort: aPort
   self log: 'McpRouter stopped.'.
   ^self
 %
+category: 'server-initiated'
+method: McpRouter
+sendRequest: aMethodString params: aDictOrNil toSession: sess
+  "Queue a server-initiated JSON-RPC REQUEST on sess's stream and record it as pending, so the
+   client's answer can be correlated back to it. Answers the id, or nil if the outbox would not take
+   the message (closed or closing), in which case nothing is left pending to time out.
+   The answer does not come back on the stream: the client POSTs a JSON-RPC response to /mcp, which
+   is why the pending table exists at all and why servePost: has to recognize a body with an id and
+   no method."
+  | rid entry |
+  rid := self nextServerRequestId.
+  entry := Dictionary new.
+  entry at: 'id' put: rid.
+  entry at: 'method' put: aMethodString.
+  entry at: 'sessionId' put: sess id.
+  entry at: 'sentAt' put: System timeGmt.
+  "'origin' distinguishes a request the ROUTER asked -- resolved here, as ping is -- from one a
+   worker gem asked (elicitation, sampling), whose answer would have to be delivered back INTO that
+   gem while its GCI call is already in flight. Nothing originates in a worker yet: that needs a
+   bidirectional worker channel, which is why those two scenarios sit last in the plan."
+  entry at: 'origin' put: 'router'.
+  pendingMutex critical: [pendingRequests at: rid put: entry].
+  (sess outbox add: (self request: aMethodString params: aDictOrNil id: rid) asJson) ifFalse: [
+    pendingMutex critical: [pendingRequests removeKey: rid ifAbsent: [nil]].
+    ^nil].
+  ^rid
+%
 category: 'running'
 method: McpRouter
 serve: aClientSocket
@@ -579,6 +834,25 @@ serve: aClientSocket
    server-side handshake first; a failed handshake closes the socket and serves nothing."
   [(self completeHandshake: aClientSocket)
      ifTrue: [self handleConnection: (McpHttpConnection on: aClientSocket)]] fork
+%
+category: 'routing'
+method: McpRouter
+serveClientResponse: parsed sessionId: sid on: conn
+  "A JSON-RPC RESPONSE the client POSTed: its answer to a request THIS server sent on the SSE stream
+   (today only ping). It carries an id and no method, which is what tells it from a request.
+   Per the Streamable HTTP spec a POST carrying only responses or notifications MUST be answered with
+   202 Accepted and no body. Before this existed, such a body fell through to the worker, whose
+   dispatcher saw no method and answered -32600 Invalid Request with a 200 -- so a client's reply to
+   a server ping came back to it as an error.
+   Session gates are the same as on every other verb, so a client gets one consistent signal."
+  | sess |
+  sid isNil ifTrue: [
+    ^self writeSessionError: 'Missing MCP-Session-Id header (call initialize first)' code: 400 reason: 'Bad Request' on: conn].
+  sess := self sessionAt: sid.
+  sess isNil ifTrue: [
+    ^self writeSessionError: 'Unknown or expired session: ' , sid code: 404 reason: 'Not Found' on: conn].
+  self resolvePendingRequest: (parsed at: 'id' ifAbsent: [nil]) forSession: sess.
+  conn writeStatus: 202 reason: 'Accepted' body: ''
 %
 category: 'routing'
 method: McpRouter
@@ -602,21 +876,53 @@ serveDelete: req on: conn
 category: 'running'
 method: McpRouter
 serveGet: req on: conn
-  "Dispatch a GET. Base: open the standalone SSE stream. Subclasses may branch on the request path
-   (McpAuthRouter serves Protected Resource Metadata at a well-known path)."
-  ^self serveGetStream: conn
+  "Dispatch a GET: open the standalone SSE stream for the session named by the MCP-Session-Id
+   header. Subclasses may branch on the request path first (McpAuthRouter serves Protected Resource
+   Metadata at a well-known path).
+   The stream is SESSION-SCOPED, and the same 400/404 rules apply as on the POST and DELETE paths.
+   It has to be: a stream the server cannot name a session for can be attached to no outbox, and it
+   also outlived its session -- once the reaper dropped a session and logged out its gem, nothing
+   touched that client's GET socket, so the keepalives went on advertising a healthy stream over a
+   worker that no longer existed."
+  | sid sess |
+  sid := self sessionIdOf: req.
+  sid isNil ifTrue: [
+    ^self writeSessionError: 'Missing MCP-Session-Id header (call initialize first)' code: 400 reason: 'Bad Request' on: conn].
+  sess := self sessionAt: sid.
+  sess isNil ifTrue: [
+    ^self writeSessionError: 'Unknown or expired session: ' , sid code: 404 reason: 'Not Found' on: conn].
+  ^self serveGetStream: conn forSession: sess
 %
 category: 'running'
 method: McpRouter
-serveGetStream: conn
-  "Open the standalone MCP SSE stream (server -> client). This server currently emits no
-   server-initiated messages, so the stream stays open with periodic keepalive comments
-   until the client disconnects (write fails) or the server stops."
+serveGetStream: conn forSession: sess
+  "Hold the standalone MCP SSE stream open for one session and drain its outbox onto it
+   (server -> client). It ends when the client disconnects (a write fails, or #clientHasClosed spots
+   the EOF a poll earlier), when a newer GET for this session supersedes this stream (the
+   latest-GET-wins rule that keeps two drainers off one socket -- see McpOutbox>>attachStream), when
+   the session's outbox closes because it was reaped, or when the server stops.
+   Runs in the connection's own GsProcess and yields on every tick, so holding a stream open costs
+   the gem nothing: the accept loop, the reaper and other sessions' streams all keep running. That
+   was not true while forwarding blocked -- every open stream's keepalive froze for the length of
+   the longest tool call, which is exactly when an intermediary is most likely to drop the
+   connection (fixed by McpSession>>runWorker:)."
+  | outbox generation lastKeepalive |
   (conn writeSseStreamHeaders) ifNil: [^self].
-  (conn writeSseComment: 'connected') ifNil: [^self].
-  [isRunning] whileTrue: [
-    (Delay forSeconds: 15) wait.
-    (conn writeSseComment: 'keepalive') ifNil: [^self]]
+  outbox := sess outbox.
+  generation := outbox attachStream.
+  ^[lastKeepalive := System timeGmt.
+    (conn writeSseComment: 'connected') ifNil: [^self].
+    [self isRunning and: [outbox isOpen and: [outbox isCurrentStream: generation]]] whileTrue: [
+      (self drainOutbox: outbox to: conn) ifFalse: [^self].
+      "A closing outbox has just had its last messages written -- the session-ending notice among
+       them -- so the stream ends here, cleanly, rather than the client being cut off with the gem."
+      outbox isClosing ifTrue: [outbox close. ^self].
+      (System timeGmt - lastKeepalive >= self keepaliveIntervalSeconds) ifTrue: [
+        (conn writeSseComment: 'keepalive') ifNil: [^self].
+        lastKeepalive := System timeGmt].
+      conn clientHasClosed ifTrue: [^self].
+      (Delay forMilliseconds: self streamPollMilliseconds) wait]]
+   ensure: [outbox detachStream: generation]
 %
 category: 'routing'
 method: McpRouter
@@ -643,7 +949,15 @@ servePost: req on: conn
   parsed := self parseBody: body.
   parsed isNil ifTrue: [^self writeParseError: conn].
   method := parsed at: 'method' ifAbsent: [nil].
+  "A body with an id and NO method is a JSON-RPC response: the client answering a request this
+   server sent on its stream. It is not routable -- the worker's dispatcher would answer it
+   -32600 -- so it is correlated here and acknowledged with 202."
+  (method isNil and: [parsed includesKey: 'id'])
+    ifTrue: [^self serveClientResponse: parsed sessionId: (self sessionIdOf: req) on: conn].
   method = 'initialize' ifTrue: [^self serveInitialize: req on: conn].
+  "logging/setLevel is snooped on its way past and still forwarded -- the worker answers it, but the
+   front end is what generates log notifications, so the front end is where the level must land."
+  method = 'logging/setLevel' ifTrue: [self noteLogLevelFrom: parsed sessionId: (self sessionIdOf: req)].
   ^self serveRouted: body sessionId: (self sessionIdOf: req) on: conn
 %
 category: 'worker identity'
@@ -723,6 +1037,14 @@ method: McpRouter
 stop
   "Request a graceful shutdown; the accept loop exits within one accept timeout."
   isRunning := false
+%
+category: 'running'
+method: McpRouter
+streamPollMilliseconds
+  "How long a drain loop sleeps between ticks. It is a Delay, so it YIELDS -- that is what lets the
+   accept loop, the reaper and every other stream keep running while this one is held open. A
+   latency/wakeup tradeoff: 100ms puts a notification on the wire promptly without spinning."
+  ^100
 %
 category: 'tls'
 method: McpRouter
@@ -819,6 +1141,23 @@ validateWorkerConfig
       , 'list (e.g. Published).'].
   self effectiveToolsetNames do: [:n | McpServer toolsetClassNamed: n].
   ^self
+%
+category: 'server-initiated'
+method: McpRouter
+warnIdleSession: sess
+  "Warn a client that has proved it is listening that its session is nearing the idle deadline, and
+   answer whether the warning was queued. Only a client that answered a ping is warned -- see
+   #probeIdleSessions.
+   MCP has no 'you are idle' method, and inventing one would produce a message every client ignores.
+   notifications/message (the logging utility) is the sanctioned generic carrier."
+  | minutes |
+  minutes := ((self sessionIdleTimeoutSeconds - sess idleSeconds) // 60) max: 1.
+  (self enqueueLog: 'This MCP session will be released after about ' , minutes printString ,
+      ' more minute(s) idle. Its GemStone worker gem holds its own transaction view, so any ' ,
+      'uncommitted changes will be lost -- commit them, or make any call, to keep the session.'
+    level: 'warning' toSession: sess) ifFalse: [^false].
+  sess noteIdleWarned.
+  ^true
 %
 category: 'worker class'
 method: McpRouter

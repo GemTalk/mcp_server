@@ -19,14 +19,23 @@ sessions** — each client gets its own isolated worker gem (see [Per-client ses
   - `initialize` opens a session and returns its id in the **`MCP-Session-Id`** response header.
   - Every other request must send that header back; a missing id → **`400`**, an unknown/expired
     id → **`404`** (a compliant client then re-initializes).
-- **GET `/mcp`** — opens the standalone server→client SSE stream (`text/event-stream`),
-  held open with keepalive comments. No server-initiated messages yet, so it carries only keepalives.
+- **GET `/mcp`** — opens the standalone server→client SSE stream (`text/event-stream`) for the
+  session named by `MCP-Session-Id`, and carries the messages the server sends **first** (see
+  [Server-initiated messages](#server-initiated-messages)). Same session gates as the other verbs:
+  missing id → **`400`**, unknown/expired → **`404`**. Held open with a keepalive comment every 15s
+  between messages.
+- **A POSTed JSON-RPC *response*** — a body with an `id` and no `method`, which is how a client
+  answers a request the server sent it — is acknowledged with **`202 Accepted`** and no body.
 - **DELETE `/mcp`** — ends the session named by `MCP-Session-Id` (closes its worker). Answers the
   same codes as the POST path: missing header → **`400`**, unknown/already-ended id → **`404`**,
   live session → **`200`**.
 - Any other method → `405`.
 
-`ping` is answered with an empty result on every session, as the spec requires.
+`ping` is answered with an empty result on every session, as the spec requires — and is also **sent**
+by the server, as a liveness probe on idle sessions.
+
+Declared capabilities: `tools` and `logging`. `logging/setLevel` is honoured (RFC 5424 levels,
+default `info`); the level is recorded by the front end, which is what generates log notifications.
 
 **Security (per the MCP spec):** the server binds only to `127.0.0.1`, session ids are
 cryptographically-random 128-bit tokens, and every request's `Origin` header is validated to
@@ -79,7 +88,9 @@ omitted otherwise, so a client falls back to displaying `name`. That is the **se
 **tool** `title` is not implemented.
 
 Not implemented, all optional at these revisions: pagination (`tools/list` returns every tool and
-no `nextCursor`), `listChanged` notifications, SSE resumability (`Last-Event-ID`), tool `title` /
+no `nextCursor`), `listChanged` notifications, SSE resumability (`Last-Event-ID` — no event `id:` is
+emitted at all, deliberately: ids without a replay buffer behind them invite a resume the server
+cannot honour), progress notifications, elicitation, sampling, resources, prompts, tool `title` /
 `annotations` / `icons` / `outputSchema`, server `instructions`, and `tasks`.
 
 The **draft `2026-07-28`** revision is a different protocol era — no `initialize`, no sessions, no
@@ -206,16 +217,17 @@ an image without Grail. Once loaded the toolset joins the default tool surface a
 
 | Class | Role |
 |-------|------|
-| `McpBase` | abstract superclass of the router + worker; holds only the two shared helpers (`parseBody:`, `log:`) |
-| `McpRouter` | front end: accept loop, HTTP, routing, the `MCP-Session-Id → McpSession` map, and the idle reaper. Owns the socket; never runs a tool |
+| `McpBase` | abstract superclass of the router + worker; holds only what both share — `parseBody:`, `log:`, the JSON-RPC envelope builders for server-initiated messages, and the RFC 5424 log-level table |
+| `McpRouter` | front end: accept loop, HTTP, routing, the `MCP-Session-Id → McpSession` map, the SSE drain loop, the pending-request table, and the session reaper. Owns the socket; never runs a tool |
 | `McpAuthRouter` | network-facing `McpRouter` subclass: requires an OAuth/JWT bearer token, logs each worker in as its own GemStone user, serves the `WWW-Authenticate` challenge + RFC 9728 metadata, validates token claims/scopes, adds TLS, and (via `writeScope`) can open a session read-only |
 | `McpServer` | per-client worker: the single-client MCP server that runs inside each worker gem — registry, dispatcher, the kernel guards, read-only gating, identity. The tools themselves belong to its toolsets, and which of those it registers is not fixed by the class. No socket |
 | `McpToolset` | abstract tool pack: `registerOn:` (its tools + schemas), its `tool_*` handlers, `toolNames`, `readOnlySafeToolNames` (empty by default — fail closed), plus the shared schema builders, image-lookup helpers, and the kernel guards (which forward to the server's policy). **Subclass this to add tools**; a deployment picks the list |
 | `McpBrowsingToolset`, `McpExecutionToolset`, `McpListingToolset`, `McpMutationToolset`, `McpSearchToolset`, `McpSessionToolset`, `McpTestingToolset` | the seven core toolsets, one per tool family. A deployment can expose any subset — or none of them, alongside its own |
 | `McpGrailToolset` | optional Python toolset (`eval_python`, `compile_python`), filed in only on a Grail image. Needs nothing from the server, so it doubles as the worked example for a third-party toolset |
-| `McpSession` | one client's isolated worker handle: a `GsTsExternalSession` gem + session id + last-activity + the worker class/toolsets/identity the front end resolved. `prepareWorker` sets the gem up in one call; `forward:` runs a request in it (`<workerClass> handleJsonString: …`) without blocking the front end (`runWorker:`); `close` stops it |
-| `McpHttpConnection` | reads one HTTP/1.1 request, writes one JSON response (incl. `MCP-Session-Id`) |
-| `McpDispatcher` | JSON-RPC 2.0 / MCP routing (`initialize`, `tools/list`, `tools/call`); read-only tool gating; structured error kinds |
+| `McpSession` | one client's isolated worker handle: a `GsTsExternalSession` gem + session id + last-activity + the worker class/toolsets/identity the front end resolved, plus the front-end-side outbox, log level and liveness state. `prepareWorker` sets the gem up in one call; `forward:` runs a request in it (`<workerClass> handleJsonString: …`) without blocking the front end (`runWorker:`); `close` stops it |
+| `McpOutbox` | one session's queue of server-initiated messages waiting for its SSE stream. Front-end-only and never committed; owns the bound/overflow policy, the closing handshake, and the latest-GET-wins rule |
+| `McpHttpConnection` | reads one HTTP/1.1 request, writes one JSON response (incl. `MCP-Session-Id`), and writes the SSE stream — every frame gated on the socket being writable, plus a non-blocking read-side disconnect check |
+| `McpDispatcher` | JSON-RPC 2.0 / MCP routing (`initialize`, `tools/list`, `tools/call`, `ping`, `logging/setLevel`); read-only tool gating; structured error kinds |
 | `McpToolRegistry` | name → `McpTool` map; produces `tools/list` descriptors |
 | `McpTool` | one tool: name, description, JSON Schema, handler block; validates arguments against the schema |
 | `McpError` | an error carrying a machine-readable `kind` (e.g. `refused`, `readOnly`) that the dispatcher surfaces in the tool-call error envelope |
@@ -268,9 +280,10 @@ tools itself (those run in the per-client `McpServer` workers):
   handleJsonString: ' , body printString`, naming the class the router resolved — the worker runs
   the tool in its own session and returns the response, which the front end relays. Missing id →
   `400`; unknown/expired → `404` (a compliant client re-initializes).
-- **DELETE** closes the worker; and an **idle reaper** (a background `GsProcess`) closes any
-  session idle beyond **30 minutes** (`sessionIdleTimeoutSeconds`), so abandoned test gems don't
-  pile up.
+- **DELETE** closes the worker; and a **background maintenance `GsProcess`** (every 60s) probes,
+  warns and reaps idle sessions, so abandoned test gems don't pile up. A session is reaped after
+  **30 minutes** idle (`sessionIdleTimeoutSeconds`) — or sooner, if it fails a liveness probe. See
+  [Server-initiated messages](#server-initiated-messages).
 
 Isolation comes from each worker being a separate gem = a separate transaction view, and clients
 really do run **concurrently**: forwarding is non-blocking (`McpSession>>runWorker:`), so one
@@ -278,6 +291,64 @@ client's long tool call no longer stalls anyone else — see
 [Concurrency & robustness](#concurrency--robustness) below.
 The base `McpRouter` logs every worker in as the current (server) user; the network-facing
 `McpAuthRouter` instead logs each worker in as the **token's own GemStone user** via JWT.
+
+## Server-initiated messages
+
+MCP is request/response over HTTP, so a server has no socket to call out on: it can only write on a
+connection the client opened. The one such connection not tied to a request is the **standalone SSE
+stream** the client opens with `GET /mcp`, and that is where everything below travels.
+
+It lives in the **front end**, and could live nowhere else. A worker is a separate OS process, and a
+socket is a file descriptor meaningful only inside the process that accepted it — GemStone exposes
+no way to hand one across. So each `McpSession` carries an **`McpOutbox`** on the front-end side
+(gem-local, never committed), the GET handler drains it onto that client's stream, and the router
+keeps the pending-request table that matches a server-sent request to the JSON-RPC response the
+client POSTs back.
+
+### What it is for today: idle sessions
+
+This matters more here than for a typical MCP server, because a session **is a gem with its own
+transaction view** — reaping one throws away uncommitted work. Previously a client discovered that
+by meeting a cold `404` on its next call. Now, for a session drifting toward the idle deadline and
+holding an open stream:
+
+| When | What happens |
+|---|---|
+| idle > 25 min | the server sends a `ping` on the stream (`ping` is bidirectional; the receiver MUST answer) |
+| the client answers | it is **proven live** — and gets a `warning`-level `notifications/message` saying how long is left and that uncommitted changes will be lost |
+| the client does not answer | it is **proven gone** — its worker gem is released early rather than waited out |
+| the session is reaped | a last notice goes out on the stream first, explaining why the gem went |
+
+**An answered `ping` deliberately does *not* reset the activity clock.** It proves someone is
+listening; only real MCP traffic keeps a session alive. Refreshing the clock instead would mean any
+well-behaved client — they all answer `ping` — held a gem and a transaction view for as long as it
+stayed open, and the warning would only ever reach clients unable to act on it.
+
+A client that never opens a GET stream is left exactly as it was: never probed, never warned, reaped
+on the plain 30-minute timeout. Pinging it would only mark it unanswered and cost it its gem early.
+
+### The pieces
+
+| | |
+|---|---|
+| `McpOutbox` | per-session FIFO queue, bounded at 256 (drops oldest, then admits the gap on the stream). Its own mutex — the router's is held across reaping. Hands out a **stream generation** so the newest `GET` wins and two drainers can never interleave frames on one socket |
+| `McpRouter>>serveGetStream:forSession:` | the drain loop. Yields every tick, so holding a stream open costs the gem nothing |
+| `McpBase>>notification:params:` / `request:params:id:` | envelope builders on the front-end side. `McpDispatcher` lives in the worker and cannot be asked to build one mid-tool-call |
+| pending-request table | `srv-N` ids in their own namespace, timed out at 30s — an unanswered ping must decide something, never hang a session |
+
+Tunables, each a single method: `sessionIdleTimeoutSeconds` 1800, `idleWarningLeadSeconds` 300,
+`reaperIntervalSeconds` 60, `pendingRequestTimeoutSeconds` 30, `keepaliveIntervalSeconds` 15,
+`streamPollMilliseconds` 100, `McpOutbox>>maxQueueSize` 256, `sseWriteTimeoutMs` 5000.
+
+Both SSE write paths are guarded: `writeWillNotBlockWithin:` before every frame (`GsSocket>>write:`
+suspends with no timeout, so a client that stops reading would otherwise park a stream's `GsProcess`
+forever), and a non-blocking read-side poll each tick, so a disconnect is caught in ~100ms rather
+than at the next keepalive.
+
+Not yet built: anything originating in a **worker** gem — progress during a long tool call, log
+lines from tool internals — which needs a worker→router channel (`InterSessionSignal` is the
+candidate). Elicitation and sampling need more than that: a *bidirectional* worker channel, since
+their answers have to be delivered back into a gem whose GCI call is already in flight.
 
 ## Read-only mode
 
@@ -380,8 +451,8 @@ The classes live on disk as plain **topaz file-outs** — canonical `Class>>file
 grouped by area, with one loader per group:
 
 ```
-src/core/    17 classes  the server itself: protocol, transport, dispatch, toolsets
-src/tests/   12 classes  the SUnit suites and their fixtures
+src/core/    18 classes  the server itself: protocol, transport, dispatch, toolsets
+src/tests/   15 classes  the SUnit suites and their fixtures
 src/auth/     3 classes  the OAuth/OIDC front end McpAuthRouter + its two suites
 src/grail/    2 classes  the optional GemStone-Python toolset + its suite
 load.gs                  files in core + tests + auth, then commits
@@ -440,8 +511,10 @@ suite when `McpGrailToolset` is installed:
   failing/erroring tests, for the test-runner tools), both classes in `UserGlobals`, plus a
   `McpTestDict` symbol dictionary of its own. All are cleaned up in `tearDown`.
 - `McpDispatcherTest` — JSON-RPC routing/envelope: initialize, tools/list (31, alphabetical),
-  success + error wrapping, `-32601`/`-32602`/`-32700`, notifications → nil, and the per-worker
-  entry `handleJsonString:`.
+  success + error wrapping, `-32601`/`-32602`/`-32700`, notifications → nil, the per-worker
+  entry `handleJsonString:`, and the declared capabilities — `logging` present, `listChanged` /
+  `resources` / `prompts` / `completions` deliberately absent — plus `logging/setLevel` and its
+  `-32602` on an unknown level.
 - `McpSessionTest` — how a session drives its worker gem: the non-blocking `runWorker:` that
   `forward:` and `prepareWorker` both use, that it reads the result only once the call is over (a
   premature read would answer one request with another's response), that two concurrent requests on
@@ -450,9 +523,20 @@ suite when `McpGrailToolset` is installed:
   `McpMockSession`, which stand in for the `GsTsExternalSession` with no gem.
 - `McpTransportTest` — `handleConnection:` driven over a **`McpMockSocket`** wrapped in a
   real `McpHttpConnection`, so the genuine HTTP parsing/writing runs with no TCP. Covers the
-  paths that spawn **no** worker gem: GET→SSE, DELETE→`400`/`404`, unknown verb→405, malformed→`-32700`,
-  a session-less POST→`400`, chunked delivery, EOF, Content-Length. (initialize and a routed tool
-  call spawn a real worker, so they're exercised by the integration test instead.)
+  paths that spawn **no** worker gem: a session-less GET→`400`, DELETE→`400`/`404`, unknown verb→405,
+  malformed→`-32700`, a session-less POST→`400`, chunked delivery, EOF, Content-Length. (initialize
+  and a routed tool call spawn a real worker, so they're exercised by the integration test instead.)
+- `McpOutboxTest` — `McpOutbox` on its own: FIFO, the bound and the drop-oldest policy with its
+  admitted gap, the `beginClosing`/`close` handshake, and latest-GET-wins — including that detaching
+  a superseded stream must *not* roll the generation back, or the stream that replaced it would look
+  stale and end too.
+- `McpStreamTest` — the whole server-to-client pathway with no sockets: the session-scoped GET
+  (`400`/`404`/stream), the drain onto the stream, a closing outbox getting its last flush, a POSTed
+  JSON-RPC response → `202` and its correlation back to the ping that caused it, the probe-then-warn
+  sequence over an idle session, that a session with no stream is never probed, that an answered
+  ping does **not** move the activity clock, that an unanswered one frees the gem early, and that a
+  reaped session is told on its stream first. Uses `McpFixtureRouter`, a real router that reports
+  itself running without binding a socket, so the drain loop can be driven at all.
 - `McpContractTest` — contract / property tests over the tool surface, all driven through the real
   `McpDispatcher>>handle:` envelope: every tool schema is closed (`additionalProperties:false`),
   unknown/missing arguments → an `isError` tool execution error while a missing tool name / unknown
@@ -624,6 +708,15 @@ all, now skips any session with a call in flight (`McpSession>>isBusy`) instead 
 out mid-request. A forwarded request still has **no deadline**: a runaway tool ties up its own
 session for as long as it runs, though no longer anyone else's.
 
+**An open SSE stream costs the gem nothing.** Its drain loop yields on every tick (a 100ms `Delay`),
+so the accept loop, the reaper and every other session's stream keep running. Both directions of that
+socket are guarded, for the same reason the accept loop guards its read side: every SSE frame waits
+on `writeWillNotBlockWithin:` first — `GsSocket>>write:` suspends with **no timeout**, so a client
+that stops reading would otherwise park that stream's `GsProcess` and its socket forever — and each
+tick polls the read side without blocking, so a client that simply vanishes is noticed in ~100ms
+rather than at the next keepalive. Reopening the GET does not accumulate streams either: the newest
+supersedes the previous one, which ends on its next tick.
+
 ## Status
 
 Streamable HTTP transport (POST→JSON, GET→SSE stream, DELETE) with **per-client sessions** — each
@@ -639,9 +732,13 @@ schemas + a kernel-class guard + structured error kinds, and a **selectable tool
 in `McpToolset`s, the front end resolves the worker class and toolset list per session and pushes them
 into the worker gem, and a server can announce its own name/version/title — so a third party can
 ship an MCP server for their own software, exposing only their tools. The Python tools delegate to Grail's
-`ModuleAst` and require a Grail-equipped image (see the Python note above).
+`ModuleAst` and require a Grail-equipped image (see the Python note above). Most recently it gained
+**server-initiated messages** on the SSE stream: an idle session is pinged, warned before the reaper
+takes its gem, and told when it is gone — see
+[Server-initiated messages](#server-initiated-messages).
 
-Future work: server-initiated SSE messages (which would let `notifications/tools/list_changed`
-announce a surface change, and let an idle session be warned before it is reaped); mapping **OAuth
-scopes to toolsets**, so a token's scopes select what it may see rather than only whether it may
-write; and a deadline for a forwarded request, now that a non-blocking forward makes one possible.
+Future work: carrying messages that originate in a **worker** gem (progress during a long tool call,
+log lines from tool internals), which needs a worker→router channel; SSE resumability
+(`Last-Event-ID`); mapping **OAuth scopes to toolsets**, so a token's scopes select what it may see
+rather than only whether it may write; and a deadline for a forwarded request, now that a
+non-blocking forward makes one possible.
