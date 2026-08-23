@@ -7,7 +7,8 @@ Object subclass: 'McpSession'
                     lastActivitySeconds userId readOnly workerClassName
                     toolsetNames serverName serverTitle serverVersion
                     workerPid workerStoneSession outbox logLevel
-                    probeState idleWarned)
+                    probeState idleWarned startedAtSeconds expiresAtSeconds
+                    lastProbeAtSeconds lastStreamSeenAtSeconds)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -84,6 +85,13 @@ startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
   ^self new startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
 %
 ! ------------------- Instance methods for McpSession
+category: 'activity'
+method: McpSession
+ageSeconds
+  "How long this session has existed, whatever it has been doing. What an absolute lifetime cap is
+   measured against, unlike #idleSeconds."
+  ^System timeGmt - startedAtSeconds
+%
 category: 'logging'
 method: McpSession
 allowsLogLevel: aLevelString
@@ -132,6 +140,44 @@ close
   [worker logout] on: Error do: [:e | nil].
   ^self
 %
+category: 'liveness'
+method: McpSession
+expiresAtSeconds
+  "The absolute wall-clock second at which this session must end regardless of activity, or nil when
+   nothing bounds it. Set by an authenticated front end from the access token's exp (see
+   McpAuthRouter>>openSessionForUser:jwt:readOnly:): the worker gem is logged in as that token's
+   user, so letting the session outlive the token would leave the authorization it was granted in
+   force after the grant expired."
+  ^expiresAtSeconds
+%
+category: 'liveness'
+method: McpSession
+expiresAtSeconds: aSecondOrNil
+  "Bind this session to an absolute deadline (nil removes it). Only ever moved EARLIER: a caller may
+   tighten a deadline, never extend one that is already in force, so a later, laxer policy cannot
+   hand a session more life than the credential it was opened with allowed."
+  aSecondOrNil isNil ifTrue: [^self].
+  (expiresAtSeconds isNil or: [aSecondOrNil < expiresAtSeconds])
+    ifTrue: [expiresAtSeconds := aSecondOrNil].
+  ^self
+%
+category: 'liveness'
+method: McpSession
+forgiveSuspendedSeconds: anInteger
+  "The host was suspended (or the front-end gem was otherwise not running) for anInteger seconds, so
+   move this session's idle clock forward by that much: no service was offered during it, and idleness
+   is a measure of service time, not of wall time. See McpRouter>>forgiveSuspendedSeconds:.
+   Deliberately NOT applied to #expiresAtSeconds or to #ageSeconds: an expiry is an absolute
+   commitment (a token's exp does not pause because a laptop slept), and forgiving it would be a
+   security regression rather than a courtesy. Also drops whatever the last probe concluded -- a
+   verdict reached across a suspend is about the suspend, not about the client."
+  anInteger > 0 ifFalse: [^self].
+  lastActivitySeconds := lastActivitySeconds + anInteger.
+  probeState := nil.
+  lastProbeAtSeconds := nil.
+  idleWarned := false.
+  ^self
+%
 category: 'routing'
 method: McpSession
 forward: aRawJsonString
@@ -169,6 +215,9 @@ initialize
   logLevel := nil.
   probeState := nil.
   idleWarned := false.
+  startedAtSeconds := System timeGmt.
+  expiresAtSeconds := nil.   "nil = no absolute deadline; McpAuthRouter sets one from the token exp"
+  lastProbeAtSeconds := nil.
   ^self
 %
 category: 'activity'
@@ -180,6 +229,14 @@ isBusy
    not happen while forwarding blocked the whole front-end gem, because the reaper could not run
    either. Cheap: it reads the external session's own state and makes no GCI call."
   ^worker notNil and: [worker isCallInProgress]
+%
+category: 'liveness'
+method: McpSession
+isExpired
+  "Whether this session has passed the absolute deadline it was opened with (see #expiresAtSeconds).
+   Unlike idleness this is never forgiven and never probed around: the reaper frees such a session
+   whatever its client is doing."
+  ^expiresAtSeconds notNil and: [System timeGmt >= expiresAtSeconds]
 %
 category: 'liveness'
 method: McpSession
@@ -248,9 +305,26 @@ noteIdleWarned
 %
 category: 'activity'
 method: McpSession
+noteProbeDiscarded
+  "Throw away an outstanding liveness probe WITHOUT concluding anything from it. For a ping that
+   was written to a stream the client has since replaced, the write succeeded -- into a socket
+   buffer nobody will ever read -- so the silence that follows is evidence about the transport and
+   not about the client. Treating it as proof of death frees a worker gem whose client is alive,
+   connected, and holding a perfectly good stream (measured: 6 of 14 pings, 2026-08-23).
+   Clearing the probe stamp too, so the next pass sends a fresh ping down the CURRENT stream rather
+   than waiting out the cadence on a verdict that never arrived."
+  probeState == #sent ifTrue: [probeState := nil].
+  lastProbeAtSeconds := nil.
+  ^self
+%
+category: 'activity'
+method: McpSession
 noteProbeSent
-  "A liveness ping is on its way; the reaper waits for the answer rather than sending another."
+  "A liveness ping is on its way; the reaper waits for the answer rather than sending another.
+   The time is stamped as well, because a session with no wall-clock deadline is re-probed on a
+   cadence (McpRouter>>livenessProbeIntervalSeconds) rather than once per idle period."
   probeState := #sent.
+  lastProbeAtSeconds := System timeGmt.
   ^self
 %
 category: 'activity'
@@ -260,6 +334,16 @@ noteProbeUnanswered
    client has since spoken to has already been reset by #touch, and must not be marked gone by a
    verdict on a probe that no longer applies."
   probeState == #sent ifTrue: [probeState := #gone].
+  ^self
+%
+category: 'liveness'
+method: McpSession
+noteStreamSeen
+  "Record that this client had an SSE stream open just now. Stamped by the front end's maintenance
+   pass, the only regular observer of the fact (McpRouter>>maintainIdleSession:), and read by
+   #unreachableSeconds -- so its resolution is one maintenance interval, which is ample for the
+   half-hour scale the streamless fallback works at."
+  lastStreamSeenAtSeconds := System timeGmt.
   ^self
 %
 category: 'accessing'
@@ -328,6 +412,14 @@ runWorker: anExpressionString
       whileTrue: [worker waitForResultForSeconds: self workerWaitSeconds otherwise: [nil]].
     self touch.
     worker lastResult]
+%
+category: 'liveness'
+method: McpSession
+secondsSinceProbe
+  "How long since a liveness ping was last sent to this client, or nil if none has been sent since
+   the idle cycle last restarted. What the re-probe cadence for a session with no wall-clock
+   deadline is measured against."
+  ^lastProbeAtSeconds isNil ifTrue: [nil] ifFalse: [System timeGmt - lastProbeAtSeconds]
 %
 category: 'accessing'
 method: McpSession
@@ -409,8 +501,23 @@ touch
    whatever the last probe concluded is now out of date."
   lastActivitySeconds := System timeGmt.
   probeState := nil.
+  lastProbeAtSeconds := nil.
   idleWarned := false.
   ^self
+%
+category: 'liveness'
+method: McpSession
+unreachableSeconds
+  "How long this client has been impossible to speak to: 0 while a stream is attached, otherwise the
+   time since one last was -- or, for a client that never opened one at all, simply how long it has
+   been idle.
+   This is what a router with NO idle deadline reaps on, and it deliberately is not the same as
+   idleness. A quiet client holding an open stream is answering pings and can be told anything; a
+   client with no stream can be told nothing and asked nothing, so it is the only kind that liveness
+   cannot speak for."
+  outbox hasStream ifTrue: [^0].
+  lastStreamSeenAtSeconds isNil ifTrue: [^self idleSeconds].
+  ^System timeGmt - lastStreamSeenAtSeconds
 %
 category: 'accessing'
 method: McpSession

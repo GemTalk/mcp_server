@@ -3,7 +3,7 @@ set compile_env: 0
 expectvalue /Class
 doit
 McpRouter subclass: 'McpFixtureRouter'
-  instVarNames: #( pendingTimeoutOrNil)
+  instVarNames: #()
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -25,8 +25,9 @@ A mock socket is at EOF the moment its scripted input runs out, so McpHttpConnec
 answers true and the loop ends after ONE full pass. That is exactly the disconnect it is meant to
 detect, and it is also what keeps a test from hanging.
 
-It also lets a test shorten the pending-request timeout, so the unanswered-ping path can be reached
-without waiting out the real 30 seconds.'
+Every interval a test needs to bend -- the pending-request timeout, the idle deadline, the probe
+cadence -- is now ordinary router config (McpRouter>>sessionIdleTimeoutSeconds: and friends), so this
+fixture no longer overrides any of them.'
 %
 expectvalue /Class
 doit
@@ -45,14 +46,9 @@ isRunning
 %
 category: 'testing support'
 method: McpFixtureRouter
-pendingRequestTimeoutSeconds
-  "The configured timeout, or the shipping one when nothing overrode it."
-  ^pendingTimeoutOrNil ifNil: [super pendingRequestTimeoutSeconds]
-%
-category: 'testing support'
-method: McpFixtureRouter
-pendingRequestTimeoutSeconds: anIntegerOrNil
-  "Shorten (or restore, with nil) how long a server-initiated request may go unanswered. -1 expires
-   a request the instant it is sent, which is how a test reaches the liveness-failed path."
-  pendingTimeoutOrNil := anIntegerOrNil
+pretendLastMaintenanceWasSecondsAgo: anInteger
+  "Backdate the maintenance clock so #noteMaintenanceTick sees a pass that came back late. The seam
+   the suspend detector needs: the real thing measures a gap no test can produce without sleeping
+   through it, and the alternative -- a setter on the shipping class -- would exist for nobody else."
+  lastMaintenanceAtSeconds := System timeGmt - anInteger
 %

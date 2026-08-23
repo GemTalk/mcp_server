@@ -294,9 +294,18 @@ category: 'sessions'
 method: McpAuthRouter
 openSessionForUser: aUserId jwt: aJwtString readOnly: aBoolean
   "Open + register a worker session for aUserId. When aBoolean, the worker is read-only for its
-   whole life (its token lacked the write scope)."
-  ^self openSessionCreating: [:newId |
-    McpSession startWithId: newId user: aUserId jwt: aJwtString readOnly: aBoolean]
+   whole life (its token lacked the write scope).
+   The session is also bound to the TOKEN'S OWN expiry. That matters more here than any idle policy:
+   the worker gem is logged in as the token's GemStone user, so a session allowed to outlive its
+   access token would leave the authorization it was opened with in force after the grant expired --
+   indefinitely, on a router configured with no idle deadline. exp is required of every token this
+   router accepts (#rejectionForPayload:), so there is always one to bind to; McpSession only ever
+   moves an expiry earlier, so this composes with #maxSessionLifetimeSeconds rather than fighting it."
+  | sess |
+  sess := self openSessionCreating: [:newId |
+    McpSession startWithId: newId user: aUserId jwt: aJwtString readOnly: aBoolean].
+  sess expiresAtSeconds: (self tokenExpirySecondsOf: aJwtString).
+  ^sess
 %
 category: 'metadata'
 method: McpAuthRouter
@@ -615,6 +624,19 @@ supportedScopes
   writeScope ifNotNil: [:w | (all includes: w) ifFalse: [all add: w]].
   extraScopes do: [:s | (all includes: s) ifFalse: [all add: s]].
   ^all asArray
+%
+category: 'auth'
+method: McpAuthRouter
+tokenExpirySecondsOf: aJwtString
+  "The token's exp claim as a wall-clock second, or nil if it cannot be read. An UNVERIFIED parse,
+   like #userIdFromToken:, and safe for the same reason: it is only ever used to shorten a session's
+   life, and the token's signature and claims were validated before this point (and again by GemStone
+   at login). A token whose exp cannot be read simply leaves the session bound by the idle policy
+   alone, which is where it stood before this existed."
+  ^[ | exp |
+     exp := (JsonWebToken fromJwtString: aJwtString) payload at: 'exp' ifAbsent: [nil].
+     (exp isKindOf: Number) ifTrue: [exp truncated] ifFalse: [nil] ]
+   on: Error do: [:e | nil]
 %
 category: 'validation'
 method: McpAuthRouter

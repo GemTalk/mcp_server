@@ -28,6 +28,12 @@
 #                     Subclass to change BEHAVIOR; to add tools write a toolset instead.
 #   GS_MCP_TOOLSETS - space-separated McpToolset names to expose instead of the default surface,
 #                     e.g. "McpBrowsingToolset McpSearchToolset". Empty means the default.
+#   Session lifetime (how long a quiet client keeps its worker gem, whether it may keep it
+#                     indefinitely, and when it is warned) is configured with the GS_MCP_IDLE_TIMEOUT
+#                     family -- see ./session-lifetime.sh, which documents each one. The common case
+#                     for a localhost server you come back to hours later is
+#                     GS_MCP_IDLE_TIMEOUT=none, which keeps a session alive for as long as its client
+#                     keeps answering liveness pings.
 #   GS_MCP_TITLE    - human-readable label for THIS INSTANCE, reported as serverInfo.title, e.g.
 #                     "GemStone - staging (gs64stone)". Empty means no title at all: the key is
 #                     omitted and clients display the server name. Use this -- not a relabeled
@@ -45,6 +51,10 @@ GS_MCP_WORKER_CLASS="${GS_MCP_WORKER_CLASS:-}"
 GS_MCP_TOOLSETS="${GS_MCP_TOOLSETS:-}"
 GS_MCP_TITLE="${GS_MCP_TITLE:-}"
 TOPAZ="$GEMSTONE/bin/topaz"
+
+# Session-lifetime setters (GS_MCP_IDLE_TIMEOUT and friends) -> $LIFETIME_LINES; empty when none are
+# set, leaving McpRouter>>initialize's defaults in place.
+. ./session-lifetime.sh
 
 [ "$GS_MCP_READONLY" = "1" ] && RO="true" || RO="false"
 
@@ -73,7 +83,7 @@ iferr 1 stk
 run
 | r |
 r := McpRouter new.
-r readOnly: $RO.$CONFIG
+r readOnly: $RO.$CONFIG$LIFETIME_LINES
 r forkOnPort: $GS_MCP_PORT
 %
 logout

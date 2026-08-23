@@ -53,6 +53,13 @@
 #                         Advertised automatically so clients can request it -- an unrequestable write
 #                         scope would leave every session read-only.
 #   GS_MCP_READONLY     - 1 to force EVERY session read-only regardless of scope (default: 0)
+#   Session lifetime    - the GS_MCP_IDLE_TIMEOUT family, documented in ./session-lifetime.sh. A
+#                         hosted server usually wants a SHORTER idle timeout than the 30-minute
+#                         default, since every live session is a gem holding a transaction view. Note
+#                         that this router additionally caps each session at its access token's own
+#                         `exp`, whatever the idle policy says: the worker gem is logged in as that
+#                         token's GemStone user, so a session outliving its token would leave the
+#                         authorization it was opened with in force after the grant expired.
 #   GS_MCP_TITLE        - human-readable label for THIS INSTANCE, reported as serverInfo.title, e.g.
 #                         "GemStone - geode teststone 3.7.6". Empty means no title at all: the key is
 #                         omitted and clients display the server name. Use this -- not a relabeled
@@ -87,6 +94,10 @@ MCP_BIND_ADDRESS="${MCP_BIND_ADDRESS:-}"
 MCP_TLS_CERT="${MCP_TLS_CERT:-}"
 MCP_TLS_KEY="${MCP_TLS_KEY:-}"
 TOPAZ="$GEMSTONE/bin/topaz"
+
+# Session-lifetime setters (GS_MCP_IDLE_TIMEOUT and friends) -> $LIFETIME_LINES; empty when none are
+# set, leaving McpRouter>>initialize's defaults in place.
+. ./session-lifetime.sh
 
 # Two pre-flight checks follow. Each mirrors a rule McpAuthRouter enforces on itself, so the code is
 # the real gate and neither is load-bearing: they exist only to turn "launch topaz, watch the router
@@ -161,7 +172,7 @@ $EXTRA_LINE
 $WRITE_LINE
 $RO_LINE
 $BIND_LINE
-$TITLE_LINE
+$TITLE_LINE$LIFETIME_LINES
 r forkOnPort: $GS_MCP_PORT
 %
 logout

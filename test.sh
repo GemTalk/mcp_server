@@ -4,7 +4,8 @@
 # Starts the server in its own gem (one session) via run-server.sh, then acts as an
 # MCP client (a separate process) driving the Streamable HTTP transport end-to-end:
 # initialize, the initialized notification, tools/list, every core tool, the error
-# paths, the SSE GET stream, and DELETE. Compiles + runs a throwaway method to exercise
+# paths, the SSE GET stream, DELETE, and (on a second, differently-configured front end)
+# that a session-lifetime policy survives the fork into its own gem. Compiles + runs a throwaway method to exercise
 # compile_method/commit, then cleans it up. Shuts the server down on exit.
 #
 # Configure (or export before running):
@@ -28,6 +29,8 @@ SERVER_LOG="$(mktemp -t gsmcp-server.XXXXXX)"
 
 PASS=0; FAIL=0
 WRAPPER_PID=""
+LIFE_WRAPPER_PID=""
+LIFE_LOG=""
 SID=""
 
 cleanup() {
@@ -37,7 +40,11 @@ cleanup() {
   pid="$(lsof -nP -iTCP:$PORT -sTCP:LISTEN -t 2>/dev/null)"
   [ -n "$pid" ] && kill $pid 2>/dev/null
   [ -n "$WRAPPER_PID" ] && kill "$WRAPPER_PID" 2>/dev/null
-  rm -f "$SERVER_LOG"
+  # the second, differently-configured front end the lifetime section starts (see [3/4])
+  pid="$(lsof -nP -iTCP:$((PORT + 1)) -sTCP:LISTEN -t 2>/dev/null)"
+  [ -n "$pid" ] && kill $pid 2>/dev/null
+  [ -n "$LIFE_WRAPPER_PID" ] && kill "$LIFE_WRAPPER_PID" 2>/dev/null
+  rm -f "$SERVER_LOG" "${LIFE_LOG:-}"
 }
 trap cleanup EXIT
 
@@ -61,7 +68,7 @@ echo "Stone=$GS_STONE  User=$GS_USER  Port=$PORT"
 echo
 
 # ---------------------------------------------------------------------------
-echo "[1/3] Starting server gem (session A) ..."
+echo "[1/4] Starting server gem (session A) ..."
 GS_MCP_PORT="$PORT" ./run-server.sh > "$SERVER_LOG" 2>&1 &
 WRAPPER_PID=$!
 for i in $(seq 1 60); do nc -z 127.0.0.1 "$PORT" 2>/dev/null && break; sleep 0.5; done
@@ -74,7 +81,7 @@ echo "  server is listening on 127.0.0.1:$PORT"
 echo
 
 # ---------------------------------------------------------------------------
-echo "[2/3] Driving requests from the client (session B) ..."
+echo "[2/4] Driving requests from the client (session B) ..."
 
 # --- handshake: initialize establishes this client's session id (MCP-Session-Id) ---
 r=$(curl -s -i -m 10 "$URL" --data-binary @- <<'JSON'
@@ -467,6 +474,51 @@ r=$(curl -s -i -m 10 "$URL" -H "MCP-Session-Id: $SID" \
 check "POST after DELETE => 404"               '404'                     "$r"
 
 # ---------------------------------------------------------------------------
+# --- session lifetime: the intervals are deployment config ---
+# The idle policy is no longer literals in a method, so the thing worth checking on real wires is
+# that a configured lifetime SURVIVES THE FORK: config reaches a detached front end only by being
+# serialized into its fork string, and a router that quietly reverted to the defaults would look
+# perfectly healthy while ignoring everything the operator asked for.
+# The no-deadline case is the one to check, because it is the only setting whose instruction is a
+# JSON null -- absence and "none" mean different things, and only one of them is what was asked for.
 echo
-echo "[3/3] Results: $PASS passed, $FAIL failed"
+echo "[3/4] Session lifetime configuration ..."
+LIFE_PORT=$((PORT + 1))
+LIFE_URL="http://127.0.0.1:$LIFE_PORT/mcp"
+LIFE_LOG="$(mktemp -t gsmcp-life.XXXXXX)"
+GS_MCP_PORT="$LIFE_PORT" GS_MCP_IDLE_TIMEOUT=none GS_MCP_PROBE_INTERVAL=30s \
+  GS_MCP_STREAMLESS_TIMEOUT=20m GS_MCP_MAX_LIFETIME=8h ./run-server.sh > "$LIFE_LOG" 2>&1 &
+LIFE_WRAPPER_PID=$!
+for i in $(seq 1 60); do nc -z 127.0.0.1 "$LIFE_PORT" 2>/dev/null && break; sleep 0.5; done
+if nc -z 127.0.0.1 "$LIFE_PORT" 2>/dev/null; then
+  check "a router with no idle deadline starts"  'listening'   "$(cat "$LIFE_LOG")"
+  r=$(curl -s -i -m 10 "$LIFE_URL" --data-binary @- <<'"'"'JSON'"'"'
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}
+JSON
+)
+  check "...and serves a session on it"          'MCP-Session-Id'  "$r"
+  LIFE_SID=$(printf '%s' "$r" | grep -i '^mcp-session-id:' | tr -d '\r' | awk '{print $2}')
+  curl -s -m 10 -X DELETE "$LIFE_URL" -H "MCP-Session-Id: $LIFE_SID" >/dev/null 2>&1
+else
+  check "a router with no idle deadline starts"  'listening'   "did not start. log: $(cat "$LIFE_LOG")"
+fi
+# A deliberately incoherent combination must be refused, and refused IN THE LAUNCHING SESSION: a
+# detached child gem that raises on startup leaves the operator looking at a cheerful "forked into
+# gem session N" and a port that never opens. So forkOnPort: validates before it forks, and the
+# message lands where whoever typed it will see it.
+BAD_PORT=$((PORT + 2))
+BAD_LOG="$(mktemp -t gsmcp-bad.XXXXXX)"
+GS_MCP_PORT="$BAD_PORT" GS_MCP_IDLE_TIMEOUT=90s GS_MCP_WARNING_LEAD=80s \
+  ./run-server.sh > "$BAD_LOG" 2>&1 || true
+check "an unworkable warning lead is refused"  'too short'   "$(cat "$BAD_LOG")"
+if nc -z 127.0.0.1 "$BAD_PORT" 2>/dev/null; then
+  check "...and no front end is left running"  'nothing listening'  "something is listening on $BAD_PORT"
+else
+  check "...and no front end is left running"  'nothing listening'  "nothing listening"
+fi
+rm -f "$BAD_LOG"
+
+# ---------------------------------------------------------------------------
+echo
+echo "[4/4] Results: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

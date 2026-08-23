@@ -97,6 +97,17 @@ statusBody
 %
 category: 'tests'
 method: McpAuthTest
+testAnUnreadableTokenExpiryLeavesTheIdlePolicyInCharge
+  "Fail soft, not open: a token whose exp cannot be parsed simply leaves the session bound by the
+   idle policy alone, which is where it stood before this existed. It cannot fail OPEN, because the
+   token's claims were validated before this point and are validated again by GemStone at login."
+  | router |
+  router := McpAuthRouter new.
+  self assert: (router tokenExpirySecondsOf: 'not.a.jwt') isNil.
+  self assert: (router tokenExpirySecondsOf: '') isNil
+%
+category: 'tests'
+method: McpAuthTest
 testAudienceArrayMatchAccepted
   "aud may be an array; a match on any element passes."
   | p router |
@@ -370,6 +381,31 @@ testRequiresTlsToServe
   r useTlsCertificateFile: '/tmp/nonexistent.crt' privateKeyFile: '/tmp/nonexistent.key'.
   self shouldnt: [r requireTls] raise: Error.
   self assert: r requireTls == r
+%
+category: 'tests'
+method: McpAuthTest
+testSessionIsCappedAtTheTokenExpiry
+  "The bound that matters on an authenticated router, and the one no idle policy expresses. The
+   worker gem is logged in as the token's GemStone user, so a session allowed to outlive its access
+   token leaves the authorization it was opened with in force after the grant expired -- indefinitely,
+   on a router configured with no idle deadline. exp is required of every token this router accepts,
+   so there is always one to bind to."
+  | router |
+  router := McpAuthRouter new.
+  router expectedAudience: nil; expectedIssuer: nil; requiredScopes: #(); userIdClaim: 'sub'.
+  self withJwtUser: 'McpExpiryTestUser' do: [:jwt | | sid sess exp |
+    exp := router tokenExpirySecondsOf: jwt.
+    self deny: exp isNil.
+    sid := self sessionIdFrom: (self runRequest:
+      (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: router).
+    self deny: sid isNil.
+    sess := router sessionAt: sid.
+    self deny: sess isNil.
+    self assert: sess expiresAtSeconds equals: exp.
+    self deny: sess isExpired.
+    "the fixture mints an hour-long token, and that hour is what the session gets"
+    self assert: ((sess expiresAtSeconds - System timeGmt) - 3600) abs < 60.
+    router reapIdleSessions]
 %
 category: 'tests'
 method: McpAuthTest

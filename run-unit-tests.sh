@@ -43,7 +43,7 @@ iferr 1 stk
 run
 | s classes grailTest |
 classes := #( 'McpToolTest' 'McpDispatcherTest' 'McpSessionTest' 'McpOutboxTest'
-  'McpStreamTest' 'McpTransportTest' 'McpContractTest' 'McpExtensionTest'
+  'McpStreamTest' 'McpLifetimeTest' 'McpTransportTest' 'McpContractTest' 'McpExtensionTest'
   'McpAuthTest' 'McpAuthConformanceTest' ) asOrderedCollection.
 grailTest := System myUserProfile objectNamed: #McpGrailToolsetTest.
 grailTest ifNotNil: [classes add: 'McpGrailToolsetTest'].

@@ -7,7 +7,9 @@ McpBase subclass: 'McpRouter'
                     serverSocket sessions allowedOriginHosts tlsCertificateFile
                     tlsPrivateKeyFile readOnly workerClassName toolsetNames
                     serverName serverTitle serverVersion pendingRequests
-                    pendingMutex serverRequestCounter)
+                    pendingMutex serverRequestCounter sessionIdleTimeoutSeconds streamlessIdleTimeoutSeconds
+                    livenessProbeIntervalSeconds idleWarningLeadSeconds reaperIntervalSeconds pendingRequestTimeoutSeconds
+                    maxSessionLifetimeSeconds reapOnFailedProbe lastMaintenanceAtSeconds)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -95,6 +97,51 @@ defaultAllowedOriginHosts
   "Loopback hosts only -- a page served from any other origin is a DNS-rebinding attempt."
   ^#('localhost' '127.0.0.1' '[::1]')
 %
+category: 'session lifetime defaults'
+classmethod: McpRouter
+defaultIdleWarningLeadSeconds
+  "The longest warning lead #idleWarningLeadSeconds will derive: five minutes. Long enough that a
+   model told 'commit or make a call' can actually do so, short enough that the probe behind it is a
+   fair test of whether anyone is still there."
+  ^300
+%
+category: 'session lifetime defaults'
+classmethod: McpRouter
+defaultLivenessProbeIntervalSeconds
+  "How often a quiet session with NO wall-clock deadline is asked whether its client is still there.
+   Five minutes: with no deadline this ping is the only thing that will ever release the worker gem,
+   so it has to run on a cadence rather than once, and it is cheap -- a client answers from a
+   built-in handler without prompting anyone."
+  ^300
+%
+category: 'session lifetime defaults'
+classmethod: McpRouter
+defaultPendingRequestTimeoutSeconds
+  "How long a server-initiated request may go unanswered before it is decided. 30 seconds -- well
+   under the reaper interval, so a ping sent on one pass has always been decided by the next."
+  ^30
+%
+category: 'session lifetime defaults'
+classmethod: McpRouter
+defaultReaperIntervalSeconds
+  "How often the maintenance pass runs. 60 seconds."
+  ^60
+%
+category: 'session lifetime defaults'
+classmethod: McpRouter
+defaultSessionIdleTimeoutSeconds
+  "Idle time before a client session's worker gem is released. 30 minutes -- the historical value,
+   and a defensible default for a server whose sessions each hold a gem and a transaction view."
+  ^1800
+%
+category: 'session lifetime defaults'
+classmethod: McpRouter
+defaultStreamlessIdleTimeoutSeconds
+  "The deadline that still applies to a client which never opened an SSE stream when there is no
+   ordinary idle deadline. 30 minutes: such a client can never be pinged, so without this an
+   indefinite timeout would mean 'initialize, vanish, leak a gem forever'."
+  ^1800
+%
 category: 'network'
 classmethod: McpRouter
 loopbackAddress
@@ -138,18 +185,16 @@ allowedOriginHosts: aCollectionOfHostStrings
 %
 category: 'server-initiated'
 method: McpRouter
-announceSessionEnd: sess
-  "Tell a client on its own stream that its session has just ended, and stop the stream cleanly.
+announceSessionEnd: sess because: aReasonPhrase
+  "Tell a client on its own stream that its session has just ended and why, and stop the stream
+   cleanly. The phrase comes from #reapReasonFor:, so what the client is told is the actual ground
+   the decision was made on rather than a guess made afterwards.
    #beginClosing -- not #close -- is what makes this land: it refuses anything further while leaving
    the queued notice deliverable, so the drain loop writes it and closes the outbox itself. Closing
    outright here would drop the notice on the floor as the gem went away.
    Best-effort by design: a client that never opened a GET stream cannot be told, and still learns
    from the 404 on its next call. That is a defensible outcome, but a chosen one."
-  | reason |
-  reason := sess isKnownGone
-    ifTrue: ['it did not answer a liveness ping']
-    ifFalse: ['it was idle for over ' , (self sessionIdleTimeoutSeconds // 60) printString , ' minutes'].
-  self enqueueLog: 'This MCP session has ended because ' , reason ,
+  self enqueueLog: 'This MCP session has ended because ' , aReasonPhrase ,
       '. Its GemStone worker gem has been released, and any uncommitted changes in it are gone. ' ,
       'Send initialize to start a new session.'
     level: 'warning' toSession: sess.
@@ -160,6 +205,8 @@ method: McpRouter
 applyConfig: aConfigDict
   "Set this router's config from a parsed config Dictionary (see configDict). A key that is absent
    leaves the initialize-seeded default; a present key (including a JSON null -> nil) is applied.
+   That distinction is what lets a deployment ASK for no idle deadline: 'sessionIdleTimeoutSeconds'
+   present and null is an instruction, where its absence is not.
    Subclasses extend via super."
   allowedOriginHosts := aConfigDict at: 'allowedOriginHosts' ifAbsent: [allowedOriginHosts].
   tlsCertificateFile := aConfigDict at: 'tlsCertificateFile' ifAbsent: [tlsCertificateFile].
@@ -170,6 +217,14 @@ applyConfig: aConfigDict
   serverName := aConfigDict at: 'serverName' ifAbsent: [serverName].
   serverTitle := aConfigDict at: 'serverTitle' ifAbsent: [serverTitle].
   serverVersion := aConfigDict at: 'serverVersion' ifAbsent: [serverVersion].
+  sessionIdleTimeoutSeconds := aConfigDict at: 'sessionIdleTimeoutSeconds' ifAbsent: [sessionIdleTimeoutSeconds].
+  streamlessIdleTimeoutSeconds := aConfigDict at: 'streamlessIdleTimeoutSeconds' ifAbsent: [streamlessIdleTimeoutSeconds].
+  livenessProbeIntervalSeconds := aConfigDict at: 'livenessProbeIntervalSeconds' ifAbsent: [livenessProbeIntervalSeconds].
+  idleWarningLeadSeconds := aConfigDict at: 'idleWarningLeadSeconds' ifAbsent: [idleWarningLeadSeconds].
+  reaperIntervalSeconds := aConfigDict at: 'reaperIntervalSeconds' ifAbsent: [reaperIntervalSeconds].
+  pendingRequestTimeoutSeconds := aConfigDict at: 'pendingRequestTimeoutSeconds' ifAbsent: [pendingRequestTimeoutSeconds].
+  maxSessionLifetimeSeconds := aConfigDict at: 'maxSessionLifetimeSeconds' ifAbsent: [maxSessionLifetimeSeconds].
+  reapOnFailedProbe := aConfigDict at: 'reapOnFailedProbe' ifAbsent: [reapOnFailedProbe].
   ^self
 %
 category: 'config'
@@ -177,6 +232,25 @@ method: McpRouter
 applyConfigJson: aJsonString
   "Apply a JSON config string (see applyConfig: / configJson)."
   ^self applyConfig: (self parseBody: aJsonString)
+%
+category: 'sessions'
+method: McpRouter
+awaitingIdleWarning: sess
+  "Whether a session that has reached its idle deadline is still owed the warning it never got, and
+   so should be given one bounded grace period rather than reaped now.
+   The warning is the promise this pathway makes -- commit, or make any call, or lose the uncommitted
+   work in your gem -- and a session can arrive at the deadline without ever hearing it: the client
+   opened its stream late, the warning went down a stream it had already replaced, or the host was
+   suspended and the entire warning window elapsed between two maintenance passes. Reaping such a
+   session is the one outcome this was built to prevent, so a client that is reachable and unwarned
+   earns #reapGraceSeconds, once, in which the ping-then-warn cycle can run.
+   It is NOT a liveness reprieve, and does not reopen the question settled in the design: a client
+   that answers a ping is still reaped at its deadline, because an answered ping deliberately does
+   not restart the idle clock. It is simply told first. The grace is bounded for a reason -- a client
+   replacing its stream on every pass would otherwise never yield a verdict, and never yield its gem."
+  sess idleWarned ifTrue: [^false].
+  sess outbox hasStream ifFalse: [^false].
+  ^sess idleSeconds <= (self sessionIdleTimeoutSeconds + self reapGraceSeconds)
 %
 category: 'network'
 method: McpRouter
@@ -226,8 +300,12 @@ method: McpRouter
 configDict
   "This router's deployment config as a Dictionary of JSON-safe values, for serialization into the
    fork string (forkOnPort:). FIXED KEY ALLOW-LIST: only these keys travel, so a future ivar cannot
-   silently start carrying a secret. Values are host lists, file PATHS, booleans, and display strings
-   -- never key material. Subclasses add their keys via super."
+   silently start carrying a secret. Values are host lists, file PATHS, booleans, numbers and display
+   strings -- never key material. Subclasses add their keys via super.
+   The lifetime intervals are written from the IVARS, not the accessors, so what travels is what was
+   configured: a nil sessionIdleTimeoutSeconds means 'no deadline' in the child exactly as it does
+   here, and a nil idleWarningLeadSeconds is re-derived there from whatever the other intervals
+   turn out to be."
   | d |
   d := Dictionary new.
   d at: 'allowedOriginHosts' put: allowedOriginHosts.
@@ -239,6 +317,14 @@ configDict
   d at: 'serverName' put: serverName.
   d at: 'serverTitle' put: serverTitle.
   d at: 'serverVersion' put: serverVersion.
+  d at: 'sessionIdleTimeoutSeconds' put: sessionIdleTimeoutSeconds.
+  d at: 'streamlessIdleTimeoutSeconds' put: streamlessIdleTimeoutSeconds.
+  d at: 'livenessProbeIntervalSeconds' put: livenessProbeIntervalSeconds.
+  d at: 'idleWarningLeadSeconds' put: idleWarningLeadSeconds.
+  d at: 'reaperIntervalSeconds' put: reaperIntervalSeconds.
+  d at: 'pendingRequestTimeoutSeconds' put: pendingRequestTimeoutSeconds.
+  d at: 'maxSessionLifetimeSeconds' put: maxSessionLifetimeSeconds.
+  d at: 'reapOnFailedProbe' put: reapOnFailedProbe.
   ^d
 %
 category: 'config'
@@ -268,6 +354,22 @@ disableTls
   "Return THIS router to plaintext HTTP (clear its cert + key)."
   tlsCertificateFile := nil.
   tlsPrivateKeyFile := nil
+%
+category: 'sessions'
+method: McpRouter
+discardPendingRequests
+  "Empty the pending-request table WITHOUT concluding anything from what was in it, and answer how
+   many were dropped. Used when this front end learns its own clock is not to be trusted (see
+   #forgiveSuspendedSeconds:); #expirePendingRequests is the path that draws conclusions."
+  | dropped |
+  dropped := pendingMutex critical: [
+    | old |
+    old := pendingRequests values asArray.
+    pendingRequests := Dictionary new.
+    old].
+  dropped do: [:e |
+    (self sessionAt: (e at: 'sessionId')) ifNotNil: [:sess | sess noteProbeDiscarded]].
+  ^dropped size
 %
 category: 'server-initiated'
 method: McpRouter
@@ -317,10 +419,18 @@ enqueueLog: aString level: aLevelString toSession: sess
 category: 'server-initiated'
 method: McpRouter
 expirePendingRequests
-  "Drop server-initiated requests the client never answered, and mark their sessions accordingly.
-   EVERY pending request is timed out, without exception: an unanswered ping has to decide something
-   -- liveness failed -- and must never leave a session waiting for an answer that is not coming.
-   Answers how many expired."
+  "Time out server-initiated requests the client never answered, and mark their sessions -- but only
+   where the silence is actually about the client. Answers how many expired.
+   A request is written to ONE stream. If the client has since replaced that stream -- both shipping
+   clients reconnect a dropped standalone GET on their own, and a handover is likeliest on exactly
+   the quiet sessions this probes -- then the write succeeded into a socket buffer nobody will ever
+   read, and no answer can arrive however alive the client is. Reading that as proof of death frees
+   the worker gem of a client that is awake, connected and holding a perfectly good stream; measured
+   on 2026-08-23, it accounted for 6 of 14 pings. So a verdict is drawn only when the stream that
+   carried the request is still the current one (#verdictAdmissible:forSession:); otherwise the probe
+   is DISCARDED and re-sent down the new stream on the next pass.
+   Every pending request is still removed either way: an unanswered request must never leave a
+   session waiting for an answer that is not coming."
   | now expired |
   now := System timeGmt.
   expired := pendingMutex critical: [
@@ -330,8 +440,43 @@ expirePendingRequests
     old do: [:e | pendingRequests removeKey: (e at: 'id') ifAbsent: [nil]].
     old].
   expired do: [:e |
-    (self sessionAt: (e at: 'sessionId')) ifNotNil: [:sess | sess noteProbeUnanswered]].
+    (self sessionAt: (e at: 'sessionId')) ifNotNil: [:sess |
+      (self verdictAdmissible: e forSession: sess)
+        ifTrue: [sess noteProbeUnanswered]
+        ifFalse: [sess noteProbeDiscarded]]].
   ^expired size
+%
+category: 'sessions'
+method: McpRouter
+forgiveSuspendedSeconds: anInteger
+  "Treat anInteger seconds as time this front end was not running, and take it off every session's
+   idle clock. Answers the seconds forgiven.
+   Idleness is a measure of SERVICE time -- how long a client has had no need of a gem this server
+   was offering -- so time in which nothing was offered should not count toward it. Without this, the
+   first maintenance pass after a laptop wakes sees every session idle by the whole suspend and frees
+   every worker gem, including those of clients that are awake, connected, and one keystroke away.
+   Expiry is deliberately NOT forgiven with it (McpSession>>forgiveSuspendedSeconds:): a credential's
+   exp is an absolute commitment, and a suspended host is not a reason to honour an expired token.
+   Outstanding server requests are discarded rather than expired, for the same reason a ping written
+   to a superseded stream is: an answer that could not physically have arrived is not evidence about
+   the client. And every reachable client is told, because the one thing it cannot work out for
+   itself is that its worker gem still holds a transaction view from before the gap."
+  anInteger > 0 ifFalse: [^0].
+  self log: 'Front end was not running for about ' , anInteger printString
+    , 's (host suspended?); forgiving it on every session''s idle clock.'.
+  self discardPendingRequests.
+  (mutex critical: [sessions values asArray]) do: [:sess |
+    [sess forgiveSuspendedSeconds: anInteger.
+     sess outbox hasStream ifTrue: [
+       self enqueueLog: 'This server was not running for about ' , (anInteger // 60) printString
+         , ' minute(s) -- the host was most likely suspended. This session was kept, and the time '
+         , 'does not count against its idle timeout, but its GemStone worker gem still holds the '
+         , 'transaction view it had beforehand: commit or abort before relying on what it reads.'
+       level: 'warning' toSession: sess]]
+    on: Error
+    do: [:e | self log: 'forgiveSuspendedSeconds: error: ' ,
+           ([e description] on: Error do: [:x | e class name asString])]].
+  ^anInteger
 %
 category: 'forking'
 method: McpRouter
@@ -345,6 +490,11 @@ forkOnPort: aPort
    Stop it by port with ./stop-server.sh, or via `System stopSession: <id>` / `kill <pid>` (both
    printed below). Answers a status string. Requires GsTsExternalSession."
   | es sid pid s |
+  "Check the config HERE as well as in runOnPort:, so a combination the child would refuse fails in
+   the launching session. Without this the operator sees a cheerful 'forked into gem session N' and a
+   port that never opens, with the reason buried in a detached gem's log."
+  self validateWorkerConfig.
+  self validateTimerConfig.
   es := GsTsExternalSession newDefaultForGemHost: 'localhost'.
   es useOnetimePassword.
   es login.
@@ -392,6 +542,15 @@ handleConnection: aConnection
       on: Error do: [:e | nil]].
   aConnection close
 %
+category: 'session lifetime'
+method: McpRouter
+hasSessionIdleDeadline
+  "Whether sessions on this router have a wall-clock idle deadline at all. When they do not, liveness
+   is the entire policy and several things change shape: the ping runs on a cadence rather than once
+   per idle period, there is nothing to warn anybody about, and #streamlessIdleTimeoutSeconds becomes
+   the only thing that can release an unreachable client's gem."
+  ^sessionIdleTimeoutSeconds notNil
+%
 category: 'routing'
 method: McpRouter
 hostOfOrigin: aString
@@ -409,13 +568,39 @@ hostOfOrigin: aString
   (rest indexOf: $/) > 0 ifTrue: [cut := cut min: (rest indexOf: $/)].
   ^rest copyFrom: 1 to: cut - 1
 %
-category: 'sessions'
+category: 'session lifetime'
+method: McpRouter
+idleProbeThresholdSeconds
+  "How quiet a session must be before it is worth a liveness ping. With a wall-clock deadline that is
+   the start of the warning window (the deadline less the lead); with none there is no window to be
+   at the start of, so it is simply the probe cadence."
+  ^self hasSessionIdleDeadline
+    ifTrue: [self sessionIdleTimeoutSeconds - self idleWarningLeadSeconds]
+    ifFalse: [self livenessProbeIntervalSeconds]
+%
+category: 'session lifetime'
 method: McpRouter
 idleWarningLeadSeconds
-  "How long before the idle deadline a session is probed and then warned. Five minutes: long enough
-   that a model told 'commit or make a call' can actually do so, short enough that the probe is a
-   fair test of whether anyone is still there."
-  ^300
+  "How long before the idle deadline a session is probed and then warned -- DERIVED from the other
+   intervals unless one was set explicitly.
+   Derived rather than merely defaulted because it is the one interval with a hard relationship to
+   the others: the ping and the warning go out on SEPARATE reaper passes with the answer window
+   between them, so a lead that is short relative to reaperIntervalSeconds silently never completes
+   the cycle and nobody is ever warned. Someone who shortens the idle timeout should not have to
+   work that out. Aim for a sixth of the timeout, never below what the cycle needs
+   (#minimumWarningLeadSeconds), never above the class default."
+  idleWarningLeadSeconds notNil ifTrue: [^idleWarningLeadSeconds].
+  self hasSessionIdleDeadline ifFalse: [^self class defaultIdleWarningLeadSeconds].
+  ^((self sessionIdleTimeoutSeconds // 6) min: self class defaultIdleWarningLeadSeconds)
+    max: self minimumWarningLeadSeconds
+%
+category: 'session lifetime'
+method: McpRouter
+idleWarningLeadSeconds: anIntegerOrNil
+  "Set the warning lead explicitly, or restore the derivation with nil (see the getter). An explicit
+   value is checked against the other intervals at startup (#validateTimerConfig) rather than
+   silently producing a cycle that never completes."
+  idleWarningLeadSeconds := anIntegerOrNil
 %
 category: 'initialization'
 method: McpRouter
@@ -435,7 +620,7 @@ initialize
   workerClassName := nil.  "nil = McpServer"
   toolsetNames := nil.     "nil = the installed default surface, resolved per session"
   serverName := nil.       "nil = the worker's own default (McpServer class>>defaultServerName)"
-  serverTitle := nil.      "nil = no instance label, so no serverInfo title key at all"
+  serverTitle := nil.
   serverVersion := nil.
   "server-initiated messaging: the requests this server has sent and is waiting to be answered.
    Its OWN mutex, not the session-map one -- that is held across reapIdleSessions, and correlating
@@ -443,6 +628,19 @@ initialize
   pendingRequests := Dictionary new.
   pendingMutex := Semaphore forMutualExclusion.
   serverRequestCounter := 0.
+  "Session lifetime. These are SEEDED rather than left nil-for-default, because for the first of
+   them nil is a real setting (no wall-clock deadline at all) and could not also mean 'use the
+   default'. The one exception is idleWarningLeadSeconds, which is derived from the others when it
+   is nil -- see the accessor."
+  sessionIdleTimeoutSeconds := self class defaultSessionIdleTimeoutSeconds.
+  streamlessIdleTimeoutSeconds := self class defaultStreamlessIdleTimeoutSeconds.
+  livenessProbeIntervalSeconds := self class defaultLivenessProbeIntervalSeconds.
+  idleWarningLeadSeconds := nil.   "nil = derived from the timeout and the reaper cadence"
+  reaperIntervalSeconds := self class defaultReaperIntervalSeconds.
+  pendingRequestTimeoutSeconds := self class defaultPendingRequestTimeoutSeconds.
+  maxSessionLifetimeSeconds := nil.  "nil = no absolute cap beyond whatever a credential imposes"
+  reapOnFailedProbe := true.
+  lastMaintenanceAtSeconds := System timeGmt.
   ^self
 %
 category: 'running'
@@ -460,35 +658,58 @@ keepaliveIntervalSeconds
    second proxy and NAT idle timeouts, which is the only thing this interval has to beat."
   ^15
 %
+category: 'session lifetime'
+method: McpRouter
+livenessProbeIntervalSeconds
+  "How often a quiet session with no wall-clock deadline is re-asked whether its client is there.
+   Only meaningful when #hasSessionIdleDeadline is false: with a deadline the ping is asked once per
+   idle period, as the session enters its warning window."
+  ^livenessProbeIntervalSeconds
+%
+category: 'session lifetime'
+method: McpRouter
+livenessProbeIntervalSeconds: anInteger
+  "Set the re-probe cadence for sessions with no idle deadline (see #livenessProbeIntervalSeconds)."
+  livenessProbeIntervalSeconds := anInteger
+%
 category: 'sessions'
 method: McpRouter
-maintainIdleSession: sess pastThreshold: thresholdSeconds
+maintainIdleSession: sess
   "One session's turn in the idle window (see #probeIdleSessions). Answers whether a message was
-   sent to it."
+   sent to it.
+   Nothing here is skipped merely because a session is past its deadline: that is exactly when a
+   client which has never been warned still needs to be (see #awaitingIdleWarning:), and the reaping
+   pass holds off while this cycle runs."
+  "Record that a stream was seen while one is open. This pass is the only regular observer of that,
+   and it is what #unreachableSeconds -- the sole ground for reaping when there is no idle deadline
+   -- is measured from."
+  sess outbox hasStream ifTrue: [sess noteStreamSeen].
   sess isBusy ifTrue: [^false].
-  sess idleSeconds <= thresholdSeconds ifTrue: [^false].
-  "past the deadline as well -- reapIdleSessions has this one; do not spend a ping on it"
-  sess idleSeconds > self sessionIdleTimeoutSeconds ifTrue: [^false].
   "a client with no stream can receive neither a ping nor a warning. Skipping it is not an
    oversight: pinging it would record an unanswered probe and reap its gem EARLY for the sole
    offence of not opening a stream."
   sess outbox hasStream ifFalse: [^false].
   sess isProbeOutstanding ifTrue: [^false].    "answer still owed; decide on a later pass"
-  sess isKnownGone ifTrue: [^false].           "already decided; reapIdleSessions frees it"
-  sess isKnownAlive ifFalse: [^self probeSession: sess].
+  (self probeDue: sess) ifTrue: [^self probeSession: sess].
+  sess isKnownAlive ifFalse: [^false].         "no verdict yet, or none coming: nothing to say"
   sess idleWarned ifTrue: [^false].
+  (self warningDue: sess) ifFalse: [^false].
   ^self warnIdleSession: sess
 %
 category: 'sessions'
 method: McpRouter
 maintainSessions
   "One pass of session housekeeping, run on the reaper's GsProcess. The order is the point:
-     1. time out server-initiated requests nobody answered -- that is what marks a probed session
-        gone;
-     2. probe, then warn, sessions drifting toward the idle deadline;
-     3. reap what is idle or gone, telling each client on its stream first.
-   Reaping last means a session found gone in step 1 is freed in the same pass rather than the next.
+     0. notice whether this pass is itself wildly late -- the host was suspended -- and forgive that
+        time rather than letting it be read as idleness;
+     1. time out server-initiated requests nobody answered, which is what marks a probed session
+        gone (or, where the silence is about the transport rather than the client, discards it);
+     2. probe, then warn, sessions drifting toward their deadline;
+     3. reap what should go, telling each client on its stream first.
+   Step 0 comes first because every step after it reads a wall clock. Reaping comes last so that a
+   session found gone in step 1 is freed in the same pass rather than the next.
    Answers the number reaped."
+  self noteMaintenanceTick.
   self expirePendingRequests.
   self probeIdleSessions.
   ^self reapIdleSessions
@@ -508,6 +729,29 @@ makeListenerOnPort: aPort
   (sock makeServer: 16 atPort: aPort atAddress: self bindAddress)
     ifNil: [^self error: 'makeServer failed on port ' , aPort printString , ': ' , sock lastErrorString].
   ^sock
+%
+category: 'session lifetime'
+method: McpRouter
+maxSessionLifetimeSeconds
+  "An absolute cap on how long any session may live, however busy, or nil for none (the default).
+   Applied at session open as an expiry (McpSession>>expiresAtSeconds:), so unlike idleness it is
+   never probed around and never forgiven -- including across a host suspend. An authenticated front
+   end tightens the same expiry with the access token's own exp, whichever is sooner."
+  ^maxSessionLifetimeSeconds
+%
+category: 'session lifetime'
+method: McpRouter
+maxSessionLifetimeSeconds: anIntegerOrNil
+  "Cap the absolute lifetime of every session this router opens (nil removes the cap)."
+  maxSessionLifetimeSeconds := anIntegerOrNil
+%
+category: 'session lifetime'
+method: McpRouter
+minimumWarningLeadSeconds
+  "The shortest warning lead that can actually complete the ping-then-warn cycle: one pass to send
+   the ping, the window in which the answer may arrive, and a second pass to send the warning -- plus
+   a little slack, since a pass that lands a second early would otherwise skip a step."
+  ^(2 * self reaperIntervalSeconds) + self pendingRequestTimeoutSeconds + 10
 %
 category: 'server-initiated'
 method: McpRouter
@@ -546,6 +790,24 @@ noteLogLevelFrom: parsed sessionId: sid
 %
 category: 'sessions'
 method: McpRouter
+noteMaintenanceTick
+  "Measure how long this maintenance pass actually waited, and forgive anything far beyond what it
+   asked for. Answers the seconds forgiven (0 on an ordinary pass).
+   The maintenance loop is this gem's own clock: it asks for #reaperIntervalSeconds and, if the host
+   was suspended in between, comes back hours later. Everything the front end measures is wall-clock
+   (System timeGmt), so on that first pass after a wake every session looks idle by the whole
+   suspend, every request in flight looks unanswered, and nothing was idle at all -- the host was
+   simply not serving anyone. Detecting it here, at the top of the pass, is what keeps every step
+   below from having to know about it."
+  | now gap |
+  now := System timeGmt.
+  gap := now - lastMaintenanceAtSeconds.
+  lastMaintenanceAtSeconds := now.
+  gap > (self reaperIntervalSeconds * self suspendDetectionFactor) ifFalse: [^0].
+  ^self forgiveSuspendedSeconds: gap - self reaperIntervalSeconds
+%
+category: 'sessions'
+method: McpRouter
 openSession
   "Create + register a new client session (a worker gem for the current/server user). The worker is
    opened read-only when THIS router is read-only."
@@ -571,6 +833,10 @@ openSessionCreating: aOneArgBlock
     serverTitle: self serverTitle;
     serverVersion: self serverVersion;
     prepareWorker.
+  "An absolute lifetime cap, where one is configured, becomes an expiry the session carries. A
+   subclass may tighten it further (McpAuthRouter, from the access token's exp) but never loosen it."
+  self maxSessionLifetimeSeconds ifNotNil: [:secs |
+    sess expiresAtSeconds: System timeGmt + secs].
   mutex critical: [sessions at: newId put: sess].
   ^sess
 %
@@ -586,28 +852,51 @@ originAllowed: req
   origin isNil ifTrue: [^true].
   ^self allowedOriginHosts includes: (self hostOfOrigin: origin) asLowercase
 %
-category: 'server-initiated'
+category: 'session lifetime'
 method: McpRouter
 pendingRequestTimeoutSeconds
-  "How long a server-initiated request may go unanswered before it is treated as failed. Well under
-   the reaper interval, so a ping sent on one pass has always been decided by the next."
-  ^30
+  "How long a server-initiated request may go unanswered before it is decided. Keep it well under
+   #reaperIntervalSeconds, so a ping sent on one pass has always been decided by the next."
+  ^pendingRequestTimeoutSeconds
+%
+category: 'session lifetime'
+method: McpRouter
+pendingRequestTimeoutSeconds: anInteger
+  "Set how long a server-initiated request may go unanswered (see the getter)."
+  pendingRequestTimeoutSeconds := anInteger
+%
+category: 'sessions'
+method: McpRouter
+probeDue: sess
+  "Whether a liveness ping is owed to this session now.
+   Two cadences, because the ping answers two different questions. With a wall-clock deadline it asks
+   'is anyone there to warn?' -- once, as the session enters its warning window. With no deadline it
+   is the only thing that will ever end the session, so it asks 'are you still there?' every
+   #livenessProbeIntervalSeconds for as long as the session stays quiet.
+   A session whose probe was DISCARDED (its stream was replaced under it) has no stamp and no verdict,
+   so it re-probes on the very next pass rather than waiting out the cadence on an answer that was
+   never going to arrive."
+  | since |
+  sess idleSeconds > self idleProbeThresholdSeconds ifFalse: [^false].
+  since := sess secondsSinceProbe.
+  since isNil ifTrue: [^true].
+  self hasSessionIdleDeadline ifTrue: [^false].
+  ^since >= self livenessProbeIntervalSeconds
 %
 category: 'sessions'
 method: McpRouter
 probeIdleSessions
   "Work the window between 'quiet' and 'reaped' for every session, and answer how many messages went
-   out. Two steps per session, a pass apart (see #maintainIdleSession:pastThreshold:): a liveness
-   ping first, and only for a client that answered it, the warning.
+   out. Two steps per session, a pass apart (see #maintainIdleSession:): a liveness ping first, and
+   only for a client that answered it, the warning.
    That order is what makes the warning worth sending. It costs a gem its own transaction view when
    a session is reaped, so a client that is still there deserves the chance to commit -- and a client
    that is not there should not be waited out for the full timeout.
    Iterates a snapshot: a session may be reaped, or a new one registered, while this runs."
-  | sent threshold |
+  | sent |
   sent := 0.
-  threshold := self sessionIdleTimeoutSeconds - self idleWarningLeadSeconds.
   (mutex critical: [sessions values asArray]) do: [:sess |
-    [(self maintainIdleSession: sess pastThreshold: threshold) ifTrue: [sent := sent + 1]]
+    [(self maintainIdleSession: sess) ifTrue: [sent := sent + 1]]
       on: Error
       do: [:e | self log: 'probeIdleSessions error: ' ,
              ([e description] on: Error do: [:x | e class name asString])]].
@@ -681,41 +970,101 @@ readOnly: aBoolean
   "Open this router's workers read-only (see #readOnly)."
   readOnly := aBoolean
 %
-category: 'sessions'
+category: 'session lifetime'
 method: McpRouter
 reaperIntervalSeconds
-  "How often (seconds) the reaper checks for idle sessions."
-  ^60
+  "How often (seconds) the maintenance pass runs: expire unanswered requests, probe and warn sessions
+   drifting toward their deadline, reap what should go. Also the unit the suspend detector measures
+   its own lateness in (#maintainSessions)."
+  ^reaperIntervalSeconds
+%
+category: 'session lifetime'
+method: McpRouter
+reaperIntervalSeconds: anInteger
+  "Set how often the maintenance pass runs (see the getter)."
+  reaperIntervalSeconds := anInteger
+%
+category: 'session lifetime'
+method: McpRouter
+reapGraceSeconds
+  "How long past its idle deadline an unwarned but reachable session is kept while the ping-then-warn
+   cycle runs (see #awaitingIdleWarning:). Sized to exactly that cycle and no further: a pass to send
+   the ping, the answer window, a pass to send the warning, and one more for the client to act on it.
+   Derived rather than configured -- it is a consequence of the other intervals, not a policy."
+  ^(3 * self reaperIntervalSeconds) + self pendingRequestTimeoutSeconds
 %
 category: 'sessions'
 method: McpRouter
 reapIdleSessions
-  "Close and unmap client sessions whose worker gem should be released, and answer how many.
-   Collect + unmap under the mutex; close (a blocking logout) outside it.
-   TWO grounds now, not one: a session idle longer than sessionIdleTimeoutSeconds, and a session
-   whose liveness ping went unanswered (#isKnownGone). The second is evidence, not merely absent
-   traffic -- the ping went down a stream the client itself opened -- so that gem is freed without
-   waiting out the whole timeout.
-   A session with a call in flight is never reaped on either ground, however long it has run:
+  "Close and unmap client sessions whose worker gem should be released, and answer how many. The
+   grounds themselves live in #reapReasonFor: -- one place, so the policy can be read in one sitting
+   -- and the phrase it answers is what the client is told on its stream (#announceSessionEnd:because:).
+   Collect + unmap under the mutex; close (a blocking logout) outside it. Each session is told before
+   it goes: a session reaped for idleness is by definition one making no calls, so the stream is the
+   only way to reach it."
+  | doomed |
+  doomed := mutex critical: [
+    | found |
+    found := OrderedCollection new.
+    sessions values do: [:s |
+      (self reapReasonFor: s) ifNotNil: [:why | found add: (Array with: s with: why)]].
+    found do: [:pair | sessions removeKey: (pair at: 1) id ifAbsent: [nil]].
+    found].
+  doomed do: [:pair |
+    [self announceSessionEnd: (pair at: 1) because: (pair at: 2)] on: Error do: [:e | nil].
+    [(pair at: 1) close] on: Error do: [:e | nil]].
+  doomed isEmpty ifFalse: [self log: 'Reaped ' , doomed size printString , ' MCP session(s).'].
+  ^doomed size
+%
+category: 'session lifetime'
+method: McpRouter
+reapOnFailedProbe
+  "Whether a session whose liveness ping went unanswered has its worker gem freed at once, without
+   waiting out the idle deadline. True by default, and FORCED true where there is no deadline, since
+   with none this is the only thing that would ever end a session.
+   Worth turning off where the deadline is already short: it then saves at most (timeout - lead) of
+   gem lifetime, which is a modest prize for a verdict drawn from silence. What makes it trustworthy
+   at all is that the silence is checked against the stream that carried the ping -- see
+   #verdictAdmissible:forSession:."
+  self hasSessionIdleDeadline ifFalse: [^true].
+  ^reapOnFailedProbe ~~ false
+%
+category: 'session lifetime'
+method: McpRouter
+reapOnFailedProbe: aBoolean
+  "Whether an unanswered liveness ping is grounds for reaping (see the getter). Ignored -- forced
+   true -- when there is no idle deadline."
+  reapOnFailedProbe := aBoolean
+%
+category: 'sessions'
+method: McpRouter
+reapReasonFor: sess
+  "Why this session's worker gem should be released now -- as the phrase the client is told on its
+   stream -- or nil to keep it. The whole reaping policy, in one place.
+   A session with a call in flight is never reaped on any ground, however long it has run:
    McpSession>>forward: stamps the activity clock when the call STARTS, so a request that outlives
-   the idle timeout would otherwise have its worker logged out from under it. That could not happen
-   while forwarding blocked the whole gem -- the reaper could not run either -- so the guard arrives
-   with the non-blocking forward (see McpSession>>runWorker:).
-   Each session is told on its own stream before it goes (#announceSessionEnd:); a session reaped for
-   idleness is by definition one making no calls, so the stream is the only way to reach it."
-  | expired timeout |
-  timeout := self sessionIdleTimeoutSeconds.
-  expired := mutex critical: [
-    | old |
-    old := sessions values select: [:s |
-      s isBusy not and: [s isKnownGone or: [s idleSeconds > timeout]]].
-    old do: [:s | sessions removeKey: s id ifAbsent: [nil]].
-    old].
-  expired do: [:s |
-    [self announceSessionEnd: s] on: Error do: [:e | nil].
-    [s close] on: Error do: [:e | nil]].
-  expired isEmpty ifFalse: [self log: 'Reaped ' , expired size printString , ' idle MCP session(s).'].
-  ^expired size
+   the idle timeout would otherwise have its worker logged out from under it.
+   The grounds, in order of how little they depend on inference:
+     - EXPIRY is absolute. A session opened under a credential must not outlive it, and unlike
+       idleness it is neither probed around nor forgiven across a host suspend.
+     - A FAILED LIVENESS PING is evidence rather than absent traffic -- the ping went down a stream
+       the client itself opened -- so that gem need not wait out the whole timeout. It counts only
+       where the silence was admissible in the first place (#expirePendingRequests).
+     - The IDLE DEADLINE, where there is one, less the grace a client still owed its warning gets.
+     - With no deadline, the only remaining ground is that no stream has been open long enough that
+       no ping could have been sent at all: liveness cannot speak for a client it cannot reach."
+  sess isBusy ifTrue: [^nil].
+  sess isExpired ifTrue: [^'its access credential expired'].
+  (self reapOnFailedProbe and: [sess isKnownGone])
+    ifTrue: [^'it did not answer a liveness ping'].
+  self hasSessionIdleDeadline ifTrue: [
+    sess idleSeconds > self sessionIdleTimeoutSeconds ifFalse: [^nil].
+    (self awaitingIdleWarning: sess) ifTrue: [^nil].
+    ^'it was idle for over ' , (self sessionIdleTimeoutSeconds // 60) printString , ' minutes'].
+  sess unreachableSeconds > self streamlessIdleTimeoutSeconds ifTrue: [
+    ^'no event stream was open to ping it for over '
+      , (self streamlessIdleTimeoutSeconds // 60) printString , ' minutes'].
+  ^nil
 %
 category: 'routing'
 method: McpRouter
@@ -774,6 +1123,7 @@ runOnPort: aPort
    BLOCKING: this is meant to be the gem's main activity (forked GsProcesses
    only run while the gem is actively executing Smalltalk)."
   self validateWorkerConfig.
+  self validateTimerConfig.
   serverSocket := self makeListenerOnPort: aPort.
   isRunning := true.
   self forkReaper.
@@ -815,6 +1165,10 @@ sendRequest: aMethodString params: aDictOrNil toSession: sess
   entry at: 'method' put: aMethodString.
   entry at: 'sessionId' put: sess id.
   entry at: 'sentAt' put: System timeGmt.
+  "WHICH STREAM this is about to go down. A message is written to exactly one stream, and the client
+   may replace that stream at any moment, so silence afterwards means 'the client is gone' only if
+   this generation is still the current one when the timeout fires -- see #expirePendingRequests."
+  entry at: 'streamGeneration' put: sess outbox currentStreamGeneration.
   "'origin' distinguishes a request the ROUTER asked -- resolved here, as ping is -- from one a
    worker gem asked (elicitation, sampling), whose answer would have to be delivered back INTO that
    gem while its GCI call is already in flight. Nothing originates in a worker yet: that needs a
@@ -1020,11 +1374,30 @@ sessionAt: aSessionId
   aSessionId isNil ifTrue: [^nil].
   ^mutex critical: [sessions at: aSessionId ifAbsent: [nil]]
 %
-category: 'sessions'
+category: 'session lifetime'
 method: McpRouter
 sessionIdleTimeoutSeconds
-  "Idle time (seconds) before a client session's worker gem is reaped. 30 minutes."
-  ^1800
+  "Idle time (seconds) after which a client session's worker gem is released, or NIL for no
+   wall-clock deadline at all. 30 minutes by default.
+   nil is a deliberate setting, not an oversight, and it is not the same as unpoliced: with no
+   deadline a session lives exactly as long as its client keeps answering liveness pings -- which is
+   the client asserting, on a stream it opened itself, that it still wants that gem and the
+   uncommitted work in it. What makes that safe is the pair of things that come with it: a failed
+   probe always reaps (#reapOnFailedProbe), and a client that never opens a stream, and so can never
+   be pinged, still falls back to #streamlessIdleTimeoutSeconds.
+   Worth knowing before choosing it: on GemStone an idle session is not free. Each worker is a gem
+   sitting in a transaction, so it pins a repository view and holds back page reclamation -- a
+   forgotten session is extent growth, not merely an idle process. The front end cannot fix that for
+   the client either: aborting the worker's transaction would discard exactly the uncommitted work
+   this whole pathway exists to protect."
+  ^sessionIdleTimeoutSeconds
+%
+category: 'session lifetime'
+method: McpRouter
+sessionIdleTimeoutSeconds: anIntegerOrNil
+  "Set the idle deadline for this router's sessions, or nil for none (see the getter). Consistency
+   with the other intervals is checked at startup, in #validateTimerConfig."
+  sessionIdleTimeoutSeconds := anIntegerOrNil
 %
 category: 'routing'
 method: McpRouter
@@ -1038,6 +1411,23 @@ stop
   "Request a graceful shutdown; the accept loop exits within one accept timeout."
   isRunning := false
 %
+category: 'session lifetime'
+method: McpRouter
+streamlessIdleTimeoutSeconds
+  "The idle deadline that still applies to a client which never opened an SSE stream, when there is
+   no ordinary deadline. Such a client cannot be pinged -- pinging it would record an unanswered
+   probe and reap its gem early for the sole offence of not opening a stream -- so liveness can say
+   nothing about it, and this is the only thing that can ever free its gem.
+   Ignored while #sessionIdleTimeoutSeconds is set: that deadline already covers every session, and
+   a second, quieter one for a subset would be a surprise rather than a safeguard."
+  ^streamlessIdleTimeoutSeconds
+%
+category: 'session lifetime'
+method: McpRouter
+streamlessIdleTimeoutSeconds: anInteger
+  "Set the fallback deadline for clients that open no stream (see the getter)."
+  streamlessIdleTimeoutSeconds := anInteger
+%
 category: 'running'
 method: McpRouter
 streamPollMilliseconds
@@ -1045,6 +1435,15 @@ streamPollMilliseconds
    accept loop, the reaper and every other stream keep running while this one is held open. A
    latency/wakeup tradeoff: 100ms puts a notification on the wire promptly without spinning."
   ^100
+%
+category: 'session lifetime'
+method: McpRouter
+suspendDetectionFactor
+  "How many times its own interval a maintenance pass may overshoot before the overshoot is read as
+   time the host was suspended rather than as a slow pass. Three: a merely late pass (a blocking
+   worker login, a busy gem) overshoots by a fraction of an interval, while a suspend overshoots by
+   minutes or hours, so nothing realistic falls in between."
+  ^3
 %
 category: 'tls'
 method: McpRouter
@@ -1128,6 +1527,55 @@ validatedClassName: aName
 %
 category: 'config'
 method: McpRouter
+validateSeconds: aValue named: aName allowingNil: aBoolean
+  "Check one configured interval, raising with the offending name and value. Used by
+   #validateTimerConfig so a bad number is reported once, in words, at startup."
+  aValue isNil ifTrue: [
+    aBoolean ifTrue: [^self].
+    ^self error: aName , ' must be a positive number of seconds, and is nil.'].
+  ((aValue isKindOf: Number) and: [aValue > 0]) ifFalse: [
+    ^self error: aName , ' must be a positive number of seconds, and is ' , aValue printString , '.'].
+  ^self
+%
+category: 'config'
+method: McpRouter
+validateTimerConfig
+  "Check the session-lifetime intervals against each other BEFORE binding a port (runOnPort:), so a
+   combination that cannot work fails at startup with a clear message instead of silently never
+   warning anybody -- the same bargain #validateWorkerConfig makes for the worker class.
+   The invariant that is easy to violate: the ping and the warning go out on separate reaper passes
+   with the answer window between them, so the warning lead has to be wide enough to hold that whole
+   cycle. Shorten the idle timeout to a couple of minutes and leave the lead alone and every session
+   is in its warning window from the moment it is opened."
+  | lead |
+  self validateSeconds: sessionIdleTimeoutSeconds named: 'sessionIdleTimeoutSeconds' allowingNil: true.
+  self validateSeconds: maxSessionLifetimeSeconds named: 'maxSessionLifetimeSeconds' allowingNil: true.
+  self validateSeconds: idleWarningLeadSeconds named: 'idleWarningLeadSeconds' allowingNil: true.
+  self validateSeconds: self streamlessIdleTimeoutSeconds named: 'streamlessIdleTimeoutSeconds' allowingNil: false.
+  self validateSeconds: self livenessProbeIntervalSeconds named: 'livenessProbeIntervalSeconds' allowingNil: false.
+  self validateSeconds: self reaperIntervalSeconds named: 'reaperIntervalSeconds' allowingNil: false.
+  self validateSeconds: self pendingRequestTimeoutSeconds named: 'pendingRequestTimeoutSeconds' allowingNil: false.
+  self pendingRequestTimeoutSeconds < self reaperIntervalSeconds ifFalse: [
+    ^self error: 'pendingRequestTimeoutSeconds (' , self pendingRequestTimeoutSeconds printString
+      , 's) must be shorter than reaperIntervalSeconds (' , self reaperIntervalSeconds printString
+      , 's), or a request sent on one maintenance pass is still undecided on the next.'].
+  self hasSessionIdleDeadline ifFalse: [^self].
+  lead := self idleWarningLeadSeconds.
+  lead < self minimumWarningLeadSeconds ifTrue: [
+    ^self error: 'idleWarningLeadSeconds (' , lead printString
+      , 's) is too short for the ping-then-warn cycle, which needs at least '
+      , self minimumWarningLeadSeconds printString , 's: two reaper passes of '
+      , self reaperIntervalSeconds printString , 's plus the '
+      , self pendingRequestTimeoutSeconds printString , 's answer window.'].
+  self sessionIdleTimeoutSeconds > lead ifFalse: [
+    ^self error: 'sessionIdleTimeoutSeconds (' , self sessionIdleTimeoutSeconds printString
+      , 's) is not longer than the warning lead (' , lead printString
+      , 's), so every session would open already inside its warning window. Raise the timeout, or '
+      , 'lower reaperIntervalSeconds and idleWarningLeadSeconds together.'].
+  ^self
+%
+category: 'config'
+method: McpRouter
 validateWorkerConfig
   "Resolve what this router will ask its workers to build, BEFORE binding a port (runOnPort:), so a
    name that cannot be used fails at startup with a clear message instead of at a client's first
@@ -1144,10 +1592,24 @@ validateWorkerConfig
 %
 category: 'server-initiated'
 method: McpRouter
+verdictAdmissible: aPendingEntry forSession: sess
+  "Whether the silence following aPendingEntry is evidence about the CLIENT rather than about the
+   transport. It is, only if the stream that carried the request is still attached AND still the one
+   entitled to drain this session's outbox: an unanswered ping means 'gone' only if it was written to
+   the stream the client is still on.
+   An entry with no recorded generation was queued with no stream attached at all, and can prove
+   nothing either."
+  | gen |
+  gen := aPendingEntry at: 'streamGeneration' ifAbsent: [nil].
+  gen isNil ifTrue: [^false].
+  ^sess outbox hasStream and: [sess outbox isCurrentStream: gen]
+%
+category: 'server-initiated'
+method: McpRouter
 warnIdleSession: sess
   "Warn a client that has proved it is listening that its session is nearing the idle deadline, and
    answer whether the warning was queued. Only a client that answered a ping is warned -- see
-   #probeIdleSessions.
+   #probeIdleSessions -- and only a router with a deadline warns at all (#warningDue:).
    MCP has no 'you are idle' method, and inventing one would produce a message every client ignores.
    notifications/message (the logging utility) is the sanctioned generic carrier."
   | minutes |
@@ -1158,6 +1620,15 @@ warnIdleSession: sess
     level: 'warning' toSession: sess) ifFalse: [^false].
   sess noteIdleWarned.
   ^true
+%
+category: 'sessions'
+method: McpRouter
+warningDue: sess
+  "Whether it is time to tell this client its session is nearing the deadline. Only a session with a
+   wall-clock deadline has anything to be warned about: with none, a session ends when its client
+   stops answering, which is not news the client needs to be told in advance."
+  self hasSessionIdleDeadline ifFalse: [^false].
+  ^sess idleSeconds > (self sessionIdleTimeoutSeconds - self idleWarningLeadSeconds)
 %
 category: 'worker class'
 method: McpRouter

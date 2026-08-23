@@ -111,6 +111,15 @@ close
 %
 category: 'streams'
 method: McpOutbox
+currentStreamGeneration
+  "The generation of the stream entitled to drain this outbox right now (see #attachStream), or nil
+   if no stream is attached. #isCurrentStream: answers the question the drain loop asks; this answers
+   the one the SENDER asks -- which stream a message is about to be written to -- so that a verdict
+   reached later can be checked against the stream that actually carried it."
+  ^mutex critical: [streamCount > 0 ifTrue: [streamGeneration] ifFalse: [nil]]
+%
+category: 'streams'
+method: McpOutbox
 detachStream: aGeneration
   "One drain loop has ended. Only the stream count is adjusted: the generation must NOT be rolled
    back, or a superseded stream's exit would make the stream that replaced it look stale."

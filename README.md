@@ -282,7 +282,8 @@ tools itself (those run in the per-client `McpServer` workers):
   `400`; unknown/expired → `404` (a compliant client re-initializes).
 - **DELETE** closes the worker; and a **background maintenance `GsProcess`** (every 60s) probes,
   warns and reaps idle sessions, so abandoned test gems don't pile up. A session is reaped after
-  **30 minutes** idle (`sessionIdleTimeoutSeconds`) — or sooner, if it fails a liveness probe. See
+  **30 minutes** idle by default (`sessionIdleTimeoutSeconds`, configurable and optional) — or
+  sooner, if it fails a liveness probe on the stream it opened. See
   [Server-initiated messages](#server-initiated-messages).
 
 Isolation comes from each worker being a separate gem = a separate transaction view, and clients
@@ -327,6 +328,20 @@ stayed open, and the warning would only ever reach clients unable to act on it.
 A client that never opens a GET stream is left exactly as it was: never probed, never warned, reaped
 on the plain 30-minute timeout. Pinging it would only mark it unanswered and cost it its gem early.
 
+**An unanswered ping is evidence of death only if it went down the stream the client is still on.**
+A message is written to exactly one stream, and both shipping clients reconnect a dropped standalone
+`GET` on their own — a handover being likeliest on exactly the quiet sessions the reaper probes. The
+write into a superseded stream *succeeds*, into a socket buffer nobody will ever read, so the silence
+that follows says nothing about the client. Every probe therefore records the stream generation it
+was written to, and a verdict is drawn only if that generation is still current; otherwise the probe
+is discarded and re-sent down the new stream on the next pass. (Measured against real clients on
+2026-08-23, this accounted for 6 of 14 pings.)
+
+**A session that reaches the deadline unwarned gets one bounded grace period.** The warning is the
+promise this makes — commit or lose the uncommitted work in your gem — and a session can arrive at
+the deadline never having heard it. That grace is not a liveness reprieve: answering the ping does
+not save the session, it only means the notice reaches someone listening.
+
 ### The pieces
 
 | | |
@@ -336,9 +351,61 @@ on the plain 30-minute timeout. Pinging it would only mark it unanswered and cos
 | `McpBase>>notification:params:` / `request:params:id:` | envelope builders on the front-end side. `McpDispatcher` lives in the worker and cannot be asked to build one mid-tool-call |
 | pending-request table | `srv-N` ids in their own namespace, timed out at 30s — an unanswered ping must decide something, never hang a session |
 
-Tunables, each a single method: `sessionIdleTimeoutSeconds` 1800, `idleWarningLeadSeconds` 300,
-`reaperIntervalSeconds` 60, `pendingRequestTimeoutSeconds` 30, `keepaliveIntervalSeconds` 15,
-`streamPollMilliseconds` 100, `McpOutbox>>maxQueueSize` 256, `sseWriteTimeoutMs` 5000.
+### Session lifetime is configuration
+
+How long a session lives is deployment policy, not a constant. Each of these is ordinary router
+config — settable on the instance, carried into a forked child gem in the fork string, and checked
+against the others before a port is bound.
+
+| | default | |
+|---|---|---|
+| `sessionIdleTimeoutSeconds` | 1800 | how long a client may be quiet. **`nil` = no deadline at all** |
+| `streamlessIdleTimeoutSeconds` | 1800 | the floor for a client that opens no stream, when there is no deadline |
+| `livenessProbeIntervalSeconds` | 300 | how often a quiet session with no deadline is re-asked |
+| `idleWarningLeadSeconds` | *derived* | how long before the deadline the ping-then-warn cycle starts |
+| `reaperIntervalSeconds` | 60 | how often the maintenance pass runs |
+| `pendingRequestTimeoutSeconds` | 30 | how long a server-initiated request may go unanswered |
+| `maxSessionLifetimeSeconds` | `nil` | absolute cap, however busy the session is |
+| `reapOnFailedProbe` | `true` | whether an unanswered ping frees a gem early. Forced on with no deadline |
+
+From the shell, `GS_MCP_IDLE_TIMEOUT` and friends set these on either launcher — durations like
+`90s`, `30m`, `4h`, or `none`. See [session-lifetime.sh](session-lifetime.sh), which documents each.
+
+`idleWarningLeadSeconds` is **derived** rather than merely defaulted, because it is the one interval
+with a hard relationship to the others: the ping and the warning go out on separate maintenance
+passes with the answer window between them, so a lead that is short relative to
+`reaperIntervalSeconds` silently never completes the cycle and nobody is ever warned. Someone
+shortening the idle timeout should not have to work that out. `validateTimerConfig` refuses an
+incoherent combination before binding a port — and `forkOnPort:` checks too, so the message reaches
+whoever typed the command rather than a detached gem's log.
+
+**Sessions with no deadline.** `GS_MCP_IDLE_TIMEOUT=none` is the localhost case: a developer who
+comes back hours later resumes rather than re-initializing. The session then lives exactly as long
+as its client keeps answering liveness pings on the stream it opened — the client asserting it still
+wants that gem and the uncommitted work in it. What keeps it from being a leak is the pair around
+it: a failed probe always reaps, and a client that opens no stream (so can never be asked) still
+falls back to `streamlessIdleTimeoutSeconds`. Worth knowing before choosing it: on GemStone an idle
+session is *not* free — each worker is a gem sitting in a transaction, so it pins a repository view
+and holds back page reclamation. A forgotten session is extent growth, not merely an idle process.
+
+**On an authenticated router, the token is the real bound.** `McpAuthRouter` caps every session at
+its access token's own `exp`, whatever the idle policy says: the worker gem is logged in as that
+token's GemStone user, so a session outliving its token would leave the authorization it was opened
+with in force after the grant expired. An expiry is never probed around and never forgiven.
+
+**Host suspend.** Everything here measures wall time, so a laptop that sleeps for two hours looks
+exactly like every client going idle at once — and the first maintenance pass after a wake would
+expire every in-flight probe, find every session hours idle, and free every worker gem while the
+clients sat there awake and connected. So the pass measures its own lateness: a pass that asks for a
+minute and returns hours later is read as time the front end was not running, and that time is
+forgiven on every session's idle clock (never on an expiry). Outstanding requests are discarded
+rather than condemned, and every reachable client is told on its stream — because the one thing it
+cannot work out for itself is that its worker gem still holds the transaction view it had before the
+gap.
+
+Not configurable, because they are mechanism rather than policy: `keepaliveIntervalSeconds` 15
+(sized to proxy and NAT idle timeouts, not to sessions), `streamPollMilliseconds` 100,
+`McpOutbox>>maxQueueSize` 256, `sseWriteTimeoutMs` 5000.
 
 Both SSE write paths are guarded: `writeWillNotBlockWithin:` before every frame (`GsSocket>>write:`
 suspends with no timeout, so a client that stops reading would otherwise park a stream's `GsProcess`
@@ -537,6 +604,14 @@ suite when `McpGrailToolset` is installed:
   ping does **not** move the activity clock, that an unanswered one frees the gem early, and that a
   reaped session is told on its stream first. Uses `McpFixtureRouter`, a real router that reports
   itself running without binding a socket, so the drain loop can be driven at all.
+- `McpLifetimeTest` — the *policy* riding on that pathway, which is a separate thing: that the
+  intervals are config and survive the fork (including the JSON `null` that means "no deadline"),
+  that the warning lead derives from the timeout and an unworkable combination is refused at startup,
+  that a probe lost to a stream handover is **discarded rather than condemned** while one lost on the
+  current stream still condemns, that an unwarned session at the deadline gets one bounded grace
+  period, that an indefinite session lives while it answers and goes when it stops — with a floor for
+  the client that opens no stream — that an expiry is absolute, and that a wildly late maintenance
+  pass is read as a host suspend and forgiven instead of reaping every live client at once.
 - `McpContractTest` — contract / property tests over the tool surface, all driven through the real
   `McpDispatcher>>handle:` envelope: every tool schema is closed (`additionalProperties:false`),
   unknown/missing arguments → an `isError` tool execution error while a missing tool name / unknown
