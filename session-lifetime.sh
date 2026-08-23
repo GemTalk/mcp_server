@@ -32,6 +32,10 @@
 #                           the warning need two maintenance passes and an answer window between
 #                           them, and a lead too short for that silently never warns anybody.
 #   GS_MCP_REAPER_INTERVAL  How often the maintenance pass runs. Default 60s.
+#   GS_MCP_PENDING_TIMEOUT  How long a server-initiated request (today, a liveness ping) may go
+#                           unanswered before it is decided. Default 30s. Must stay shorter than
+#                           GS_MCP_REAPER_INTERVAL, or a ping sent on one pass is still undecided on
+#                           the next; the router refuses to start otherwise.
 #   GS_MCP_REAP_ON_FAILED_PROBE
 #                           0 to stop treating an unanswered liveness ping as grounds for releasing
 #                           a gem early. Default 1. Ignored (forced on) with no idle deadline, where
@@ -84,6 +88,7 @@ mcp_lifetime_line "${GS_MCP_PROBE_INTERVAL:-}"      livenessProbeIntervalSeconds
 mcp_lifetime_line "${GS_MCP_STREAMLESS_TIMEOUT:-}"  streamlessIdleTimeoutSeconds  GS_MCP_STREAMLESS_TIMEOUT
 mcp_lifetime_line "${GS_MCP_WARNING_LEAD:-}"        idleWarningLeadSeconds        GS_MCP_WARNING_LEAD
 mcp_lifetime_line "${GS_MCP_REAPER_INTERVAL:-}"     reaperIntervalSeconds         GS_MCP_REAPER_INTERVAL
+mcp_lifetime_line "${GS_MCP_PENDING_TIMEOUT:-}"     pendingRequestTimeoutSeconds  GS_MCP_PENDING_TIMEOUT
 
 if [ "${GS_MCP_REAP_ON_FAILED_PROBE:-1}" = "0" ]; then
   LIFETIME_LINES="$LIFETIME_LINES

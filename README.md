@@ -393,7 +393,9 @@ its access token's own `exp`, whatever the idle policy says: the worker gem is l
 token's GemStone user, so a session outliving its token would leave the authorization it was opened
 with in force after the grant expired. An expiry is never probed around and never forgiven.
 
-**Host suspend.** Everything here measures wall time, so a laptop that sleeps for two hours looks
+**Host suspend.** ([sleep-test.sh](sleep-test.sh) is the harness for this — `simulate` freezes the
+gem with `SIGSTOP` and reports in four minutes; `arm`/`check` brackets a real sleep.)
+Everything here measures wall time, so a laptop that sleeps for two hours looks
 exactly like every client going idle at once — and the first maintenance pass after a wake would
 expire every in-flight probe, find every session hours idle, and free every worker gem while the
 clients sat there awake and connected. So the pass measures its own lateness: a pass that asks for a
