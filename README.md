@@ -393,6 +393,12 @@ its access token's own `exp`, whatever the idle policy says: the worker gem is l
 token's GemStone user, so a session outliving its token would leave the authorization it was opened
 with in force after the grant expired. An expiry is never probed around and never forgiven.
 
+**The log says what was in force.** The startup banner records the whole lifetime configuration, and
+a reap names the session and the reason the client was given rather than a count — the defaults are
+class-side and the rest arrives as JSON in the fork string, so nothing else on disk records what
+*this* router was told. Every line is timestamped, since the events worth correlating (a host
+suspend, a wake, a client reconnect) are ones the gem neither caused nor can see.
+
 **Host suspend.** Everything here measures wall time, so a laptop that sleeps for two hours looks
 exactly like every client going idle at once — and the first maintenance pass after a wake would
 expire every in-flight probe, find every session hours idle, and free every worker gem while the
@@ -409,6 +415,14 @@ as idleness across three and a half hours — and no session on any of three rou
 [sleep-test.sh](sleep-test.sh) is the harness: `simulate` freezes the gem with `SIGSTOP` and reports
 in four minutes, `arm`/`check` brackets a real sleep and reports the full fragmentation profile
 against macOS's own power log.
+
+A second run of **8h46m** with **Power Nap on** fragmented far harder — 38 pieces, one every ~14
+minutes — while the pieces themselves grew *longer* (mean 675s), because Power Nap on AC is allowed
+to do real work once awake. A guest VM freezing alongside the same host saw **one** piece of 8h35m:
+a guest does not dark-wake on its own schedule, so its numbers describe a different regime and
+should not be pooled with the host's. That run also produced the first hardware evidence that expiry
+outranks forgiveness — an authenticated router forgave 8h35m of idleness and reaped anyway, in the
+same maintenance pass, because the credentials had expired.
 
 Not configurable, because they are mechanism rather than policy: `keepaliveIntervalSeconds` 15
 (sized to proxy and NAT idle timeouts, not to sessions), `streamPollMilliseconds` 100,

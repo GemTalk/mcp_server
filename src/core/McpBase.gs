@@ -67,8 +67,15 @@ logLevelRank: aString
 category: 'private'
 method: McpBase
 log: aString
-  "Best-effort logging to the gem's log file; never fails the caller."
-  [GsFile gciLogServer: aString] on: Error do: [:ex | nil]
+  "Best-effort logging to the gem's log file; never fails the caller.
+   Every line is stamped. A log without times cannot be lined up against anything else that
+   happened on the host -- a suspend, a wake, a client reconnect -- which is most of what these
+   lines are for: the interesting events here are ones this gem did not cause and cannot see.
+   The stamp falls back to the GMT epoch if DateTime is unavailable, since this server is meant to
+   run on as many GemStone versions as will have it, and a timeless line still beats no line."
+  | stamp |
+  stamp := [DateTime now printString] on: Error do: [:ex | System timeGmt printString].
+  [GsFile gciLogServer: stamp , '  ' , aString] on: Error do: [:ex | nil]
 %
 category: 'json-rpc'
 method: McpBase

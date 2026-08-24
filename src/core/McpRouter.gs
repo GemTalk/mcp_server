@@ -993,6 +993,33 @@ reapGraceSeconds
    Derived rather than configured -- it is a consequence of the other intervals, not a policy."
   ^(3 * self reaperIntervalSeconds) + self pendingRequestTimeoutSeconds
 %
+category: 'session lifetime'
+method: McpRouter
+lifetimeSummary
+  "One line naming every session-lifetime knob in force, for the startup banner.
+   A reap is only diagnosable afterwards if the log says what the deadlines actually were. The
+   defaults are class-side and the rest arrives as JSON in the fork string, so nothing else on
+   disk records what THIS router was told -- and the gem that could answer the question is
+   usually the one that has just been restarted to fix whatever raised it."
+  | s |
+  s := WriteStream on: String new.
+  s nextPutAll: 'idle '.
+  s nextPutAll: (self hasSessionIdleDeadline
+    ifTrue: [self sessionIdleTimeoutSeconds printString , 's']
+    ifFalse: ['none']).
+  s nextPutAll: ', streamless '; nextPutAll: self streamlessIdleTimeoutSeconds printString.
+  s nextPutAll: 's, probe '; nextPutAll: self livenessProbeIntervalSeconds printString.
+  s nextPutAll: 's, warn-lead '; nextPutAll: self idleWarningLeadSeconds printString.
+  s nextPutAll: 's, reaper '; nextPutAll: self reaperIntervalSeconds printString.
+  s nextPutAll: 's, pending '; nextPutAll: self pendingRequestTimeoutSeconds printString.
+  s nextPutAll: 's, max-life '.
+  s nextPutAll: (self maxSessionLifetimeSeconds isNil
+    ifTrue: ['none']
+    ifFalse: [self maxSessionLifetimeSeconds printString , 's']).
+  s nextPutAll: ', reap-on-failed-probe '.
+  s nextPutAll: (self reapOnFailedProbe ifTrue: ['yes'] ifFalse: ['no']).
+  ^s contents
+%
 category: 'sessions'
 method: McpRouter
 reapIdleSessions
@@ -1013,7 +1040,8 @@ reapIdleSessions
   doomed do: [:pair |
     [self announceSessionEnd: (pair at: 1) because: (pair at: 2)] on: Error do: [:e | nil].
     [(pair at: 1) close] on: Error do: [:e | nil]].
-  doomed isEmpty ifFalse: [self log: 'Reaped ' , doomed size printString , ' MCP session(s).'].
+  doomed do: [:pair |
+    self log: 'Reaped MCP session ' , (pair at: 1) id printString , ' -- ' , (pair at: 2) , '.'].
   ^doomed size
 %
 category: 'session lifetime'
@@ -1133,6 +1161,7 @@ runOnPort: aPort
     (self effectiveToolsetNames isEmpty
       ifTrue: ['(none -- this router offers no tools)']
       ifFalse: [self effectiveToolsetNames inject: '' into: [:a :b | a isEmpty ifTrue: [b] ifFalse: [a , ' ' , b]]]).
+  self log: 'session lifetime: ' , self lifetimeSummary.
   [isRunning] whileTrue: [
     "Gate the accept on readiness rather than acceptTimeoutMs:: for a GsSecureSocket listener
      acceptTimeoutMs: RAISES on an idle timeout (it treats the nil from a plain-socket timeout as a
