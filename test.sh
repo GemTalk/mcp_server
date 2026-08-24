@@ -18,10 +18,18 @@
 set -uo pipefail
 cd "$(dirname "$0")"
 
-: "${GEMSTONE:?Set GEMSTONE to your GemStone product directory}"
 export GS_STONE="${GS_STONE:-gs64stone}"
 export GS_USER="${GS_USER:-DataCurator}"
 export GS_PASS="${GS_PASS:-swordfish}"
+
+# Resolve the environment up front so a misconfiguration is one line here, rather than a server
+# that never comes up and a run that fails every check for the same hidden reason. run-server.sh
+# checks again in its own process; this is cheap and the export makes the resolved value inherited.
+. ./gs-env.sh
+GS_NEEDS_NETLDI=1
+gs_env_resolve
+gs_env_require_stone
+gs_env_require_netldi
 PORT="${GS_MCP_PORT:-8011}"
 URL="http://127.0.0.1:$PORT/mcp"
 SERVER_LOG="$(mktemp -t gsmcp-server.XXXXXX)"
