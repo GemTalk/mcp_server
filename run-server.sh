@@ -16,8 +16,11 @@
 # child gem in the fork string. This launches the base, unauthenticated, localhost router -- for the
 # OAuth/OIDC network-facing router, see run-auth-server.sh.
 #
+#   --check    verify the environment (product, GEMSTONE_GLOBAL_DIR, the stone, AND a netldi) and
+#              report, without starting anything.
+#
 # Configure (or export before running):
-#   GEMSTONE   - GemStone product directory (required)
+#   GEMSTONE   - GemStone product directory (REQUIRED; no default can be guessed)
 #   GS_STONE   - stone name      (default: gs64stone)
 #   GS_USER    - GemStone user   (default: DataCurator)
 #   GS_PASS    - GemStone password (default: swordfish)
@@ -41,7 +44,6 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-: "${GEMSTONE:?Set GEMSTONE to your GemStone product directory}"
 GS_STONE="${GS_STONE:-gs64stone}"
 GS_USER="${GS_USER:-DataCurator}"
 GS_PASS="${GS_PASS:-swordfish}"
@@ -50,7 +52,25 @@ GS_MCP_READONLY="${GS_MCP_READONLY:-0}"
 GS_MCP_WORKER_CLASS="${GS_MCP_WORKER_CLASS:-}"
 GS_MCP_TOOLSETS="${GS_MCP_TOOLSETS:-}"
 GS_MCP_TITLE="${GS_MCP_TITLE:-}"
-TOPAZ="$GEMSTONE/bin/topaz"
+
+# Resolve the environment and confirm BOTH the stone and a netldi. The netldi requirement is real
+# and is not about how this script logs in: forkOnPort: creates a GsTsExternalSession for the front
+# end and one per client, and netldi is what forks those gems. Checked here so a missing netldi is
+# one line rather than a GciError stack out of GsTsExternalSession>>login.
+. ./gs-env.sh
+GS_NEEDS_NETLDI=1
+gs_env_resolve
+if [ "${1:-}" = "--check" ]; then gs_env_check; exit $?; fi
+gs_env_require_stone
+gs_env_require_netldi
+
+# Refuse a port that is already served, rather than letting the forked gem fail on bind in a log
+# nobody is watching.
+if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$GS_MCP_PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
+  echo "error: something is already listening on port $GS_MCP_PORT." >&2
+  echo "       Stop it with  GS_MCP_PORT=$GS_MCP_PORT ./stop-server.sh  or pick another GS_MCP_PORT." >&2
+  exit 1
+fi
 
 # Session-lifetime setters (GS_MCP_IDLE_TIMEOUT and friends) -> $LIFETIME_LINES; empty when none are
 # set, leaving McpRouter>>initialize's defaults in place.

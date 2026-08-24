@@ -1,0 +1,35 @@
+#!/bin/bash
+# Copy to .setenv (git-ignored) and edit for your machine:  cp .setenv.example .setenv
+#   source .setenv
+#
+# Most of this is DISCOVERED for you -- gs-env.sh works out GEMSTONE_GLOBAL_DIR by asking gslist
+# where the running servers actually are, so on many machines exporting GEMSTONE alone is enough.
+# Check what your environment resolves to, without installing anything:
+#
+#   GEMSTONE=/path/to/product ./install.sh --check
+#
+# Set the rest here when you want it pinned rather than discovered, or when you run more than one
+# stone and do not want to type GS_STONE every time.
+
+# REQUIRED. The product directory. Nothing can guess this.
+export GEMSTONE=/opt/gemstone/GemStone64Bit3.7.5-x86_64.Linux
+
+# The one variable that decides whether a login works at all, and the one most setup notes omit.
+# A stone and a netldi record their (usually ephemeral) ports under $GEMSTONE_GLOBAL_DIR/locks/, and
+# clients read those files; point a client at a different directory than the stone was STARTED with
+# and every login fails with "getaddrinfo failed, EAI error 8" (error 4065), which looks like a DNS
+# or /etc/services problem and is not. The product default is /opt/gemstone, then /usr/gemstone.
+# Leave it unset to let gs-env.sh discover it; set it to make the choice explicit.
+# See the README, "Environment".
+export GEMSTONE_GLOBAL_DIR=/opt/gemstone
+
+# Which stone the scripts talk to, and how they log in. Defaults: gs64stone / DataCurator / swordfish.
+export GS_STONE=gs64stone
+export GS_USER=DataCurator
+export GS_PASS=swordfish
+
+# Only needed if this stone's config/log files are not where the product would look by default.
+#export GEMSTONE_SYS_CONF=/opt/gemstone/conf
+#export GEMSTONE_EXE_CONF=/opt/gemstone/conf
+
+export PATH=$GEMSTONE/bin:$PATH

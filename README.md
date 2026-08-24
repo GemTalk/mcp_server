@@ -521,8 +521,8 @@ forbidden here" from "no such tool". A tool absent because its toolset was never
 
 ```bash
 export GEMSTONE=/path/to/GemStone64Bit3.7.x   # product dir
-export GS_USER=DataCurator GS_PASS=...         # GemStone credentials
 
+./install.sh --check                # verify the environment first -- do this on a new machine
 ./install.sh                        # file in the classes (core + tests + auth) and commit
 ./install.sh --grail                # ...and the optional Grail/Python toolset (Grail image only)
 GS_MCP_PORT=8000 ./run-server.sh    # fork a detached, independent localhost server gem and return
@@ -533,7 +533,8 @@ GS_MCP_WORKER_CLASS=MyMcpServer ./run-server.sh                        # ...a su
 ```
 
 `install.sh` and the `run-*.sh` scripts use topaz; set `GEMSTONE`, `GS_STONE`, `GS_USER`,
-`GS_PASS` to match your environment. `install.sh` files the code in with topaz from `load.gs` —
+`GS_PASS` to match your environment — and read **Environment** below before assuming those four are
+enough, because on many machines they are not. `install.sh` files the code in with topaz from `load.gs` —
 which on this branch includes `src/auth/`, since the OAuth front end is the point of it; `--grail`
 (or `GS_MCP_WITH_GRAIL=1`) files in `load-grail.gs` instead, which adds the `src/grail/` group on
 top. `run-server.sh` builds a base `McpRouter` instance and calls
@@ -541,6 +542,62 @@ its `forkOnPort:` (`run-auth-server.sh` builds an OIDC-configured `McpAuthRouter
 config as code, no commit), which launches a detached, independent front-end gem and returns; stop it
 with `./stop-server.sh` (by port), or the `System stopSession: <id>` / `kill <pid>` line it prints.
 A loaded Grail toolset is picked up automatically, per session, by the front end.
+
+### Environment
+
+Every script here sources `gs-env.sh`, which resolves the environment and refuses to continue on a
+misconfigured one. `--check` runs that resolution and reports without doing anything else; it is the
+first thing to run on a machine you have not installed on before.
+
+```
+$ ./install.sh --check
+product      /opt/gemstone/GemStone64Bit3.7.5-x86_64.Linux
+global dir   /opt/gemstone
+
+servers visible to this client:
+  Status     Version   Owner        Pid  Port  Started      Type    Name
+  OK         3.7.5     gsadmin    96453 65166 Aug 23 12:31  Netldi  gs64ldi
+  OK         3.7.5     gsadmin    60042 56820 Aug 20 08:53  Stone   gs64stone
+
+OK: environment looks usable for gs64stone.
+```
+
+**`GEMSTONE_GLOBAL_DIR` is the variable that decides whether anything works**, and it is the one the
+old four-variable advice left out. Get it wrong and every script fails at `login` with:
+
+```
+could not find server 'gs64stone' on host 'somehost' because service not found,
+getaddrinfo failed, EAI error 8   ... Number: 4065
+```
+
+That message names `getaddrinfo`, so it reads like a DNS or `/etc/services` problem. It is not.
+With no `/etc/services` entries a stone and a netldi each bind an **ephemeral** port and record it
+in `$GEMSTONE_GLOBAL_DIR/locks/<name>..LCK`; clients read those lock files. A client pointed at a
+different `GEMSTONE_GLOBAL_DIR` than the stone was *started* with finds no lock file and falls back
+to a hostname/service lookup, which fails. The product's built-in default is `/opt/gemstone` (then
+`/usr/gemstone`), so any installation keeping its locks elsewhere must tell its clients where.
+
+`.setenv.example` is a starting point: copy it to `.setenv` (git-ignored) and edit it for your
+machine. Most of it is optional — `gs-env.sh` discovers it rather than making you guess: it asks `gslist` under each candidate and
+uses the one where the running servers actually are, saying so when it has to correct or supply a
+value. `gslist` is the authority here — it reads the same lock files the GCI client does.
+
+Do **not** reach for `/etc/services`. Registering a stone or netldi there is unnecessary once
+`GEMSTONE_GLOBAL_DIR` is right, and it is a trap: netldi binds the port named in `/etc/services`
+only if it is **restarted** after the entry exists, so an entry added to a running system is stale
+by construction and points at a port nothing is listening on.
+
+**Which scripts need a netldi.** `install.sh` talks only to the stone, so it runs fine on a host
+with no netldi at all. The `run-*.sh` scripts need one — not because of how they log in, but
+because `McpRouter>>forkOnPort:` and every per-client worker create a `GsTsExternalSession`, and
+netldi is what forks those gems. `run-unit-tests.sh` needs one too, because `McpAuthTest` spawns a
+real worker. Each script checks for what it actually needs, and says which is missing.
+
+**Linked vs RPC.** These scripts run `topaz -l` (linked). That is deliberate, and it is not the
+cause of the error above: a linked login resolves the stone through the same lock files, so it
+needs `GEMSTONE_GLOBAL_DIR` and nothing else — no netldi, no NRS, no service entries. Dropping `-l`
+routes the login through netldi instead, which works equally well once `GEMSTONE_GLOBAL_DIR` is
+right, but it would make `install.sh` depend on a netldi it otherwise has no use for.
 
 ### Source layout
 

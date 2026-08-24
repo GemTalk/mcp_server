@@ -1266,7 +1266,11 @@ serveGet: req on: conn
    It has to be: a stream the server cannot name a session for can be attached to no outbox, and it
    also outlived its session -- once the reaper dropped a session and logged out its gem, nothing
    touched that client's GET socket, so the keepalives went on advertising a healthy stream over a
-   worker that no longer existed."
+   worker that no longer existed.
+   None of that is the credential gate, which runs earlier: route:on: applies requestAuthorized:on:
+   to every verb before dispatching it, so on McpAuthRouter an anonymous GET is refused 401 and
+   never arrives here. Easy to misread from McpAuthRouter>>serveGet: alone, which only intercepts
+   the metadata path and otherwise falls through to this method."
   | sid sess |
   sid := self sessionIdOf: req.
   sid isNil ifTrue: [
