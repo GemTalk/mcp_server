@@ -395,9 +395,9 @@ with in force after the grant expired. An expiry is never probed around and neve
 
 That cap is on the *grant*, not on the session: a request bearing a **refreshed** token for the same
 user extends the session to the new token's `exp` (`renewSessionExpiry:from:`). Without this a client
-working steadily lost its worker gem — and the uncommitted transaction inside it — one access-token
-lifetime after opening, however recently it had called, because activity feeds the idle clock and the
-idle clock is not what ends an authenticated session. Refreshing sooner would not have helped, since
+working steadily had its worker gem torn down and rebuilt one access-token lifetime after opening,
+however recently it had called, because activity feeds the idle clock and the idle clock is not what
+ends an authenticated session. Refreshing sooner would not have helped, since
 the renewed token was never consulted about lifetime. A read-write session is *not* extended by a
 token that has lost the write scope: that token keeps working, but buys no time, and the next session
 opens read-only.
