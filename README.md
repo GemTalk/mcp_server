@@ -393,6 +393,15 @@ its access token's own `exp`, whatever the idle policy says: the worker gem is l
 token's GemStone user, so a session outliving its token would leave the authorization it was opened
 with in force after the grant expired. An expiry is never probed around and never forgiven.
 
+That cap is on the *grant*, not on the session: a request bearing a **refreshed** token for the same
+user extends the session to the new token's `exp` (`renewSessionExpiry:from:`). Without this a client
+working steadily lost its worker gem — and the uncommitted transaction inside it — one access-token
+lifetime after opening, however recently it had called, because activity feeds the idle clock and the
+idle clock is not what ends an authenticated session. Refreshing sooner would not have helped, since
+the renewed token was never consulted about lifetime. A read-write session is *not* extended by a
+token that has lost the write scope: that token keeps working, but buys no time, and the next session
+opens read-only.
+
 **The log says what was in force.** The startup banner records the whole lifetime configuration, and
 a reap names the session and the reason the client was given rather than a count — the defaults are
 class-side and the rest arrives as JSON in the fork string, so nothing else on disk records what

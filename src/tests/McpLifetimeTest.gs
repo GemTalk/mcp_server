@@ -117,6 +117,71 @@ testAnExpiryOnlyEverMovesEarlier
   sess expiresAtSeconds: nil.
   self assert: sess expiresAtSeconds equals: now + 50
 %
+category: 'tests - expiry'
+method: McpLifetimeTest
+testARefreshedTokenExtendsAnExistingDeadline
+  "The point of the whole renewal path: a client that keeps proving its authorization keeps its
+   worker gem, instead of losing it -- and the uncommitted transaction in it -- one access-token
+   lifetime after the session opened."
+  | sess now |
+  now := System timeGmt.
+  sess := McpSession new.
+  sess expiresAtSeconds: now + 100.
+  self assert: (sess renewExpiryTo: now + 900).
+  self assert: sess expiresAtSeconds equals: now + 900
+%
+category: 'tests - expiry'
+method: McpLifetimeTest
+testRenewalNeverShortensAndSaysSoWhenItDoesNothing
+  "Renewal is not the other half of a general setter: presenting the SAME token again (the common
+   case, since every request carries one) must not move anything, and must report that it did not,
+   so the caller does not log a renewal on every single request."
+  | sess now |
+  now := System timeGmt.
+  sess := McpSession new.
+  sess expiresAtSeconds: now + 500.
+  self deny: (sess renewExpiryTo: now + 500).
+  self deny: (sess renewExpiryTo: now + 200).
+  self assert: sess expiresAtSeconds equals: now + 500
+%
+category: 'tests - expiry'
+method: McpLifetimeTest
+testRenewalNeverIntroducesADeadline
+  "An unauthenticated router leaves expiresAtSeconds nil, and a session with no deadline must not
+   acquire one from this path -- bounding a session is #expiresAtSeconds:'s job. Keeping the two
+   selectors strictly complementary is what makes either safe to read on its own."
+  | sess |
+  sess := McpSession new.
+  self assert: sess expiresAtSeconds isNil.
+  self deny: (sess renewExpiryTo: System timeGmt + 900).
+  self assert: sess expiresAtSeconds isNil
+%
+category: 'tests - expiry'
+method: McpLifetimeTest
+testRenewalIgnoresATokenWithNoReadableExpiry
+  "tokenExpirySecondsOf: answers nil when exp cannot be read. That must not be taken as 'no
+   deadline', which would turn a bounded session unbounded on a malformed claim."
+  | sess now |
+  now := System timeGmt.
+  sess := McpSession new.
+  sess expiresAtSeconds: now + 300.
+  self deny: (sess renewExpiryTo: nil).
+  self assert: sess expiresAtSeconds equals: now + 300
+%
+category: 'tests - expiry'
+method: McpLifetimeTest
+testAnExpiredButUnreapedSessionIsStillRenewable
+  "The reaper runs on an interval, so a session can sit expired for up to one pass before it goes.
+   A client presenting a valid fresh token inside that window is exactly the client that should keep
+   its gem: the gap is an artefact of scheduling, not a statement about the credential."
+  | sess now |
+  now := System timeGmt.
+  sess := McpSession new.
+  sess expiresAtSeconds: now - 5.
+  self assert: sess isExpired.
+  self assert: (sess renewExpiryTo: now + 900).
+  self deny: sess isExpired
+%
 category: 'tests - indefinite'
 method: McpLifetimeTest
 testAnIndefiniteSessionIsReprobedOnTheCadence

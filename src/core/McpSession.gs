@@ -161,6 +161,31 @@ expiresAtSeconds: aSecondOrNil
     ifTrue: [expiresAtSeconds := aSecondOrNil].
   ^self
 %
+category: 'session lifetime'
+method: McpSession
+renewExpiryTo: aSecondOrNil
+  "Move this session's existing deadline LATER, to aSecondOrNil, because its client has just proved
+   a fresh credential that runs that long. Answers whether the deadline actually moved.
+   The counterpart to #expiresAtSeconds:, and deliberately a separate selector rather than a relaxed
+   ratchet. That ratchet conflates two invariants: a session must not outlive its CURRENT grant,
+   which has to hold, and a session must not outlive its FIRST grant, which nothing requires. Access
+   tokens are short by design -- thirty minutes is a common default -- so under the ratchet alone a
+   client working steadily still loses its worker gem, and the uncommitted transaction inside it, on
+   the first maintenance pass after its opening token's exp. Refreshing cannot save it, because the
+   renewed token was never consulted about lifetime. That is silent data loss, not an inconvenience:
+   the client obtains a new token, opens a new session, and nothing looks broken.
+   Two boundaries are kept. A nil argument moves nothing, so a token with no readable exp cannot
+   turn a bounded session unbounded. And a session with no deadline at all is left alone: renewal
+   extends a deadline, it never introduces one -- that is #expiresAtSeconds:'s job. So the pair is
+   strictly complementary, one tightening and one extending, and neither can do the other's work.
+   Only the authenticated request path may send this, and only after the token's signature, subject
+   and write scope have been checked -- see McpAuthRouter>>renewSessionExpiry:from:."
+  aSecondOrNil isNil ifTrue: [^false].
+  expiresAtSeconds isNil ifTrue: [^false].
+  aSecondOrNil <= expiresAtSeconds ifTrue: [^false].
+  expiresAtSeconds := aSecondOrNil.
+  ^true
+%
 category: 'liveness'
 method: McpSession
 forgiveSuspendedSeconds: anInteger

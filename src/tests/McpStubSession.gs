@@ -47,6 +47,14 @@ startWithId: anId
 %
 category: 'accessing'
 method: McpStubSession
+beReadOnly
+  "Make this stub a read-ONLY session. #startWithId: opens read-write, which is the mode most tests
+   want; the expiry-renewal rules differ between the two, so both have to be reachable."
+  readOnly := true.
+  ^self
+%
+category: 'accessing'
+method: McpStubSession
 wasPrepared
   ^wasPrepared == true
 %

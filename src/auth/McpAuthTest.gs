@@ -95,6 +95,106 @@ method: McpAuthTest
 statusBody
   ^'{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"status","arguments":{}}}'
 %
+category: 'helpers'
+method: McpAuthTest
+jwtForUser: aUserId expiringIn: seconds writeScope: aBoolean
+  "A parseable JWT carrying sub, exp and (optionally) the write scope. The signature segment is
+   filler: every method under test here parses the token WITHOUT verifying it, because verification
+   already happened in #tokenRejectionFor: earlier in the request. alg must still name a real
+   algorithm -- JsonWebToken rejects alg 'none' outright, so a token that claims to be unsigned
+   cannot even be built by accident."
+  | enc scopes |
+  enc := [:str | (str asByteArray asBase64UrlString) select: [:c | c ~= $=]].
+  scopes := aBoolean ifTrue: ['mcp:use mcp:write'] ifFalse: ['mcp:use'].
+  ^(enc value: '{"alg":"RS256","typ":"JWT"}')
+    , '.' , (enc value: '{"sub":"' , aUserId , '","exp":'
+        , (System timeGmt + seconds) printString , ',"scope":"' , scopes , '"}')
+    , '.' , (enc value: 'signature-not-checked-here')
+%
+category: 'helpers'
+method: McpAuthTest
+renewingRouter
+  "An auth router with per-session write gating on, which is what makes the scope half of renewal
+   meaningful: with no writeScope configured every token grants write."
+  | router |
+  router := McpAuthRouter new.
+  router writeScope: 'mcp:write'.
+  ^router
+%
+category: 'tests'
+method: McpAuthTest
+testARefreshedTokenBuysAWriteSessionMoreLife
+  "The defect this exists to fix. A session's deadline is stamped once, from the token that opened
+   it, so a client working steadily lost its worker gem -- and the uncommitted transaction in it --
+   one access-token lifetime after opening, however recently it had called. A fresh token for the
+   same user is a renewed grant, and it now moves the deadline."
+  | router sess |
+  router := self renewingRouter.
+  sess := McpStubSession new startWithId: 'sid-renew'.
+  sess expiresAtSeconds: System timeGmt + 60.
+  self assert: (router renewSessionExpiry: sess
+    from: (self jwtForUser: 'alice' expiringIn: 1800 writeScope: true)).
+  self assert: sess expiresAtSeconds > (System timeGmt + 1000)
+%
+category: 'tests'
+method: McpAuthTest
+testATokenThatLostTheWriteScopeBuysNoMoreLife
+  "A read-WRITE session must not be extended on a token that no longer carries the write scope: the
+   session's mode was fixed at open, so that would keep a broader authorization alive on the strength
+   of a grant the client has demonstrably lost. The token still WORKS -- it is valid and belongs to
+   the session's user -- it just buys no time, so the session ends at its existing deadline and the
+   next one opens read-only, which is what the current grant actually says."
+  | router sess deadline |
+  router := self renewingRouter.
+  sess := McpStubSession new startWithId: 'sid-narrowed'.
+  self deny: sess readOnly.
+  deadline := System timeGmt + 60.
+  sess expiresAtSeconds: deadline.
+  self deny: (router renewSessionExpiry: sess
+    from: (self jwtForUser: 'alice' expiringIn: 1800 writeScope: false)).
+  self assert: sess expiresAtSeconds equals: deadline
+%
+category: 'tests'
+method: McpAuthTest
+testAReadOnlySessionIsRenewedByAReadOnlyToken
+  "The mirror of the above: a session that never had write access is not being handed anything it
+   lacks, so a token without the write scope renews it normally. Otherwise read-only sessions would
+   be the only ones still capped at their opening token."
+  | router sess |
+  router := self renewingRouter.
+  sess := McpStubSession new startWithId: 'sid-ro'; beReadOnly; yourself.
+  sess expiresAtSeconds: System timeGmt + 60.
+  self assert: sess readOnly.
+  self assert: (router renewSessionExpiry: sess
+    from: (self jwtForUser: 'alice' expiringIn: 1800 writeScope: false)).
+  self assert: sess expiresAtSeconds > (System timeGmt + 1000)
+%
+category: 'tests'
+method: McpAuthTest
+testPresentingTheSameTokenAgainRenewsNothing
+  "Every request carries a token, so the overwhelmingly common case is the SAME token as last time.
+   That must report no movement, or the router would log a renewal on every single request."
+  | router sess jwt |
+  router := self renewingRouter.
+  sess := McpStubSession new startWithId: 'sid-same'.
+  jwt := self jwtForUser: 'alice' expiringIn: 1800 writeScope: true.
+  sess expiresAtSeconds: (router tokenExpirySecondsOf: jwt).
+  self deny: (router renewSessionExpiry: sess from: jwt)
+%
+category: 'tests'
+method: McpAuthTest
+testAnUnparseableTokenBuysNoTimeOnAWriteSession
+  "Fail safe in the direction that matters now that this parse can EXTEND a life rather than only
+   shorten one: a token that cannot be read grants no write scope, so it cannot lengthen a
+   read-write session."
+  | router sess deadline |
+  router := self renewingRouter.
+  sess := McpStubSession new startWithId: 'sid-garbage'.
+  deadline := System timeGmt + 60.
+  sess expiresAtSeconds: deadline.
+  self deny: (router renewSessionExpiry: sess from: 'not.a.jwt').
+  self assert: sess expiresAtSeconds equals: deadline
+%
 category: 'tests'
 method: McpAuthTest
 testAnUnreadableTokenExpiryLeavesTheIdlePolicyInCharge
