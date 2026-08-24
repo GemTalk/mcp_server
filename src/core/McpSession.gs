@@ -3,9 +3,10 @@ set compile_env: 0
 expectvalue /Class
 doit
 Object subclass: 'McpSession'
-  instVarNames: #( id worker lastActivitySeconds
-                    userId readOnly workerClassName toolsetNames
-                    serverName serverTitle serverVersion)
+  instVarNames: #( id worker workerMutex
+                    lastActivitySeconds userId readOnly workerClassName
+                    toolsetNames serverName serverTitle serverVersion
+                    workerPid workerStoneSession)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -19,9 +20,15 @@ McpSession comment:
 'One MCP client''s isolated worker: a GsTsExternalSession gem (its own transaction view) plus the
 client''s session id, last-activity time, and (future) userId. The front end (McpRouter) keeps
 an id -> McpSession map and routes each request through #forward:, which runs it in this worker
-via a BLOCKING executeString: -- reliable; forwarding is serialized (true cross-client concurrency
-is a deferred follow-up). Idle sessions are reaped after a timeout. Workers log in as the current
-user for now; userId is reserved for later per-user auth.'
+WITHOUT blocking the front-end gem (see #runWorker:), so one client''s long tool call no longer
+freezes every other GsProcess in the front end -- including other clients'' requests, which is what
+makes McpRouter''s per-connection GsProcesses actually concurrent. Access to the worker is
+serialized by a mutex, since GCI allows only one call in flight per session. Idle sessions are
+reaped after a timeout, but never while a call is in flight (#isBusy). Workers log in as the
+current user for now; userId is reserved for later per-user auth. The worker''s stone session id
+and OS process id are captured at login (#cacheWorkerIds): they are what correlate a session with
+a gem in ps, and fetching them there also makes the kernel''s printOn: -- which sends those same
+two remote accessors -- harmless afterwards.'
 %
 expectvalue /Class
 doit
@@ -60,6 +67,29 @@ startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
   ^self new startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
 %
 ! ------------------- Instance methods for McpSession
+category: 'initialization'
+method: McpSession
+cacheWorkerIds
+  "Fetch the worker gem's stone session id and OS process id once, immediately after login, and hold
+   them here. Two independent reasons, either of which would justify the two calls.
+   Diagnostics: these are what tie an Mcp-Session-Id to a gem in ps and to a row in
+   System currentSessions. Log THESE, never the worker itself.
+   Safety: GsTsExternalSession>>printOn: sends these same two accessors, and each is a memoizing
+   REMOTE call -- so printing a worker that nothing has queried performs a GCI call, which overwrites
+   that worker's lastResult. A print between the nbExecute: and the lastResult read in #runWorker:
+   would then answer a client with the gem's pid where its JSON-RPC response belongs. Fetching them
+   here leaves the kernel's own instance variables set for the worker's whole life (only logout
+   clears them), so any later print is inert.
+   Both sends are BLOCKING GCI calls, deliberately: they run at login, where the gem already blocks
+   on #login for far longer, and this is the one moment when nothing is in flight. Never send them
+   from the forwarding path.
+   The two round trips cannot be folded into one. It is the ACCESSOR sends that populate those
+   instance variables, so fetching both values in a single executeString: would leave printOn: still
+   calling out. Do not add #stoneSessionSerial either: a third memoizing remote accessor, another
+   round trip, and printOn: does not reach it."
+  workerStoneSession := worker stoneSessionId.
+  workerPid := worker gemProcessId
+%
 category: 'lifecycle'
 method: McpSession
 close
@@ -72,10 +102,11 @@ category: 'routing'
 method: McpSession
 forward: aRawJsonString
   "Run a JSON-RPC request in this client's worker gem (an isolated session) and answer the JSON
-   response string ('' for a notification). BLOCKING executeString: -- reliable; forwarding is
-   serialized (concurrency deferred). The request is embedded via printString for safe quoting."
+   response string ('' for a notification). Runs WITHOUT stalling the front-end gem -- see
+   #runWorker:, which is what keeps one client's long tool call from freezing every other GsProcess
+   in the front end. The request is embedded via printString for safe quoting."
   self touch.
-  ^worker executeString: (self workerExpressionFor: aRawJsonString)
+  ^self runWorker: (self workerExpressionFor: aRawJsonString)
 %
 category: 'accessing'
 method: McpSession
@@ -86,6 +117,16 @@ category: 'activity'
 method: McpSession
 idleSeconds
   ^System timeGmt - lastActivitySeconds
+%
+category: 'activity'
+method: McpSession
+isBusy
+  "Whether a call into this session's worker gem is in flight. Asked by the idle reaper: #forward:
+   stamps the activity clock when a call STARTS, so a request that runs longer than the idle timeout
+   would otherwise be reaped -- and its worker logged out -- while it was still running. That could
+   not happen while forwarding blocked the whole front-end gem, because the reaper could not run
+   either. Cheap: it reads the external session's own state and makes no GCI call."
+  ^worker notNil and: [worker isCallInProgress]
 %
 category: 'accessing'
 method: McpSession
@@ -109,7 +150,7 @@ prepareWorker
    One round trip replaces the conditional 'sessionReadOnly:' send this used to make, and it moves tool
    registration off the client's first request. A worker class or toolset the worker cannot resolve
    fails HERE, where the message can say what to fix -- see McpServer class>>toolsetClassNamed:."
-  ^[worker executeString: self workerBootstrapExpression]
+  ^[self runWorker: self workerBootstrapExpression]
     on: Error
     do: [:ex | self error: 'Could not prepare the MCP worker gem for session ' , id printString
       , ' (worker class ' , self workerClassName , '): '
@@ -135,6 +176,29 @@ readOnly
   "Whether this client's worker is read-only. Recorded when the session starts and applied to the
    worker gem by prepareWorker."
   ^readOnly == true
+%
+category: 'private'
+method: McpSession
+runWorker: anExpressionString
+  "Run anExpressionString in this session's worker gem and answer its result -- the one place that
+   drives the worker, and non-blocking on purpose. A blocking executeString: blocks in C, so while
+   one ran the front-end gem executed no Smalltalk and NO GsProcess in it ran: other clients'
+   requests, the accept loop, the reaper, every open SSE stream. A wait on the session's socket
+   suspends only THIS GsProcess.
+   Two traps in that API, each able to corrupt a response silently. The result must be read with
+   #lastResult, because #waitForResultForSeconds: consumes it internally and a later #nbResult then
+   fails. And it must be read only once #isCallInProgress answers false, because after a wait that
+   timed out #lastResult still holds the PREVIOUS call's value. No deadline is imposed, so a worker
+   still gets as long as it takes.
+   The mutex is what keeps two requests from colliding in one worker -- GCI allows one call in flight
+   per session, which the blocking call used to guarantee by freezing the gem. A worker-side error
+   arrives as the same GciError as before, and leaves the worker usable."
+  ^self workerMutex critical: [
+    worker nbExecute: anExpressionString.
+    [worker isCallInProgress]
+      whileTrue: [worker waitForResultForSeconds: self workerWaitSeconds otherwise: [nil]].
+    self touch.
+    worker lastResult]
 %
 category: 'accessing'
 method: McpSession
@@ -170,6 +234,7 @@ startWithId: anId readOnly: aBoolean
   worker := self newWorkerSession.
   worker useOnetimePassword.
   worker login.
+  self cacheWorkerIds.
   readOnly := aBoolean.
   self touch.
   ^self
@@ -195,6 +260,7 @@ startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
   worker username: aUserId.
   worker jwtPassword: aJwtString.
   worker login.
+  self cacheWorkerIds.
   readOnly := aBoolean.
   self touch.
   ^self
@@ -254,4 +320,38 @@ workerExpressionFor: aRawJsonString
    worker never decides which server class to build. The request body is embedded via printString for
    safe quoting."
   ^self workerClassName , ' handleJsonString: ' , aRawJsonString printString
+%
+category: 'private'
+method: McpSession
+workerMutex
+  "The lock #runWorker: holds while a call is in flight in this session's worker gem. Created on
+   demand rather than at login, which is safe because the front end configures AND prepares a
+   session (McpRouter>>openSessionCreating:, which sends #prepareWorker) before it registers the
+   session in the id -> session map: the first send always happens before any request can reach
+   this session, so no two GsProcesses can race to create it."
+  ^workerMutex ifNil: [workerMutex := Semaphore forMutualExclusion]
+%
+category: 'accessing'
+method: McpSession
+workerPid
+  "The worker gem's OS process id, captured at login by #cacheWorkerIds -- what matches this session
+   to a gem in ps or to its gem log. Log this instead of the worker, which cannot be printed without
+   side effects."
+  ^workerPid
+%
+category: 'accessing'
+method: McpSession
+workerStoneSession
+  "The worker gem's stone session id, captured at login by #cacheWorkerIds -- what matches this
+   session to a row in System currentSessions. Log this instead of the worker, which cannot be
+   printed without side effects."
+  ^workerStoneSession
+%
+category: 'private'
+method: McpSession
+workerWaitSeconds
+  "How long one wait for a worker result may sleep before #runWorker: re-checks whether the call is
+   done. It bounds the re-check interval only, not latency: the wait answers as soon as the worker
+   does, because it is waiting on the session's socket."
+  ^1
 %

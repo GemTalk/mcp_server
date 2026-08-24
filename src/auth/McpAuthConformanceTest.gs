@@ -395,8 +395,9 @@ testGetStreamRequiresBearerToken
   "Token Requirements, all revisions: 'authorization MUST be included in every HTTP request from
    client to server, even if they are part of the same logical session', and the server MUST
    validate the token on every protected resource request. The GET SSE stream is a protected
-   resource request. Today McpAuthRouter>>serveGet: only intercepts the well-known path and falls
-   through to the inherited stream, so an anonymous GET /mcp gets 200 text/event-stream -- an
+   resource request. Closed by requestAuthorized:on:, which route:on: applies to EVERY verb before
+   dispatching it, so a GET is refused here and never reaches serveGet:. It was written red against
+   the behavior that preceded that gate: an anonymous GET /mcp answered 200 text/event-stream -- an
    unauthenticated read channel on a network-reachable port, and a way to pin connections and
    worker processes open indefinitely without ever presenting a credential."
   | out |

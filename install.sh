@@ -15,26 +15,44 @@
 #             set GS_MCP_WITH_GRAIL=1. Once loaded, the toolset joins the default tool surface
 #             automatically (see McpServer class>>installedDefaultToolsetNames).
 #
+#   --check   verify the environment (product, GEMSTONE_GLOBAL_DIR, the stone) and report, without
+#             installing anything. Run this first on a machine you have not installed on before.
+#
 # Configure these (or export before running):
-#   GEMSTONE       - GemStone product directory (defaults to $GEMSTONE if set)
+#   GEMSTONE       - GemStone product directory (REQUIRED; no default can be guessed)
 #   GS_STONE       - stone name              (default: gs64stone)
 #   GS_USER        - GemStone user           (default: DataCurator)
 #   GS_PASS        - GemStone password       (default: swordfish)
+#   GEMSTONE_GLOBAL_DIR - where the running stone recorded itself. Usually discovered; see
+#                         gs-env.sh, which explains why this one variable decides whether a login
+#                         works and why the failure names getaddrinfo.
+# This script talks only to the STONE, so it needs no netldi and works on a host that has none.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-: "${GEMSTONE:?Set GEMSTONE to your GemStone product directory}"
 GS_STONE="${GS_STONE:-gs64stone}"
 GS_USER="${GS_USER:-DataCurator}"
 GS_PASS="${GS_PASS:-swordfish}"
-TOPAZ="$GEMSTONE/bin/topaz"
 
 # Base classes only by default; pass --grail (or set GS_MCP_WITH_GRAIL) to also load the
 # optional GemStone-Python (Grail) toolset -- only valid on an image that has Grail/ModuleAst.
 LOAD_FILE="load.gs"
-if [ "${1:-}" = "--grail" ] || [ -n "${GS_MCP_WITH_GRAIL:-}" ]; then
-  LOAD_FILE="load-grail.gs"
-fi
+CHECK_ONLY=0
+for arg in "$@"; do
+  case "$arg" in
+    --grail) LOAD_FILE="load-grail.gs" ;;
+    --check) CHECK_ONLY=1 ;;
+    *) echo "usage: $0 [--grail] [--check]" >&2; exit 2 ;;
+  esac
+done
+[ -n "${GS_MCP_WITH_GRAIL:-}" ] && LOAD_FILE="load-grail.gs"
+
+# Resolve GEMSTONE/TOPAZ/GEMSTONE_GLOBAL_DIR and confirm the stone is actually running, so a
+# misconfigured environment is reported in its own terms instead of as a topaz login failure.
+. ./gs-env.sh
+gs_env_resolve
+if [ "$CHECK_ONLY" = "1" ]; then gs_env_check; exit $?; fi
+gs_env_require_stone
 
 # The loaders `input` their class files by paths relative to the repository root, so topaz must run
 # with this directory as its current directory -- hence the cd above, and no `cd` after it.
@@ -82,9 +100,10 @@ run
 names := #( 'McpError' 'McpTool' 'McpToolRegistry' 'McpToolset' 'McpBrowsingToolset'
   'McpExecutionToolset' 'McpListingToolset' 'McpMutationToolset' 'McpSearchToolset'
   'McpSessionToolset' 'McpTestingToolset' 'McpHttpConnection' 'McpDispatcher' 'McpBase'
-  'McpServer' 'McpSession' 'McpRouter' 'McpMockSocket' 'McpStubSession' 'McpFixtureToolset'
-  'McpFixtureServer' 'McpToolTest' 'McpDispatcherTest' 'McpTransportTest' 'McpContractTest'
-  'McpExtensionTest' 'McpAuthRouter' 'McpAuthTest' 'McpAuthConformanceTest' ) asOrderedCollection.
+  'McpServer' 'McpSession' 'McpRouter' 'McpMockSocket' 'McpMockWorker' 'McpMockSession'
+  'McpStubSession' 'McpFixtureToolset' 'McpFixtureServer' 'McpToolTest' 'McpDispatcherTest'
+  'McpTransportTest' 'McpContractTest' 'McpExtensionTest' 'McpSessionTest' 'McpAuthRouter'
+  'McpAuthTest' 'McpAuthConformanceTest' ) asOrderedCollection.
 '$LOAD_FILE' = 'load-grail.gs'
   ifTrue: [ names add: 'McpGrailToolset'; add: 'McpGrailToolsetTest' ].
 up := System myUserProfile.

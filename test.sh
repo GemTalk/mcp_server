@@ -18,10 +18,18 @@
 set -uo pipefail
 cd "$(dirname "$0")"
 
-: "${GEMSTONE:?Set GEMSTONE to your GemStone product directory}"
 export GS_STONE="${GS_STONE:-gs64stone}"
 export GS_USER="${GS_USER:-DataCurator}"
 export GS_PASS="${GS_PASS:-swordfish}"
+
+# Resolve the environment up front so a misconfiguration is one line here, rather than a server
+# that never comes up and a run that fails every check for the same hidden reason. run-server.sh
+# checks again in its own process; this is cheap and the export makes the resolved value inherited.
+. ./gs-env.sh
+GS_NEEDS_NETLDI=1
+gs_env_resolve
+gs_env_require_stone
+gs_env_require_netldi
 PORT="${GS_MCP_PORT:-8011}"
 URL="http://127.0.0.1:$PORT/mcp"
 SERVER_LOG="$(mktemp -t gsmcp-server.XXXXXX)"
@@ -363,10 +371,44 @@ JSON
 )
 check "delete_class removes the class"         'Deleted class'           "$r"
 
-# --- transport: SSE GET stream ---
-r=$(curl -s -i -N -m 3 "$URL" 2>&1 | head -12)
+# --- transport: SSE GET stream (session-scoped) ---
+# The stream is gated the same way POST and DELETE are: no session id => 400, unknown id => 404, and
+# only a live session gets a stream. Before that gate, a bare GET opened a keepalive stream that
+# belonged to no session and held a socket and a GsProcess for the life of the server.
+r=$(curl -s -i -N -m 3 "$URL" 2>&1 | head -1)
+check "GET without a session id => 400"       '400 Bad Request'          "$r"
+r=$(curl -s -i -N -m 3 "$URL" -H 'MCP-Session-Id: DEADBEEF' 2>&1 | head -1)
+check "GET with an unknown session => 404"    '404 Not Found'            "$r"
+r=$(curl -s -i -N -m 3 "$URL" -H "MCP-Session-Id: $SID" 2>&1 | head -12)
 check "GET /mcp => text/event-stream"         'text/event-stream'        "$r"
 check "GET /mcp sends 'connected' comment"    ': connected'              "$r"
+
+# --- transport: a slow call must not block another client ---
+# The property the whole front end rests on: one client's long tool call does not stop the server.
+# Forwarding used to be a blocking GCI executeString:, which blocks in C -- while it ran the
+# front-end gem executed no Smalltalk at all, so NO other GsProcess ran: no other client's request,
+# no accept loop, no idle reaper, no SSE keepalive. McpSession>>runWorker: now starts the call with
+# nbExecute: and waits in Smalltalk instead. Only an end-to-end check can catch a regression here,
+# because the unit tests use a mock worker and cannot see the gem stall.
+SLOW_OUT="$(mktemp "${TMPDIR:-/tmp}/mcp-slow.XXXXXX")"
+started=$SECONDS
+curl -s -m 40 "$URL" -H "MCP-Session-Id: $SID" --data-binary @- >"$SLOW_OUT" <<'JSON' &
+{"jsonrpc":"2.0","id":90,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"(Delay forSeconds: 8) wait. 4321"}}}
+JSON
+slow_pid=$!
+sleep 1                       # let the slow call reach the worker gem
+r=$(curl -s -i -m 20 "$URL" --data-binary @- <<'JSON'
+{"jsonrpc":"2.0","id":91,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"second-client","version":"1"}}}
+JSON
+)
+elapsed=$((SECONDS - started))
+check "second client is served during a slow call" 'MCP-Session-Id'       "$r"
+# If the front end were still blocking, this could not come back before the 8-second call finished.
+[ "$elapsed" -lt 6 ] && verdict="concurrent" || verdict="serialized after ${elapsed}s"
+check "...concurrently, not queued behind it (${elapsed}s)" 'concurrent'   "$verdict"
+wait "$slow_pid" || true
+check "the slow call still returned its own result" '"text":"4321"'        "$(cat "$SLOW_OUT")"
+rm -f "$SLOW_OUT"
 
 # --- transport: DELETE (session termination) ---
 # Same status codes as the POST path: no header => 400, unknown id => 404, live id => 200.

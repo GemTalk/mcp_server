@@ -10,7 +10,8 @@
 # UserProfiles) -- see ~/idp/README.md and ./setup-oidc-users.sh. Defaults match the local Keycloak.
 #
 # Configure (or export before running):
-#   GEMSTONE            - GemStone product directory (required)
+#   --check             - verify the environment and report, without starting anything
+#   GEMSTONE            - GemStone product directory (REQUIRED; no default can be guessed)
 #   GS_STONE/GS_USER/GS_PASS - stone + admin login (defaults: gs64stone/DataCurator/swordfish)
 #   GS_MCP_PORT         - listen port (default: 8443)
 #   MCP_ISSUER          - OIDC issuer URL. MUST be https: McpAuthRouter refuses to advertise a
@@ -70,7 +71,6 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-: "${GEMSTONE:?Set GEMSTONE to your GemStone product directory}"
 GS_STONE="${GS_STONE:-gs64stone}"
 GS_USER="${GS_USER:-DataCurator}"
 GS_PASS="${GS_PASS:-swordfish}"
@@ -86,7 +86,15 @@ GS_MCP_TITLE="${GS_MCP_TITLE:-}"
 MCP_BIND_ADDRESS="${MCP_BIND_ADDRESS:-}"
 MCP_TLS_CERT="${MCP_TLS_CERT:-}"
 MCP_TLS_KEY="${MCP_TLS_KEY:-}"
-TOPAZ="$GEMSTONE/bin/topaz"
+
+# Resolve the environment and confirm the stone AND a netldi (forkOnPort: and every per-client
+# worker fork a gem through it). Sets GEMSTONE / TOPAZ / GEMSTONE_GLOBAL_DIR -- see gs-env.sh.
+. ./gs-env.sh
+GS_NEEDS_NETLDI=1
+gs_env_resolve
+if [ "${1:-}" = "--check" ]; then gs_env_check; exit $?; fi
+gs_env_require_stone
+gs_env_require_netldi
 
 # Two pre-flight checks follow. Each mirrors a rule McpAuthRouter enforces on itself, so the code is
 # the real gate and neither is load-bearing: they exist only to turn "launch topaz, watch the router

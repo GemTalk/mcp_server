@@ -213,7 +213,7 @@ an image without Grail. Once loaded the toolset joins the default tool surface a
 | `McpToolset` | abstract tool pack: `registerOn:` (its tools + schemas), its `tool_*` handlers, `toolNames`, `readOnlySafeToolNames` (empty by default — fail closed), plus the shared schema builders, image-lookup helpers, and the kernel guards (which forward to the server's policy). **Subclass this to add tools**; a deployment picks the list |
 | `McpBrowsingToolset`, `McpExecutionToolset`, `McpListingToolset`, `McpMutationToolset`, `McpSearchToolset`, `McpSessionToolset`, `McpTestingToolset` | the seven core toolsets, one per tool family. A deployment can expose any subset — or none of them, alongside its own |
 | `McpGrailToolset` | optional Python toolset (`eval_python`, `compile_python`), filed in only on a Grail image. Needs nothing from the server, so it doubles as the worked example for a third-party toolset |
-| `McpSession` | one client's isolated worker handle: a `GsTsExternalSession` gem + session id + last-activity + the worker class/toolsets/identity the front end resolved. `prepareWorker` sets the gem up in one call; `forward:` runs a request in it (`<workerClass> handleJsonString: …`); `close` stops it |
+| `McpSession` | one client's isolated worker handle: a `GsTsExternalSession` gem + session id + last-activity + the worker class/toolsets/identity the front end resolved. `prepareWorker` sets the gem up in one call; `forward:` runs a request in it (`<workerClass> handleJsonString: …`) without blocking the front end (`runWorker:`); `close` stops it |
 | `McpHttpConnection` | reads one HTTP/1.1 request, writes one JSON response (incl. `MCP-Session-Id`) |
 | `McpDispatcher` | JSON-RPC 2.0 / MCP routing (`initialize`, `tools/list`, `tools/call`); read-only tool gating; structured error kinds |
 | `McpToolRegistry` | name → `McpTool` map; produces `tools/list` descriptors |
@@ -264,7 +264,7 @@ tools itself (those run in the per-client `McpServer` workers):
   **`MCP-Session-Id`** response header. A worker class or toolset the worker gem cannot resolve fails
   here, at session open, where the error can say what to fix.
 - **Every other request** must carry that header. The front end looks up the worker (map guarded
-  by a mutex) and **forwards the raw JSON-RPC body** to it — `worker executeString: '<workerClass>
+  by a mutex) and **forwards the raw JSON-RPC body** to it — `worker nbExecute: '<workerClass>
   handleJsonString: ' , body printString`, naming the class the router resolved — the worker runs
   the tool in its own session and returns the response, which the front end relays. Missing id →
   `400`; unknown/expired → `404` (a compliant client re-initializes).
@@ -272,9 +272,10 @@ tools itself (those run in the per-client `McpServer` workers):
   session idle beyond **30 minutes** (`sessionIdleTimeoutSeconds`), so abandoned test gems don't
   pile up.
 
-Isolation comes from each worker being a separate gem = a separate transaction view. Forwarding is
-**blocking / serialized** for now (a single front-end gem can't overlap blocking GCI calls, and the
-non-blocking poll path corrupts results); true cross-client concurrency is a deferred follow-up.
+Isolation comes from each worker being a separate gem = a separate transaction view, and clients
+really do run **concurrently**: forwarding is non-blocking (`McpSession>>runWorker:`), so one
+client's long tool call no longer stalls anyone else — see
+[Concurrency & robustness](#concurrency--robustness) below.
 The base `McpRouter` logs every worker in as the current (server) user; the network-facing
 `McpAuthRouter` instead logs each worker in as the **token's own GemStone user** via JWT.
 
@@ -352,8 +353,8 @@ forbidden here" from "no such tool". A tool absent because its toolset was never
 
 ```bash
 export GEMSTONE=/path/to/GemStone64Bit3.7.x   # product dir
-export GS_USER=DataCurator GS_PASS=...         # GemStone credentials
 
+./install.sh --check                # verify the environment first -- do this on a new machine
 ./install.sh                        # file in the classes (core + tests + auth) and commit
 ./install.sh --grail                # ...and the optional Grail/Python toolset (Grail image only)
 GS_MCP_PORT=8000 ./run-server.sh    # fork a detached, independent localhost server gem and return
@@ -364,7 +365,8 @@ GS_MCP_WORKER_CLASS=MyMcpServer ./run-server.sh                        # ...a su
 ```
 
 `install.sh` and the `run-*.sh` scripts use topaz; set `GEMSTONE`, `GS_STONE`, `GS_USER`,
-`GS_PASS` to match your environment. `install.sh` files the code in with topaz from `load.gs` —
+`GS_PASS` to match your environment — and read **Environment** below before assuming those four are
+enough, because on many machines they are not. `install.sh` files the code in with topaz from `load.gs` —
 which on this branch includes `src/auth/`, since the OAuth front end is the point of it; `--grail`
 (or `GS_MCP_WITH_GRAIL=1`) files in `load-grail.gs` instead, which adds the `src/grail/` group on
 top. `run-server.sh` builds a base `McpRouter` instance and calls
@@ -373,6 +375,62 @@ config as code, no commit), which launches a detached, independent front-end gem
 with `./stop-server.sh` (by port), or the `System stopSession: <id>` / `kill <pid>` line it prints.
 A loaded Grail toolset is picked up automatically, per session, by the front end.
 
+### Environment
+
+Every script here sources `gs-env.sh`, which resolves the environment and refuses to continue on a
+misconfigured one. `--check` runs that resolution and reports without doing anything else; it is the
+first thing to run on a machine you have not installed on before.
+
+```
+$ ./install.sh --check
+product      /opt/gemstone/GemStone64Bit3.7.5-x86_64.Linux
+global dir   /opt/gemstone
+
+servers visible to this client:
+  Status     Version   Owner        Pid  Port  Started      Type    Name
+  OK         3.7.5     gsadmin    96453 65166 Aug 23 12:31  Netldi  gs64ldi
+  OK         3.7.5     gsadmin    60042 56820 Aug 20 08:53  Stone   gs64stone
+
+OK: environment looks usable for gs64stone.
+```
+
+**`GEMSTONE_GLOBAL_DIR` is the variable that decides whether anything works**, and it is the one the
+old four-variable advice left out. Get it wrong and every script fails at `login` with:
+
+```
+could not find server 'gs64stone' on host 'somehost' because service not found,
+getaddrinfo failed, EAI error 8   ... Number: 4065
+```
+
+That message names `getaddrinfo`, so it reads like a DNS or `/etc/services` problem. It is not.
+With no `/etc/services` entries a stone and a netldi each bind an **ephemeral** port and record it
+in `$GEMSTONE_GLOBAL_DIR/locks/<name>..LCK`; clients read those lock files. A client pointed at a
+different `GEMSTONE_GLOBAL_DIR` than the stone was *started* with finds no lock file and falls back
+to a hostname/service lookup, which fails. The product's built-in default is `/opt/gemstone` (then
+`/usr/gemstone`), so any installation keeping its locks elsewhere must tell its clients where.
+
+`.setenv.example` is a starting point: copy it to `.setenv` (git-ignored) and edit it for your
+machine. Most of it is optional — `gs-env.sh` discovers it rather than making you guess: it asks `gslist` under each candidate and
+uses the one where the running servers actually are, saying so when it has to correct or supply a
+value. `gslist` is the authority here — it reads the same lock files the GCI client does.
+
+Do **not** reach for `/etc/services`. Registering a stone or netldi there is unnecessary once
+`GEMSTONE_GLOBAL_DIR` is right, and it is a trap: netldi binds the port named in `/etc/services`
+only if it is **restarted** after the entry exists, so an entry added to a running system is stale
+by construction and points at a port nothing is listening on.
+
+**Which scripts need a netldi.** `install.sh` talks only to the stone, so it runs fine on a host
+with no netldi at all. The `run-*.sh` scripts need one — not because of how they log in, but
+because `McpRouter>>forkOnPort:` and every per-client worker create a `GsTsExternalSession`, and
+netldi is what forks those gems. `run-unit-tests.sh` needs one too, because `McpAuthTest` spawns a
+real worker. Each script checks for what it actually needs, and says which is missing.
+
+**Linked vs RPC.** These scripts run `topaz -l` (linked). That is deliberate, and it is not the
+cause of the error above: a linked login resolves the stone through the same lock files, so it
+needs `GEMSTONE_GLOBAL_DIR` and nothing else — no netldi, no NRS, no service entries. Dropping `-l`
+routes the login through netldi instead, which works equally well once `GEMSTONE_GLOBAL_DIR` is
+right, but it would make `install.sh` depend on a netldi it otherwise has no use for.
+
 ### Source layout
 
 The classes live on disk as plain **topaz file-outs** — canonical `Class>>fileOutClass` output,
@@ -380,7 +438,7 @@ grouped by area, with one loader per group:
 
 ```
 src/core/    17 classes  the server itself: protocol, transport, dispatch, toolsets
-src/tests/    9 classes  the SUnit suites and their fixtures
+src/tests/   12 classes  the SUnit suites and their fixtures
 src/auth/     3 classes  the OAuth/OIDC front end McpAuthRouter + its two suites
 src/grail/    2 classes  the optional GemStone-Python toolset + its suite
 load.gs                  files in core + tests + auth, then commits
@@ -441,6 +499,12 @@ suite when `McpGrailToolset` is installed:
 - `McpDispatcherTest` — JSON-RPC routing/envelope: initialize, tools/list (31, alphabetical),
   success + error wrapping, `-32601`/`-32602`/`-32700`, notifications → nil, and the per-worker
   entry `handleJsonString:`.
+- `McpSessionTest` — how a session drives its worker gem: the non-blocking `runWorker:` that
+  `forward:` and `prepareWorker` both use, that it reads the result only once the call is over (a
+  premature read would answer one request with another's response), that two concurrent requests on
+  one session serialize instead of colliding, that a worker error leaves the session usable, and that
+  the idle reaper leaves a session with a call in flight alone. Driven through `McpMockWorker` /
+  `McpMockSession`, which stand in for the `GsTsExternalSession` with no gem.
 - `McpTransportTest` — `handleConnection:` driven over a **`McpMockSocket`** wrapped in a
   real `McpHttpConnection`, so the genuine HTTP parsing/writing runs with no TCP. Covers the
   paths that spawn **no** worker gem: GET→SSE, DELETE→`400`/`404`, unknown verb→405, malformed→`-32700`,
@@ -476,11 +540,13 @@ suite when `McpGrailToolset` is installed:
   gem on them; both run for real as of 2026-08-18.
 
 Run a single suite while a server is up via the `run_test_class` tool (e.g. `run_test_class
-McpToolTest`). `./run-unit-tests.sh` runs the socket-less suites — `McpToolTest`, `McpDispatcherTest`,
-`McpTransportTest`, `McpContractTest`, `McpExtensionTest` (**124 tests**, **133 with the 9 in
-`McpGrailToolsetTest`** on a Grail image) — and exits 0 when all pass. `McpAuthTest` (24) and
-`McpAuthConformanceTest` (25) live on the `auth` branch and need netldi, so run them there with
-`run_test_class` or the scripts — 173 tests in total on that branch.
+McpToolTest`). `./run-unit-tests.sh` runs them all and exits 0 when every test passes: the
+socket-less suites `McpToolTest` (52), `McpDispatcherTest` (11), `McpSessionTest` (8),
+`McpTransportTest` (22), `McpContractTest` (34) and `McpExtensionTest` (9), plus `McpAuthTest` (24)
+and `McpAuthConformanceTest` (25) — **185 tests**, **194 with the 9 in `McpGrailToolsetTest`** on a
+Grail image. The two auth suites are not purely in-image (they commit a throwaway JWT user and spawn
+real worker gems, so a netldi must be running); they are in the runner anyway, because they are the
+only cover for the token → session path.
 
 > Note: a test helper must never reuse a SUnit framework selector (`run:`, `setUp`, …) — doing
 > so shadows the framework method and silently breaks `suite run`. The transport helper is named
@@ -598,9 +664,22 @@ client cannot block the accept loop (the forked handlers run during the loop's a
 waits). `McpHttpConnection>>readRequest` also bails after an 8s read timeout, so a client
 that connects but never sends a complete request is dropped rather than wedging the server.
 Each client's requests run in its own worker gem (a separate session), so there's no shared
-transaction to protect; a `Semaphore` (mutex) guards only the `MCP-Session-Id → session` map.
-Forwarding to a worker is a blocking call, so forwarding across clients is serialized for now —
-true concurrent cross-client execution is deferred.
+transaction to protect; a `Semaphore` (mutex) guards the `MCP-Session-Id → session` map, and each
+session has its own guarding its worker.
+
+**Clients run concurrently.** Forwarding a request used to be a blocking GCI `executeString:`, which
+blocks in C — so while it ran the front-end gem executed no Smalltalk and *no* `GsProcess` in it ran:
+not another client's request, not the accept loop, not the idle reaper, not an open SSE stream's
+keepalives. `McpSession>>runWorker:` now starts the call with `nbExecute:` and waits on the session's
+socket, which suspends only the calling `GsProcess`. Measured: a second client is served in ~1s while
+an 8-second tool call is in flight, where it used to wait the full 8 (`test.sh` checks this).
+
+Two guarantees the blocking call had been providing by accident are now explicit. GCI allows one call
+in flight per session, so each `McpSession` holds a mutex — a client with two requests outstanding
+queues rather than colliding. And the idle reaper, which previously could not run during a forward at
+all, now skips any session with a call in flight (`McpSession>>isBusy`) instead of logging a worker
+out mid-request. A forwarded request still has **no deadline**: a runaway tool ties up its own
+session for as long as it runs, though no longer anyone else's.
 
 ## Status
 
@@ -615,12 +694,11 @@ first release it has also gained: OAuth 2.1 / JWT authentication + TLS (the `Mcp
 per-router read-only mode (a router toggle plus per-token write-scope sessions), closed argument
 schemas + a kernel-class guard + structured error kinds, and a **selectable tool surface**: tools live
 in `McpToolset`s, the front end resolves the worker class and toolset list per session and pushes them
-into the worker gem, and a server can announce its own name/version — so a third party can ship an MCP
-server for their own software, exposing only their tools. The Python tools delegate to Grail's
+into the worker gem, and a server can announce its own name/version/title — so a third party can
+ship an MCP server for their own software, exposing only their tools. The Python tools delegate to Grail's
 `ModuleAst` and require a Grail-equipped image (see the Python note above).
 
-Future work: true concurrent cross-client forwarding; server-initiated SSE messages (which would let
-`notifications/tools/list_changed` announce a surface change); an external OIDC identity provider;
-mapping **OAuth scopes to toolsets**, so a token's scopes select what it may see rather than only
-whether it may write; and an optional `serverInfo.title` for a per-deployment label distinct from the
-product name.
+Future work: server-initiated SSE messages (which would let `notifications/tools/list_changed`
+announce a surface change, and let an idle session be warned before it is reaped); mapping **OAuth
+scopes to toolsets**, so a token's scopes select what it may see rather than only whether it may
+write; and a deadline for a forwarded request, now that a non-blocking forward makes one possible.

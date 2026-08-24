@@ -13,14 +13,18 @@ run
  Existing keys are left alone, so re-installing over a loaded image changes nothing."
 | d names |
 d := System myUserProfile objectNamed: #Published.
-names := #( #McpMockSocket #McpStubSession #McpFixtureToolset #McpFixtureServer #McpToolTest
-  #McpDispatcherTest #McpTransportTest #McpContractTest #McpExtensionTest ).
+names := #( #McpMockSocket #McpMockWorker #McpMockSession #McpStubSession #McpFixtureToolset
+  #McpFixtureServer #McpToolTest #McpDispatcherTest #McpTransportTest #McpContractTest
+  #McpExtensionTest #McpSessionTest ).
 names do: [:s | (d includesKey: s) ifFalse: [ d at: s put: nil ] ].
 names size
 %
 
-! Fixtures: a mock socket, a stub session, and the extension-point fixtures the tests drive.
+! Fixtures: a mock socket, a mock worker gem + the session that drives it, a stub session, and the
+! extension-point fixtures the tests drive.
 input src/tests/McpMockSocket.gs
+input src/tests/McpMockWorker.gs
+input src/tests/McpMockSession.gs
 input src/tests/McpStubSession.gs
 input src/tests/McpFixtureToolset.gs
 input src/tests/McpFixtureServer.gs
@@ -31,3 +35,4 @@ input src/tests/McpDispatcherTest.gs
 input src/tests/McpTransportTest.gs
 input src/tests/McpContractTest.gs
 input src/tests/McpExtensionTest.gs
+input src/tests/McpSessionTest.gs

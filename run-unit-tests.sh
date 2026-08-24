@@ -12,18 +12,26 @@
 # token rejected as malformed) go unnoticed.
 #
 # Configure (or export before running):
-#   GEMSTONE   - GemStone product directory (required)
+#   GEMSTONE   - GemStone product directory (REQUIRED; no default can be guessed)
 #   GS_STONE   - stone name        (default: gs64stone)
 #   GS_USER    - GemStone user     (default: DataCurator)
 #   GS_PASS    - GemStone password (default: swordfish)
+#   --check    verify the environment and report, without running any tests.
 set -euo pipefail
 cd "$(dirname "$0")"
 
-: "${GEMSTONE:?Set GEMSTONE to your GemStone product directory}"
 GS_STONE="${GS_STONE:-gs64stone}"
 GS_USER="${GS_USER:-DataCurator}"
 GS_PASS="${GS_PASS:-swordfish}"
-TOPAZ="$GEMSTONE/bin/topaz"
+
+# A netldi IS required here, for the reason in the note above: McpAuthTest spawns a real worker
+# gem. Checking it up front beats discovering it as a GciError partway through a suite run.
+. ./gs-env.sh
+GS_NEEDS_NETLDI=1
+gs_env_resolve
+if [ "${1:-}" = "--check" ]; then gs_env_check; exit $?; fi
+gs_env_require_stone
+gs_env_require_netldi
 
 # Stream topaz output live AND keep a copy to gate on. Do NOT wrap the heredoc in $( ... ):
 # under `set -e`, a command substitution that exits non-zero aborts the script BEFORE anything
@@ -42,8 +50,8 @@ login
 iferr 1 stk
 run
 | s classes grailTest |
-classes := #( 'McpToolTest' 'McpDispatcherTest' 'McpTransportTest' 'McpContractTest'
-  'McpExtensionTest' 'McpAuthTest' 'McpAuthConformanceTest' ) asOrderedCollection.
+classes := #( 'McpToolTest' 'McpDispatcherTest' 'McpSessionTest' 'McpTransportTest'
+  'McpContractTest' 'McpExtensionTest' 'McpAuthTest' 'McpAuthConformanceTest' ) asOrderedCollection.
 grailTest := System myUserProfile objectNamed: #McpGrailToolsetTest.
 grailTest ifNotNil: [classes add: 'McpGrailToolsetTest'].
 s := WriteStream on: String new.

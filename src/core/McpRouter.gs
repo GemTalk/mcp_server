@@ -490,12 +490,17 @@ category: 'sessions'
 method: McpRouter
 reapIdleSessions
   "Close and unmap client sessions idle longer than sessionIdleTimeoutSeconds. Collect + unmap
-   under the mutex; close (a blocking logout) outside it. Answers the number reaped."
+   under the mutex; close (a blocking logout) outside it. Answers the number reaped.
+   A session with a call in flight is never reaped, however long it has run: McpSession>>forward:
+   stamps the activity clock when the call STARTS, so a request that outlives the idle timeout would
+   otherwise have its worker logged out from under it. That could not happen while forwarding blocked
+   the whole gem -- the reaper could not run either -- so the guard arrives with the non-blocking
+   forward (see McpSession>>runWorker:)."
   | expired timeout |
   timeout := self sessionIdleTimeoutSeconds.
   expired := mutex critical: [
     | old |
-    old := sessions values select: [:s | s idleSeconds > timeout].
+    old := sessions values select: [:s | s idleSeconds > timeout and: [s isBusy not]].
     old do: [:s | sessions removeKey: s id ifAbsent: [nil]].
     old].
   expired do: [:s | [s close] on: Error do: [:e | nil]].
@@ -597,8 +602,25 @@ serveDelete: req on: conn
 category: 'running'
 method: McpRouter
 serveGet: req on: conn
-  "Dispatch a GET. Base: open the standalone SSE stream. Subclasses may branch on the request path
-   (McpAuthRouter serves Protected Resource Metadata at a well-known path)."
+  "Dispatch a GET: open the standalone SSE stream, but only for a client that names a live session
+   with the MCP-Session-Id header. Subclasses may branch on the request path first (McpAuthRouter
+   serves Protected Resource Metadata at a well-known path).
+   The same 400/404 rules apply as on the POST and DELETE paths, so a client gets one consistent
+   signal from every verb. This is NOT the credential gate: route:on: already ran
+   requestAuthorized:on: before dispatching here, so on McpAuthRouter an anonymous GET was refused
+   401 long before this method. What it stops is narrower -- an ungated GET hands a keepalive
+   stream, and with it a socket and a GsProcess held for the life of the server, to any caller that
+   gets past the gates without naming a session. On this loopback-only base class that is a local
+   process pinning gem resources, not an outside one.
+   The stream itself is NOT yet session-scoped -- this router emits no server-initiated messages,
+   so there is nothing to deliver to the session once it is resolved. Resolving it here only makes
+   the stream reachable exclusively by a client that holds a session."
+  | sid |
+  sid := self sessionIdOf: req.
+  sid isNil ifTrue: [
+    ^self writeSessionError: 'Missing MCP-Session-Id header (call initialize first)' code: 400 reason: 'Bad Request' on: conn].
+  (self sessionAt: sid) isNil ifTrue: [
+    ^self writeSessionError: 'Unknown or expired session: ' , sid code: 404 reason: 'Not Found' on: conn].
   ^self serveGetStream: conn
 %
 category: 'running'
@@ -628,9 +650,10 @@ method: McpRouter
 servePost: req on: conn
   "Front-end router (per-client sessions). `initialize` opens a per-client worker gem and returns
    its id in the MCP-Session-Id header; every other request is routed by that id to the client's
-   worker (an isolated session). A valid id is required for non-initialize requests. Forwarding is
-   a blocking executeString: to the worker -- reliable and serialized (concurrency is a deferred
-   follow-up); the id -> session map is guarded by the mutex. Only enough of the body is parsed
+   worker (an isolated session). A valid id is required for non-initialize requests. Forwarding does
+   not block the front-end gem (McpSession>>runWorker:), so requests from different clients really do
+   run concurrently -- serve: already gives each connection its own GsProcess; the id -> session map
+   is guarded by the mutex, and one client's worker by that session's own. Only enough of the body is parsed
    here to route it (is it initialize? is it well-formed?); full request handling is the worker's."
   | body parsed method |
   body := req at: 'body' ifAbsent: [''].
