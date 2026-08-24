@@ -409,7 +409,8 @@ different `GEMSTONE_GLOBAL_DIR` than the stone was *started* with finds no lock 
 to a hostname/service lookup, which fails. The product's built-in default is `/opt/gemstone` (then
 `/usr/gemstone`), so any installation keeping its locks elsewhere must tell its clients where.
 
-`gs-env.sh` discovers it rather than making you guess: it asks `gslist` under each candidate and
+`.setenv.example` is a starting point: copy it to `.setenv` (git-ignored) and edit it for your
+machine. Most of it is optional — `gs-env.sh` discovers it rather than making you guess: it asks `gslist` under each candidate and
 uses the one where the running servers actually are, saying so when it has to correct or supply a
 value. `gslist` is the authority here — it reads the same lock files the GCI client does.
 
