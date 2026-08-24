@@ -602,8 +602,25 @@ serveDelete: req on: conn
 category: 'running'
 method: McpRouter
 serveGet: req on: conn
-  "Dispatch a GET. Base: open the standalone SSE stream. Subclasses may branch on the request path
-   (McpAuthRouter serves Protected Resource Metadata at a well-known path)."
+  "Dispatch a GET: open the standalone SSE stream, but only for a client that names a live session
+   with the MCP-Session-Id header. Subclasses may branch on the request path first (McpAuthRouter
+   serves Protected Resource Metadata at a well-known path).
+   The same 400/404 rules apply as on the POST and DELETE paths, so a client gets one consistent
+   signal from every verb. This is NOT the credential gate: route:on: already ran
+   requestAuthorized:on: before dispatching here, so on McpAuthRouter an anonymous GET was refused
+   401 long before this method. What it stops is narrower -- an ungated GET hands a keepalive
+   stream, and with it a socket and a GsProcess held for the life of the server, to any caller that
+   gets past the gates without naming a session. On this loopback-only base class that is a local
+   process pinning gem resources, not an outside one.
+   The stream itself is NOT yet session-scoped -- this router emits no server-initiated messages,
+   so there is nothing to deliver to the session once it is resolved. Resolving it here only makes
+   the stream reachable exclusively by a client that holds a session."
+  | sid |
+  sid := self sessionIdOf: req.
+  sid isNil ifTrue: [
+    ^self writeSessionError: 'Missing MCP-Session-Id header (call initialize first)' code: 400 reason: 'Bad Request' on: conn].
+  (self sessionAt: sid) isNil ifTrue: [
+    ^self writeSessionError: 'Unknown or expired session: ' , sid code: 404 reason: 'Not Found' on: conn].
   ^self serveGetStream: conn
 %
 category: 'running'

@@ -363,8 +363,15 @@ JSON
 )
 check "delete_class removes the class"         'Deleted class'           "$r"
 
-# --- transport: SSE GET stream ---
-r=$(curl -s -i -N -m 3 "$URL" 2>&1 | head -12)
+# --- transport: SSE GET stream (session-scoped) ---
+# The stream is gated the same way POST and DELETE are: no session id => 400, unknown id => 404, and
+# only a live session gets a stream. Before that gate, a bare GET opened a keepalive stream that
+# belonged to no session and held a socket and a GsProcess for the life of the server.
+r=$(curl -s -i -N -m 3 "$URL" 2>&1 | head -1)
+check "GET without a session id => 400"       '400 Bad Request'          "$r"
+r=$(curl -s -i -N -m 3 "$URL" -H 'MCP-Session-Id: DEADBEEF' 2>&1 | head -1)
+check "GET with an unknown session => 404"    '404 Not Found'            "$r"
+r=$(curl -s -i -N -m 3 "$URL" -H "MCP-Session-Id: $SID" 2>&1 | head -12)
 check "GET /mcp => text/event-stream"         'text/event-stream'        "$r"
 check "GET /mcp sends 'connected' comment"    ': connected'              "$r"
 

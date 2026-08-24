@@ -236,11 +236,15 @@ testForeignOriginReturns403
 %
 category: 'tests'
 method: McpTransportTest
-testGetOpensSseStream
+testGetWithoutASessionIdIsRefused
+  "The standalone SSE stream is session-scoped: a GET carrying no MCP-Session-Id gets the same 400
+   the POST and DELETE paths give, not a stream. Before serveGet:on: resolved a session, a bare GET
+   opened a keepalive stream belonging to nothing, which held a socket and a GsProcess for the life
+   of the server."
   | out |
   out := (self runRequest: (self simpleRequest: 'GET')) output.
-  self assert: (self includesCS: 'text/event-stream' in: out).
-  self assert: (self includesCS: ': connected' in: out)
+  self assert: (self includesCS: 'HTTP/1.1 400 Bad Request' in: out).
+  self deny: (self includesCS: 'text/event-stream' in: out)
 %
 category: 'tests'
 method: McpTransportTest
