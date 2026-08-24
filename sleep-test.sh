@@ -268,10 +268,11 @@ print_sleep_instructions() {
   # reaperIntervalSeconds (60) = 180s, or it reads the pass as merely late. And the sleep has to
   # exceed the idle timeout, or forgiveness changes nothing and a passing result proves nothing.
   local idle_s rec
-  case "$IDLE" in
-    *m) idle_s=$(( ${IDLE%m} * 60 )) ;;
-    *h) idle_s=$(( ${IDLE%h} * 3600 )) ;;
-    *s) idle_s=${IDLE%s} ;;
+  case "$(printf '%s' "$IDLE" | tr 'A-Z' 'a-z')" in
+    none|off|0) idle_s=0 ;;   # no deadline: only the detector's own floor applies
+    *m) idle_s=$(( ${IDLE%[mM]} * 60 )) ;;
+    *h) idle_s=$(( ${IDLE%[hH]} * 3600 )) ;;
+    *s) idle_s=${IDLE%[sS]} ;;
     *)  idle_s=$IDLE ;;
   esac
   rec=$(( idle_s > 180 ? idle_s : 180 ))
@@ -281,6 +282,12 @@ print_sleep_instructions() {
   echo
   printf '  Sleep for %s. The floor is %s -- below that the result means nothing.\n' \
     "$(( rec / 60 )) minutes" "$(( (idle_s + 120) / 60 )) minutes"
+  if [ "$idle_s" -gt 0 ]; then
+    dim "  And on this hardware, longer still: macOS fragments the first ~40 minutes of a sleep into"
+    dim "  20-30s pieces with dark wakes between, and pieces under 3 x the maintenance interval are"
+    dim "  not forgiven at all. Only past that does it settle into pieces of many minutes. A sleep"
+    dim "  short enough to sit entirely in the fragmented phase understates what the detector does."
+  fi
   echo
   dim "  Two independent floors, and the sleep has to clear both:"
   dim "    - the detector ignores a gap under 3 x the maintenance interval, so a sleep under about"
@@ -318,33 +325,60 @@ check() {
   echo "Armed ${ARMED_AT_HUMAN:-?}, $((elapsed / 60))m$((elapsed % 60))s ago.  Session $SID, idle timeout $IDLE."
   echo
 
-  # 5. did the machine really sleep? The stream's own keepalive cadence is the witness: 15s apart
-  #    normally, and the one gap that is not 15s is the outage as the GEM experienced it.
-  local biggest
-  biggest=$(grep 'keepalive' "$STREAM_LOG" 2>/dev/null | awk '{print $1" "$2}' | perl -ne '
+  # 5. HOW did the machine sleep? Not "did it" -- the 2026-08-23 run settled that a suspend arrives
+  #    in PIECES, with macOS dark-waking between them, and that only pieces above the detector's
+  #    threshold are forgiven. So the measurement that matters is the whole profile: every stretch
+  #    the gem was frozen, how much of it was forgiven, and how much was charged to the client as
+  #    idleness it never spent. Keepalives are 15s apart, so anything past ~20s is a freeze.
+  local frozen_total frozen_n biggest
+  eval "$(grep 'keepalive' "$STREAM_LOG" 2>/dev/null | awk '{print $1" "$2}' | perl -ne '
     use Time::Local; chomp;
     my ($Y,$M,$D,$h,$m,$s) = /(\d+)-(\d+)-(\d+) (\d+):(\d+):(\d+)/ or next;
     my $t = timelocal($s,$m,$h,$D,$M-1,$Y);
-    if (defined $p) { my $d = $t - $p; $max = $d if !defined $max || $d > $max; }
+    if (defined $p) {
+      my $d = $t - $p;
+      if ($d > 20) { $n++; $sum += $d; $max = $d if !defined $max || $d > $max; push @g, $d }
+    }
     $p = $t;
-    END { print defined $max ? $max : -1 }')
-  if [ "${biggest:--1}" -ge 120 ]; then
-    verdict ok "the host really stopped serving" "${biggest}s with no keepalive on the stream"
-  elif [ "${biggest:--1}" -lt 0 ]; then
-    verdict huh "the host really stopped serving" "no keepalives captured at all -- see $STREAM_LOG"
+    END {
+      printf("frozen_total=%d frozen_n=%d biggest=%d gaps=\x27%s\x27\n",
+             $sum||0, $n||0, $max||0, join(" ", @g));
+    }')"
+
+  if [ "${frozen_n:-0}" -eq 0 ]; then
+    verdict huh "the host stopped serving at all" "no freeze longer than 20s on the stream"
   else
-    verdict bad "the host really stopped serving" \
-      "largest keepalive gap only ${biggest}s: it never slept, or Power Nap kept waking it"
+    verdict ok "the host stopped serving" \
+      "${frozen_total}s total, in ${frozen_n} piece(s), largest ${biggest}s"
+    dim "      pieces (s): ${gaps}"
   fi
 
   # 1. did the maintenance pass wake up, and when? The forgiveness line is emitted BY that pass.
-  local forgiven notice_time
-  forgiven=$(grep -o 'was not running for about [0-9]*s' "$gemlog" 2>/dev/null | tail -1 | grep -o '[0-9]*')
-  if [ -n "${forgiven:-}" ]; then
-    verdict ok "the maintenance pass woke and noticed" "forgave ${forgiven}s of suspended time"
+  local forgiven forgiven_n notice_time charged
+  forgiven=$(grep -o 'was not running for about [0-9]*s' "$gemlog" 2>/dev/null \
+    | grep -o '[0-9]*' | awk '{s+=$1} END {print s+0}')
+  forgiven_n=$(grep -c 'was not running for about' "$gemlog" 2>/dev/null | tr -d ' ')
+  if [ "${forgiven_n:-0}" -gt 0 ]; then
+    verdict ok "the maintenance pass woke and noticed" \
+      "forgave ${forgiven}s across ${forgiven_n} pass(es)"
   else
     verdict bad "the maintenance pass woke and noticed" \
-      "no forgiveness line in the gem log${gemlog:+ ($gemlog)} -- the Delay may never have fired"
+      "nothing forgiven${gemlog:+ ($gemlog)} -- either it never slept long enough, or the Delay did not fire"
+  fi
+
+  # THE number this re-run exists for. A piece of the suspend below the detector's threshold is
+  # charged to the client as idleness it never spent; on 2026-08-23 that was a third of a 5-minute
+  # lid-close, because macOS fragments a short sleep into 20-30s pieces with dark wakes between.
+  if [ "${frozen_n:-0}" -gt 0 ]; then
+    charged=$(( frozen_total - forgiven ))
+    [ "$charged" -lt 0 ] && charged=0
+    if [ "$frozen_total" -gt 0 ] && [ "$((charged * 100 / frozen_total))" -le 15 ]; then
+      verdict ok "how much of the suspend was forgiven" \
+        "${forgiven}s of ${frozen_total}s; only ${charged}s charged as idleness"
+    else
+      verdict huh "how much of the suspend was forgiven" \
+        "${forgiven}s of ${frozen_total}s -- ${charged}s ($((charged * 100 / frozen_total))%) charged as idleness the client never spent"
+    fi
   fi
 
   # 3. did the notice reach the client, and how soon after the stream came back?
@@ -391,13 +425,21 @@ check() {
   else
     verdict huh "the client side was frozen too" "the freshness loop never noticed a freeze"
   fi
-  if [ -n "${client_gap:-}" ] && [ -n "${forgiven:-}" ]; then
-    local delta=$(( client_gap > forgiven ? client_gap - forgiven : forgiven - client_gap ))
+  # Compare like with like: the freshness loop stops at the FIRST freeze (by design, so it cannot
+  # stamp the session fresh afterwards), so its number is one piece of the suspend, not the whole
+  # of it. The matching server-side number is therefore the first forgiven pass, not the total --
+  # comparing it to the total was a category error that made a healthy 3-hour run look wrong.
+  local first_forgiven delta
+  first_forgiven=$(grep -o 'was not running for about [0-9]*s' "$gemlog" 2>/dev/null \
+    | head -1 | grep -o '[0-9]*')
+  if [ -n "${client_gap:-}" ] && [ -n "${first_forgiven:-}" ]; then
+    delta=$(( client_gap > first_forgiven ? client_gap - first_forgiven : first_forgiven - client_gap ))
     if [ "$delta" -le 120 ]; then
-      verdict ok "the two measurements agree" "client ${client_gap}s vs forgiven ${forgiven}s"
+      verdict ok "client and server agree on that first piece" \
+        "client ${client_gap}s, server forgave ${first_forgiven}s"
     else
-      verdict huh "the two measurements agree" \
-        "client ${client_gap}s vs forgiven ${forgiven}s -- ${delta}s apart, worth reading the logs"
+      verdict huh "client and server agree on that first piece" \
+        "client ${client_gap}s vs server ${first_forgiven}s -- ${delta}s apart, worth reading the logs"
     fi
   fi
 
@@ -417,6 +459,23 @@ check() {
   dim "The keepalive gap and the notice timestamp together answer the question no unit test can:"
   dim "whether GemStone's Delay comes back promptly after a real suspend. Compare the last keepalive"
   dim "before the gap, the first one after it, and the time on the suspend notice."
+  # macOS's own account of the same window, which is the only way to see the dark wakes: the gem
+  # cannot observe a wake it was not scheduled during, so a piece it never noticed looks like
+  # ordinary running time from inside.
+  if [ -n "${ARMED_AT_HUMAN:-}" ]; then
+    local mac_total
+    mac_total=$(pmset -g log 2>/dev/null | grep 'Entering Sleep state' \
+      | awk -v start="$ARMED_AT_HUMAN" '$0 >= start' \
+      | sed -E 's/.*[^0-9]([0-9]+) secs.*/\1/' | awk '{s+=$1} END {print s+0}')
+    if [ "${mac_total:-0}" -gt 0 ]; then
+      verdict ok "macOS agrees about the total" "${mac_total}s asleep by its own power log"
+      dim "      pieces, from pmset:"
+      pmset -g log 2>/dev/null | grep 'Entering Sleep state' \
+        | awk -v start="$ARMED_AT_HUMAN" '$0 >= start' \
+        | sed -E 's/^([0-9-]+ [0-9:]+).*due to .([A-Za-z ]+).*[^0-9]([0-9]+) secs.*/        \1  \2  \3s/' | head -30
+    fi
+  fi
+
   echo
   echo "Around the gap:"
   grep -n 'keepalive\|was not running\|ping\|has ended' "$STREAM_LOG" 2>/dev/null | tail -12 | sed 's/^/  /'
