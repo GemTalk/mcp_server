@@ -270,8 +270,10 @@ forkOnPort: aPort
    Stop it by port with ./stop-server.sh, or via `System stopSession: <id>` / `kill <pid>` (both
    printed below). Answers a status string. Requires GsTsExternalSession."
   | es sid pid s |
-  es := GsTsExternalSession newDefaultForGemHost: 'localhost'.
-  es useOnetimePassword.
+  es := GsTsExternalSession newDefault
+          gemNRS: (GsNetworkResourceString defaultGemNRSFromCurrent node: 'localhost'; yourself);
+          yourself.
+  es onetimePassword: (GsCurrentSession currentSession createOnetimePasswordValidForSeconds: 300).
   es login.
   "Capture the child's id/pid BEFORE launching the loop -- once the non-blocking call is running the
    external session rejects further queries (GciError 'operation in progress')."

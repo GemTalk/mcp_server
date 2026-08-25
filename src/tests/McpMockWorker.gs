@@ -208,7 +208,7 @@ stoneSessionId
 %
 category: 'session protocol'
 method: McpMockWorker
-useOnetimePassword
+onetimePassword: aString
   ^self
 %
 category: 'session protocol'
