@@ -137,8 +137,15 @@ category: 'initialization'
 method: McpSession
 newWorkerSession
   "A fresh, not-yet-logged-in GsTsExternalSession worker gem on localhost. GsTsExternalSession is
-   assumed present -- it exists in every supported image (GemStone 3.6.2+)."
-  ^GsTsExternalSession newDefaultForGemHost: 'localhost'
+   assumed present -- it exists in every supported image (GemStone 3.6.2+).
+   Built as #newDefault plus an explicit gem NRS rather than #newDefaultForGemHost:, which does not
+   exist before 3.7.5. The two are equivalent: the kernel's #newDefaultForGemHost: IS #newDefault
+   with the NRS node replaced, and #newDefault takes its node from #currentGemHostName. Pinning the
+   node to 'localhost' keeps the worker on this machine even where the host name does not resolve,
+   and uses only selectors present in every 3.7.x image, so one code path serves all of them."
+  ^GsTsExternalSession newDefault
+    gemNRS: (GsNetworkResourceString defaultGemNRSFromCurrent node: 'localhost'; yourself);
+    yourself
 %
 category: 'initialization'
 method: McpSession
@@ -232,7 +239,7 @@ startWithId: anId readOnly: aBoolean
   id := anId.
   userId := System myUserProfile userId.
   worker := self newWorkerSession.
-  worker useOnetimePassword.
+  worker onetimePassword: (GsCurrentSession currentSession createOnetimePasswordValidForSeconds: 300).
   worker login.
   self cacheWorkerIds.
   readOnly := aBoolean.
