@@ -538,9 +538,14 @@ clean() {
     [ -n "$pid" ] && kill "$pid" 2>/dev/null
   done
   pkill -f "tail -f -n +1 $STREAM_LOG" 2>/dev/null
-  pid="$(lsof -nP -iTCP:"$PORT" -sTCP:LISTEN -t 2>/dev/null)"
-  [ -n "$pid" ] && kill $pid 2>/dev/null
-  echo "Stopped the front end on $PORT and the background captures."
+  # Delegate the front end to stop-server.sh, and let it say what it actually did. Open-coded, this
+  # read a bare lsof and inferred "nothing is listening" from an empty result -- which on a minimal
+  # PATH means "lsof was not found" (see gs_env_require_lsof), so the gem kept running while the
+  # line below announced it had been stopped. stop-server.sh also kills only a gem and escalates
+  # SIGTERM -> SIGKILL. The arm-time check above stays on nc for an unrelated reason: it has to see
+  # listeners owned by OTHER users, which an unprivileged lsof hides.
+  GS_MCP_PORT="$PORT" ./stop-server.sh
+  echo "Stopped the background captures."
   echo "State left in $STATE (rm -rf it when you are done with the evidence)."
 }
 
