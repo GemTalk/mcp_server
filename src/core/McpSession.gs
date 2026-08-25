@@ -7,7 +7,7 @@ Object subclass: 'McpSession'
                     lastActivitySeconds userId readOnly workerClassName
                     toolsetNames serverName serverTitle serverVersion
                     workerPid workerStoneSession outbox logLevel
-                    probeState idleWarned startedAtSeconds expiresAtSeconds
+                    probeState idleWarned expiryWarned startedAtSeconds expiresAtSeconds
                     lastProbeAtSeconds lastStreamSeenAtSeconds)
   classVars: #()
   classInstVars: #()
@@ -184,7 +184,40 @@ renewExpiryTo: aSecondOrNil
   expiresAtSeconds isNil ifTrue: [^false].
   aSecondOrNil <= expiresAtSeconds ifTrue: [^false].
   expiresAtSeconds := aSecondOrNil.
+  "The client was warned about a deadline that no longer applies, so it is owed a fresh warning
+   before the new one. Without this a long-lived session is warned exactly once, ever."
+  expiryWarned := false.
   ^true
+%
+category: 'accessing'
+method: McpSession
+startedAtSeconds
+  "When this session was opened, as a wall-clock second. Exposed so a router can tell WHICH bound is
+   about to end a session -- an absolute lifetime cap is startedAtSeconds + the cap, and comparing
+   that against #expiresAtSeconds says whether the cap or a credential is the binding one, without
+   either storing that fact or reading a clock twice to infer it."
+  ^startedAtSeconds
+%
+category: 'session lifetime'
+method: McpSession
+secondsUntilExpiry
+  "Seconds remaining before this session's absolute deadline, or nil if it has none. Negative once
+   the deadline has passed and the reaper has not yet come round."
+  ^expiresAtSeconds isNil ifTrue: [nil] ifFalse: [expiresAtSeconds - System timeGmt]
+%
+category: 'session lifetime'
+method: McpSession
+expiryWarned
+  "Whether this client has already been told its session is nearing its absolute deadline. Separate
+   from #idleWarned because the two deadlines are independent: a busy authenticated session can be
+   minutes from its credential's exp while nowhere near an idle timeout."
+  ^expiryWarned == true
+%
+category: 'session lifetime'
+method: McpSession
+noteExpiryWarned
+  expiryWarned := true.
+  ^self
 %
 category: 'liveness'
 method: McpSession

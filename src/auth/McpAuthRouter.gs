@@ -646,6 +646,24 @@ tokenExpirySecondsOf: aJwtString
 %
 category: 'session lifetime'
 method: McpAuthRouter
+expiryAdviceFor: sess
+  "On an authenticated router the deadline is usually the access token's exp, and that IS extendable
+   -- a request carrying a refreshed token moves it (#renewSessionExpiry:from:), and clients refresh
+   ahead of expiry on their own. So the useful advice is the opposite of the base class's.
+   Except when it is not. #maxSessionLifetimeSeconds, if configured, also lands on this session as an
+   expiry, and whichever bound is sooner wins -- expiresAtSeconds: keeps the earlier. Telling a
+   client to refresh its token when the binding deadline is a fixed cap would be advice that cannot
+   work, so compare the two: the cap falls exactly at startedAtSeconds + the cap, and if that is the
+   deadline in force then the cap is what is ending this session and the base advice is the true one.
+   Both computed from stored integers, so no clock is read twice to decide."
+  self maxSessionLifetimeSeconds ifNotNil: [:secs |
+    sess expiresAtSeconds = (sess startedAtSeconds + secs)
+      ifTrue: [^super expiryAdviceFor: sess]].
+  ^'This is your access credential''s expiry. A client that refreshes its token keeps the session: '
+    , 'the next call carrying a refreshed token extends it, and no work is lost.'
+%
+category: 'session lifetime'
+method: McpAuthRouter
 renewSessionExpiry: sess from: aJwtString
   "Extend sess's deadline to the exp of aJwtString -- the token on the request being served right
    now -- so that a client which keeps proving its authorization keeps its worker gem. Answers

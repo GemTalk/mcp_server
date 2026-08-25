@@ -197,6 +197,47 @@ testAnUnparseableTokenBuysNoTimeOnAWriteSession
 %
 category: 'tests'
 method: McpAuthTest
+testAnAuthRouterTellsAClientToRefreshItsToken
+  "The advice that fits an access token's exp: refreshing keeps the session, because a request
+   carrying the refreshed token extends it."
+  | router sess advice |
+  router := McpAuthRouter new.
+  sess := McpStubSession new startWithId: 'sid-advice'.
+  sess expiresAtSeconds: System timeGmt + 60.
+  advice := router expiryAdviceFor: sess.
+  self assert: (self includesCS: 'refreshes its token' in: advice).
+  self deny: (self includesCS: 'cannot be extended' in: advice)
+%
+category: 'tests'
+method: McpAuthTest
+testAFixedCapOutranksTheRefreshAdvice
+  "When maxSessionLifetimeSeconds is the BINDING deadline rather than the token, telling the client
+   to refresh would be advice that cannot work: the cap is on the session, not the credential. The
+   two are told apart by arithmetic on stored integers -- the cap falls at startedAtSeconds + cap."
+  | router sess advice |
+  router := McpAuthRouter new.
+  router maxSessionLifetimeSeconds: 600.
+  sess := McpStubSession new startWithId: 'sid-capped'.
+  sess expiresAtSeconds: sess startedAtSeconds + 600.
+  advice := router expiryAdviceFor: sess.
+  self assert: (self includesCS: 'cannot be extended' in: advice).
+  self deny: (self includesCS: 'refreshes its token' in: advice)
+%
+category: 'tests'
+method: McpAuthTest
+testATokenExpiringBeforeTheCapStillGetsRefreshAdvice
+  "The other half: a cap is configured but the token expires first, so the token IS the binding
+   deadline and refreshing it is exactly the right advice."
+  | router sess advice |
+  router := McpAuthRouter new.
+  router maxSessionLifetimeSeconds: 86400.
+  sess := McpStubSession new startWithId: 'sid-token-first'.
+  sess expiresAtSeconds: System timeGmt + 300.
+  advice := router expiryAdviceFor: sess.
+  self assert: (self includesCS: 'refreshes its token' in: advice)
+%
+category: 'tests'
+method: McpAuthTest
 testAnUnreadableTokenExpiryLeavesTheIdlePolicyInCharge
   "Fail soft, not open: a token whose exp cannot be parsed simply leaves the session bound by the
    idle policy alone, which is where it stood before this existed. It cannot fail OPEN, because the

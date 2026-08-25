@@ -368,6 +368,17 @@ against the others before a port is bound.
 | `maxSessionLifetimeSeconds` | `nil` | absolute cap, however busy the session is |
 | `reapOnFailedProbe` | `true` | whether an unanswered ping frees a gem early. Forced on with no deadline |
 
+**What actually ends a session**, in one place: a **deadline counts calls**; **`none` counts pings**;
+a client that opens **no stream** gets `streamlessIdleTimeoutSeconds` either way, because a ping can
+only be sent down a stream the client itself opened. So `GS_MCP_IDLE_TIMEOUT=none` does not mean "no
+limit" — it means the client's own answers are the limit, and a client that stops answering, or that
+never opened a stream, is still released.
+
+Before either deadline the client is warned on its stream, once, with advice that fits which deadline
+is approaching: an idle timeout says to make any call (`status` is enough), while an absolute one —
+`maxSessionLifetimeSeconds`, or an access token's `exp` — says whether it can be extended at all. A
+refreshed deadline earns a fresh warning.
+
 From the shell, `GS_MCP_IDLE_TIMEOUT` and friends set these on either launcher — durations like
 `90s`, `30m`, `4h`, or `none`. See [session-lifetime.sh](session-lifetime.sh), which documents each.
 

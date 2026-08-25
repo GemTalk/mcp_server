@@ -689,6 +689,11 @@ maintainIdleSession: sess
    oversight: pinging it would record an unanswered probe and reap its gem EARLY for the sole
    offence of not opening a stream."
   sess outbox hasStream ifFalse: [^false].
+  "The absolute deadline is checked BEFORE the liveness cycle, and does not wait on a ping verdict.
+   Idleness and expiry are independent: a client calling every minute is never probed, so gating the
+   expiry warning on #isKnownAlive the way the idle warning is gated would mean the sessions most
+   likely to hit an expiry -- busy ones -- are the only ones never warned about it."
+  (self expiryWarningDue: sess) ifTrue: [^self warnExpiringSession: sess].
   sess isProbeOutstanding ifTrue: [^false].    "answer still owed; decide on a later pass"
   (self probeDue: sess) ifTrue: [^self probeSession: sess].
   sess isKnownAlive ifFalse: [^false].         "no verdict yet, or none coming: nothing to say"
@@ -1649,10 +1654,52 @@ warnIdleSession: sess
   minutes := ((self sessionIdleTimeoutSeconds - sess idleSeconds) // 60) max: 1.
   (self enqueueLog: 'This MCP session will be released after about ' , minutes printString ,
       ' more minute(s) idle. Its GemStone worker gem holds its own transaction view, so any ' ,
-      'uncommitted changes will be lost -- commit them, or make any call, to keep the session.'
+      'uncommitted changes will be lost -- commit them, or make any call (status is enough), ' ,
+      'to keep the session.'
     level: 'warning' toSession: sess) ifFalse: [^false].
   sess noteIdleWarned.
   ^true
+%
+category: 'sessions'
+method: McpRouter
+expiryWarningDue: sess
+  "Whether it is time to tell this client its session is nearing its ABSOLUTE deadline -- the one
+   that activity cannot postpone. Unlike #warningDue: this applies whatever the idle policy is,
+   including none: a session with no idle deadline can still carry a credential's exp, and that is
+   exactly the case where nothing else would ever warn it.
+   Shares #idleWarningLeadSeconds rather than introducing a knob of its own. The lead means the same
+   thing in both places -- how much notice a client gets -- and a deployment that wants more warning
+   wants more of both."
+  sess expiryWarned ifTrue: [^false].
+  ^sess secondsUntilExpiry
+    ifNil: [false]
+    ifNotNil: [:left | left <= self idleWarningLeadSeconds]
+%
+category: 'sessions'
+method: McpRouter
+warnExpiringSession: sess
+  "Tell a client its session is about to reach its absolute deadline, and answer whether the warning
+   was queued. The advice differs by what imposed the deadline, so it comes from #expiryAdviceFor:.
+   Warned once per deadline, not once per session: #renewExpiryTo: clears the flag, so a session
+   whose credential is refreshed is warned again before the new expiry."
+  | minutes |
+  minutes := (sess secondsUntilExpiry // 60) max: 0.
+  (self enqueueLog: 'This MCP session reaches its time limit in about ' , minutes printString ,
+      ' minute(s), whether or not it is being used. Its GemStone worker gem will be released and '
+      , 'any uncommitted changes in it lost. ' , (self expiryAdviceFor: sess)
+    level: 'warning' toSession: sess) ifFalse: [^false].
+  sess noteExpiryWarned.
+  ^true
+%
+category: 'sessions'
+method: McpRouter
+expiryAdviceFor: sess
+  "What this client can usefully do about an approaching absolute deadline. Here, nothing: the only
+   expiry a plain router imposes is #maxSessionLifetimeSeconds, which is a cap on the session
+   itself and cannot be extended by anything the client does. Saying so is the point -- the idle
+   warning tells a client to make a call, and repeating that advice here would be wrong."
+  ^'This limit is a fixed cap on session length and cannot be extended; commit anything you need '
+    , 'to keep, then send initialize for a fresh session.'
 %
 category: 'sessions'
 method: McpRouter

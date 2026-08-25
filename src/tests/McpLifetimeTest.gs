@@ -182,6 +182,71 @@ testAnExpiredButUnreapedSessionIsStillRenewable
   self assert: (sess renewExpiryTo: now + 900).
   self deny: sess isExpired
 %
+category: 'tests - expiry'
+method: McpLifetimeTest
+testAnExpiringSessionIsWarnedEvenWhenItIsNowhereNearIdle
+  "The case the idle warning cannot cover. A client calling steadily is never probed, so it is never
+   #isKnownAlive, so gating the expiry warning the way the idle warning is gated would mean the
+   sessions most likely to reach an expiry are the only ones never told."
+  | router sess |
+  router := McpFixtureRouter new.
+  sess := self streamedSessionOn: router.
+  sess touch.
+  sess expiresAtSeconds: System timeGmt + 60.
+  self assert: (router expiryWarningDue: sess).
+  self assert: (router maintainIdleSession: sess).
+  self assert: sess expiryWarned.
+  self assert: (self includesCS: 'reaches its time limit' in: (self noticeIn: sess))
+%
+category: 'tests - expiry'
+method: McpLifetimeTest
+testAnExpiryWarningIsSentOncePerDeadlineNotOncePerPass
+  "The maintenance pass runs every minute; the warning must not go out on each one."
+  | router sess |
+  router := McpFixtureRouter new.
+  sess := self streamedSessionOn: router.
+  sess expiresAtSeconds: System timeGmt + 60.
+  self assert: (router expiryWarningDue: sess).
+  router warnExpiringSession: sess.
+  self deny: (router expiryWarningDue: sess)
+%
+category: 'tests - expiry'
+method: McpLifetimeTest
+testARenewedDeadlineEarnsAFreshWarning
+  "A session whose credential is refreshed gets a new deadline, so it is owed a new warning. Without
+   clearing the flag a long-lived session would be warned exactly once, ever, about the first of
+   many deadlines."
+  | router sess |
+  router := McpFixtureRouter new.
+  sess := self streamedSessionOn: router.
+  sess expiresAtSeconds: System timeGmt + 60.
+  router warnExpiringSession: sess.
+  self assert: sess expiryWarned.
+  self assert: (sess renewExpiryTo: System timeGmt + 3600).
+  self deny: sess expiryWarned
+%
+category: 'tests - expiry'
+method: McpLifetimeTest
+testASessionWithNoDeadlineIsNeverExpiryWarned
+  "Most sessions have no absolute deadline at all, and must not be warned about one."
+  | router sess |
+  router := McpFixtureRouter new.
+  sess := self streamedSessionOn: router.
+  self assert: sess secondsUntilExpiry isNil.
+  self deny: (router expiryWarningDue: sess)
+%
+category: 'tests - expiry'
+method: McpLifetimeTest
+testAPlainRouterDoesNotTellAClientToRefreshAnything
+  "The base advice must not repeat the idle warning's 'make a call': maxSessionLifetimeSeconds is a
+   cap on the session itself, and nothing the client does can extend it."
+  | router sess advice |
+  router := McpFixtureRouter new.
+  sess := self streamedSessionOn: router.
+  advice := router expiryAdviceFor: sess.
+  self assert: (self includesCS: 'cannot be extended' in: advice).
+  self deny: (self includesCS: 'refresh' in: advice)
+%
 category: 'tests - indefinite'
 method: McpLifetimeTest
 testAnIndefiniteSessionIsReprobedOnTheCadence
