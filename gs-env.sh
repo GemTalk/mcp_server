@@ -72,6 +72,36 @@ _gs_env_gslist_finds_servers() {
   GEMSTONE_GLOBAL_DIR="$1" "$GEMSTONE/bin/gslist" -l 2>/dev/null | grep -qE '^(OK|exists|startup|recovery)'
 }
 
+# Locate lsof, which is NOT reliably on PATH. On macOS it lives in /usr/sbin, and /usr/sbin is
+# absent from the minimal PATH a cron job, a systemd unit, a container, or a `env -i` invocation
+# tends to get. That matters more than it sounds: every caller here reads "no lsof output" as "no
+# server is listening", so a missing lsof does not fail, it LIES -- stop-server.sh reports "nothing
+# to stop" and leaves the gem running, and test.sh's teardown then leaves a front end holding the
+# port. The next test run finds that port occupied and tests against the OLD front end, which is
+# especially misleading because a router gem does not pick up recompiled code the way worker gems
+# do. Sets GS_LSOF to an absolute path.
+gs_env_locate_lsof() {
+  if command -v lsof >/dev/null 2>&1; then GS_LSOF="$(command -v lsof)"; return 0; fi
+  local c
+  for c in /usr/sbin/lsof /sbin/lsof /usr/bin/lsof /bin/lsof /usr/local/bin/lsof /opt/homebrew/bin/lsof; do
+    [ -x "$c" ] && { GS_LSOF="$c"; return 0; }
+  done
+  GS_LSOF=""
+  return 1
+}
+
+# Same, but refuses to continue. Use wherever "nothing is listening" would otherwise be inferred
+# from silence.
+gs_env_require_lsof() {
+  gs_env_locate_lsof && return 0
+  echo "error: lsof not found on PATH or in the usual locations." >&2
+  echo "       This script uses it to find (and stop) the gem listening on a port, and without it" >&2
+  echo "       an empty result is indistinguishable from 'no server is running' -- so it would" >&2
+  echo "       silently report success while leaving a front end holding the port." >&2
+  echo "       On macOS lsof is /usr/sbin/lsof; add /usr/sbin to PATH, or set GS_LSOF to its path." >&2
+  return 1
+}
+
 # ---------------------------------------------------------------------------------------------
 # Public functions.
 

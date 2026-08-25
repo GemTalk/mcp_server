@@ -60,7 +60,7 @@ gs_env_require_netldi
 
 # Refuse a port that is already served, rather than letting the forked gem fail on bind in a log
 # nobody is watching.
-if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$GS_MCP_PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
+if gs_env_locate_lsof && "$GS_LSOF" -nP -iTCP:"$GS_MCP_PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
   echo "error: something is already listening on port $GS_MCP_PORT." >&2
   echo "       Stop it with  GS_MCP_PORT=$GS_MCP_PORT ./stop-server.sh  or pick another GS_MCP_PORT." >&2
   exit 1
