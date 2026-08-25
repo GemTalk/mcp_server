@@ -1,5 +1,5 @@
-! Load the native GemStone MCP server classes (including the OAuth/OIDC front end McpAuthRouter)
-! PLUS the optional GemStone-Python (Grail) toolset.
+! Load the native GemStone MCP server classes PLUS the optional GemStone-Python (Grail) toolset.
+! Like load.gs, this branch carries no OAuth/OIDC front end -- see load.gs.
 ! Only valid on an image that has Grail/ModuleAst -- the Grail toolset's methods reference
 ! ModuleAst and BaseException and cannot compile without them.
 ! Run from an already-logged-in topaz session whose current directory is the repository root:
@@ -8,7 +8,6 @@
 
 input src/core/load.gs
 input src/tests/load.gs
-input src/auth/load.gs
 input src/grail/load.gs
 
 commit

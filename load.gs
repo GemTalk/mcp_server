@@ -1,6 +1,6 @@
-! Load the native GemStone MCP server classes into the image, including the OAuth/OIDC-
-! authenticating front end (McpAuthRouter). On this branch auth is part of the base load, not an
-! option -- see the README.
+! Load the native GemStone MCP server classes into the image.
+! This branch targets GemStone 3.7.2, which has no kernel JWT support, so it carries no
+! OAuth/OIDC front end: there is no src/auth group and no McpAuthRouter -- see the README.
 ! Run from an already-logged-in topaz session whose current directory is the repository root:
 !   topaz> input load.gs
 ! (or use install.sh, which logs in, runs this, and commits).
@@ -10,6 +10,5 @@
 
 input src/core/load.gs
 input src/tests/load.gs
-input src/auth/load.gs
 
 commit

@@ -102,8 +102,7 @@ names := #( 'McpError' 'McpTool' 'McpToolRegistry' 'McpToolset' 'McpBrowsingTool
   'McpSessionToolset' 'McpTestingToolset' 'McpHttpConnection' 'McpDispatcher' 'McpBase'
   'McpServer' 'McpSession' 'McpRouter' 'McpMockSocket' 'McpMockWorker' 'McpMockSession'
   'McpStubSession' 'McpFixtureToolset' 'McpFixtureServer' 'McpToolTest' 'McpDispatcherTest'
-  'McpTransportTest' 'McpContractTest' 'McpExtensionTest' 'McpSessionTest' 'McpAuthRouter'
-  'McpAuthTest' 'McpAuthConformanceTest' ) asOrderedCollection.
+  'McpTransportTest' 'McpContractTest' 'McpExtensionTest' 'McpSessionTest' ) asOrderedCollection.
 '$LOAD_FILE' = 'load-grail.gs'
   ifTrue: [ names add: 'McpGrailToolset'; add: 'McpGrailToolsetTest' ].
 up := System myUserProfile.

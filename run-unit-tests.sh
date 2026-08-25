@@ -5,11 +5,10 @@
 #
 # Assumes the classes are already installed (run ./install.sh first).
 #
-# NB: McpAuthTest is not purely in-image -- its fixtures create and commit a throwaway
-# JWT-enabled UserProfile (touching AllUsers) and it spawns a real worker gem, so a NETLDI
-# must be running. It is included anyway: it is the only suite covering the token->session
-# path, and leaving it out of this list once let a broken parse in McpAuthRouter (every
-# token rejected as malformed) go unnoticed.
+# Every suite here is purely in-image: they drive McpMockSession, which overrides
+# McpSession>>newWorkerSession, so nothing spawns a real gem and NO NETLDI IS NEEDED. That is
+# only true while the list stays mock-only -- a suite that logs in a real worker (as the removed
+# McpAuthTest did) must restore GS_NEEDS_NETLDI=1 and the gs_env_require_netldi call below.
 #
 # Configure (or export before running):
 #   GEMSTONE   - GemStone product directory (REQUIRED; no default can be guessed)
@@ -24,14 +23,10 @@ GS_STONE="${GS_STONE:-gs64stone}"
 GS_USER="${GS_USER:-DataCurator}"
 GS_PASS="${GS_PASS:-swordfish}"
 
-# A netldi IS required here, for the reason in the note above: McpAuthTest spawns a real worker
-# gem. Checking it up front beats discovering it as a GciError partway through a suite run.
 . ./gs-env.sh
-GS_NEEDS_NETLDI=1
 gs_env_resolve
 if [ "${1:-}" = "--check" ]; then gs_env_check; exit $?; fi
 gs_env_require_stone
-gs_env_require_netldi
 
 # Stream topaz output live AND keep a copy to gate on. Do NOT wrap the heredoc in $( ... ):
 # under `set -e`, a command substitution that exits non-zero aborts the script BEFORE anything
@@ -51,7 +46,7 @@ iferr 1 stk
 run
 | s classes grailTest |
 classes := #( 'McpToolTest' 'McpDispatcherTest' 'McpSessionTest' 'McpTransportTest'
-  'McpContractTest' 'McpExtensionTest' 'McpAuthTest' 'McpAuthConformanceTest' ) asOrderedCollection.
+  'McpContractTest' 'McpExtensionTest' ) asOrderedCollection.
 grailTest := System myUserProfile objectNamed: #McpGrailToolsetTest.
 grailTest ifNotNil: [classes add: 'McpGrailToolsetTest'].
 s := WriteStream on: String new.
