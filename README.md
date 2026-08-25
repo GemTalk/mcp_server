@@ -828,6 +828,9 @@ default stays plaintext — nothing to restore even if interrupted. Uses port `8
 - SSE resumability (`Last-Event-ID`).
 - Mapping **OAuth scopes to toolsets**, so a token's scopes select what it may *see* rather than only
   whether it may write.
+- Reaping a session as soon as its client **closes the event stream**, rather than waiting out
+  `streamlessIdleTimeoutSeconds`. A closed socket is evidence the client is gone, so an abandoned
+  worker gem need not hold a login slot for 30 minutes.
 - A deadline for a forwarded request, now that a non-blocking forward makes one possible.
 - The draft `2026-07-28` protocol revision, which first needs a decision about how per-client
   worker-gem isolation survives a protocol with no session id — see
