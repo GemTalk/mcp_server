@@ -17,8 +17,14 @@ cd "$(dirname "$0")"
 
 GS_MCP_PORT="${GS_MCP_PORT:-8000}"
 
+# Find lsof before trusting its silence. Everything below infers "no server is running" from an
+# empty result, so an lsof that is merely NOT ON PATH would make this script report success while
+# leaving the gem running -- see gs_env_require_lsof.
+. ./gs-env.sh
+gs_env_require_lsof
+
 # -t: pids only;  -sTCP:LISTEN: only the listener, not connected clients.
-pids=$(lsof -nP -iTCP:"$GS_MCP_PORT" -sTCP:LISTEN -t 2>/dev/null || true)
+pids=$("$GS_LSOF" -nP -iTCP:"$GS_MCP_PORT" -sTCP:LISTEN -t 2>/dev/null || true)
 if [ -z "$pids" ]; then
   echo "Nothing listening on 127.0.0.1:$GS_MCP_PORT -- no MCP server to stop."
   exit 0
