@@ -20,22 +20,22 @@
 #                           regardless, so `none` there means "until the token expires".
 #   GS_MCP_MAX_LIFETIME     Absolute cap on any session's life, however busy it is. Unset = none.
 #                           Never forgiven, unlike idleness -- including across a host suspend.
-#   GS_MCP_PROBE_INTERVAL   How often a quiet session with NO idle deadline is re-asked whether its
-#                           client is still there. Default 5m. Ignored when there is a deadline.
+#   GS_MCP_PROBE_INTERVAL   How often a quiet session is asked whether its client is still there.
+#                           Default 5m. This is also the unit idleness is MEASURED in: a session is
+#                           released once it has answered GS_MCP_IDLE_TIMEOUT worth of these pings
+#                           with no work in between (six of them, at the defaults).
 #   GS_MCP_STREAMLESS_TIMEOUT
-#                           The deadline that still applies to a client which never opened an SSE
-#                           stream, when GS_MCP_IDLE_TIMEOUT is `none`. Default 30m. Such a client
-#                           can never be pinged, so this is the only thing that can free its gem.
-#   GS_MCP_WARNING_LEAD     How long before the deadline a session is pinged and then warned it is
-#                           about to lose its uncommitted work. Unset = derived from the timeout and
-#                           the reaper cadence, which is almost always what you want: the ping and
-#                           the warning need two maintenance passes and an answer window between
-#                           them, and a lead too short for that silently never warns anybody.
-#   GS_MCP_REAPER_INTERVAL  How often the maintenance pass runs. Default 60s.
-#   GS_MCP_PENDING_TIMEOUT  How long a server-initiated request (today, a liveness ping) may go
-#                           unanswered before it is decided. Default 30s. Must stay shorter than
-#                           GS_MCP_REAPER_INTERVAL, or a ping sent on one pass is still undecided on
-#                           the next; the router refuses to start otherwise.
+#                           The deadline that applies to a client which never opened an SSE stream.
+#                           Default 30m. Such a client can never be pinged, so there is no evidence
+#                           to count and this is the only thing that can free its gem.
+#   GS_MCP_REAPER_INTERVAL  How often the maintenance pass runs. Default 60s. The pass is the
+#                           server's clock -- it ticks only while the front end is running -- so
+#                           every count below is measured in passes, not in elapsed time.
+#   GS_MCP_EXPIRY_WARNING_LEAD
+#                           How long before an ABSOLUTE deadline -- a lifetime cap, or an access
+#                           token's exp -- a client is warned. Default 5m, and in seconds because
+#                           that deadline is itself a wall-clock fact. There is no equivalent knob
+#                           for the idle warning: it goes out when exactly one answered ping remains.
 #   GS_MCP_REAP_ON_FAILED_PROBE
 #                           0 to stop treating an unanswered liveness ping as grounds for releasing
 #                           a gem early. Default 1. Ignored (forced on) with no idle deadline, where
@@ -84,11 +84,10 @@ r sessionIdleTimeoutSeconds: nil." ;;
 esac
 
 mcp_lifetime_line "${GS_MCP_MAX_LIFETIME:-}"        maxSessionLifetimeSeconds     GS_MCP_MAX_LIFETIME
+mcp_lifetime_line "${GS_MCP_EXPIRY_WARNING_LEAD:-}" expiryWarningLeadSeconds      GS_MCP_EXPIRY_WARNING_LEAD
 mcp_lifetime_line "${GS_MCP_PROBE_INTERVAL:-}"      livenessProbeIntervalSeconds  GS_MCP_PROBE_INTERVAL
 mcp_lifetime_line "${GS_MCP_STREAMLESS_TIMEOUT:-}"  streamlessIdleTimeoutSeconds  GS_MCP_STREAMLESS_TIMEOUT
-mcp_lifetime_line "${GS_MCP_WARNING_LEAD:-}"        idleWarningLeadSeconds        GS_MCP_WARNING_LEAD
 mcp_lifetime_line "${GS_MCP_REAPER_INTERVAL:-}"     reaperIntervalSeconds         GS_MCP_REAPER_INTERVAL
-mcp_lifetime_line "${GS_MCP_PENDING_TIMEOUT:-}"     pendingRequestTimeoutSeconds  GS_MCP_PENDING_TIMEOUT
 
 if [ "${GS_MCP_REAP_ON_FAILED_PROBE:-1}" = "0" ]; then
   LIFETIME_LINES="$LIFETIME_LINES

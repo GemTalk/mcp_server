@@ -7,8 +7,8 @@ Object subclass: 'McpSession'
                     lastActivitySeconds userId readOnly workerClassName
                     toolsetNames serverName serverTitle serverVersion
                     workerPid workerStoneSession outbox logLevel
-                    probeState idleWarned expiryWarned startedAtSeconds expiresAtSeconds
-                    lastProbeAtSeconds lastStreamSeenAtSeconds)
+                    idleWarned expiryWarned startedAtSeconds expiresAtSeconds
+                    quietProbes unansweredProbes streamlessPasses passesSinceProbe)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -219,23 +219,6 @@ noteExpiryWarned
   expiryWarned := true.
   ^self
 %
-category: 'liveness'
-method: McpSession
-forgiveSuspendedSeconds: anInteger
-  "The host was suspended (or the front-end gem was otherwise not running) for anInteger seconds, so
-   move this session's idle clock forward by that much: no service was offered during it, and idleness
-   is a measure of service time, not of wall time. See McpRouter>>forgiveSuspendedSeconds:.
-   Deliberately NOT applied to #expiresAtSeconds or to #ageSeconds: an expiry is an absolute
-   commitment (a token's exp does not pause because a laptop slept), and forgiving it would be a
-   security regression rather than a courtesy. Also drops whatever the last probe concluded -- a
-   verdict reached across a suspend is about the suspend, not about the client."
-  anInteger > 0 ifFalse: [^self].
-  lastActivitySeconds := lastActivitySeconds + anInteger.
-  probeState := nil.
-  lastProbeAtSeconds := nil.
-  idleWarned := false.
-  ^self
-%
 category: 'routing'
 method: McpSession
 forward: aRawJsonString
@@ -254,6 +237,9 @@ id
 category: 'activity'
 method: McpSession
 idleSeconds
+  "Wall-clock seconds since the last client REQUEST. DIAGNOSTIC ONLY -- nothing in the reaping
+   policy reads this, and nothing should. Wall clock cannot tell time this server spent serving
+   from time it spent suspended, and inferring one from the other is what #quietProbes replaced."
   ^System timeGmt - lastActivitySeconds
 %
 category: 'activity'
@@ -271,11 +257,54 @@ initialize
    GsProcesses -- an arriving GET stream and the reaper -- really could race to create it."
   outbox := McpOutbox new.
   logLevel := nil.
-  probeState := nil.
   idleWarned := false.
+  expiryWarned := false.
   startedAtSeconds := System timeGmt.
   expiresAtSeconds := nil.   "nil = no absolute deadline; McpAuthRouter sets one from the token exp"
-  lastProbeAtSeconds := nil.
+  "Everything the reaper measures is a COUNT of things this front end observed, never an elapsed
+   time it inferred. A suspended host runs no maintenance passes, so none of these can advance
+   while the server is not serving -- which is why there is no suspend detector to get wrong."
+  quietProbes := 0.        "consecutive liveness pings answered with no work in between"
+  unansweredProbes := 0.   "consecutive pings sent on the current stream with no answer"
+  streamlessPasses := 0.   "consecutive passes on which there was no stream to ask down"
+  passesSinceProbe := 0.   "passes since the last ping, for the probe cadence"
+  ^self
+%
+category: 'liveness'
+method: McpSession
+quietProbes
+  "How many consecutive liveness pings this client has answered with no request in between. The
+   idleness measure: each one is a fact this server asked for and was told, not an interval it
+   inferred from a clock it cannot trust across a suspend."
+  ^quietProbes
+%
+category: 'liveness'
+method: McpSession
+unansweredProbes
+  "How many pings are outstanding on the stream the client is still holding. Evidence of death only
+   in numbers -- see McpRouter>>unansweredProbesBeforeGone."
+  ^unansweredProbes
+%
+category: 'liveness'
+method: McpSession
+streamlessPasses
+  "Consecutive maintenance passes on which this session had no stream, so nothing could be asked of
+   its client at all. The only ground for releasing a session that can never be confirmed."
+  ^streamlessPasses
+%
+category: 'liveness'
+method: McpSession
+passesSinceProbe
+  ^passesSinceProbe
+%
+category: 'liveness'
+method: McpSession
+notePassWithStream: aBoolean
+  "One maintenance pass observed this session. This is the server's entire clock: it advances only
+   when the front end is actually running, which is what makes every count below immune to a host
+   suspend without anyone having to detect one."
+  passesSinceProbe := passesSinceProbe + 1.
+  streamlessPasses := aBoolean ifTrue: [0] ifFalse: [streamlessPasses + 1].
   ^self
 %
 category: 'activity'
@@ -295,28 +324,6 @@ isExpired
    Unlike idleness this is never forgiven and never probed around: the reaper frees such a session
    whatever its client is doing."
   ^expiresAtSeconds notNil and: [System timeGmt >= expiresAtSeconds]
-%
-category: 'liveness'
-method: McpSession
-isKnownAlive
-  "Whether this client answered its liveness ping. Only such a session is worth warning: it has an
-   open stream and something at the other end of it."
-  ^probeState == #alive
-%
-category: 'liveness'
-method: McpSession
-isKnownGone
-  "Whether a liveness ping this client was sent went unanswered. The reaper frees such a session's
-   worker gem immediately: the ping went down a stream the client itself opened, so silence is
-   evidence, not merely absent traffic."
-  ^probeState == #gone
-%
-category: 'liveness'
-method: McpSession
-isProbeOutstanding
-  "Whether a liveness ping is waiting for its answer, so the reaper neither sends another nor
-   decides anything yet."
-  ^probeState == #sent
 %
 category: 'accessing'
 method: McpSession
@@ -349,10 +356,13 @@ newWorkerSession
 category: 'activity'
 method: McpSession
 noteAlive
-  "The client answered a liveness ping. It is there; its worker gem is spared the early reap and
-   earns a real warning before the idle deadline. Deliberately NOT #touch -- see the class comment."
-  probeState := #alive.
-  ^self
+  "The client answered a liveness ping: it is there, and it did no work between the previous
+   confirmation and this one. That pair of facts is the whole idleness measure -- see
+   McpRouter>>confirmationsBeforeRelease -- and it is why nothing here reads a clock. A session
+   accrues idleness only from evidence it asked for and received.
+   Deliberately NOT #touch -- see the class comment. Answering a ping is not work."
+  unansweredProbes := 0.
+  quietProbes := quietProbes + 1
 %
 category: 'activity'
 method: McpSession
@@ -364,45 +374,36 @@ noteIdleWarned
 category: 'activity'
 method: McpSession
 noteProbeDiscarded
-  "Throw away an outstanding liveness probe WITHOUT concluding anything from it. For a ping that
-   was written to a stream the client has since replaced, the write succeeded -- into a socket
-   buffer nobody will ever read -- so the silence that follows is evidence about the transport and
-   not about the client. Treating it as proof of death frees a worker gem whose client is alive,
-   connected, and holding a perfectly good stream (measured: 6 of 14 pings, 2026-08-23).
-   Clearing the probe stamp too, so the next pass sends a fresh ping down the CURRENT stream rather
-   than waiting out the cadence on a verdict that never arrived."
-  probeState == #sent ifTrue: [probeState := nil].
-  lastProbeAtSeconds := nil.
-  ^self
+  "This ping proved nothing -- it went down a stream the client had already replaced, so no answer
+   could ever have arrived (McpRouter>>verdictAdmissible:forSession:). Undo the count it was given
+   when it was sent, rather than letting the transport speak for the client."
+  unansweredProbes := (unansweredProbes - 1) max: 0
 %
 category: 'activity'
 method: McpSession
 noteProbeSent
-  "A liveness ping is on its way; the reaper waits for the answer rather than sending another.
-   The time is stamped as well, because a session with no wall-clock deadline is re-probed on a
-   cadence (McpRouter>>livenessProbeIntervalSeconds) rather than once per idle period."
-  probeState := #sent.
-  lastProbeAtSeconds := System timeGmt.
-  ^self
+  "A liveness ping is on its way. It counts as unanswered from the moment it is sent, and stops
+   counting the instant an answer arrives (#noteAlive) or the ping is shown to have proved nothing
+   (#noteProbeDiscarded). Counting at SEND rather than at some later deadline is what removes the
+   last clock from this path: there is no moment at which a ping is declared late, only a number of
+   pings outstanding on a stream the client is still holding."
+  unansweredProbes := unansweredProbes + 1.
+  passesSinceProbe := 0
 %
 category: 'activity'
 method: McpSession
 noteProbeUnanswered
-  "The liveness ping timed out. Only a ping actually in flight can fail this way -- a session the
-   client has since spoken to has already been reset by #touch, and must not be marked gone by a
-   verdict on a probe that no longer applies."
-  probeState == #sent ifTrue: [probeState := #gone].
+  "Kept for symmetry with #noteProbeDiscarded and to name the outcome at the call site: a ping that
+   was admissible and went unanswered simply keeps the count it was given when it was sent, so there
+   is nothing to do here."
   ^self
 %
 category: 'liveness'
 method: McpSession
 noteStreamSeen
-  "Record that this client had an SSE stream open just now. Stamped by the front end's maintenance
-   pass, the only regular observer of the fact (McpRouter>>maintainIdleSession:), and read by
-   #unreachableSeconds -- so its resolution is one maintenance interval, which is ample for the
-   half-hour scale the streamless fallback works at."
-  lastStreamSeenAtSeconds := System timeGmt.
-  ^self
+  "A stream is attached right now. That is the only thing that can be observed about reachability
+   without asking the client, so it resets the count of passes on which nothing could be asked."
+  streamlessPasses := 0
 %
 category: 'accessing'
 method: McpSession
@@ -470,14 +471,6 @@ runWorker: anExpressionString
       whileTrue: [worker waitForResultForSeconds: self workerWaitSeconds otherwise: [nil]].
     self touch.
     worker lastResult]
-%
-category: 'liveness'
-method: McpSession
-secondsSinceProbe
-  "How long since a liveness ping was last sent to this client, or nil if none has been sent since
-   the idle cycle last restarted. What the re-probe cadence for a session with no wall-clock
-   deadline is measured against."
-  ^lastProbeAtSeconds isNil ifTrue: [nil] ifFalse: [System timeGmt - lastProbeAtSeconds]
 %
 category: 'accessing'
 method: McpSession
@@ -554,28 +547,14 @@ toolsetNames: aCollectionOfNamesOrNil
 category: 'activity'
 method: McpSession
 touch
-  "Record now (GMT seconds) as the last activity, for idle-timeout reaping, and start the idle cycle
-   over: a client that has just made a real MCP call needs no warning and no liveness probe, and
-   whatever the last probe concluded is now out of date."
+  "A client request arrived: the session is not idle, and everything counted about its quietness
+   starts again. Resets the confirmation count (it is no longer idle), the unanswered-ping count (a
+   request is far better evidence of life than a ping answer), and the probe cadence."
   lastActivitySeconds := System timeGmt.
-  probeState := nil.
-  lastProbeAtSeconds := nil.
-  idleWarned := false.
-  ^self
-%
-category: 'liveness'
-method: McpSession
-unreachableSeconds
-  "How long this client has been impossible to speak to: 0 while a stream is attached, otherwise the
-   time since one last was -- or, for a client that never opened one at all, simply how long it has
-   been idle.
-   This is what a router with NO idle deadline reaps on, and it deliberately is not the same as
-   idleness. A quiet client holding an open stream is answering pings and can be told anything; a
-   client with no stream can be told nothing and asked nothing, so it is the only kind that liveness
-   cannot speak for."
-  outbox hasStream ifTrue: [^0].
-  lastStreamSeenAtSeconds isNil ifTrue: [^self idleSeconds].
-  ^System timeGmt - lastStreamSeenAtSeconds
+  quietProbes := 0.
+  unansweredProbes := 0.
+  passesSinceProbe := 0.
+  idleWarned := false
 %
 category: 'accessing'
 method: McpSession

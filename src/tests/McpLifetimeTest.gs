@@ -32,9 +32,11 @@ The four questions each group answers:
   - indefinite: with no wall-clock deadline the ping stops being an optimization and becomes the
     whole policy. What keeps that from being a gem leak is the pair around it: a failed probe always
     reaps, and a client that never opens a stream (so can never be pinged) still has a floor.
-  - suspend: everything here measures wall time, so a laptop that sleeps for two hours looks exactly
-    like every client going idle at once. Without the detector the first pass after a wake frees
-    every worker gem, including those of clients that are awake and one keystroke away.
+  - counting: idleness is a COUNT of liveness pings the client answered while doing no work, and
+    unreachability a count of passes on which there was no stream to ask down. Nothing here is an
+    elapsed time, which is why a suspended host cannot manufacture any of it: a front end that is
+    not running holds no maintenance passes, so every count simply stops. There is no suspend to
+    detect and nothing to forgive.
 
 Sessions are McpStubSession or McpMockSession (no gem, no NETLDI) and the router is McpFixtureRouter
 -- a shipping McpRouter that reports itself running without a listener. Everything under test is the
@@ -247,138 +249,130 @@ testAPlainRouterDoesNotTellAClientToRefreshAnything
   self assert: (self includesCS: 'cannot be extended' in: advice).
   self deny: (self includesCS: 'refresh' in: advice)
 %
-category: 'tests - indefinite'
+category: 'tests - counting'
 method: McpLifetimeTest
-testAnIndefiniteSessionIsReprobedOnTheCadence
-  "With a deadline the ping is asked once per idle period. With none it is the only thing that will
-   ever release the gem, so it has to keep being asked."
+testIdlenessIsCountedInPingsNotSeconds
+  "The whole redesign in one assertion. A session that has been quiet for hours of wall time, but
+   has never been asked and answered anything, is not idle by this server's measure -- because the
+   hours might have been hours this server spent suspended, and it has no way to tell."
   | r sess |
   r := McpFixtureRouter new.
-  r sessionIdleTimeoutSeconds: nil; livenessProbeIntervalSeconds: 0.
   sess := self streamedSessionOn: r.
-  sess fakeIdleSeconds: 14400.
-  self assert: r probeIdleSessions equals: 1.
-  r resolvePendingRequest: 'srv-1' forSession: sess.
-  self assert: r probeIdleSessions equals: 1.       "asked again"
-  r resolvePendingRequest: 'srv-2' forSession: sess.
-  self assert: r probeIdleSessions equals: 1
+  sess fakeIdleSeconds: 36000.
+  self assert: sess quietProbes equals: 0.
+  self assert: (r reapReasonFor: sess) isNil
 %
-category: 'tests - indefinite'
+category: 'tests - counting'
 method: McpLifetimeTest
-testAnIndefiniteSessionLivesWhileItAnswers
-  "The developer who falls asleep at the keyboard. With no wall-clock deadline the session lives
-   exactly as long as its client keeps answering pings on a stream it opened itself -- which is the
-   client asserting it still wants that gem and the uncommitted work in it."
+testAnAnsweredPingWithNoWorkInBetweenIsOneConfirmation
   | r sess |
   r := McpFixtureRouter new.
-  r sessionIdleTimeoutSeconds: nil; livenessProbeIntervalSeconds: 60.
   sess := self streamedSessionOn: r.
-  sess fakeIdleSeconds: 14400.                 "four hours quiet"
-  self assert: r probeIdleSessions equals: 1.
-  r resolvePendingRequest: 'srv-1' forSession: sess.
-  self assert: sess isKnownAlive.
-  self assert: r reapIdleSessions equals: 0.
-  "nothing is warned about, either: there is no deadline to warn of"
-  self assert: r probeIdleSessions equals: 0.
-  self deny: sess idleWarned
+  sess noteProbeSent.
+  self assert: sess unansweredProbes equals: 1.
+  sess noteAlive.
+  self assert: sess quietProbes equals: 1.
+  self assert: sess unansweredProbes equals: 0
 %
-category: 'tests - indefinite'
+category: 'tests - counting'
 method: McpLifetimeTest
-testAnIndefiniteSessionStillGoesWhenItStopsAnswering
-  "What makes indefinite different from unpoliced. The failed probe is forced to reap here whatever
-   reapOnFailedProbe says, because it is the only thing left that could end a session."
+testAClientRequestResetsEverythingCounted
+  "A request is better evidence of life than any ping answer, and it means the session is not idle."
   | r sess |
   r := McpFixtureRouter new.
-  r sessionIdleTimeoutSeconds: nil; livenessProbeIntervalSeconds: 60;
-    pendingRequestTimeoutSeconds: -1; reapOnFailedProbe: false.
   sess := self streamedSessionOn: r.
-  sess fakeIdleSeconds: 14400.
-  self assert: r probeIdleSessions equals: 1.
-  self assert: r expirePendingRequests equals: 1.
-  self assert: sess isKnownGone.
-  self assert: r reapIdleSessions equals: 1
+  sess noteProbeSent; noteAlive; noteProbeSent.
+  self assert: sess quietProbes equals: 1.
+  self assert: sess unansweredProbes equals: 1.
+  sess touch.
+  self assert: sess quietProbes equals: 0.
+  self assert: sess unansweredProbes equals: 0.
+  self assert: sess passesSinceProbe equals: 0
 %
-category: 'tests - indefinite'
+category: 'tests - counting'
 method: McpLifetimeTest
-testAnIndefiniteSessionWithNoStreamStillHasAFloor
-  "The gem leak an indefinite timeout would otherwise be: initialize, never open a GET, vanish. Such
-   a client can never be pinged -- pinging it would condemn it for the sole offence of not opening a
-   stream -- so liveness can say nothing about it and the floor is the only thing that can free it."
+testASessionGoesAtTheConfirmationCount
   | r sess |
   r := McpFixtureRouter new.
-  r sessionIdleTimeoutSeconds: nil; streamlessIdleTimeoutSeconds: 900.
-  sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
-  sess fakeIdleSeconds: 600.
-  self assert: r probeIdleSessions equals: 0.
-  self assert: r reapIdleSessions equals: 0.
-  sess fakeIdleSeconds: 1000.
-  self assert: r reapIdleSessions equals: 1
-%
-category: 'tests - liveness'
-method: McpLifetimeTest
-testAnUnansweredProbeOnTheCurrentStreamStillCondemns
-  "The counterpart, so the fix above narrows the verdict rather than removing it: where the stream
-   that carried the ping is still the one the client is on, silence remains evidence and the gem is
-   still freed without waiting out the full timeout."
-  | r sess |
-  r := McpFixtureRouter new.
-  r pendingRequestTimeoutSeconds: -1.
+  r sessionIdleTimeoutSeconds: 1800; livenessProbeIntervalSeconds: 300.
   sess := self streamedSessionOn: r.
-  sess fakeIdleSeconds: 1700.
-  self assert: r probeIdleSessions equals: 1.
-  self assert: r expirePendingRequests equals: 1.
-  self assert: sess isKnownGone.
-  self assert: r reapIdleSessions equals: 1
+  self assert: r confirmationsBeforeRelease equals: 6.
+  1 to: 5 do: [:i | sess noteProbeSent; noteAlive].
+  self assert: (r reapReasonFor: sess) isNil.
+  sess noteProbeSent; noteAlive.
+  self assert: (self includesCS: 'idle' in: (r reapReasonFor: sess))
+%
+category: 'tests - counting'
+method: McpLifetimeTest
+testTheCountsOnlyMoveOnAMaintenancePass
+  "The pass IS the clock. A front end that is not running holds no passes, so a suspended host
+   advances nothing -- which is the property that replaced the suspend detector."
+  | r sess |
+  r := McpFixtureRouter new.
+  sess := self streamedSessionOn: r.
+  self assert: sess passesSinceProbe equals: 0.
+  sess notePassWithStream: true.
+  sess notePassWithStream: true.
+  self assert: sess passesSinceProbe equals: 2.
+  self assert: sess streamlessPasses equals: 0
+%
+category: 'tests - counting'
+method: McpLifetimeTest
+testAnIndefiniteSessionIsNeverReapedForIdleness
+  "With no deadline the confirmations still accrue; they simply mean nothing to the reaper."
+  | r sess |
+  r := McpFixtureRouter new.
+  r sessionIdleTimeoutSeconds: nil.
+  sess := self streamedSessionOn: r.
+  1 to: 50 do: [:i | sess noteProbeSent; noteAlive].
+  self assert: sess quietProbes equals: 50.
+  self assert: (r reapReasonFor: sess) isNil
 %
 category: 'tests - liveness'
 method: McpLifetimeTest
-testAnUnwarnedSessionAtTheDeadlineGetsOneGracePeriod
-  "The warning is the promise this pathway makes -- commit or lose the uncommitted work in your gem
-   -- and a session can reach the deadline without ever hearing it, because its stream opened late or
-   the whole warning window elapsed between two passes. So a reachable, unwarned client gets one
-   bounded grace period in which the cycle runs, and is told before it is reaped.
-   It is not a liveness reprieve: answering the ping does not save it, it only means the notice is
-   delivered to someone listening."
+testThreeUnansweredPingsCondemnAndTwoDoNot
+  "The width of the evidence. One miss can be a client that is merely not scheduled -- a laptop in a
+   brief maintenance wake, a paused VM -- and it will answer late. Three in a row on the stream the
+   client is still holding is a different claim."
   | r sess |
   r := McpFixtureRouter new.
   sess := self streamedSessionOn: r.
-  sess fakeIdleSeconds: 1900.                 "past the 1800 deadline, never warned"
-  self assert: r reapIdleSessions equals: 0.  "held, not killed"
-  self assert: r probeIdleSessions equals: 1. "the cycle runs instead"
-  r resolvePendingRequest: 'srv-1' forSession: sess.
-  sess outbox drain.
-  self assert: r probeIdleSessions equals: 1. "the warning it was owed"
-  self assert: (self includesCS: 'uncommitted changes will be lost' in: (self noticeIn: sess)).
-  self assert: sess idleWarned.
-  "warned, so the deadline now applies"
-  self assert: r reapIdleSessions equals: 1
+  sess noteProbeSent; noteProbeSent.
+  self assert: (r reapReasonFor: sess) isNil.
+  sess noteProbeSent.
+  self assert: (self includesCS: 'did not answer' in: (r reapReasonFor: sess))
+%
+category: 'tests - liveness'
+method: McpLifetimeTest
+testOneAnswerClearsTheWholeUnansweredRun
+  "A late answer is still an answer: the client proved it is there, so the run starts again."
+  | r sess |
+  r := McpFixtureRouter new.
+  sess := self streamedSessionOn: r.
+  sess noteProbeSent; noteProbeSent.
+  sess noteAlive.
+  self assert: sess unansweredProbes equals: 0.
+  self assert: (r reapReasonFor: sess) isNil
 %
 category: 'tests - liveness'
 method: McpLifetimeTest
 testAProbeLostToAStreamHandoverIsDiscardedNotCondemned
   "The defect the 2026-08-23 client runs turned up: 6 of 14 pings never reached their client because
    they were written to a stream the client had already replaced. The write SUCCEEDS -- into a socket
-   buffer nobody will ever read again -- so nothing in the router notices, and 30 seconds later the
-   silence is read as proof of death and a live client's worker gem is freed.
-   An unanswered ping means gone only if it went down the stream the client is still on."
+   buffer nobody will ever read again -- so nothing in the router notices, and the silence would be
+   read as proof of death while the client is awake and connected.
+   Now that a ping is counted at SEND, the correction is to take that count back."
   | r sess |
   r := McpFixtureRouter new.
-  r pendingRequestTimeoutSeconds: -1.        "expire the moment it is sent"
   sess := self streamedSessionOn: r.
-  sess fakeIdleSeconds: 1700.
-  self assert: r probeIdleSessions equals: 1.
-  self assert: sess isProbeOutstanding.
+  self assert: (r probeSession: sess).
+  self assert: sess unansweredProbes equals: 1.
   "the client's stream drops and it reconnects -- latest-GET-wins supersedes the generation the
    ping was written to"
   sess outbox attachStream.
-  self assert: r expirePendingRequests equals: 1.
-  self deny: sess isKnownGone.
-  self assert: r reapIdleSessions equals: 0.
-  self assert: (r sessionAt: sess id) notNil.
-  "and the probe is not merely forgiven -- it is re-asked down the stream the client is now on"
-  self deny: sess isProbeOutstanding.
-  self assert: r probeIdleSessions equals: 1.
-  self assert: sess isProbeOutstanding
+  self assert: (r retirePendingProbesFor: sess) equals: 1.
+  self assert: sess unansweredProbes equals: 0.
+  self assert: (r reapReasonFor: sess) isNil
 %
 category: 'tests - liveness'
 method: McpLifetimeTest
@@ -387,75 +381,133 @@ testAProbeWithNoStreamAtAllProvesNothing
    so its silence is inadmissible for the same reason: nothing could have carried it."
   | r sess |
   r := McpFixtureRouter new.
-  r pendingRequestTimeoutSeconds: -1.
   sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
-  sess fakeIdleSeconds: 1700.
   self assert: (r sendRequest: 'ping' params: nil toSession: sess) notNil.
   sess noteProbeSent.
-  self assert: r expirePendingRequests equals: 1.
-  self deny: sess isKnownGone
+  self assert: (r retirePendingProbesFor: sess) equals: 1.
+  self assert: sess unansweredProbes equals: 0
 %
-category: 'tests - suspend'
+category: 'tests - liveness'
 method: McpLifetimeTest
-testAWakingFrontEndDoesNotReapLiveClients
-  "The whole point, end to end. Two hours asleep with a client connected the entire time: before the
-   detector this pass expired the in-flight probe, marked the session gone, found it idle by two
-   hours and freed its gem -- while the client sat there awake, connected, and one keystroke away."
+testReapOnFailedProbeCanBeTurnedOff
+  "A deployment may not want a verdict drawn from silence at all. Turning it off leaves the idle
+   count and the streamless count as the only grounds."
   | r sess |
   r := McpFixtureRouter new.
-  r reaperIntervalSeconds: 60.
+  r reapOnFailedProbe: false.
   sess := self streamedSessionOn: r.
-  sess fakeIdleSeconds: 1700.
-  self assert: r probeIdleSessions equals: 1.     "a ping was in flight when the host slept"
-  sess fakeIdleSeconds: nil.                      "the real clock, which the forgiveness moves"
-  r pretendLastMaintenanceWasSecondsAgo: 7200.
-  self assert: r maintainSessions equals: 0.
-  self assert: (r sessionAt: sess id) notNil.
-  self deny: sess isKnownGone.
-  self deny: sess isProbeOutstanding             "the probe was discarded, not condemned"
+  1 to: 10 do: [:i | sess noteProbeSent].
+  self assert: (r reapReasonFor: sess) isNil
 %
-category: 'tests - suspend'
+category: 'tests - liveness'
 method: McpLifetimeTest
-testAWildlyLatePassIsReadAsASuspend
-  "The detector itself: the maintenance loop is this gem's own clock, so a pass that asks for a
-   minute and comes back hours later is the only evidence the front end gets that the host slept."
+testReapOnFailedProbeIsForcedOnWithNoDeadline
+  "With no deadline it is the only thing that would ever end a session, so it cannot be turned off."
+  | r |
+  r := McpFixtureRouter new.
+  r sessionIdleTimeoutSeconds: nil; reapOnFailedProbe: false.
+  self assert: r reapOnFailedProbe
+%
+category: 'tests - liveness'
+method: McpLifetimeTest
+testProbesGoOutOnThePassCadenceNotTheClock
   | r sess |
   r := McpFixtureRouter new.
-  r reaperIntervalSeconds: 60.
+  r livenessProbeIntervalSeconds: 300; reaperIntervalSeconds: 60.
   sess := self streamedSessionOn: r.
-  self assert: r noteMaintenanceTick equals: 0.       "an ordinary pass forgives nothing"
-  r pretendLastMaintenanceWasSecondsAgo: 7200.
-  self assert: r noteMaintenanceTick equals: 7140.    "the gap, less the interval it asked for"
-  "a pass that is merely late -- a slow login, a busy gem -- is not a suspend"
-  r pretendLastMaintenanceWasSecondsAgo: 90.
-  self assert: r noteMaintenanceTick equals: 0
+  self assert: r probePassInterval equals: 5.
+  1 to: 4 do: [:i | sess notePassWithStream: true].
+  self deny: (r probeDue: sess).
+  sess notePassWithStream: true.
+  self assert: (r probeDue: sess)
+%
+category: 'tests - unreachable'
+method: McpLifetimeTest
+testAStreamlessSessionIsReleasedAfterEnoughPasses
+  "The give-up rule, and the only one that acts on absence rather than evidence -- because a client
+   that opens no stream can be asked nothing at all."
+  | r sess |
+  r := McpFixtureRouter new.
+  r streamlessIdleTimeoutSeconds: 300; reaperIntervalSeconds: 60.
+  sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
+  self assert: r streamlessPassesBeforeRelease equals: 5.
+  1 to: 4 do: [:i | sess notePassWithStream: false].
+  self assert: (r reapReasonFor: sess) isNil.
+  sess notePassWithStream: false.
+  self assert: (self includesCS: 'no event stream' in: (r reapReasonFor: sess))
+%
+category: 'tests - unreachable'
+method: McpLifetimeTest
+testAStreamSeenResetsTheStreamlessCount
+  "A client that reconnects has proved reachability again, which is the whole thing being counted."
+  | r sess |
+  r := McpFixtureRouter new.
+  sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
+  1 to: 20 do: [:i | sess notePassWithStream: false].
+  self assert: sess streamlessPasses equals: 20.
+  sess notePassWithStream: true.
+  self assert: sess streamlessPasses equals: 0
+%
+category: 'tests - unreachable'
+method: McpLifetimeTest
+testTheStreamlessFloorAppliesEvenWithADeadline
+  "It used to apply only where there was no idle deadline. That left a streamless session on a
+   deadline router bounded by an idle count that can never advance, since it can never be pinged."
+  | r sess |
+  r := McpFixtureRouter new.
+  r sessionIdleTimeoutSeconds: 1800; streamlessIdleTimeoutSeconds: 120; reaperIntervalSeconds: 60.
+  sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
+  1 to: 2 do: [:i | sess notePassWithStream: false].
+  self assert: (self includesCS: 'no event stream' in: (r reapReasonFor: sess))
+%
+category: 'tests - warning'
+method: McpLifetimeTest
+testTheWarningGoesOutOneConfirmationBeforeTheEnd
+  "No lead to configure any more: the warning fires when exactly one answered ping remains, which is
+   what a lead in seconds was always trying to approximate and could get wrong in both directions."
+  | r sess |
+  r := McpFixtureRouter new.
+  r sessionIdleTimeoutSeconds: 1800; livenessProbeIntervalSeconds: 300.
+  sess := self streamedSessionOn: r.
+  1 to: 4 do: [:i | sess noteProbeSent; noteAlive].
+  self deny: (r idleWarningDue: sess).
+  sess noteProbeSent; noteAlive.
+  self assert: (r idleWarningDue: sess).
+  self assert: (r warnIdleSession: sess).
+  self assert: (self includesCS: 'one more liveness check' in: (self noticeIn: sess))
+%
+category: 'tests - warning'
+method: McpLifetimeTest
+testTheWarningIsSentOncePerQuietPeriod
+  | r sess |
+  r := McpFixtureRouter new.
+  r sessionIdleTimeoutSeconds: 600; livenessProbeIntervalSeconds: 300.
+  sess := self streamedSessionOn: r.
+  sess noteProbeSent; noteAlive.
+  self assert: (r idleWarningDue: sess).
+  r warnIdleSession: sess.
+  self deny: (r idleWarningDue: sess).
+  "a call makes it quiet again, and it is owed a fresh warning"
+  sess touch.
+  sess noteProbeSent; noteAlive.
+  self assert: (r idleWarningDue: sess)
 %
 category: 'tests - config'
 method: McpLifetimeTest
-testDefaultsAreUnchangedFromPhase0
-  "The knobs are new; the behaviour out of the box is not. Anyone who configures nothing gets exactly
-   the intervals that shipped, which is what makes this a refactor for them rather than an upgrade."
+testDefaultsAreUnchangedWhereTheyStillExist
   | r |
   r := McpRouter new.
   self assert: r sessionIdleTimeoutSeconds equals: 1800.
-  self assert: r idleWarningLeadSeconds equals: 300.
+  self assert: r streamlessIdleTimeoutSeconds equals: 1800.
+  self assert: r livenessProbeIntervalSeconds equals: 300.
   self assert: r reaperIntervalSeconds equals: 60.
-  self assert: r pendingRequestTimeoutSeconds equals: 30.
-  self assert: r hasSessionIdleDeadline.
-  self assert: r reapOnFailedProbe
-%
-category: 'tests - suspend'
-method: McpLifetimeTest
-testExpiryIsNotForgiven
-  "The one clock a suspend does not move. A credential's exp is an absolute commitment, and a
-   suspended laptop is not a reason to go on honouring an expired token."
-  | r sess |
-  r := McpFixtureRouter new.
-  sess := self streamedSessionOn: r.
-  sess expiresAtSeconds: System timeGmt - 1.
-  r forgiveSuspendedSeconds: 7200.
-  self assert: sess isExpired.
-  self assert: r reapIdleSessions equals: 1
+  self assert: r expiryWarningLeadSeconds equals: 300.
+  self assert: r maxSessionLifetimeSeconds isNil.
+  self assert: r reapOnFailedProbe.
+  "and what those seconds mean to the reaper"
+  self assert: r confirmationsBeforeRelease equals: 6.
+  self assert: r probePassInterval equals: 5.
+  self assert: r streamlessPassesBeforeRelease equals: 30
 %
 category: 'tests - config'
 method: McpLifetimeTest
@@ -469,9 +521,8 @@ testIntervalsTravelToAForkedChild
   r sessionIdleTimeoutSeconds: nil;
     streamlessIdleTimeoutSeconds: 900;
     livenessProbeIntervalSeconds: 120;
-    idleWarningLeadSeconds: 240;
     reaperIntervalSeconds: 30;
-    pendingRequestTimeoutSeconds: 10;
+    expiryWarningLeadSeconds: 45;
     maxSessionLifetimeSeconds: 7200;
     reapOnFailedProbe: false.
   child := McpRouter new applyConfigJson: r configJson.
@@ -479,18 +530,44 @@ testIntervalsTravelToAForkedChild
   self deny: child hasSessionIdleDeadline.
   self assert: child streamlessIdleTimeoutSeconds equals: 900.
   self assert: child livenessProbeIntervalSeconds equals: 120.
-  self assert: child idleWarningLeadSeconds equals: 240.
   self assert: child reaperIntervalSeconds equals: 30.
-  self assert: child pendingRequestTimeoutSeconds equals: 10.
+  self assert: child expiryWarningLeadSeconds equals: 45.
   self assert: child maxSessionLifetimeSeconds equals: 7200.
-  "reapOnFailedProbe travelled, but is FORCED on where there is no deadline -- it is the only thing
-   that could ever end a session there"
+  "reapOnFailedProbe travelled, but is FORCED on where there is no deadline"
   self assert: child reapOnFailedProbe
+%
+category: 'tests - config'
+method: McpLifetimeTest
+testValidationRefusesAProbeShorterThanAPass
+  "The division would floor to zero: a cadence of no passes at all."
+  | r |
+  r := McpRouter new.
+  r livenessProbeIntervalSeconds: 10; reaperIntervalSeconds: 60.
+  self should: [r validateTimerConfig] raise: Error
+%
+category: 'tests - config'
+method: McpLifetimeTest
+testValidationRefusesATimeoutShorterThanAProbeInterval
+  "A session would be released before its client could be asked anything."
+  | r |
+  r := McpRouter new.
+  r sessionIdleTimeoutSeconds: 60; livenessProbeIntervalSeconds: 300.
+  self should: [r validateTimerConfig] raise: Error
+%
+category: 'tests - config'
+method: McpLifetimeTest
+testTheDefaultConfigurationValidates
+  | r |
+  r := McpRouter new.
+  r validateTimerConfig.
+  r sessionIdleTimeoutSeconds: nil.
+  r validateTimerConfig
 %
 category: 'tests - expiry'
 method: McpLifetimeTest
 testMaxSessionLifetimeBecomesAnExpiryAtOpen
-  "The blunt cap, applied where every session passes through."
+  "The blunt cap, applied where every session passes through. Still wall-clock, deliberately: it is
+   a bound on how long anyone may hold a gem, which is a question about time and not about evidence."
   | r sess |
   r := McpFixtureRouter new.
   r maxSessionLifetimeSeconds: 60.
@@ -498,113 +575,4 @@ testMaxSessionLifetimeBecomesAnExpiryAtOpen
   self assert: sess expiresAtSeconds notNil.
   self deny: sess isExpired.
   self assert: (sess expiresAtSeconds - System timeGmt) <= 60
-%
-category: 'tests - liveness'
-method: McpLifetimeTest
-testReapOnFailedProbeCanBeTurnedOff
-  "A deployment with a short deadline may not want a verdict drawn from silence at all: turning it
-   off costs at most (timeout - lead) of gem lifetime and removes the whole class of false positive."
-  | r sess |
-  r := McpFixtureRouter new.
-  r pendingRequestTimeoutSeconds: -1; reapOnFailedProbe: false.
-  sess := self streamedSessionOn: r.
-  sess fakeIdleSeconds: 1700.
-  r probeIdleSessions.
-  r expirePendingRequests.
-  self assert: sess isKnownGone.
-  self assert: r reapIdleSessions equals: 0.
-  "the wall clock still has it"
-  sess fakeIdleSeconds: 4000.
-  self assert: r reapIdleSessions equals: 1
-%
-category: 'tests - suspend'
-method: McpLifetimeTest
-testSuspendedTimeIsForgivenOnEveryIdleClock
-  "Idleness is a measure of SERVICE time. A host that was asleep offered no service, so the sleep is
-   not something a client should be charged for -- and without this, the first pass after a wake sees
-   every session idle by the whole suspend and frees every worker gem at once."
-  | r sess before |
-  r := McpFixtureRouter new.
-  sess := self streamedSessionOn: r.
-  before := sess idleSeconds.
-  self assert: (r forgiveSuspendedSeconds: 7200) equals: 7200.
-  self assert: sess idleSeconds <= (before - 7199).
-  "and the client is told, because the one thing it cannot work out for itself is that its worker
-   gem still holds the transaction view it had before the gap"
-  self assert: (self includesCS: 'transaction view it had beforehand' in: (self noticeIn: sess))
-%
-category: 'tests - indefinite'
-method: McpLifetimeTest
-testTheFloorIsMeasuredFromWhenTheStreamWasLastSeen
-  "Not from last activity. A client that has been quiet for hours but holding a stream the whole time
-   is reachable, and must not be reaped the instant its stream blips during a reconnect."
-  | r sess |
-  r := McpFixtureRouter new.
-  r sessionIdleTimeoutSeconds: nil; streamlessIdleTimeoutSeconds: 900.
-  sess := self streamedSessionOn: r.
-  sess fakeIdleSeconds: 14400.
-  self assert: sess unreachableSeconds equals: 0.
-  r probeIdleSessions.                       "the pass that observes the stream stamps it"
-  sess outbox detachStream: sess outbox currentStreamGeneration.
-  self deny: sess outbox hasStream.
-  self assert: sess unreachableSeconds < 10.  "seconds, not the four idle hours"
-  self assert: r reapIdleSessions equals: 0
-%
-category: 'tests - liveness'
-method: McpLifetimeTest
-testTheGracePeriodIsBounded
-  "A client replacing its stream on every pass would never yield a verdict, so the grace has to end
-   whether or not the warning was ever delivered -- otherwise 'one more chance' is a gem leak."
-  | r sess |
-  r := McpFixtureRouter new.
-  sess := self streamedSessionOn: r.
-  sess fakeIdleSeconds: 1800 + r reapGraceSeconds + 1.
-  self deny: sess idleWarned.
-  self assert: r reapIdleSessions equals: 1
-%
-category: 'tests - config'
-method: McpLifetimeTest
-testTheWarningLeadIsDerivedFromTheTimeout
-  "The one interval with a hard relationship to the others. Someone who shortens the idle timeout
-   should not also have to work out that the ping and the warning need two reaper passes and an
-   answer window between them -- so the lead follows the timeout down, and stops at the floor that
-   cycle needs rather than going below it."
-  | r |
-  r := McpRouter new.
-  r sessionIdleTimeoutSeconds: 3600.
-  self assert: r idleWarningLeadSeconds equals: 300.    "capped at the class default"
-  r sessionIdleTimeoutSeconds: 1200.
-  self assert: r idleWarningLeadSeconds equals: 200.    "a sixth of the timeout"
-  r sessionIdleTimeoutSeconds: 600.
-  self assert: r idleWarningLeadSeconds equals: r minimumWarningLeadSeconds.   "the floor wins"
-  "and an explicit value is left exactly as given"
-  r idleWarningLeadSeconds: 222.
-  self assert: r idleWarningLeadSeconds equals: 222.
-  r idleWarningLeadSeconds: nil.
-  self assert: r idleWarningLeadSeconds equals: r minimumWarningLeadSeconds
-%
-category: 'tests - config'
-method: McpLifetimeTest
-testValidationRefusesACycleThatCannotComplete
-  "Fail at startup, in words, rather than at a client's first idle window. A lead too short for the
-   ping-then-warn cycle does not misbehave visibly -- it simply never warns anyone, which is
-   precisely the failure nobody would notice until they lost uncommitted work."
-  | r |
-  r := McpRouter new.
-  r sessionIdleTimeoutSeconds: 1800; idleWarningLeadSeconds: 20.
-  self should: [r validateTimerConfig] raise: Error.
-  "a timeout shorter than the lead would open every session already inside its warning window"
-  r idleWarningLeadSeconds: nil; sessionIdleTimeoutSeconds: 100.
-  self should: [r validateTimerConfig] raise: Error.
-  "an answer window at or beyond the pass interval leaves a ping undecided on the next pass"
-  r sessionIdleTimeoutSeconds: 1800; pendingRequestTimeoutSeconds: 90.
-  self should: [r validateTimerConfig] raise: Error.
-  "and a number that is not a positive count of seconds"
-  r pendingRequestTimeoutSeconds: 30; streamlessIdleTimeoutSeconds: 0.
-  self should: [r validateTimerConfig] raise: Error.
-  "the shipping configuration passes, and so does a coherent short one"
-  self assert: (McpRouter new validateTimerConfig) notNil.
-  r := McpRouter new.
-  r sessionIdleTimeoutSeconds: 300; reaperIntervalSeconds: 10; pendingRequestTimeoutSeconds: 5.
-  self assert: r validateTimerConfig notNil
 %

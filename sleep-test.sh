@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Does the suspend detector actually work on a real host that really slept?
+# Does a session survive a real sleep on a real host?
 #
 # MANUAL test, driven in three steps around a genuine sleep -- there is no way to fake this, which
 # is why it is a script you run rather than a suite that runs itself:
@@ -13,11 +13,17 @@
 #
 #     ./sleep-test.sh simulate # freeze the gem with SIGSTOP for two minutes, then report
 #
-# WHAT IT IS FOR. Everything the front end measures is wall-clock, so a suspended host looks exactly
-# like every client going idle at once. McpRouter>>noteMaintenanceTick is supposed to notice that its
-# own pass came back hours late, read that as time the front end was not running, and forgive it --
-# instead of expiring every in-flight probe, finding every session hours idle, and freeing every
-# worker gem while the clients sit there awake and one keystroke away.
+# WHAT IT IS FOR. It used to ask whether a suspend DETECTOR worked: the front end measured elapsed
+# wall-clock time, so a sleeping host looked exactly like every client going idle at once, and a
+# detector had to notice its own pass had come back hours late and forgive the difference. That whole
+# mechanism is gone. Nothing the reaper reads is an elapsed time any more -- idleness is a count of
+# liveness pings the client answered, unreachability a count of maintenance passes with no stream --
+# and a front end that is not running holds no passes, so a suspend advances nothing and there is
+# nothing to detect or forgive.
+#
+# Which leaves the question this script was always really asking, now answerable directly: after the
+# host really slept, is the session still there and does it still work? The gem log is no longer
+# expected to say anything at all about the sleep. Silence in it is the result.
 #
 # That logic is unit-tested and mutation-tested. What unit tests CANNOT answer, and this can:
 #
@@ -353,40 +359,36 @@ check() {
     dim "      pieces (s): ${gaps}"
   fi
 
-  # 1. did the maintenance pass wake up, and when? The forgiveness line is emitted BY that pass.
-  local forgiven forgiven_n notice_time charged
-  forgiven=$(grep -o 'was not running for about [0-9]*s' "$gemlog" 2>/dev/null \
-    | grep -o '[0-9]*' | awk '{s+=$1} END {print s+0}')
+  # 1. the gem log should have NOTHING to say about any of this. Under the counted-evidence design a
+  # suspend is not an event the front end can observe or has to handle: it simply holds no
+  # maintenance passes while it is not running, so nothing advances and nothing is forgiven. A
+  # forgiveness line here would mean a suspend detector had come back from the dead.
+  local forgiven_n reaped_n
   forgiven_n=$(grep -c 'was not running for about' "$gemlog" 2>/dev/null | tr -d ' ')
-  if [ "${forgiven_n:-0}" -gt 0 ]; then
-    verdict ok "the maintenance pass woke and noticed" \
-      "forgave ${forgiven}s across ${forgiven_n} pass(es)"
+  if [ "${forgiven_n:-0}" -eq 0 ]; then
+    verdict ok "the front end had nothing to forgive" "no suspend accounting in the gem log, as designed"
   else
-    verdict bad "the maintenance pass woke and noticed" \
-      "nothing forgiven${gemlog:+ ($gemlog)} -- either it never slept long enough, or the Delay did not fire"
+    verdict bad "the front end had nothing to forgive" \
+      "${forgiven_n} forgiveness line(s) in $gemlog -- a suspend detector is back"
   fi
 
-  # THE number this re-run exists for. A piece of the suspend below the detector's threshold is
-  # charged to the client as idleness it never spent; on 2026-08-23 that was a third of a 5-minute
-  # lid-close, because macOS fragments a short sleep into 20-30s pieces with dark wakes between.
-  if [ "${frozen_n:-0}" -gt 0 ]; then
-    charged=$(( frozen_total - forgiven ))
-    [ "$charged" -lt 0 ] && charged=0
-    if [ "$frozen_total" -gt 0 ] && [ "$((charged * 100 / frozen_total))" -le 15 ]; then
-      verdict ok "how much of the suspend was forgiven" \
-        "${forgiven}s of ${frozen_total}s; only ${charged}s charged as idleness"
-    else
-      verdict huh "how much of the suspend was forgiven" \
-        "${forgiven}s of ${frozen_total}s -- ${charged}s ($((charged * 100 / frozen_total))%) charged as idleness the client never spent"
-    fi
+  # 2. and it should not have reaped anything. Any reap line names its own reason, so a failure here
+  # says which count advanced while the host was asleep -- which is the bug this design forecloses.
+  reaped_n=$(grep -c 'Reaped MCP session' "$gemlog" 2>/dev/null | tr -d ' ')
+  if [ "${reaped_n:-0}" -eq 0 ]; then
+    verdict ok "nothing was reaped across the sleep" "no session ended while the host was away"
+  else
+    verdict bad "nothing was reaped across the sleep" \
+      "$(grep -m3 'Reaped MCP session' "$gemlog" 2>/dev/null | sed 's/^/        /')"
   fi
 
-  # 3. did the notice reach the client, and how soon after the stream came back?
+  # 3. the client should not have been told anything about a suspend either -- there is no longer
+  # any such notice to send, because the session was never in danger and its gem never changed hands.
   notice_time=$(grep -m1 'was not running for about' "$STREAM_LOG" 2>/dev/null | awk '{print $1" "$2}')
-  if [ -n "$notice_time" ]; then
-    verdict ok "the client was told on its stream" "at $notice_time"
+  if [ -z "$notice_time" ]; then
+    verdict ok "the client was told nothing about a suspend" "nothing to tell it"
   else
-    verdict bad "the client was told on its stream" "no suspend notice in $STREAM_LOG"
+    verdict bad "the client was told nothing about a suspend" "a suspend notice arrived at $notice_time"
   fi
   if kill -0 "$(cat "$STATE/stream.pid" 2>/dev/null)" 2>/dev/null; then
     verdict ok "the SSE stream survived the sleep" "still connected"

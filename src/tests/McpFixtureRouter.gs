@@ -44,11 +44,3 @@ isRunning
   "Running, with no listener behind it. The one seam a stream test needs."
   ^true
 %
-category: 'testing support'
-method: McpFixtureRouter
-pretendLastMaintenanceWasSecondsAgo: anInteger
-  "Backdate the maintenance clock so #noteMaintenanceTick sees a pass that came back late. The seam
-   the suspend detector needs: the real thing measures a gap no test can produce without sleeping
-   through it, and the alternative -- a setter on the shipping class -- would exist for nobody else."
-  lastMaintenanceAtSeconds := System timeGmt - anInteger
-%

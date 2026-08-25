@@ -362,9 +362,8 @@ against the others before a port is bound.
 | `sessionIdleTimeoutSeconds` | 1800 | how long a client may be quiet. **`nil` = no deadline at all** |
 | `streamlessIdleTimeoutSeconds` | 1800 | the floor for a client that opens no stream, when there is no deadline |
 | `livenessProbeIntervalSeconds` | 300 | how often a quiet session with no deadline is re-asked |
-| `idleWarningLeadSeconds` | *derived* | how long before the deadline the ping-then-warn cycle starts |
 | `reaperIntervalSeconds` | 60 | how often the maintenance pass runs |
-| `pendingRequestTimeoutSeconds` | 30 | how long a server-initiated request may go unanswered |
+| `expiryWarningLeadSeconds` | 300 | how long before an *absolute* deadline a client is warned |
 | `maxSessionLifetimeSeconds` | `nil` | absolute cap, however busy the session is |
 | `reapOnFailedProbe` | `true` | whether an unanswered ping frees a gem early. Forced on with no deadline |
 
@@ -382,13 +381,15 @@ refreshed deadline earns a fresh warning.
 From the shell, `GS_MCP_IDLE_TIMEOUT` and friends set these on either launcher — durations like
 `90s`, `30m`, `4h`, or `none`. See [session-lifetime.sh](session-lifetime.sh), which documents each.
 
-`idleWarningLeadSeconds` is **derived** rather than merely defaulted, because it is the one interval
-with a hard relationship to the others: the ping and the warning go out on separate maintenance
-passes with the answer window between them, so a lead that is short relative to
-`reaperIntervalSeconds` silently never completes the cycle and nobody is ever warned. Someone
-shortening the idle timeout should not have to work that out. `validateTimerConfig` refuses an
-incoherent combination before binding a port — and `forkOnPort:` checks too, so the message reaches
-whoever typed the command rather than a detached gem's log.
+**Nothing here is measured in elapsed time.** The knobs are seconds because that is how a deployment
+thinks; what the reaper counts is derived from them. Idleness is a count of **liveness pings the
+client answered with no work in between** — `sessionIdleTimeoutSeconds ÷ livenessProbeIntervalSeconds`
+of them, six at the defaults. Unreachability is a count of **maintenance passes with no stream**.
+Both advance only when the front end is running, so a host that suspends simply stops the count
+where it was: there is no suspend to detect, nothing to forgive, and no threshold to get wrong.
+`validateTimerConfig` refuses a combination whose counts would floor to zero before binding a port —
+and `forkOnPort:` checks too, so the message reaches whoever typed the command rather than a
+detached gem's log.
 
 **Sessions with no deadline.** `GS_MCP_IDLE_TIMEOUT=none` is the localhost case: a developer who
 comes back hours later resumes rather than re-initializing. The session then lives exactly as long
@@ -419,30 +420,20 @@ class-side and the rest arrives as JSON in the fork string, so nothing else on d
 *this* router was told. Every line is timestamped, since the events worth correlating (a host
 suspend, a wake, a client reconnect) are ones the gem neither caused nor can see.
 
-**Host suspend.** Everything here measures wall time, so a laptop that sleeps for two hours looks
-exactly like every client going idle at once — and the first maintenance pass after a wake would
-expire every in-flight probe, find every session hours idle, and free every worker gem while the
-clients sat there awake and connected. So the pass measures its own lateness: a pass that asks for a
-minute and returns hours later is read as time the front end was not running, and that time is
-forgiven on every session's idle clock (never on an expiry). Outstanding requests are discarded
-rather than condemned, and every reachable client is told on its stream — because the one thing it
-cannot work out for itself is that its worker gem still holds the transaction view it had before the
-gap.
+**Host suspend.** Not handled, because it does not need to be. The maintenance pass is the server's
+only clock, and it ticks solely while the front end runs; a suspended host holds no passes, so no
+count advances and a session comes back exactly as it went away. The one deliberate exception is an
+absolute deadline — a lifetime cap or a credential's `exp` — which stays wall-clock and is never
+forgiven, because a token does not become valid again just because a laptop slept.
 
-Measured on real hardware rather than reasoned about: over a **3h19m** lid-close, macOS suspended in
-9 separate pieces (dark-waking between them), of which **98.5% was forgiven** — 182 seconds charged
-as idleness across three and a half hours — and no session on any of three routers was reaped.
-[sleep-test.sh](sleep-test.sh) is the harness: `simulate` freezes the gem with `SIGSTOP` and reports
-in four minutes, `arm`/`check` brackets a real sleep and reports the full fragmentation profile
-against macOS's own power log.
+An earlier design did measure elapsed time and tried to *detect* suspends, forgiving a pass that came
+back late. It worked to about 96% over a real night, and the missing few percent still released
+sessions whose clients had never left — because the error term was set by someone else's power
+management rather than by anything this server could reason about. Counting evidence instead of
+subtracting time removed the failure and the mechanism together.
 
-A second run of **8h46m** with **Power Nap on** fragmented far harder — 38 pieces, one every ~14
-minutes — while the pieces themselves grew *longer* (mean 675s), because Power Nap on AC is allowed
-to do real work once awake. A guest VM freezing alongside the same host saw **one** piece of 8h35m:
-a guest does not dark-wake on its own schedule, so its numbers describe a different regime and
-should not be pooled with the host's. That run also produced the first hardware evidence that expiry
-outranks forgiveness — an authenticated router forgave 8h35m of idleness and reaped anyway, in the
-same maintenance pass, because the credentials had expired.
+[sleep-test.sh](sleep-test.sh) brackets a real sleep and checks the outcome that now matters: the
+session is still there, the gem still works, and the front end logged nothing about the sleep at all.
 
 Not configurable, because they are mechanism rather than policy: `keepaliveIntervalSeconds` 15
 (sized to proxy and NAT idle timeouts, not to sessions), `streamPollMilliseconds` 100,

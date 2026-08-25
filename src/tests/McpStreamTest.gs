@@ -115,19 +115,18 @@ streamOn: aRouter forSession: sess
 category: 'tests - idle probe'
 method: McpStreamTest
 testAnsweredPingDoesNotRestartTheIdleClock
-  "The decision this design turns on. If an answered ping stamped the activity clock, every
-   well-behaved client would hold its worker gem -- and its transaction view -- for as long as it
-   stayed open, and the warning would only ever reach clients unable to act on it. So liveness
-   spares the gem an early reap and earns a warning; only real MCP traffic restarts the cycle."
+  "The decision this design turns on. If an answered ping counted as work, every well-behaved client
+   would hold its worker gem -- and its transaction view -- for as long as it stayed open, and the
+   warning would only ever reach clients unable to act on it. So an answer spares the gem an early
+   reap and ADVANCES the idleness count; only real MCP traffic resets it."
   | r sess before |
   r := McpFixtureRouter new.
   sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
   sess outbox attachStream.
-  sess fakeIdleSeconds: 1700.
   before := sess lastActivitySeconds.
   self assert: (r probeSession: sess).
   self assert: (r resolvePendingRequest: ((self firstQueuedIn: sess) at: 'id') forSession: sess) notNil.
-  self assert: sess isKnownAlive.
+  self assert: sess quietProbes equals: 1.
   self assert: sess lastActivitySeconds equals: before
 %
 category: 'tests - stream'
@@ -208,31 +207,27 @@ testGetStreamWritesWhatIsQueued
 category: 'tests - idle probe'
 method: McpStreamTest
 testIdleSessionWithAStreamIsProbedThenWarned
-  "The two steps of the idle window, a pass apart: a ping first, and the warning only for a client
-   that answered it -- so the warning always goes to someone who can act on it."
+  "The two steps of the idle window: a ping first, and the warning only for a client that answered
+   it -- so the warning always goes to someone who can act on it. Sized so that one answered ping is
+   the last one: 600s of quiet at one ping per 300s is two confirmations."
   | r sess ping warning |
   r := McpFixtureRouter new.
+  r sessionIdleTimeoutSeconds: 600; livenessProbeIntervalSeconds: 300; reaperIntervalSeconds: 60.
   sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
   sess outbox attachStream.
-  sess fakeIdleSeconds: 1700.        "past 1800 - 300, not yet past 1800"
+  1 to: r probePassInterval do: [:i | sess notePassWithStream: true].
   self assert: r probeIdleSessions equals: 1.
   ping := self firstQueuedIn: sess.
   self assert: (ping at: 'method') equals: 'ping'.
   self assert: (self includesCS: 'srv-' in: (ping at: 'id')).
-  self assert: sess isProbeOutstanding.
-  "a second pass sends nothing while the answer is still owed"
-  self assert: r probeIdleSessions equals: 0.
+  self assert: sess unansweredProbes equals: 1.
   "the client answers; now it has earned a warning"
   r resolvePendingRequest: (ping at: 'id') forSession: sess.
+  self assert: sess quietProbes equals: 1.
   self assert: r probeIdleSessions equals: 1.
   warning := self firstQueuedIn: sess.
   self assert: (warning at: 'method') equals: 'notifications/message'.
-  self assert: ((warning at: 'params') at: 'level') equals: 'warning'.
-  self assert: (self includesCS: 'uncommitted changes will be lost'
-    in: ((warning at: 'params') at: 'data')).
-  self assert: sess idleWarned.
-  "and it is said once per idle period, not on every pass"
-  self assert: r probeIdleSessions equals: 0
+  self assert: ((warning at: 'params') at: 'level') equals: 'warning'
 %
 category: 'tests - logging'
 method: McpStreamTest
@@ -267,17 +262,17 @@ category: 'tests - return path'
 method: McpStreamTest
 testPostedResponseResolvesTheLivenessProbe
   "The whole round trip: the ping goes out on the stream, the answer comes back as a POST, and the
-   session is marked alive."
+   session records one confirmation."
   | r sess ping |
   r := McpFixtureRouter new.
   sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
   self assert: (r probeSession: sess).
   ping := self firstQueuedIn: sess.
-  self assert: sess isProbeOutstanding.
+  self assert: sess unansweredProbes equals: 1.
   self runRequest: (self postRequest:
     '{"jsonrpc":"2.0","id":"' , (ping at: 'id') , '","result":{}}' sessionId: sess id) on: r.
-  self assert: sess isKnownAlive.
-  self deny: sess isProbeOutstanding.
+  self assert: sess quietProbes equals: 1.
+  self assert: sess unansweredProbes equals: 0.
   "a duplicate or late answer is ignored, not refused: the server must not make a client fail"
   self assert: (r resolvePendingRequest: (ping at: 'id') forSession: sess) isNil
 %
@@ -293,17 +288,17 @@ testPostedResponseWithoutSessionIdReturns400
 category: 'tests - idle probe'
 method: McpStreamTest
 testProbeIsNotSentToASessionWithNoStream
-  "Not an oversight. A ping the client cannot receive would be recorded as unanswered and reap its
-   gem EARLY for the sole offence of never opening a stream; such a client keeps the old behaviour
-   and learns from a 404."
+  "Not an oversight. A ping the client cannot receive would be counted as unanswered and could reap
+   its gem for the sole offence of never opening a stream. Such a client is bounded instead by
+   #streamlessPassesBeforeRelease, which counts the passes on which nothing could be asked."
   | r sess |
   r := McpFixtureRouter new.
   sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
-  sess fakeIdleSeconds: 1700.
   self deny: sess outbox hasStream.
-  self assert: r probeIdleSessions equals: 0.
-  self deny: sess isProbeOutstanding.
-  self assert: sess outbox isEmpty
+  1 to: 10 do: [:i | r probeIdleSessions].
+  self assert: sess unansweredProbes equals: 0.
+  self assert: sess outbox isEmpty.
+  self assert: sess streamlessPasses equals: 10
 %
 category: 'tests - idle probe'
 method: McpStreamTest
@@ -313,15 +308,16 @@ testReapedSessionIsToldOnItsStreamBeforeTheGemGoes
    the drain loop still gets its turn."
   | r sess out |
   r := McpFixtureRouter new.
+  r sessionIdleTimeoutSeconds: 600; livenessProbeIntervalSeconds: 300.
   sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
   sess outbox attachStream.
-  sess fakeIdleSeconds: 4000.
+  1 to: r confirmationsBeforeRelease do: [:i | sess noteProbeSent; noteAlive].
   self assert: r reapIdleSessions equals: 1.
   self assert: (r sessionAt: sess id) isNil.
   self assert: sess outbox isClosing.
   out := (self streamOn: r forSession: sess) output.
   self assert: (self includesCS: 'This MCP session has ended' in: out).
-  self assert: (self includesCS: 'idle for over 30 minutes' in: out).
+  self assert: (self includesCS: 'idle for 10 minutes' in: out).
   self assert: (self includesCS: 'uncommitted changes in it are gone' in: out)
 %
 category: 'tests - logging'
@@ -362,16 +358,16 @@ category: 'tests - idle probe'
 method: McpStreamTest
 testUnansweredProbeFreesTheGemEarly
   "The other half of the ping: silence on a stream the client itself opened is evidence, not merely
-   absent traffic, so that gem need not wait out the full 30 minutes."
+   absent traffic, so that gem need not wait out the full idle count. Three consecutive misses,
+   because one can be a client that is merely not scheduled and will answer late."
   | r sess |
   r := McpFixtureRouter new.
-  r pendingRequestTimeoutSeconds: -1.       "expire the moment it is sent"
   sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
   sess outbox attachStream.
-  sess fakeIdleSeconds: 1700.               "well short of the 1800 idle timeout"
-  self assert: r probeIdleSessions equals: 1.
-  self assert: r expirePendingRequests equals: 1.
-  self assert: sess isKnownGone.
+  1 to: r unansweredProbesBeforeGone do: [:i |
+    1 to: r probePassInterval do: [:j | sess notePassWithStream: true].
+    self assert: r probeIdleSessions equals: 1].
+  self assert: sess unansweredProbes equals: r unansweredProbesBeforeGone.
   self assert: r reapIdleSessions equals: 1.
   self assert: (r sessionAt: sess id) isNil
 %

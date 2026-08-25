@@ -500,7 +500,7 @@ echo "[3/4] Session lifetime configuration ..."
 LIFE_PORT=$((PORT + 1))
 LIFE_URL="http://127.0.0.1:$LIFE_PORT/mcp"
 LIFE_LOG="$(mktemp -t gsmcp-life.XXXXXX)"
-GS_MCP_PORT="$LIFE_PORT" GS_MCP_IDLE_TIMEOUT=none GS_MCP_PROBE_INTERVAL=30s \
+GS_MCP_PORT="$LIFE_PORT" GS_MCP_IDLE_TIMEOUT=none GS_MCP_PROBE_INTERVAL=30s GS_MCP_REAPER_INTERVAL=15s \
   GS_MCP_STREAMLESS_TIMEOUT=20m GS_MCP_MAX_LIFETIME=8h ./run-server.sh > "$LIFE_LOG" 2>&1 &
 LIFE_WRAPPER_PID=$!
 for i in $(seq 1 60); do nc -z 127.0.0.1 "$LIFE_PORT" 2>/dev/null && break; sleep 0.5; done
@@ -516,15 +516,17 @@ JSON
 else
   check "a router with no idle deadline starts"  'listening'   "did not start. log: $(cat "$LIFE_LOG")"
 fi
-# A deliberately incoherent combination must be refused, and refused IN THE LAUNCHING SESSION: a
+# A deliberately incoherent combination must be refused -- here an idle timeout shorter than the
+# interval idleness is measured in, which would release a session before its client could be asked
+# anything at all -- and refused IN THE LAUNCHING SESSION: a
 # detached child gem that raises on startup leaves the operator looking at a cheerful "forked into
 # gem session N" and a port that never opens. So forkOnPort: validates before it forks, and the
 # message lands where whoever typed it will see it.
 BAD_PORT=$((PORT + 2))
 BAD_LOG="$(mktemp -t gsmcp-bad.XXXXXX)"
-GS_MCP_PORT="$BAD_PORT" GS_MCP_IDLE_TIMEOUT=90s GS_MCP_WARNING_LEAD=80s \
+GS_MCP_PORT="$BAD_PORT" GS_MCP_IDLE_TIMEOUT=90s GS_MCP_PROBE_INTERVAL=300s \
   ./run-server.sh > "$BAD_LOG" 2>&1 || true
-check "an unworkable warning lead is refused"  'too short'   "$(cat "$BAD_LOG")"
+check "an unmeasurable idle timeout is refused"  'shorter than'   "$(cat "$BAD_LOG")"
 if nc -z 127.0.0.1 "$BAD_PORT" 2>/dev/null; then
   check "...and no front end is left running"  'nothing listening'  "something is listening on $BAD_PORT"
 else
