@@ -5,9 +5,95 @@ GemStone Smalltalk. It runs **inside** the image and executes tool calls directl
 Node.js process, no GCI/FFI bridge. The goal is to replace the GCI-based Jasper MCP
 server with one that any MCP client can reach over plain HTTP.
 
+**Status:** the Streamable HTTP transport, per-client worker gems, 31 base tools (+2 optional
+Python), OAuth 2.1 / JWT + TLS, per-router read-only mode and server-initiated messages are built
+and verified end-to-end — by curl, by a TLS run, and by the in-image suites. What is *not* built is
+listed under [Future work](#future-work).
+
 A note about versions: `run-server.sh` is safe to use on a 3.7.5 stone, but `run-auth-server.sh`
-needs 3.7.6 due to a bug in connecting to an external OIDC IdP. Instructions for installing and
-running are later in this document.
+needs 3.7.6 due to a bug in connecting to an external OIDC IdP.
+
+## Install & run
+
+```bash
+export GEMSTONE=/path/to/GemStone64Bit3.7.x   # product dir
+
+./install.sh --check                # verify the environment first -- do this on a new machine
+./install.sh                        # file in the classes (core + tests + auth) and commit
+./install.sh --grail                # ...and the optional Grail/Python toolset (Grail image only)
+GS_MCP_PORT=8000 ./run-server.sh    # fork a detached, independent localhost server gem and return
+GS_MCP_READONLY=1 ./run-server.sh   # ...read-only (browse/search only; no accidental mutation)
+GS_MCP_TOOLSETS="McpBrowsingToolset McpSearchToolset" ./run-server.sh   # ...only these tools
+GS_MCP_WORKER_CLASS=MyMcpServer ./run-server.sh                        # ...a subclass as the worker
+./run-auth-server.sh                # ...the OAuth/OIDC network-facing server (McpAuthRouter)
+```
+
+`install.sh` and the `run-*.sh` scripts use topaz; set `GEMSTONE`, `GS_STONE`, `GS_USER`,
+`GS_PASS` to match your environment — and read **Environment** below before assuming those four are
+enough, because on many machines they are not. `install.sh` files the code in with topaz from `load.gs` —
+which on this branch includes `src/auth/`, since the OAuth front end is the point of it; `--grail`
+(or `GS_MCP_WITH_GRAIL=1`) files in `load-grail.gs` instead, which adds the `src/grail/` group on
+top. `run-server.sh` builds a base `McpRouter` instance and calls
+its `forkOnPort:` (`run-auth-server.sh` builds an OIDC-configured `McpAuthRouter` — resource-server
+config as code, no commit), which launches a detached, independent front-end gem and returns; stop it
+with `./stop-server.sh` (by port), or the `System stopSession: <id>` / `kill <pid>` line it prints.
+A loaded Grail toolset is picked up automatically, per session, by the front end.
+
+### Environment
+
+Every script here sources `gs-env.sh`, which resolves the environment and refuses to continue on a
+misconfigured one. `--check` runs that resolution and reports without doing anything else; it is the
+first thing to run on a machine you have not installed on before.
+
+```
+$ ./install.sh --check
+product      /opt/gemstone/GemStone64Bit3.7.5-x86_64.Linux
+global dir   /opt/gemstone
+
+servers visible to this client:
+  Status     Version   Owner        Pid  Port  Started      Type    Name
+  OK         3.7.5     gsadmin    96453 65166 Aug 23 12:31  Netldi  gs64ldi
+  OK         3.7.5     gsadmin    60042 56820 Aug 20 08:53  Stone   gs64stone
+
+OK: environment looks usable for gs64stone.
+```
+
+**`GEMSTONE_GLOBAL_DIR` is the variable that decides whether anything works**, and it is the one the
+old four-variable advice left out. Get it wrong and every script fails at `login` with:
+
+```
+could not find server 'gs64stone' on host 'somehost' because service not found,
+getaddrinfo failed, EAI error 8   ... Number: 4065
+```
+
+That message names `getaddrinfo`, so it reads like a DNS or `/etc/services` problem. It is not.
+With no `/etc/services` entries a stone and a netldi each bind an **ephemeral** port and record it
+in `$GEMSTONE_GLOBAL_DIR/locks/<name>..LCK`; clients read those lock files. A client pointed at a
+different `GEMSTONE_GLOBAL_DIR` than the stone was *started* with finds no lock file and falls back
+to a hostname/service lookup, which fails. The product's built-in default is `/opt/gemstone` (then
+`/usr/gemstone`), so any installation keeping its locks elsewhere must tell its clients where.
+
+`.setenv.example` is a starting point: copy it to `.setenv` (git-ignored) and edit it for your
+machine. Most of it is optional — `gs-env.sh` discovers it rather than making you guess: it asks `gslist` under each candidate and
+uses the one where the running servers actually are, saying so when it has to correct or supply a
+value. `gslist` is the authority here — it reads the same lock files the GCI client does.
+
+Do **not** reach for `/etc/services`. Registering a stone or netldi there is unnecessary once
+`GEMSTONE_GLOBAL_DIR` is right, and it is a trap: netldi binds the port named in `/etc/services`
+only if it is **restarted** after the entry exists, so an entry added to a running system is stale
+by construction and points at a port nothing is listening on.
+
+**Which scripts need a netldi.** `install.sh` talks only to the stone, so it runs fine on a host
+with no netldi at all. The `run-*.sh` scripts need one — not because of how they log in, but
+because `McpRouter>>forkOnPort:` and every per-client worker create a `GsTsExternalSession`, and
+netldi is what forks those gems. `run-unit-tests.sh` needs one too, because `McpAuthTest` spawns a
+real worker. Each script checks for what it actually needs, and says which is missing.
+
+**Linked vs RPC.** These scripts run `topaz -l` (linked). That is deliberate, and it is not the
+cause of the error above: a linked login resolves the stone through the same lock files, so it
+needs `GEMSTONE_GLOBAL_DIR` and nothing else — no netldi, no NRS, no service entries. Dropping `-l`
+routes the login through netldi instead, which works equally well once `GEMSTONE_GLOBAL_DIR` is
+right, but it would make `install.sh` depend on a netldi it otherwise has no use for.
 
 ## Transport
 
@@ -213,6 +299,76 @@ an image without Grail. Once loaded the toolset joins the default tool surface a
   classifier (`compileError`, `refused`, `readOnly`, `notFound`, `invalidParams`, `other`), so a
   client can branch on the kind instead of parsing prose.
 
+## Read-only mode
+
+A router can refuse every state-changing tool, so a client can browse and search but not modify the
+image — primarily a **localhost convenience** so a single user cannot *accidentally* mutate or commit
+(it is a tool-gate, **not** an access-control boundary). Read-only is **per-router**: the router marks
+each worker read-only at session open, so two routers (one read-only, one not) can run at once with
+no shared state. A worker is read-only if **either** applies:
+
+- **The router is read-only** — `(McpRouter new readOnly: true) forkOnPort: 8000`, or the shortcut
+  `GS_MCP_READONLY=1 ./run-server.sh`. Every session that router opens is read-only.
+- **By OAuth scope (`McpAuthRouter`)** — give the router a `writeScope` (e.g. `./run-auth-server.sh`
+  with `MCP_WRITE_SCOPE=mcp:write`): a token carrying that scope gets a read-write worker; a token
+  lacking it gets a read-only worker for that session. For a client to actually *request* that scope,
+  the router must also **advertise** it — and it does so automatically, so there is nothing to keep
+  in sync. Advertising without requiring is the point: an entitled user is granted the scope and gets
+  read-write, while an unentitled user (the authorization server withholds it) still connects
+  read-only.
+
+`supportedScopes` is the set published as `scopes_supported` (RFC 9728 metadata) and offered in the
+`WWW-Authenticate` challenge — what clients are told to request, as distinct from `requiredScopes`,
+what every token *must* carry. It is **derived, not configured**: the union of `requiredScopes`, the
+`writeScope`, and `extraScopes`. Because it is a union, a required scope is always advertised and the
+write scope is always requestable — neither can be left out by a configuration slip, and there is no
+subset rule to observe. Set `extraScopes` only for scopes the router itself does not gate on but the
+client still needs to ask for, such as an authorization server's own `profile`.
+
+**Configuring the authorization server (Keycloak).** Keycloak's own
+[MCP authorization server guide](https://www.keycloak.org/securing-apps/mcp-authz-server) recommends
+the shape this router already expects: define `mcp:*` client scopes, and bind an **audience mapper**
+to them so a token carries the resource identifier this router checks as `expectedAudience`. It
+recommends binding the audience to a *scope* rather than to an RFC 8707 `resource` indicator, because
+Keycloak has not implemented resource indicators — so bind the mapper to a scope every client
+requests, i.e. one of the router's `requiredScopes` (say `mcp:use`), and every token comes out with
+the right audience without any per-client setup.
+
+That choice interacts with `extraScopes` in one Keycloak-specific way worth knowing before you deploy.
+A client that registers dynamically (RFC 7591) and sends a `scope` field is assigned **only** the
+scopes it asked for — Keycloak drops the realm's default client scopes — so anything the token needs
+must be advertised or the client is never assigned it. In practice that means
+`MCP_EXTRA_SCOPES="profile offline_access"`: `profile` because `MCP_USERID_CLAIM` is typically
+`preferred_username` on Keycloak (the claim defaults to `sub`) and the `profile` scope is what emits
+it, and `offline_access` because clients ask for it to get a refresh token. Advertising
+`offline_access` runs against MCP's SEP-2207, which says a resource SHOULD NOT list it since refresh
+tokens are not a resource requirement — but on Keycloak, advertising is the only mechanism by which a
+dynamically-registered client can come to hold that scope, so it is the supported configuration here
+rather than a workaround.
+
+**What's gated:** everything that can persist a change or run arbitrary code — `execute_code`,
+`commit`, and all the mutation tools. Everything else (browsing, listing, search,
+`status`/`refresh`/`abort`, and the test-runner tools) stays available.
+
+**Each toolset declares its own safe tools** (`McpToolset>>readOnlySafeToolNames`), and the server
+answers their union, so a third-party toolset decides for its own tools without editing anything
+central. It is **fail-closed**: the default declaration is *empty*, so a newly added tool is gated
+until its toolset explicitly vouches for it. `McpServer class>>coreReadOnlySafeToolNames` remains as
+the **audit list** — the one place to read the whole core answer — and `McpContractTest` pins the
+union of the seven core toolsets against it, so a tool cannot quietly become "safe".
+
+Screening happens at both levels, which matters because one family is mixed: `McpSessionToolset`
+holds `abort`/`refresh`/`status` (safe) *and* `commit` (not). A toolset that declares nothing safe —
+mutation, execution — is dropped whole; a mixed one keeps only its safe tools.
+
+Two moments, too. When the router opens a read-only worker the gated tools are **never registered**
+(the flag is set before the server is built), which is a stronger gate than refusing them on call;
+the dispatcher's check still runs for a server whose flag was set afterwards. Either way a gated tool
+is **hidden from `tools/list`** and, if called by name, returns `-32601` with
+`error.data.kind = "readOnly"` — deliberately *not* `notFound`, so a client can tell "exists but
+forbidden here" from "no such tool". A tool absent because its toolset was never loaded genuinely
+*is* `notFound`.
+
 ## Architecture
 
 | Class | Role |
@@ -293,6 +449,39 @@ client's long tool call no longer stalls anyone else — see
 The base `McpRouter` logs every worker in as the current (server) user; the network-facing
 `McpAuthRouter` instead logs each worker in as the **token's own GemStone user** via JWT.
 
+## Concurrency & robustness
+
+Each accepted connection is handled in its own forked `GsProcess`, so a slow or stalled
+client cannot block the accept loop (the forked handlers run during the loop's accept
+waits). `McpHttpConnection>>readRequest` also bails after an 8s read timeout, so a client
+that connects but never sends a complete request is dropped rather than wedging the server.
+Each client's requests run in its own worker gem (a separate session), so there's no shared
+transaction to protect; a `Semaphore` (mutex) guards the `MCP-Session-Id → session` map, and each
+session has its own guarding its worker.
+
+**Clients run concurrently.** Forwarding a request used to be a blocking GCI `executeString:`, which
+blocks in C — so while it ran the front-end gem executed no Smalltalk and *no* `GsProcess` in it ran:
+not another client's request, not the accept loop, not the idle reaper, not an open SSE stream's
+keepalives. `McpSession>>runWorker:` now starts the call with `nbExecute:` and waits on the session's
+socket, which suspends only the calling `GsProcess`. Measured: a second client is served in ~1s while
+an 8-second tool call is in flight, where it used to wait the full 8 (`test.sh` checks this).
+
+Two guarantees the blocking call had been providing by accident are now explicit. GCI allows one call
+in flight per session, so each `McpSession` holds a mutex — a client with two requests outstanding
+queues rather than colliding. And the idle reaper, which previously could not run during a forward at
+all, now skips any session with a call in flight (`McpSession>>isBusy`) instead of logging a worker
+out mid-request. A forwarded request still has **no deadline**: a runaway tool ties up its own
+session for as long as it runs, though no longer anyone else's.
+
+**An open SSE stream costs the gem nothing.** Its drain loop yields on every tick (a 100ms `Delay`),
+so the accept loop, the reaper and every other session's stream keep running. Both directions of that
+socket are guarded, for the same reason the accept loop guards its read side: every SSE frame waits
+on `writeWillNotBlockWithin:` first — `GsSocket>>write:` suspends with **no timeout**, so a client
+that stops reading would otherwise park that stream's `GsProcess` and its socket forever — and each
+tick polls the read side without blocking, so a client that simply vanishes is noticed in ~100ms
+rather than at the next keepalive. Reopening the GET does not accumulate streams either: the newest
+supersedes the previous one, which ends on its next tick.
+
 ## Server-initiated messages
 
 MCP is request/response over HTTP, so a server has no socket to call out on: it can only write on a
@@ -351,89 +540,17 @@ not save the session, it only means the notice reaches someone listening.
 | `McpBase>>notification:params:` / `request:params:id:` | envelope builders on the front-end side. `McpDispatcher` lives in the worker and cannot be asked to build one mid-tool-call |
 | pending-request table | `srv-N` ids in their own namespace, timed out at 30s — an unanswered ping must decide something, never hang a session |
 
-### Session lifetime is configuration
+### Session lifetime
 
-How long a session lives is deployment policy, not a constant. Each of these is ordinary router
-config — settable on the instance, carried into a forked child gem in the fork string, and checked
-against the others before a port is bound.
+How long a session lives is deployment policy, not a constant: the idle deadline, the liveness-probe
+interval, the absolute cap, and what an authenticated router does with a token's own `exp`. Because
+a session here **is a gem holding a transaction view**, those choices decide when uncommitted work
+is thrown away — so they have their own document: **[docs/session-lifetime.md](docs/session-lifetime.md)**.
+It covers every knob and its default, what actually ends a session, why nothing is measured in
+elapsed time, and why a host suspend needs no handling at all.
 
-| | default | |
-|---|---|---|
-| `sessionIdleTimeoutSeconds` | 1800 | how long a client may be quiet. **`nil` = no deadline at all** |
-| `streamlessIdleTimeoutSeconds` | 1800 | the floor for a client that opens no stream, when there is no deadline |
-| `livenessProbeIntervalSeconds` | 300 | how often a quiet session with no deadline is re-asked |
-| `reaperIntervalSeconds` | 60 | how often the maintenance pass runs |
-| `expiryWarningLeadSeconds` | 300 | how long before an *absolute* deadline a client is warned |
-| `maxSessionLifetimeSeconds` | `nil` | absolute cap, however busy the session is |
-| `reapOnFailedProbe` | `true` | whether an unanswered ping frees a gem early. Forced on with no deadline |
-
-**What actually ends a session**, in one place: a **deadline counts calls**; **`none` counts pings**;
-a client that opens **no stream** gets `streamlessIdleTimeoutSeconds` either way, because a ping can
-only be sent down a stream the client itself opened. So `GS_MCP_IDLE_TIMEOUT=none` does not mean "no
-limit" — it means the client's own answers are the limit, and a client that stops answering, or that
-never opened a stream, is still released.
-
-Before either deadline the client is warned on its stream, once, with advice that fits which deadline
-is approaching: an idle timeout says to make any call (`status` is enough), while an absolute one —
-`maxSessionLifetimeSeconds`, or an access token's `exp` — says whether it can be extended at all. A
-refreshed deadline earns a fresh warning.
-
-From the shell, `GS_MCP_IDLE_TIMEOUT` and friends set these on either launcher — durations like
-`90s`, `30m`, `4h`, or `none`. See [session-lifetime.sh](session-lifetime.sh), which documents each.
-
-**Nothing here is measured in elapsed time.** The knobs are seconds because that is how a deployment
-thinks; what the reaper counts is derived from them. Idleness is a count of **liveness pings the
-client answered with no work in between** — `sessionIdleTimeoutSeconds ÷ livenessProbeIntervalSeconds`
-of them, six at the defaults. Unreachability is a count of **maintenance passes with no stream**.
-Both advance only when the front end is running, so a host that suspends simply stops the count
-where it was: there is no suspend to detect, nothing to forgive, and no threshold to get wrong.
-`validateTimerConfig` refuses a combination whose counts would floor to zero before binding a port —
-and `forkOnPort:` checks too, so the message reaches whoever typed the command rather than a
-detached gem's log.
-
-**Sessions with no deadline.** `GS_MCP_IDLE_TIMEOUT=none` is the localhost case: a developer who
-comes back hours later resumes rather than re-initializing. The session then lives exactly as long
-as its client keeps answering liveness pings on the stream it opened — the client asserting it still
-wants that gem and the uncommitted work in it. What keeps it from being a leak is the pair around
-it: a failed probe always reaps, and a client that opens no stream (so can never be asked) still
-falls back to `streamlessIdleTimeoutSeconds`. Worth knowing before choosing it: on GemStone an idle
-session is *not* free — each worker is a gem sitting in a transaction, so it pins a repository view
-and holds back page reclamation. A forgotten session is extent growth, not merely an idle process.
-
-**On an authenticated router, the token is the real bound.** `McpAuthRouter` caps every session at
-its access token's own `exp`, whatever the idle policy says: the worker gem is logged in as that
-token's GemStone user, so a session outliving its token would leave the authorization it was opened
-with in force after the grant expired. An expiry is never probed around and never forgiven.
-
-That cap is on the *grant*, not on the session: a request bearing a **refreshed** token for the same
-user extends the session to the new token's `exp` (`renewSessionExpiry:from:`). Without this a client
-working steadily had its worker gem torn down and rebuilt one access-token lifetime after opening,
-however recently it had called, because activity feeds the idle clock and the idle clock is not what
-ends an authenticated session. Refreshing sooner would not have helped, since
-the renewed token was never consulted about lifetime. A read-write session is *not* extended by a
-token that has lost the write scope: that token keeps working, but buys no time, and the next session
-opens read-only.
-
-**The log says what was in force.** The startup banner records the whole lifetime configuration, and
-a reap names the session and the reason the client was given rather than a count — the defaults are
-class-side and the rest arrives as JSON in the fork string, so nothing else on disk records what
-*this* router was told. Every line is timestamped, since the events worth correlating (a host
-suspend, a wake, a client reconnect) are ones the gem neither caused nor can see.
-
-**Host suspend.** Not handled, because it does not need to be. The maintenance pass is the server's
-only clock, and it ticks solely while the front end runs; a suspended host holds no passes, so no
-count advances and a session comes back exactly as it went away. The one deliberate exception is an
-absolute deadline — a lifetime cap or a credential's `exp` — which stays wall-clock and is never
-forgiven, because a token does not become valid again just because a laptop slept.
-
-An earlier design did measure elapsed time and tried to *detect* suspends, forgiving a pass that came
-back late. It worked to about 96% over a real night, and the missing few percent still released
-sessions whose clients had never left — because the error term was set by someone else's power
-management rather than by anything this server could reason about. Counting evidence instead of
-subtracting time removed the failure and the mechanism together.
-
-[sleep-test.sh](sleep-test.sh) brackets a real sleep and checks the outcome that now matters: the
-session is still there, the gem still works, and the front end logged nothing about the sleep at all.
+From the shell, `GS_MCP_IDLE_TIMEOUT` and friends set all of it on either launcher — see
+[session-lifetime.sh](session-lifetime.sh), which documents each.
 
 Not configurable, because they are mechanism rather than policy: `keepaliveIntervalSeconds` 15
 (sized to proxy and NAT idle timeouts, not to sessions), `streamPollMilliseconds` 100,
@@ -449,159 +566,97 @@ lines from tool internals — which needs a worker→router channel (`InterSessi
 candidate). Elicitation and sampling need more than that: a *bidirectional* worker channel, since
 their answers have to be delivered back into a gem whose GCI call is already in flight.
 
-## Read-only mode
+## Writing your own MCP server
 
-A router can refuse every state-changing tool, so a client can browse and search but not modify the
-image — primarily a **localhost convenience** so a single user cannot *accidentally* mutate or commit
-(it is a tool-gate, **not** an access-control boundary). Read-only is **per-router**: the router marks
-each worker read-only at session open, so two routers (one read-only, one not) can run at once with
-no shared state. A worker is read-only if **either** applies:
+You can ship an MCP server for **your** software on this transport — including one that exposes only
+your tools, with none of the Smalltalk-development surface. There are two extension points, and the
+first is the one you usually want.
 
-- **The router is read-only** — `(McpRouter new readOnly: true) forkOnPort: 8000`, or the shortcut
-  `GS_MCP_READONLY=1 ./run-server.sh`. Every session that router opens is read-only.
-- **By OAuth scope (`McpAuthRouter`)** — give the router a `writeScope` (e.g. `./run-auth-server.sh`
-  with `MCP_WRITE_SCOPE=mcp:write`): a token carrying that scope gets a read-write worker; a token
-  lacking it gets a read-only worker for that session. For a client to actually *request* that scope,
-  the router must also **advertise** it — and it does so automatically, so there is nothing to keep
-  in sync. Advertising without requiring is the point: an entitled user is granted the scope and gets
-  read-write, while an unentitled user (the authorization server withholds it) still connects
-  read-only.
+**To add tools, write a toolset.** Subclass `McpToolset`, implement `registerOn:` (one
+`name:description:inputSchema:do:` send per tool, building schemas with the inherited
+`objectSchema:required:` / `propString:` / `boolProperty:` helpers), implement `toolNames`, and
+declare `readOnlySafeToolNames` for whichever of your tools cannot persist a change — the default is
+*none*, so an undeclared tool is gated in a read-only session. Write the handlers as instance methods
+on the same class, taking the parsed argument dictionary and returning a `String`; the inherited
+`resolveClass:`, `dictNamed:`, `linesFrom:` and `capResult:` helpers cover the usual image lookups
+and output capping. `McpFixtureToolset` (in `src/tests/`) and `McpGrailToolset` are small worked
+examples. A handler that *mutates* the image should pass through the inherited kernel guard
+(`self assertMutableClass: cls`) before it changes anything; that forwards to the server, because
+what counts as protected is one answer per deployment rather than each toolset's to invent, and a
+subclass can tighten it for every toolset at once. `McpMutationToolset` shows the pattern. Your
+toolset may layer a *stricter* guard of its own on top; a toolset built with no server refuses to
+mutate at all, fail-closed.
 
-`supportedScopes` is the set published as `scopes_supported` (RFC 9728 metadata) and offered in the
-`WWW-Authenticate` challenge — what clients are told to request, as distinct from `requiredScopes`,
-what every token *must* carry. It is **derived, not configured**: the union of `requiredScopes`, the
-`writeScope`, and `extraScopes`. Because it is a union, a required scope is always advertised and the
-write scope is always requestable — neither can be left out by a configuration slip, and there is no
-subset rule to observe. Set `extraScopes` only for scopes the router itself does not gate on but the
-client still needs to ask for, such as an authorization server's own `profile`.
+Errors raised inside a handler are caught by the dispatcher and returned as an MCP error result
+(`isError: true`) carrying a structured `kind`. If your tools can raise exceptions **outside** the
+`Error` hierarchy, catch them yourself and re-signal an `McpError` — that is what `McpGrailToolset`
+does for Python exceptions, and why it has to.
 
-**Configuring the authorization server (Keycloak).** Keycloak's own
-[MCP authorization server guide](https://www.keycloak.org/securing-apps/mcp-authz-server) recommends
-the shape this router already expects: define `mcp:*` client scopes, and bind an **audience mapper**
-to them so a token carries the resource identifier this router checks as `expectedAudience`. It
-recommends binding the audience to a *scope* rather than to an RFC 8707 `resource` indicator, because
-Keycloak has not implemented resource indicators — so bind the mapper to a scope every client
-requests, i.e. one of the router's `requiredScopes` (say `mcp:use`), and every token comes out with
-the right audience without any per-client setup.
+Then name your toolsets when you launch a router:
 
-That choice interacts with `extraScopes` in one Keycloak-specific way worth knowing before you deploy.
-A client that registers dynamically (RFC 7591) and sends a `scope` field is assigned **only** the
-scopes it asked for — Keycloak drops the realm's default client scopes — so anything the token needs
-must be advertised or the client is never assigned it. In practice that means
-`MCP_EXTRA_SCOPES="profile offline_access"`: `profile` because `MCP_USERID_CLAIM` is typically
-`preferred_username` on Keycloak (the claim defaults to `sub`) and the `profile` scope is what emits
-it, and `offline_access` because clients ask for it to get a refresh token. Advertising
-`offline_access` runs against MCP's SEP-2207, which says a resource SHOULD NOT list it since refresh
-tokens are not a resource requirement — but on Keycloak, advertising is the only mechanism by which a
-dynamically-registered client can come to hold that scope, so it is the supported configuration here
-rather than a workaround.
-
-**What's gated:** everything that can persist a change or run arbitrary code — `execute_code`,
-`commit`, and all the mutation tools. Everything else (browsing, listing, search,
-`status`/`refresh`/`abort`, and the test-runner tools) stays available.
-
-**Each toolset declares its own safe tools** (`McpToolset>>readOnlySafeToolNames`), and the server
-answers their union, so a third-party toolset decides for its own tools without editing anything
-central. It is **fail-closed**: the default declaration is *empty*, so a newly added tool is gated
-until its toolset explicitly vouches for it. `McpServer class>>coreReadOnlySafeToolNames` remains as
-the **audit list** — the one place to read the whole core answer — and `McpContractTest` pins the
-union of the seven core toolsets against it, so a tool cannot quietly become "safe".
-
-Screening happens at both levels, which matters because one family is mixed: `McpSessionToolset`
-holds `abort`/`refresh`/`status` (safe) *and* `commit` (not). A toolset that declares nothing safe —
-mutation, execution — is dropped whole; a mixed one keeps only its safe tools.
-
-Two moments, too. When the router opens a read-only worker the gated tools are **never registered**
-(the flag is set before the server is built), which is a stronger gate than refusing them on call;
-the dispatcher's check still runs for a server whose flag was set afterwards. Either way a gated tool
-is **hidden from `tools/list`** and, if called by name, returns `-32601` with
-`error.data.kind = "readOnly"` — deliberately *not* `notFound`, so a client can tell "exists but
-forbidden here" from "no such tool". A tool absent because its toolset was never loaded genuinely
-*is* `notFound`.
-
-## Install & run
-
-```bash
-export GEMSTONE=/path/to/GemStone64Bit3.7.x   # product dir
-
-./install.sh --check                # verify the environment first -- do this on a new machine
-./install.sh                        # file in the classes (core + tests + auth) and commit
-./install.sh --grail                # ...and the optional Grail/Python toolset (Grail image only)
-GS_MCP_PORT=8000 ./run-server.sh    # fork a detached, independent localhost server gem and return
-GS_MCP_READONLY=1 ./run-server.sh   # ...read-only (browse/search only; no accidental mutation)
-GS_MCP_TOOLSETS="McpBrowsingToolset McpSearchToolset" ./run-server.sh   # ...only these tools
-GS_MCP_WORKER_CLASS=MyMcpServer ./run-server.sh                        # ...a subclass as the worker
-./run-auth-server.sh                # ...the OAuth/OIDC network-facing server (McpAuthRouter)
+```smalltalk
+(McpRouter new
+  toolsetNames: #('AcmeDbToolset');           "only your tools -- no execute_code, no mutation tools"
+  serverName: 'acme-db-mcp'; serverVersion: '2.5.0';
+  serverTitle: 'Acme Labels - sandbox')       "which INSTANCE this is, for a human"
+    forkOnPort: 8000
 ```
 
-`install.sh` and the `run-*.sh` scripts use topaz; set `GEMSTONE`, `GS_STONE`, `GS_USER`,
-`GS_PASS` to match your environment — and read **Environment** below before assuming those four are
-enough, because on many machines they are not. `install.sh` files the code in with topaz from `load.gs` —
-which on this branch includes `src/auth/`, since the OAuth front end is the point of it; `--grail`
-(or `GS_MCP_WITH_GRAIL=1`) files in `load-grail.gs` instead, which adds the `src/grail/` group on
-top. `run-server.sh` builds a base `McpRouter` instance and calls
-its `forkOnPort:` (`run-auth-server.sh` builds an OIDC-configured `McpAuthRouter` — resource-server
-config as code, no commit), which launches a detached, independent front-end gem and returns; stop it
-with `./stop-server.sh` (by port), or the `System stopSession: <id>` / `kill <pid>` line it prints.
-A loaded Grail toolset is picked up automatically, per session, by the front end.
+Relabel the server when you configure one: `serverName` / `serverVersion` say which *product* this is,
+`serverTitle` says which *instance* a human is looking at — see [Server identity](#server-identity)
+below.
 
-### Environment
+Toolsets **compose** — `#('AcmeDbToolset' 'McpBrowsingToolset')` gives your tools plus class
+browsing, and two unrelated vendors' toolsets can be combined. This is the reason tools live in
+toolsets rather than in `McpServer` subclasses: single inheritance could never express it.
 
-Every script here sources `gs-env.sh`, which resolves the environment and refuses to continue on a
-misconfigured one. `--check` runs that resolution and reports without doing anything else; it is the
-first thing to run on a machine you have not installed on before.
+**To change behavior, subclass `McpServer`** — the kernel guards, the worker entry, dispatcher
+wiring, or the advertised identity. Name your subclass in `workerClassName` (nothing auto-detects
+it):
 
-```
-$ ./install.sh --check
-product      /opt/gemstone/GemStone64Bit3.7.5-x86_64.Linux
-global dir   /opt/gemstone
-
-servers visible to this client:
-  Status     Version   Owner        Pid  Port  Started      Type    Name
-  OK         3.7.5     gsadmin    96453 65166 Aug 23 12:31  Netldi  gs64ldi
-  OK         3.7.5     gsadmin    60042 56820 Aug 20 08:53  Stone   gs64stone
-
-OK: environment looks usable for gs64stone.
+```smalltalk
+(McpRouter new workerClassName: 'AcmeDbServer'; toolsetNames: #('AcmeDbToolset')) forkOnPort: 8000
 ```
 
-**`GEMSTONE_GLOBAL_DIR` is the variable that decides whether anything works**, and it is the one the
-old four-variable advice left out. Get it wrong and every script fails at `login` with:
+### Server identity
 
+The `initialize` result's `serverInfo` carries three fields, and they answer different questions:
+
+| Field | Means | Set by |
+|---|---|---|
+| `name` | **which software this is** | the product: override class-side `defaultServerName`, or set router config `serverName` for a toolset-composed server with no `McpServer` subclass |
+| `version` | which release of that software | same |
+| `title` | **which instance this is**, for a human | the operator: router config `serverTitle` |
+
+`name` is the programmatic identifier and `title` is the display string (MCP `BaseMetadata`); when
+there is no `title` a client displays the `name`. So the two shapes are:
+
+```smalltalk
+"same software, three stones -- name stays truthful, humans can tell them apart"
+(McpRouter new serverTitle: 'GemStone - geode teststone 3.7.6') forkOnPort: 8000
+(McpRouter new readOnly: true; serverTitle: 'GemStone (read-only)') forkOnPort: 8001
+"a different product assembled from toolsets, with no McpServer subclass"
+(McpRouter new toolsetNames: #('AcmeDbToolset');
+   serverName: 'acme-db-mcp'; serverVersion: '2.5.0';
+   serverTitle: 'Acme Labels - sandbox') forkOnPort: 8002
 ```
-could not find server 'gs64stone' on host 'somehost' because service not found,
-getaddrinfo failed, EAI error 8   ... Number: 4065
-```
 
-That message names `getaddrinfo`, so it reads like a DNS or `/etc/services` problem. It is not.
-With no `/etc/services` entries a stone and a netldi each bind an **ephemeral** port and record it
-in `$GEMSTONE_GLOBAL_DIR/locks/<name>..LCK`; clients read those lock files. A client pointed at a
-different `GEMSTONE_GLOBAL_DIR` than the stone was *started* with finds no lock file and falls back
-to a hostname/service lookup, which fails. The product's built-in default is `/opt/gemstone` (then
-`/usr/gemstone`), so any installation keeping its locks elsewhere must tell its clients where.
+To name your **product**, override the **class-side** `defaultServerName` / `defaultServerVersion`.
+That keeps the name a default a deployment can still relabel through router config — the path for a
+server assembled from toolsets that never subclasses `McpServer`. Overriding the instance-side
+`serverName` instead wins over config, which is a deliberate lock rather than the normal path.
 
-`.setenv.example` is a starting point: copy it to `.setenv` (git-ignored) and edit it for your
-machine. Most of it is optional — `gs-env.sh` discovers it rather than making you guess: it asks `gslist` under each candidate and
-uses the one where the running servers actually are, saying so when it has to correct or supply a
-value. `gslist` is the authority here — it reads the same lock files the GCI client does.
+There is **no default title**: class-side `defaultServerTitle` answers `nil` and the `title` key is
+then left out of `serverInfo` entirely (not sent as `null` or `''`). A title being present therefore
+means a human deliberately labeled that instance. A product that wants its own display name overrides
+`defaultServerTitle`; per-box labeling stays the operator's `serverTitle`.
 
-Do **not** reach for `/etc/services`. Registering a stone or netldi there is unnecessary once
-`GEMSTONE_GLOBAL_DIR` is right, and it is a trap: netldi binds the port named in `/etc/services`
-only if it is **restarted** after the entry exists, so an entry added to a running system is stale
-by construction and points at a port nothing is listening on.
+> **Where your classes must live:** a worker gem may log in as a *different user* than the front end
+> (under `McpAuthRouter`, as the token's own GemStone user), so your toolsets and any worker subclass
+> must be in a symbol dictionary in the **worker's** symbol list — `Published`, not the operator's
+> `UserGlobals`.
 
-**Which scripts need a netldi.** `install.sh` talks only to the stone, so it runs fine on a host
-with no netldi at all. The `run-*.sh` scripts need one — not because of how they log in, but
-because `McpRouter>>forkOnPort:` and every per-client worker create a `GsTsExternalSession`, and
-netldi is what forks those gems. `run-unit-tests.sh` needs one too, because `McpAuthTest` spawns a
-real worker. Each script checks for what it actually needs, and says which is missing.
-
-**Linked vs RPC.** These scripts run `topaz -l` (linked). That is deliberate, and it is not the
-cause of the error above: a linked login resolves the stone through the same lock files, so it
-needs `GEMSTONE_GLOBAL_DIR` and nothing else — no netldi, no NRS, no service entries. Dropping `-l`
-routes the login through netldi instead, which works equally well once `GEMSTONE_GLOBAL_DIR` is
-right, but it would make `install.sh` depend on a netldi it otherwise has no use for.
-
-### Source layout
+## Source layout
 
 The classes live on disk as plain **topaz file-outs** — canonical `Class>>fileOutClass` output,
 grouped by area, with one loader per group:
@@ -758,151 +813,16 @@ sets the cert/key **only in the forked gem's session (never committed)**, so the
 default stays plaintext — nothing to restore even if interrupted. Uses port `8443` by default
 (set `GS_MCP_PORT`). Exit status 0 = all passed.
 
-## Writing your own MCP server
+## Future work
 
-You can ship an MCP server for **your** software on this transport — including one that exposes only
-your tools, with none of the Smalltalk-development surface. There are two extension points, and the
-first is the one you usually want.
-
-**To add tools, write a toolset.** Subclass `McpToolset`, implement `registerOn:` (one
-`name:description:inputSchema:do:` send per tool, building schemas with the inherited
-`objectSchema:required:` / `propString:` / `boolProperty:` helpers), implement `toolNames`, and
-declare `readOnlySafeToolNames` for whichever of your tools cannot persist a change — the default is
-*none*, so an undeclared tool is gated in a read-only session. Write the handlers as instance methods
-on the same class, taking the parsed argument dictionary and returning a `String`; the inherited
-`resolveClass:`, `dictNamed:`, `linesFrom:` and `capResult:` helpers cover the usual image lookups
-and output capping. `McpFixtureToolset` (in `src/tests/`) and `McpGrailToolset` are small worked
-examples. A handler that *mutates* the image should pass through the inherited kernel guard
-(`self assertMutableClass: cls`) before it changes anything; that forwards to the server, because
-what counts as protected is one answer per deployment rather than each toolset's to invent, and a
-subclass can tighten it for every toolset at once. `McpMutationToolset` shows the pattern. Your
-toolset may layer a *stricter* guard of its own on top; a toolset built with no server refuses to
-mutate at all, fail-closed.
-
-Errors raised inside a handler are caught by the dispatcher and returned as an MCP error result
-(`isError: true`) carrying a structured `kind`. If your tools can raise exceptions **outside** the
-`Error` hierarchy, catch them yourself and re-signal an `McpError` — that is what `McpGrailToolset`
-does for Python exceptions, and why it has to.
-
-Then name your toolsets when you launch a router:
-
-```smalltalk
-(McpRouter new
-  toolsetNames: #('AcmeDbToolset');           "only your tools -- no execute_code, no mutation tools"
-  serverName: 'acme-db-mcp'; serverVersion: '2.5.0';
-  serverTitle: 'Acme Labels - sandbox')       "which INSTANCE this is, for a human"
-    forkOnPort: 8000
-```
-
-Relabel the server when you configure one: `serverName` / `serverVersion` say which *product* this is,
-`serverTitle` says which *instance* a human is looking at — see [Server identity](#server-identity)
-below.
-
-Toolsets **compose** — `#('AcmeDbToolset' 'McpBrowsingToolset')` gives your tools plus class
-browsing, and two unrelated vendors' toolsets can be combined. This is the reason tools live in
-toolsets rather than in `McpServer` subclasses: single inheritance could never express it.
-
-**To change behavior, subclass `McpServer`** — the kernel guards, the worker entry, dispatcher
-wiring, or the advertised identity. Name your subclass in `workerClassName` (nothing auto-detects
-it):
-
-```smalltalk
-(McpRouter new workerClassName: 'AcmeDbServer'; toolsetNames: #('AcmeDbToolset')) forkOnPort: 8000
-```
-
-### Server identity
-
-The `initialize` result's `serverInfo` carries three fields, and they answer different questions:
-
-| Field | Means | Set by |
-|---|---|---|
-| `name` | **which software this is** | the product: override class-side `defaultServerName`, or set router config `serverName` for a toolset-composed server with no `McpServer` subclass |
-| `version` | which release of that software | same |
-| `title` | **which instance this is**, for a human | the operator: router config `serverTitle` |
-
-`name` is the programmatic identifier and `title` is the display string (MCP `BaseMetadata`); when
-there is no `title` a client displays the `name`. So the two shapes are:
-
-```smalltalk
-"same software, three stones -- name stays truthful, humans can tell them apart"
-(McpRouter new serverTitle: 'GemStone - geode teststone 3.7.6') forkOnPort: 8000
-(McpRouter new readOnly: true; serverTitle: 'GemStone (read-only)') forkOnPort: 8001
-"a different product assembled from toolsets, with no McpServer subclass"
-(McpRouter new toolsetNames: #('AcmeDbToolset');
-   serverName: 'acme-db-mcp'; serverVersion: '2.5.0';
-   serverTitle: 'Acme Labels - sandbox') forkOnPort: 8002
-```
-
-To name your **product**, override the **class-side** `defaultServerName` / `defaultServerVersion`.
-That keeps the name a default a deployment can still relabel through router config — the path for a
-server assembled from toolsets that never subclasses `McpServer`. Overriding the instance-side
-`serverName` instead wins over config, which is a deliberate lock rather than the normal path.
-
-There is **no default title**: class-side `defaultServerTitle` answers `nil` and the `title` key is
-then left out of `serverInfo` entirely (not sent as `null` or `''`). A title being present therefore
-means a human deliberately labeled that instance. A product that wants its own display name overrides
-`defaultServerTitle`; per-box labeling stays the operator's `serverTitle`.
-
-> **Where your classes must live:** a worker gem may log in as a *different user* than the front end
-> (under `McpAuthRouter`, as the token's own GemStone user), so your toolsets and any worker subclass
-> must be in a symbol dictionary in the **worker's** symbol list — `Published`, not the operator's
-> `UserGlobals`.
-
-## Concurrency & robustness
-
-Each accepted connection is handled in its own forked `GsProcess`, so a slow or stalled
-client cannot block the accept loop (the forked handlers run during the loop's accept
-waits). `McpHttpConnection>>readRequest` also bails after an 8s read timeout, so a client
-that connects but never sends a complete request is dropped rather than wedging the server.
-Each client's requests run in its own worker gem (a separate session), so there's no shared
-transaction to protect; a `Semaphore` (mutex) guards the `MCP-Session-Id → session` map, and each
-session has its own guarding its worker.
-
-**Clients run concurrently.** Forwarding a request used to be a blocking GCI `executeString:`, which
-blocks in C — so while it ran the front-end gem executed no Smalltalk and *no* `GsProcess` in it ran:
-not another client's request, not the accept loop, not the idle reaper, not an open SSE stream's
-keepalives. `McpSession>>runWorker:` now starts the call with `nbExecute:` and waits on the session's
-socket, which suspends only the calling `GsProcess`. Measured: a second client is served in ~1s while
-an 8-second tool call is in flight, where it used to wait the full 8 (`test.sh` checks this).
-
-Two guarantees the blocking call had been providing by accident are now explicit. GCI allows one call
-in flight per session, so each `McpSession` holds a mutex — a client with two requests outstanding
-queues rather than colliding. And the idle reaper, which previously could not run during a forward at
-all, now skips any session with a call in flight (`McpSession>>isBusy`) instead of logging a worker
-out mid-request. A forwarded request still has **no deadline**: a runaway tool ties up its own
-session for as long as it runs, though no longer anyone else's.
-
-**An open SSE stream costs the gem nothing.** Its drain loop yields on every tick (a 100ms `Delay`),
-so the accept loop, the reaper and every other session's stream keep running. Both directions of that
-socket are guarded, for the same reason the accept loop guards its read side: every SSE frame waits
-on `writeWillNotBlockWithin:` first — `GsSocket>>write:` suspends with **no timeout**, so a client
-that stops reading would otherwise park that stream's `GsProcess` and its socket forever — and each
-tick polls the read side without blocking, so a client that simply vanishes is noticed in ~100ms
-rather than at the next keepalive. Reopening the GET does not accumulate streams either: the newest
-supersedes the previous one, which ends on its next tick.
-
-## Status
-
-Streamable HTTP transport (POST→JSON, GET→SSE stream, DELETE) with **per-client sessions** — each
-client gets its own isolated worker gem, routed by `MCP-Session-Id` (missing→400, unknown→404),
-reaped after 30 min idle. **31 base tools** in seven composable toolsets (execution, session, listing,
-browsing, search, mutation, testing) — **plus 2 Python tools** in the optional `McpGrailToolset`
-(filed in by `install.sh --grail`); per-connection forking + read timeout. Verified
-end-to-end with curl (initialize / `MCP-Session-Id` routing / tools/call / two-client isolation /
-400 / 404 / SSE GET / DELETE, and stalled-connection load) and by the in-image unit tests. Since the
-first release it has also gained: OAuth 2.1 / JWT authentication + TLS (the `McpAuthRouter` subclass),
-per-router read-only mode (a router toggle plus per-token write-scope sessions), closed argument
-schemas + a kernel-class guard + structured error kinds, and a **selectable tool surface**: tools live
-in `McpToolset`s, the front end resolves the worker class and toolset list per session and pushes them
-into the worker gem, and a server can announce its own name/version/title — so a third party can
-ship an MCP server for their own software, exposing only their tools. The Python tools delegate to Grail's
-`ModuleAst` and require a Grail-equipped image (see the Python note above). Most recently it gained
-**server-initiated messages** on the SSE stream: an idle session is pinged, warned before the reaper
-takes its gem, and told when it is gone — see
-[Server-initiated messages](#server-initiated-messages).
-
-Future work: carrying messages that originate in a **worker** gem (progress during a long tool call,
-log lines from tool internals), which needs a worker→router channel; SSE resumability
-(`Last-Event-ID`); mapping **OAuth scopes to toolsets**, so a token's scopes select what it may see
-rather than only whether it may write; and a deadline for a forwarded request, now that a
-non-blocking forward makes one possible.
+- Exposing class and method source as MCP **resources**, so a client is notified when another gem
+  recompiles a method and its cached source goes stale.
+- Carrying messages that originate in a **worker** gem — progress during a long tool call, log lines
+  from tool internals — which needs a worker→router channel.
+- SSE resumability (`Last-Event-ID`).
+- Mapping **OAuth scopes to toolsets**, so a token's scopes select what it may *see* rather than only
+  whether it may write.
+- A deadline for a forwarded request, now that a non-blocking forward makes one possible.
+- The draft `2026-07-28` protocol revision, which first needs a decision about how per-client
+  worker-gem isolation survives a protocol with no session id — see
+  [Protocol conformance](#protocol-conformance).
