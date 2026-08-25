@@ -28,6 +28,17 @@ export GS_STONE=gs64stone
 export GS_USER=DataCurator
 export GS_PASS=swordfish
 
+# Only needed when the netldi serving this stone is NOT named gs64ldi -- typically because you run
+# several stones side by side, each with its own netldi. The gem NRS defaults to netldi "gs64ldi",
+# so a client left unset silently asks the WRONG netldi to fork its gems; when that netldi belongs
+# to a different GemStone version the fork fails with "GciError: The Gem and Stone versions are
+# incompatible", which reads like a broken build and is not. This matters for the MCP server
+# specifically because it forks gems (the front end, and one worker per client) -- a plain topaz
+# login does not go through netldi and so succeeds even when this is wrong.
+# Only the #netldi: component is load-bearing; append #dir: and #log: to also choose the forked
+# gem's working directory and log file.
+#export GEMSTONE_NRS_ALL=#netldi:gs64ldi
+
 # Only needed if this stone's config/log files are not where the product would look by default.
 #export GEMSTONE_SYS_CONF=/opt/gemstone/conf
 #export GEMSTONE_EXE_CONF=/opt/gemstone/conf
