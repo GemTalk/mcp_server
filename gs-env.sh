@@ -69,7 +69,7 @@ _gs_env_globaldir_candidates() {
 # Does gslist see any running server with this GEMSTONE_GLOBAL_DIR? gslist is the authority: it
 # reads the same lock files the GCI client does, so if it lists servers, a login can find them.
 _gs_env_gslist_finds_servers() {
-  GEMSTONE_GLOBAL_DIR="$1" "$GEMSTONE/bin/gslist" -l 2>/dev/null | grep -qE '^(OK|exists|startup|recovery)'
+  GEMSTONE_GLOBAL_DIR="$1" "$GEMSTONE/bin/gslist" -l 2>/dev/null | grep -E '^(OK|exists|startup|recovery)' > /dev/null
 }
 
 # Locate lsof, which is NOT reliably on PATH. On macOS it lives in /usr/sbin, and /usr/sbin is
