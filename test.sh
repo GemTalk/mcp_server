@@ -41,9 +41,16 @@ SID=""
 cleanup() {
   echo
   echo "Tearing down server on port $PORT ..."
-  local pid
-  pid="$(lsof -nP -iTCP:$PORT -sTCP:LISTEN -t 2>/dev/null)"
-  [ -n "$pid" ] && kill $pid 2>/dev/null
+  # Delegate to stop-server.sh rather than open-coding a kill: it locates lsof properly (see
+  # gs_env_require_lsof -- lsof is /usr/sbin/lsof on macOS and absent from a minimal PATH, and this
+  # teardown used to infer "nothing is listening" from its silence and leave the server running),
+  # only kills a process that looks like a gem, and escalates SIGTERM -> SIGKILL with a wait rather
+  # than firing and letting the shell exit.
+  # Leaking here is worse than it sounds: the survivor keeps the port, so the NEXT run finds
+  # something already listening and tests against it -- and because a router gem does not pick up
+  # recompiled code the way worker gems do, that stale front end serves the previous tree's
+  # transport code and the run reports failures belonging to a version nobody is testing.
+  GS_MCP_PORT="$PORT" ./stop-server.sh >/dev/null 2>&1
   [ -n "$WRAPPER_PID" ] && kill "$WRAPPER_PID" 2>/dev/null
   rm -f "$SERVER_LOG"
 }
