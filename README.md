@@ -787,12 +787,18 @@ suite when `McpGrailToolset` is installed:
 
 Run a single suite while a server is up via the `run_test_class` tool (e.g. `run_test_class
 McpToolTest`). `./run-unit-tests.sh` runs them all and exits 0 when every test passes: the
-socket-less suites `McpToolTest` (52), `McpDispatcherTest` (11), `McpSessionTest` (8),
-`McpTransportTest` (22), `McpContractTest` (34) and `McpExtensionTest` (9), plus `McpAuthTest` (24)
-and `McpAuthConformanceTest` (25) — **185 tests**, **194 with the 9 in `McpGrailToolsetTest`** on a
+socket-less suites `McpToolTest` (52), `McpDispatcherTest` (14), `McpSessionTest` (9),
+`McpOutboxTest` (9), `McpStreamTest` (17), `McpLifetimeTest` (36), `McpTransportTest` (22),
+`McpContractTest` (34) and `McpExtensionTest` (9), plus `McpAuthTest` (34) and
+`McpAuthConformanceTest` (25) — **261 tests**, **270 with the 9 in `McpGrailToolsetTest`** on a
 Grail image. The two auth suites are not purely in-image (they commit a throwaway JWT user and spawn
 real worker gems, so a netldi must be running); they are in the runner anyway, because they are the
 only cover for the token → session path.
+
+Those two also need **spare login slots**, which is the likeliest reason for a failure that is
+nothing to do with the code: each spawns worker gems of its own, so a stone whose `StnMaxSessions`
+is already consumed by running servers fails them with *"the maximum number of users are already
+logged in."* Stop the servers, or raise the limit, before reading such a failure as a regression.
 
 > Note: a test helper must never reuse a SUnit framework selector (`run:`, `setUp`, …) — doing
 > so shadows the framework method and silently breaks `suite run`. The transport helper is named
