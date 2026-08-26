@@ -8,7 +8,7 @@ Object subclass: 'McpMockWorker'
                     lastResult errorOnComplete waitCount blockingExecuteCount
                     overlapDetected staleReadAttempted loginCount stoneSessionId
                     gemProcessId idFetchCount objInfoBuffers bufferContents
-                    refetchOnlyWhenGrowing probeExpressions currentIsProbe)
+                    refetchOnlyWhenGrowing probeExpressions currentIsProbe dropResultNonce)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -48,7 +48,11 @@ same way it finds it in a real session.
 
 Fidelity probes are answered like a real gem would answer them, but they are kept OUT of the
 instrumentation a test reads -- #expressions, #waitCount and the rest count requests only, with the
-probes recorded separately as #probeExpressions.'
+probes recorded separately as #probeExpressions.
+
+A real gem also appends the per-call nonce McpSession>>runWorker: asked for, since that is part of
+the expression it was handed; this mock does the same, and #dropResultNonce: makes it stop -- which
+is how a response that lost its tail is tested without having to corrupt one.'
 %
 expectvalue /Class
 doit
@@ -70,6 +74,14 @@ blockingExecuteCount
   "How many times the BLOCKING executeString: was used. The whole point of the non-blocking
    forward is that this stays zero."
   ^blockingExecuteCount
+%
+category: 'configuring'
+method: McpMockWorker
+dropResultNonce: aBoolean
+  "Stop appending the nonce the expression asked for, so the next response arrives looking complete
+   but missing its tail -- what a truncated or stale response looks like to McpSession. The failure
+   it produces is McpSession>>resultOf:withoutNonce: refusing the response."
+  dropResultNonce := aBoolean
 %
 category: 'configuring'
 method: McpMockWorker
@@ -159,6 +171,7 @@ initialize
   probeExpressions := OrderedCollection new.
   currentIsProbe := false.
   refetchOnlyWhenGrowing := false.
+  dropResultNonce := false.
   bufferContents := String new.
   objInfoBuffers := Array
     with: (CByteArray gcMalloc: 40)
@@ -262,11 +275,18 @@ method: McpMockWorker
 resultForCurrentExpression
   "What the in-flight call computes, before it is fetched back through the buffer. A fidelity probe
    is answered the way a real gem would answer it -- the string it asked for -- so that McpSession's
-   probe exercises the same path here as it does against a gem."
-  | req |
+   probe exercises the same path here as it does against a gem.
+   The per-call nonce is appended for the same reason: a gem evaluating the wrapped expression would
+   append it, and McpSession requires it back. #dropResultNonce: is the seam that withholds it."
+  | req base nonce |
   req := McpSession resultFidelityProbeRequestFrom: currentExpression.
-  req notNil ifTrue: [^(String new: (req at: 1)) atAllPut: (req at: 2); yourself].
-  ^nextResult ifNil: ['echo: ' , currentExpression]
+  base := req notNil
+    ifTrue: [(String new: (req at: 1)) atAllPut: (req at: 2); yourself]
+    ifFalse: [nextResult ifNil: ['echo: ' , currentExpression]].
+  base isString ifFalse: [^base].
+  dropResultNonce == true ifTrue: [^base].
+  nonce := McpSession resultNonceIn: currentExpression.
+  ^nonce isNil ifTrue: [base] ifFalse: [base , nonce]
 %
 category: 'configuring'
 method: McpMockWorker

@@ -6,7 +6,8 @@ Object subclass: 'McpSession'
   instVarNames: #( id worker workerMutex
                     lastActivitySeconds userId readOnly workerClassName
                     toolsetNames serverName serverTitle serverVersion
-                    workerPid workerStoneSession resultBufferSlot resultBuffer)
+                    workerPid workerStoneSession resultBufferSlot resultBuffer
+                    nonceCounter)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -34,7 +35,12 @@ Before it serves anything, a new session PROBES its worker to confirm that resul
 bytes survive the trip back (#verifyWorkerResultFidelity). GemStone before 3.7.4.1 corrupts them,
 and every MCP response is fetched the way that bug corrupts, so the probe is what decides whether
 this image needs the workaround -- a fixed image carries none of it. The defect is GemStone kernel
-bug #51438, fixed in 3.7.4.1.'
+bug #51438, fixed in 3.7.4.1.
+
+Independently of that, EVERY response is checked on arrival. #runWorker: has the worker append a
+per-call nonce and refuses any response that does not end with it (#resultOf:withoutNonce:), which
+catches a truncated or stale response whatever caused it, on any version. That check is not a
+version workaround and is never switched off.'
 %
 expectvalue /Class
 doit
@@ -44,6 +50,18 @@ McpSession category: 'Mcp-Core'
 removeallmethods McpSession
 removeallclassmethods McpSession
 ! ------------------- Class methods for McpSession
+category: 'response integrity'
+classmethod: McpSession
+expressionWith: anExpressionString nonce: aNonceString
+  "anExpressionString wrapped so the worker appends aNonceString to whatever it answers.
+   The block is what lets an expression that declares its own temporaries be wrapped at all, and the
+   nonce is the LAST thing in the source -- inside a string literal at a fixed offset from the end --
+   so #resultNonceIn: can recover it without parsing Smalltalk and without being confused by a client
+   request body that happens to contain quotes or brackets.
+   Every expression sent through #runWorker: must answer a String. All of them do: a JSON-RPC
+   response, the worker bootstrap's ready line, or a fidelity probe's marker string."
+  ^'[' , anExpressionString , '] value , ''' , aNonceString , ''''
+%
 category: 'result fidelity'
 classmethod: McpSession
 probeLargeBytes
@@ -81,16 +99,55 @@ resultFidelityProbeRequestFrom: anExpressionString
   "The size and marker character a probe expression asks for, as { size . marker }, or nil if this is
    not a probe expression -- the inverse of #resultFidelityProbeExpressionBytes:marker:.
    It exists so a stand-in worker can answer a probe the way a real gem would, which is what lets
-   McpMockSession run the SHIPPING startWithId: rather than one with the probe stubbed out."
-  | head tail i |
+   McpMockSession run the SHIPPING startWithId: rather than one with the probe stubbed out.
+   Found ANYWHERE in the argument rather than at its start, because by the time a worker sees an
+   expression #expressionWith:nonce: has wrapped it. Only a stand-in worker reads this, so a request
+   body contriving to look like a probe would mislead nothing that runs in production."
+  | head tail i j |
   head := '| s | s := String new: '.
   tail := '. s atAllPut: $'.
-  (anExpressionString beginsWith: head) ifFalse: [^nil].
-  i := anExpressionString indexOfSubCollection: tail.
+  i := anExpressionString indexOfSubCollection: head.
   i = 0 ifTrue: [^nil].
+  j := anExpressionString indexOfSubCollection: tail.
+  (j = 0 or: [j < i]) ifTrue: [^nil].
   ^Array
-    with: (anExpressionString copyFrom: head size + 1 to: i - 1) asInteger
-    with: (anExpressionString at: i + tail size)
+    with: (anExpressionString copyFrom: i + head size to: j - 1) asInteger
+    with: (anExpressionString at: j + tail size)
+%
+category: 'response integrity'
+classmethod: McpSession
+resultNonceDigits
+  "How many digits of counter a nonce carries. Twelve is far more than a session can consume, and
+   fixing the width is what lets #resultNonceIn: read the nonce at a known offset."
+  ^12
+%
+category: 'response integrity'
+classmethod: McpSession
+resultNonceIn: anExpressionString
+  "The nonce #expressionWith:nonce: put at the end of anExpressionString, or nil if it has none.
+   Read at a fixed offset from the end rather than searched for, so a request body containing
+   something that looks like a nonce cannot be mistaken for one."
+  | n nonce |
+  n := self resultNonceSize.
+  anExpressionString size < (n + 1) ifTrue: [^nil].
+  anExpressionString last = $' ifFalse: [^nil].
+  nonce := anExpressionString
+    copyFrom: anExpressionString size - n to: anExpressionString size - 1.
+  ^(nonce beginsWith: self resultNonceMarker) ifTrue: [nonce] ifFalse: [nil]
+%
+category: 'response integrity'
+classmethod: McpSession
+resultNonceMarker
+  "What every nonce starts with: a short, printable tag that makes one recognisable in a log or a
+   gem trace, and keeps #resultNonceIn: from mistaking arbitrary trailing text for a nonce."
+  ^'~mcp~'
+%
+category: 'response integrity'
+classmethod: McpSession
+resultNonceSize
+  "The length of a nonce -- fixed, so it can be read at a known offset from the end of both an
+   expression and a response."
+  ^self resultNonceMarker size + self resultNonceDigits
 %
 category: 'instance creation'
 classmethod: McpSession
@@ -222,6 +279,23 @@ newWorkerSession
     yourself
   "^GsTsExternalSession newDefaultForGemHost: 'localhost'"
 %
+category: 'response integrity'
+method: McpSession
+nextResultNonce
+  "A nonce -- a value used once -- that no other call on this session has used or will use: the
+   marker followed by a zero-padded count. Answered inside #runWorker:'s mutex, so two GsProcesses
+   serving one client cannot be given the same one.
+   A counter is enough here, and making it unguessable would add nothing. What the check needs is
+   that a nonce cannot arrive by ACCIDENT, and the only bytes that could carry an old one are an
+   earlier response of this same session -- which necessarily carries an earlier, smaller count.
+   In particular a stale tail cannot satisfy the check even when the two responses are the same
+   length, which is exactly the case a fixed sentinel would let through."
+  | digits |
+  nonceCounter := (nonceCounter ifNil: [0]) + 1.
+  digits := nonceCounter printString.
+  [digits size < self class resultNonceDigits] whileTrue: [digits := '0' , digits].
+  ^self class resultNonceMarker , digits
+%
 category: 'initialization'
 method: McpSession
 prepareWorker
@@ -299,6 +373,27 @@ resetWorkerResultBuffer
   resultBufferSlot ifNotNil: [:slot |
     (worker instVarAt: slot) at: 2 put: resultBuffer]
 %
+category: 'response integrity'
+method: McpSession
+resultOf: aResult withoutNonce: aNonceString
+  "Answer the worker's response with its nonce removed, having first confirmed the nonce is there.
+   The nonce is the last thing the worker appends, so it is the first thing a truncated or
+   overwritten response loses. A response that does not carry it is not the response this call asked
+   for, whatever went wrong -- so REJECT it rather than try to repair it: nothing here can tell how
+   much of what arrived is real, and a plausible-looking answer is the failure worth refusing.
+   This check is not tied to any version or to kernel bug #51438. It stays on everywhere, and is the
+   only part of this class that would notice a corruption nobody has characterised yet."
+  ((aResult isString and: [aResult size >= aNonceString size])
+    and: [(aResult copyFrom: aResult size - aNonceString size + 1 to: aResult size) = aNonceString])
+      ifFalse: [
+        ^self error: 'The worker gem for session ' , id printString , ' returned a response that '
+          , 'failed its integrity check: it does not end with this call''s nonce (' , aNonceString
+          , '), so it is not this call''s response. Nothing was returned to the client. On GemStone '
+          , 'before 3.7.4.1 the likely cause is kernel bug #51438 -- external-session results larger '
+          , 'than ' , self class resultBufferBytes printString , ' bytes coming back with a stale '
+          , 'tail.'].
+  ^aResult copyFrom: 1 to: aResult size - aNonceString size
+%
 category: 'private'
 method: McpSession
 runWorker: anExpressionString
@@ -316,14 +411,17 @@ runWorker: anExpressionString
    per session, which the blocking call used to guarantee by freezing the gem. A worker-side error
    arrives as the same GciError as before, and leaves the worker usable.
    The buffer reset is inert on any image from 3.7.4.1 on; where it is not, it is what keeps a
-   response from arriving with a stale tail -- see #resetWorkerResultBuffer."
-  ^self workerMutex critical: [
+   response from arriving with a stale tail -- see #resetWorkerResultBuffer. The nonce is the
+   belt to that pair of braces: the worker appends it, this method requires it, and a response
+   without it is refused instead of returned -- on every image, whatever the cause."
+  ^self workerMutex critical: [ | nonce |
+    nonce := self nextResultNonce.
     self resetWorkerResultBuffer.
-    worker nbExecute: anExpressionString.
+    worker nbExecute: (self class expressionWith: anExpressionString nonce: nonce).
     [worker isCallInProgress]
       whileTrue: [worker waitForResultForSeconds: self workerWaitSeconds otherwise: [nil]].
     self touch.
-    worker lastResult]
+    self resultOf: worker lastResult withoutNonce: nonce]
 %
 category: 'accessing'
 method: McpSession

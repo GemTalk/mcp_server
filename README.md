@@ -534,8 +534,12 @@ suite when `McpGrailToolset` is installed:
   `forward:` and `prepareWorker` both use, that it reads the result only once the call is over (a
   premature read would answer one request with another's response), that two concurrent requests on
   one session serialize instead of colliding, that a worker error leaves the session usable, and that
-  the idle reaper leaves a session with a call in flight alone. Driven through `McpMockWorker` /
-  `McpMockSession`, which stand in for the `GsTsExternalSession` with no gem.
+  the idle reaper leaves a session with a call in flight alone. Also that a response arrives whole:
+  every call carries its own nonce and one that comes back without it is refused, and on an image
+  with the pre-3.7.4.1 result corruption the startup probe catches it and the buffer reset repairs
+  it. Driven through `McpMockWorker` / `McpMockSession`, which stand in for the
+  `GsTsExternalSession` with no gem — including a model of the kernel's own result fetch, so both
+  sides of that defect are exercised on any version.
 - `McpTransportTest` — `handleConnection:` driven over a **`McpMockSocket`** wrapped in a
   real `McpHttpConnection`, so the genuine HTTP parsing/writing runs with no TCP. Covers the
   paths that spawn **no** worker gem: GET→SSE, DELETE→`400`/`404`, unknown verb→405, malformed→`-32700`,
@@ -573,11 +577,11 @@ suite when `McpGrailToolset` is installed:
 
 Run a single suite while a server is up via the `run_test_class` tool (e.g. `run_test_class
 McpToolTest`). `./run-unit-tests.sh` runs them all and exits 0 when every test passes: the
-socket-less suites `McpToolTest` (52), `McpDispatcherTest` (11), `McpSessionTest` (9),
-`McpTransportTest` (22), `McpContractTest` (34) and `McpExtensionTest` (9) — **137 tests**, which is
+socket-less suites `McpToolTest` (52), `McpDispatcherTest` (11), `McpSessionTest` (18),
+`McpTransportTest` (22), `McpContractTest` (34) and `McpExtensionTest` (9) — **146 tests**, which is
 the whole suite on a base install and on 3.7.2. Where the optional groups are installed the runner
 picks their suites up automatically, by resolving the class names rather than by a flag: plus
-`McpAuthTest` (24) and `McpAuthConformanceTest` (25) — **186 tests** — and **195 with the 9 in
+`McpAuthTest` (24) and `McpAuthConformanceTest` (25) — **195 tests** — and **204 with the 9 in
 `McpGrailToolsetTest`** on a Grail image. The two auth suites are not purely in-image (they commit a
 throwaway JWT user and spawn real worker gems, so a netldi must be running); they are in the runner
 anyway, because they are the only cover for the token → session path.

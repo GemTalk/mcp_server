@@ -105,6 +105,23 @@ testCorruptingWorkerStillReturnsIntactResults
   self assert: second size equals: 2000.
   self assert: (second occurrencesOf: $B) equals: 2000
 %
+category: 'tests - response integrity'
+method: McpSessionTest
+testEveryCallCarriesItsOwnNonce
+  "The nonce has to be per-call. With a fixed sentinel, a stale tail inherited from a previous
+   response of the SAME length would carry the sentinel at exactly the offset the check looks at, and
+   sail through. Consecutive calls must therefore never repeat one."
+  | sess first second |
+  sess := McpMockSession startWithId: 'nonces'.
+  sess mockWorker waitMs: 1.
+  sess forward: 'REQUEST-1'.
+  sess forward: 'REQUEST-2'.
+  first := McpSession resultNonceIn: (sess mockWorker expressions at: 1).
+  second := McpSession resultNonceIn: (sess mockWorker expressions at: 2).
+  self assert: first notNil.
+  self assert: second notNil.
+  self deny: first = second
+%
 category: 'tests - result fidelity'
 method: McpSessionTest
 testFaithfulWorkerNeedsNoResultBufferReset
@@ -174,6 +191,30 @@ testIsBusyReportsACallInFlight
   self assert: (self waitUpTo: 1000 for: [sess isBusy]).
   self assert: (self waitUpTo: 1000 for: [sess isBusy not])
 %
+category: 'tests - response integrity'
+method: McpSessionTest
+testNonceIsStrippedFromTheResponse
+  "The client sees its response and nothing else: the nonce goes on inside the worker and comes off
+   in runWorker:, so nothing downstream has to know it exists."
+  | sess out |
+  sess := McpMockSession startWithId: 'strip'.
+  sess mockWorker waitMs: 1; nextResult: '{"jsonrpc":"2.0","id":1,"result":{}}'.
+  out := sess forward: '{"jsonrpc":"2.0","id":1,"method":"ping"}'.
+  self assert: out equals: '{"jsonrpc":"2.0","id":1,"result":{}}'.
+  self deny: (self includesCS: McpSession resultNonceMarker in: out)
+%
+category: 'tests - response integrity'
+method: McpSessionTest
+testNonceRoundTripsThroughTheExpression
+  "The wrapper and the reader are inverses, and the reader is not fooled by a request body that
+   merely contains something nonce-shaped -- it reads a fixed offset from the end, not a search."
+  | nonce wrapped |
+  nonce := McpSession resultNonceMarker , '000000000042'.
+  wrapped := McpSession expressionWith: 'McpServer handleJsonString: ''{}''' nonce: nonce.
+  self assert: (McpSession resultNonceIn: wrapped) equals: nonce.
+  self assert: (McpSession resultNonceIn: 'McpServer handleJsonString: ''{}''') isNil.
+  self assert: (McpSession resultNonceIn: 'a body ending in ' , nonce) isNil
+%
 category: 'tests - forwarding'
 method: McpSessionTest
 testPrepareWorkerUsesTheSameNonBlockingPath
@@ -218,6 +259,30 @@ testReaperLeavesASessionWithACallInFlightAlone
   "once the call is over the same idle session is reaped as before"
   self assert: (self waitUpTo: 2000 for: [sess isBusy not]).
   self assert: r reapIdleSessions equals: 1
+%
+category: 'tests - response integrity'
+method: McpSessionTest
+testResponseWithoutItsNonceIsRejected
+  "The whole point of the check: a response that lost its tail is REFUSED, not returned. It arrives
+   looking like a perfectly good answer -- right shape, plausible content -- and the only thing that
+   gives it away is the missing nonce. The error has to name the session and the nonce, because that
+   is what a report of this will be traced with."
+  | sess w raised recovered |
+  sess := McpMockSession startWithId: 'rejected'.
+  w := sess mockWorker.
+  w waitMs: 1; nextResult: '{"jsonrpc":"2.0","id":1,"result":{}}'.
+  w dropResultNonce: true.
+  raised := [sess forward: '{"id":1}'. nil]
+    on: Error
+    do: [:ex | [ex description] on: Error do: [:x | ex class name asString]].
+  self assert: raised notNil.
+  self assert: (self includesCS: 'integrity check' in: raised).
+  self assert: (self includesCS: 'rejected' in: raised).
+  self assert: (self includesCS: McpSession resultNonceMarker in: raised).
+  "and the session is still usable once the worker behaves again"
+  w dropResultNonce: false.
+  recovered := sess forward: '{"id":2}'.
+  self assert: recovered equals: '{"jsonrpc":"2.0","id":1,"result":{}}'
 %
 category: 'tests - session open'
 method: McpSessionTest
