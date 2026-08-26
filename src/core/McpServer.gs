@@ -94,7 +94,7 @@ category: 'identity'
 classmethod: McpServer
 defaultServerVersion
   "See defaultServerName."
-  ^'0.5.0'
+  ^'0.5.1'
 %
 category: 'toolsets'
 classmethod: McpServer
