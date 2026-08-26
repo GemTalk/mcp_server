@@ -270,6 +270,9 @@ forkOnPort: aPort
    Stop it by port with ./stop-server.sh, or via `System stopSession: <id>` / `kill <pid>` (both
    printed below). Answers a status string. Requires GsTsExternalSession."
   | es sid pid s |
+  "The first two lines are for compatibility with 3.7.2. In 3.7.5 they could be replaced with
+   es := GsTsExternalSession newDefaultForGemHost: 'localhost'.
+   es useOnetimePassword."
   es := GsTsExternalSession newDefault
           gemNRS: (GsNetworkResourceString defaultGemNRSFromCurrent node: 'localhost'; yourself);
           yourself.
