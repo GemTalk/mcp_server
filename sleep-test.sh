@@ -52,9 +52,15 @@
 #   GEMSTONE              - GemStone product directory (required; source your setenv first)
 #   GS_STONE/GS_USER/GS_PASS - as for the other scripts (defaults: gs64stone/DataCurator/swordfish)
 #   GS_MCP_PORT           - test port (default 8020, kept off 8000 and off test.sh's 8011)
-#   GS_MCP_IDLE_TIMEOUT   - the deadline under test (default 5m). Shorter than the 30m default on
-#                           purpose: the sleep has to EXCEED it for the result to mean anything, and
-#                           a 35-minute sleep is a lot to ask to prove a five-minute point.
+#   GS_MCP_IDLE_TIMEOUT   - the idle deadline (default none). It used to default to 5m, because
+#                           idleness was wall-clock and the sleep had to EXCEED it to prove the
+#                           detector forgave the gap. Counting pings inverts that. A sleep advances
+#                           no count, so exceeding a deadline proves nothing -- while a deadline
+#                           SHORT enough to be interesting now reaps the subject before the Mac ever
+#                           sleeps: at 5m against the 300s probe interval the release count floors to
+#                           one, so the harness, which answers pings faithfully, is reaped on the
+#                           first one. The suspend question is only visible with no deadline in the
+#                           way; set one here to test the deadline itself, which needs no sleep.
 #   GS_MCP_SLEEP_STATE    - where the run's state lives (default $TMPDIR/gs-mcp-sleep-test)
 set -uo pipefail
 cd "$(dirname "$0")"
@@ -62,7 +68,7 @@ cd "$(dirname "$0")"
 STATE="${GS_MCP_SLEEP_STATE:-${TMPDIR:-/tmp}/gs-mcp-sleep-test}"
 PORT="${GS_MCP_PORT:-8020}"
 URL="http://127.0.0.1:$PORT/mcp"
-IDLE="${GS_MCP_IDLE_TIMEOUT:-5m}"
+IDLE="${GS_MCP_IDLE_TIMEOUT:-none}"
 export GS_STONE="${GS_STONE:-gs64stone}"
 export GS_USER="${GS_USER:-DataCurator}"
 export GS_PASS="${GS_PASS:-swordfish}"
@@ -427,22 +433,35 @@ check() {
   else
     verdict huh "the client side was frozen too" "the freshness loop never noticed a freeze"
   fi
-  # Compare like with like: the freshness loop stops at the FIRST freeze (by design, so it cannot
-  # stamp the session fresh afterwards), so its number is one piece of the suspend, not the whole
-  # of it. The matching server-side number is therefore the first forgiven pass, not the total --
-  # comparing it to the total was a category error that made a healthy 3-hour run look wrong.
-  local first_forgiven delta
-  first_forgiven=$(grep -o 'was not running for about [0-9]*s' "$gemlog" 2>/dev/null \
-    | head -1 | grep -o '[0-9]*')
-  if [ -n "${client_gap:-}" ] && [ -n "${first_forgiven:-}" ]; then
-    delta=$(( client_gap > first_forgiven ? client_gap - first_forgiven : first_forgiven - client_gap ))
-    if [ "$delta" -le 120 ]; then
-      verdict ok "client and server agree on that first piece" \
-        "client ${client_gap}s, server forgave ${first_forgiven}s"
-    else
-      verdict huh "client and server agree on that first piece" \
-        "client ${client_gap}s vs server ${first_forgiven}s -- ${delta}s apart, worth reading the logs"
-    fi
+  # HOW MUCH DID THE GEM ACTUALLY RUN? This is the one question the redesign leaves genuinely open,
+  # and the only one that needs a real night to answer. A suspend advances no count because no pass
+  # runs -- but Power Nap dark-wakes let the front end run in short bursts, and a pass that runs is a
+  # pass that counts. Each burst with no stream advances streamlessPasses toward its release count;
+  # each ping the client is too frozen to answer advances unansweredProbes toward three.
+  #
+  # Pings are the visible proxy: one goes out every #probePassInterval passes, so the ratio of pings
+  # actually sent to the number a continuously-running gem would have sent IS the fraction of the
+  # night the front end was scheduled. Near 0% is a clean suspend. Near 100% means the Mac never
+  # really slept. In between is the interesting case -- and if the client answered every ping that
+  # was sent even so, the design held under exactly the conditions that used to defeat it.
+  local sent answered expected ran_pct
+  sent=$(grep -c '"method":"ping"' "$STREAM_LOG" 2>/dev/null | tr -d ' ')
+  answered=$(grep -c 'answered' "$PING_LOG" 2>/dev/null | tr -d ' ')
+  expected=$(( elapsed / ${GS_MCP_PROBE_SECONDS:-300} ))
+  if [ "${expected:-0}" -gt 0 ]; then
+    ran_pct=$(( 100 * ${sent:-0} / expected ))
+    verdict ok "how much of the night the front end ran" \
+      "${sent:-0} pings sent vs ${expected} if never suspended -- about ${ran_pct}% scheduled"
+  fi
+  # The verdict that matters: of the pings that DID go out, did the client answer them? Three
+  # unanswered in a row on a live stream is the one thing that ends a session with no deadline set.
+  if [ "${sent:-0}" -eq 0 ]; then
+    verdict ok "every ping that went out was answered" "none went out -- the gem was not running"
+  elif [ "${answered:-0}" -ge "${sent:-0}" ]; then
+    verdict ok "every ping that went out was answered" "${answered}/${sent}, so nothing counted as death"
+  else
+    verdict bad "every ping that went out was answered" \
+      "${answered}/${sent} -- $(( sent - answered )) went unanswered; 3 in a row releases the gem"
   fi
 
   local answered failed
@@ -511,9 +530,14 @@ status() {
 # too short for a liveness ping -- and both are artefacts of the simulation, not findings.
 simulate() {
   local freeze="${2:-120}"
-  GS_MCP_IDLE_TIMEOUT="${GS_MCP_IDLE_TIMEOUT:-90s}" \
+  # No idle deadline here either, and for the same reason as arm: with one set, the harness answers
+  # pings faithfully and is reaped for perfectly correct idleness a couple of minutes in, which says
+  # nothing about the freeze. A fast reaper and a fast probe just make the passes tick quickly enough
+  # to see something happen inside a two-minute run. GS_MCP_PENDING_TIMEOUT is gone with the pending
+  # -request timer the redesign deleted; setting it here did nothing.
+  GS_MCP_IDLE_TIMEOUT="${GS_MCP_IDLE_TIMEOUT:-none}" \
   GS_MCP_REAPER_INTERVAL="${GS_MCP_REAPER_INTERVAL:-10}" \
-  GS_MCP_PENDING_TIMEOUT="${GS_MCP_PENDING_TIMEOUT:-5}" arm || exit 1
+  GS_MCP_PROBE_INTERVAL="${GS_MCP_PROBE_INTERVAL:-30}" arm || exit 1
   . "$META"
   [ -n "${GEMPID:-}" ] || { red "No gem pid recorded; cannot freeze anything."; exit 1; }
 
