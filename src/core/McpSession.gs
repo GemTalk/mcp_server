@@ -6,7 +6,7 @@ Object subclass: 'McpSession'
   instVarNames: #( id worker workerMutex
                     lastActivitySeconds userId readOnly workerClassName
                     toolsetNames serverName serverTitle serverVersion
-                    workerPid workerStoneSession)
+                    workerPid workerStoneSession resultBufferSlot resultBuffer)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -28,7 +28,13 @@ reaped after a timeout, but never while a call is in flight (#isBusy). Workers l
 current user for now; userId is reserved for later per-user auth. The worker''s stone session id
 and OS process id are captured at login (#cacheWorkerIds): they are what correlate a session with
 a gem in ps, and fetching them there also makes the kernel''s printOn: -- which sends those same
-two remote accessors -- harmless afterwards.'
+two remote accessors -- harmless afterwards.
+
+Before it serves anything, a new session PROBES its worker to confirm that results larger than 1024
+bytes survive the trip back (#verifyWorkerResultFidelity). GemStone before 3.7.4.1 corrupts them,
+and every MCP response is fetched the way that bug corrupts, so the probe is what decides whether
+this image needs the workaround -- a fixed image carries none of it. The defect is GemStone kernel
+bug #51438, fixed in 3.7.4.1.'
 %
 expectvalue /Class
 doit
@@ -38,6 +44,54 @@ McpSession category: 'Mcp-Core'
 removeallmethods McpSession
 removeallclassmethods McpSession
 ! ------------------- Class methods for McpSession
+category: 'result fidelity'
+classmethod: McpSession
+probeLargeBytes
+  "The size of the first result a fidelity probe fetches. Its job is to grow the kernel's fetch
+   buffer past its original size, so anything over #resultBufferBytes would do."
+  ^2048
+%
+category: 'result fidelity'
+classmethod: McpSession
+probeSmallBytes
+  "The size of the second result a fidelity probe fetches: larger than #resultBufferBytes, so the
+   kernel's initial fetch cannot hold it, and smaller than #probeLargeBytes, so it fits inside the
+   buffer the first probe just grew. That is the band GemStone before 3.7.4.1 returns stale bytes in."
+  ^1536
+%
+category: 'result fidelity'
+classmethod: McpSession
+resultBufferBytes
+  "The size GsTsExternalSession>>_allocateBuffers gives a session's result-fetch buffer, and the size
+   McpSession>>resetWorkerResultBuffer restores. Not a tunable: resolveResult: asks for exactly this
+   many bytes in its first fetch, so a smaller buffer would be written past its end."
+  ^1024
+%
+category: 'result fidelity'
+classmethod: McpSession
+resultFidelityProbeExpressionBytes: anInteger marker: aCharacter
+  "The expression a fidelity probe runs in the worker gem: answer anInteger copies of aCharacter.
+   Deliberately trivial -- it names no Mcp class, so it runs in a worker that has not been prepared
+   yet, and uses only selectors present in every image the server supports."
+  ^'| s | s := String new: ' , anInteger printString , '. s atAllPut: $' , aCharacter asString , '. s'
+%
+category: 'result fidelity'
+classmethod: McpSession
+resultFidelityProbeRequestFrom: anExpressionString
+  "The size and marker character a probe expression asks for, as { size . marker }, or nil if this is
+   not a probe expression -- the inverse of #resultFidelityProbeExpressionBytes:marker:.
+   It exists so a stand-in worker can answer a probe the way a real gem would, which is what lets
+   McpMockSession run the SHIPPING startWithId: rather than one with the probe stubbed out."
+  | head tail i |
+  head := '| s | s := String new: '.
+  tail := '. s atAllPut: $'.
+  (anExpressionString beginsWith: head) ifFalse: [^nil].
+  i := anExpressionString indexOfSubCollection: tail.
+  i = 0 ifTrue: [^nil].
+  ^Array
+    with: (anExpressionString copyFrom: head size + 1 to: i - 1) asInteger
+    with: (anExpressionString at: i + tail size)
+%
 category: 'instance creation'
 classmethod: McpSession
 startWithId: anId
@@ -97,6 +151,27 @@ close
    logout stops it."
   [worker logout] on: Error do: [:e | nil].
   ^self
+%
+category: 'result fidelity'
+method: McpSession
+enableResultBufferReset
+  "Arrange for #resetWorkerResultBuffer to put this worker's result-fetch buffer back to its original
+   size before every call, and answer whether that is possible in this image.
+   The buffer is the second slot of GsTsExternalSession's objInfoBuffers -- an ordinary Array, so the
+   slot can simply be stored into. The instance variable is located by NAME at runtime rather than
+   assumed to be at a fixed offset: an image that renamed it answers false here, and
+   #verifyWorkerResultFidelity then refuses to start the session rather than serving results it
+   cannot trust.
+   One CByteArray is allocated here and stored back for the session's whole life, so the per-request
+   cost is a single instance-variable store and no allocation at all."
+  | slot buffers |
+  slot := worker class allInstVarNames indexOf: #objInfoBuffers.
+  slot = 0 ifTrue: [^false].
+  buffers := worker instVarAt: slot.
+  ((buffers isKindOf: Array) and: [buffers size >= 2]) ifFalse: [^false].
+  resultBuffer := CByteArray gcMalloc: self class resultBufferBytes.
+  resultBufferSlot := slot.
+  ^true
 %
 category: 'routing'
 method: McpSession
@@ -163,6 +238,32 @@ prepareWorker
       , ' (worker class ' , self workerClassName , '): '
       , ([ex description] on: Error do: [:x | ex class name asString])]
 %
+category: 'result fidelity'
+method: McpSession
+probeWorkerFor: anInteger marker: aCharacter
+  "Fetch a string of anInteger copies of aCharacter from the worker gem, and answer whether every
+   byte of it arrived. Deliberately routed through #runWorker:, so a probe travels exactly the path
+   a real response does -- including the buffer reset, once one is in place."
+  | s |
+  s := self runWorker: (self class resultFidelityProbeExpressionBytes: anInteger marker: aCharacter).
+  ^s isString
+    and: [s size = anInteger and: [(s occurrencesOf: aCharacter) = anInteger]]
+%
+category: 'result fidelity'
+method: McpSession
+probeWorkerResultsAreIntact
+  "Answer whether results larger than 1024 bytes survive the trip out of this worker gem.
+   Fetch a large marker string, which grows the kernel's fetch buffer, and then a smaller one that
+   fits inside it. That is the exact shape GemStone before 3.7.4.1 corrupts: the second result comes
+   back the right LENGTH, with its first 1024 bytes right and the rest left over from the first. The
+   two probes use DIFFERENT marker characters, so a stale tail can never be mistaken for the answer.
+   An error from the worker counts as not intact. The workaround is harmless on a healthy image, so
+   the pessimistic verdict is the safe one, and a worker that cannot answer this could not serve a
+   request either -- which #verifyWorkerResultFidelity reports."
+  ^[(self probeWorkerFor: self class probeLargeBytes marker: $A)
+    and: [self probeWorkerFor: self class probeSmallBytes marker: $B]]
+      on: Error do: [:ex | false]
+%
 category: 'private'
 method: McpSession
 quotedNameArrayFor: aCollectionOfNames
@@ -184,6 +285,20 @@ readOnly
    worker gem by prepareWorker."
   ^readOnly == true
 %
+category: 'result fidelity'
+method: McpSession
+resetWorkerResultBuffer
+  "Put this worker's result-fetch buffer back to its original size before a call, on an image that
+   needs it. Does nothing anywhere else: resultBufferSlot is set only where a probe caught this image
+   corrupting results (#verifyWorkerResultFidelity), so a fixed image pays nothing.
+   Restoring the ORIGINAL size is the whole trick. GsTsExternalSession>>resolveResult: refetches a
+   large result only when its buffer has to GROW, having already conflated 'big enough' with 'already
+   full'; a buffer left at its original size makes that test true for everything the initial
+   1024-byte fetch could not hold, which is precisely when the refetch is needed.
+   Never store a smaller buffer here -- see McpSession class>>resultBufferBytes."
+  resultBufferSlot ifNotNil: [:slot |
+    (worker instVarAt: slot) at: 2 put: resultBuffer]
+%
 category: 'private'
 method: McpSession
 runWorker: anExpressionString
@@ -199,8 +314,11 @@ runWorker: anExpressionString
    still gets as long as it takes.
    The mutex is what keeps two requests from colliding in one worker -- GCI allows one call in flight
    per session, which the blocking call used to guarantee by freezing the gem. A worker-side error
-   arrives as the same GciError as before, and leaves the worker usable."
+   arrives as the same GciError as before, and leaves the worker usable.
+   The buffer reset is inert on any image from 3.7.4.1 on; where it is not, it is what keeps a
+   response from arriving with a stale tail -- see #resetWorkerResultBuffer."
   ^self workerMutex critical: [
+    self resetWorkerResultBuffer.
     worker nbExecute: anExpressionString.
     [worker isCallInProgress]
       whileTrue: [worker waitForResultForSeconds: self workerWaitSeconds otherwise: [nil]].
@@ -244,6 +362,7 @@ startWithId: anId readOnly: aBoolean
   worker onetimePassword: (GsCurrentSession currentSession createOnetimePasswordValidForSeconds: 300).
   worker login.
   self cacheWorkerIds.
+  self verifyWorkerResultFidelity.
   readOnly := aBoolean.
   self touch.
   ^self
@@ -270,6 +389,7 @@ startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
   worker jwtPassword: aJwtString.
   worker login.
   self cacheWorkerIds.
+  self verifyWorkerResultFidelity.
   readOnly := aBoolean.
   self touch.
   ^self
@@ -292,6 +412,40 @@ category: 'accessing'
 method: McpSession
 userId
   ^userId
+%
+category: 'result fidelity'
+method: McpSession
+usesResultBufferReset
+  "Whether this session is working around the pre-3.7.4.1 result corruption -- false on any image
+   whose probe came back intact, which is every supported image from 3.7.4.1 on."
+  ^resultBufferSlot notNil
+%
+category: 'result fidelity'
+method: McpSession
+verifyWorkerResultFidelity
+  "Establish that what this worker returns is what it computed, before the session serves anything.
+   GemStone before 3.7.4.1 (bug #51438) refetches a large result only when the session's fetch buffer
+   must grow, so once one big result has grown it, every later result that fits comes back the right
+   LENGTH with everything past byte 1024 left over from the previous one. Every MCP response is a
+   String fetched exactly that way, so for this server that is the main path, not an edge case.
+   The image is PROBED rather than version-checked. That way the workaround switches itself off the
+   moment the server runs on a fixed image, applies itself on a version nobody has examined, and
+   cannot be wrong about a patched or unusual build -- with no version table to maintain. It costs
+   two round trips against a gem that was just forked, and on a fixed image that is all that happens.
+   A corrupting image that cannot be repaired fails the session HERE, loudly, rather than answering
+   clients with JSON of the right size and the wrong bytes."
+  self probeWorkerResultsAreIntact ifTrue: [^self].
+  self enableResultBufferReset ifFalse: [
+    ^self error: 'This GemStone image corrupts external-session results larger than '
+      , self class resultBufferBytes printString , ' bytes (kernel bug #51438, fixed in 3.7.4.1), '
+      , 'and the workaround cannot be applied here: ' , worker class name asString
+      , ' has no objInfoBuffers instance variable to reset. Run the server on GemStone 3.7.4.1 or '
+      , 'later.'].
+  self probeWorkerResultsAreIntact ifTrue: [^self].
+  ^self error: 'The worker gem for session ' , id printString , ' cannot return large results '
+    , 'intact. This GemStone image corrupts external-session results (kernel bug #51438, fixed in '
+    , '3.7.4.1) and resetting the fetch buffer did not repair it. Run the server on GemStone 3.7.4.1 '
+    , 'or later.'
 %
 category: 'private'
 method: McpSession

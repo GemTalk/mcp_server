@@ -3,7 +3,7 @@ set compile_env: 0
 expectvalue /Class
 doit
 McpSession subclass: 'McpMockSession'
-  instVarNames: #( mockWorker fakeIdleSeconds)
+  instVarNames: #( mockWorker fakeIdleSeconds mockCorrupts)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -20,7 +20,11 @@ the SHIPPING implementations under test -- unlike McpStubSession, which stubs pr
 test the router''s session bookkeeping without a login.
 
 fakeIdleSeconds: makes a session look idle without waiting, so a test can drive
-McpRouter>>reapIdleSessions and check that it leaves a session with a call in flight alone.'
+McpRouter>>reapIdleSessions and check that it leaves a session with a call in flight alone.
+
+startWithId:corrupting: builds a worker that returns large results the way GemStone before 3.7.4.1
+does, so the whole of McpSession>>verifyWorkerResultFidelity -- probe, workaround, re-probe -- runs
+against it on any image (GemStone kernel bug #51438, fixed in 3.7.4.1).'
 %
 expectvalue /Class
 doit
@@ -30,6 +34,16 @@ McpMockSession category: 'Mcp-Tests'
 removeallmethods McpMockSession
 removeallclassmethods McpMockSession
 ! ------------------- Class methods for McpMockSession
+category: 'instance creation'
+classmethod: McpMockSession
+startWithId: anId corrupting: aBoolean
+  "A started mock session whose worker corrupts large results when aBoolean -- an image with kernel
+   bug #51438. The flag has to be set before startWithId:, because that is what builds the worker and
+   then probes it."
+  ^self new
+    simulateResultCorruption: aBoolean;
+    startWithId: anId
+%
 ! ------------------- Instance methods for McpMockSession
 category: 'testing support'
 method: McpMockSession
@@ -52,7 +66,16 @@ category: 'initialization'
 method: McpMockSession
 newWorkerSession
   "The one seam a mock session needs: answer a mock worker where McpSession would answer a
-   GsTsExternalSession. Everything else -- the login sends, prepareWorker, forward: -- runs the
-   shipping code against it."
+   GsTsExternalSession. Everything else -- the login sends, the fidelity probe, prepareWorker,
+   forward: -- runs the shipping code against it."
   ^mockWorker := McpMockWorker new
+    simulateResultCorruption: mockCorrupts == true;
+    yourself
+%
+category: 'testing support'
+method: McpMockSession
+simulateResultCorruption: aBoolean
+  "Whether the worker this session is about to build corrupts large results (kernel bug #51438).
+   Send it before startWithId:; see McpMockSession class>>startWithId:corrupting:."
+  mockCorrupts := aBoolean
 %
