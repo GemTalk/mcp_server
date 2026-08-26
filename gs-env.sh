@@ -27,6 +27,7 @@
 #   gs_env_resolve            GEMSTONE + TOPAZ + GEMSTONE_GLOBAL_DIR (discovered if unset/wrong)
 #   gs_env_require_stone      $GS_STONE is running and reachable, with a real listing if not
 #   gs_env_require_netldi     a netldi is running (needed to FORK gems -- see below)
+#   gs_env_image_has NAME     the image has a global by that name (0 yes / 1 no / 2 unknown)
 #   gs_env_summary            one line naming what was resolved
 #   gs_env_check              all of the above as a report, for --check
 #
@@ -69,7 +70,7 @@ _gs_env_globaldir_candidates() {
 # Does gslist see any running server with this GEMSTONE_GLOBAL_DIR? gslist is the authority: it
 # reads the same lock files the GCI client does, so if it lists servers, a login can find them.
 _gs_env_gslist_finds_servers() {
-  GEMSTONE_GLOBAL_DIR="$1" "$GEMSTONE/bin/gslist" -l 2>/dev/null | grep -qE '^(OK|exists|startup|recovery)'
+  GEMSTONE_GLOBAL_DIR="$1" "$GEMSTONE/bin/gslist" -l 2>/dev/null | grep -E '^(OK|exists|startup|recovery)' > /dev/null
 }
 
 # Locate lsof, which is NOT reliably on PATH. On macOS it lives in /usr/sbin, and /usr/sbin is
@@ -206,6 +207,55 @@ gs_env_require_netldi() {
   echo "       GciError stack from GsTsExternalSession>>login." >&2
   echo "       Start one, e.g.:  startnetldi -g -a \$USER gs64ldi" >&2
   return 1
+}
+
+# Ask the IMAGE whether a global resolves, e.g. `gs_env_image_has JsonWebToken`. Answers 0 if the
+# name is bound, 1 if it is not, and 2 if the query itself could not be run.
+#
+# WHY THE IMAGE AND NOT THE VERSION. What the installer actually needs to know is whether a class
+# exists, and only the image can answer that. $GEMSTONE/version.txt names a product, not the extent
+# it is running against, and the two do drift -- a patched product can carry a pre-fix version.txt,
+# and an extent can be older or newer than the product that opened it. Asking the image is also the
+# right answer for a customized kernel, where a version number would be a guess.
+#
+# This costs one extra topaz login. It is worth it because three scripts need the same fact:
+# install.sh (which groups to file in), run-unit-tests.sh (whether a netldi is required) and
+# run-auth-server.sh (whether the router it is about to fork is installed at all).
+#
+# Requires gs_env_resolve (for $TOPAZ) and a running stone; call gs_env_require_stone first, so a
+# stone that is down is reported as a stone that is down rather than as an absent class.
+gs_env_image_has() {
+  local sym="$1" tmp
+  tmp="$(mktemp "${TMPDIR:-/tmp}/gs-env-probe.XXXXXX")"
+  # `|| true`: topaz's exit status is not the answer here -- the sentinel below is -- and a
+  # non-zero exit under the caller's `set -e` would abort before we could read it.
+  "$TOPAZ" -l >"$tmp" 2>&1 <<TPZ || true
+set gemstone ${GS_STONE:-gs64stone}
+set username ${GS_USER:-DataCurator}
+set password ${GS_PASS:-swordfish}
+login
+iferr 1 exit 1
+run
+"Assign before testing rather than sending isNil to a parenthesised expression: a topaz heredoc
+ line that STARTS with '(' and closes after a '#' is mis-parsed by bash 3.2 (macOS) inside a
+ command substitution. Costs one temp, avoids a platform-specific failure."
+| v |
+v := System myUserProfile objectNamed: #$sym.
+v isNil ifTrue: [ 'GS_ENV_PROBE ABSENT' ] ifFalse: [ 'GS_ENV_PROBE PRESENT' ]
+%
+logout
+exit
+TPZ
+  # Match the RESULT line topaz prints ("[oop size:N Class] <value>"), not a bare substring: topaz
+  # echoes the block's own source back, so BOTH sentinels appear in the output regardless.
+  local line='^\[[0-9]+ size:[0-9]+ +[A-Za-z0-9]+\] GS_ENV_PROBE'
+  if grep -qE "$line PRESENT" "$tmp"; then rm -f "$tmp"; return 0; fi
+  if grep -qE "$line ABSENT" "$tmp"; then rm -f "$tmp"; return 1; fi
+  echo "error: could not ask the image whether '$sym' is defined -- the probe login produced no" >&2
+  echo "       answer. topaz said:" >&2
+  sed 's/^/         /' "$tmp" >&2
+  rm -f "$tmp"
+  return 2
 }
 
 gs_env_summary() {

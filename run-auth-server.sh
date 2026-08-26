@@ -103,6 +103,25 @@ if [ "${1:-}" = "--check" ]; then gs_env_check; exit $?; fi
 gs_env_require_stone
 gs_env_require_netldi
 
+# Is the router this script forks even installed? src/auth is an OPTIONAL group -- install.sh skips
+# it on an image with no kernel JWT support, and --no-auth skips it anywhere -- so on a base install
+# the fork string below would name a class that does not exist, and the failure would surface from
+# inside a detached gem as a nil doesNotUnderstand, with the gem gone by the time you read it.
+gs_env_image_has McpAuthRouter && HAVE_ROUTER=0 || HAVE_ROUTER=$?
+# 2 means the probe itself could not run; it has already said why, and reporting that as "not
+# installed" would send you to install.sh over what is really a login problem.
+[ "$HAVE_ROUTER" -eq 2 ] && exit 1
+if [ "$HAVE_ROUTER" -ne 0 ]; then
+  echo "ERROR: McpAuthRouter is not installed in '$GS_STONE', so there is no authenticating front" >&2
+  echo "       end to fork. src/auth is an optional install group. Add it with:" >&2
+  echo "         ./install.sh --auth" >&2
+  echo "       which will also tell you if this image cannot take it -- the group needs the kernel" >&2
+  echo "       JWT classes (JsonWebToken, JwtSecurityData) and GsTsExternalSession>>jwtPassword:," >&2
+  echo "       none of which exist before 3.7.5. On such an image the authenticated front end is" >&2
+  echo "       not available at all; ./run-server.sh gives you the unauthenticated loopback one." >&2
+  exit 1
+fi
+
 # Session-lifetime setters (GS_MCP_IDLE_TIMEOUT and friends) -> $LIFETIME_LINES; empty when none are
 # set, leaving McpRouter>>initialize's defaults in place.
 . ./session-lifetime.sh

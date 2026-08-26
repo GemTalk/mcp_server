@@ -10,17 +10,31 @@ Python), OAuth 2.1 / JWT + TLS, per-router read-only mode and server-initiated m
 and verified end-to-end — by curl, by a TLS run, and by the in-image suites. What is *not* built is
 listed under [Future work](#future-work).
 
-A note about versions: `run-server.sh` is safe to use on a 3.7.5 stone, but `run-auth-server.sh`
-needs 3.7.6 due to a bug in connecting to an external OIDC IdP.
+**A note about versions.** What you get depends on the image, and `install.sh` works it out for you:
+
+| image | base server (`run-server.sh`) | OAuth/OIDC front end (`run-auth-server.sh`) |
+|---|---|---|
+| **3.7.2** | yes | **no** — the image has no kernel JWT classes, so `src/auth` is skipped |
+| **3.7.5** | yes | yes, against a local IdP |
+| **3.7.6+** | yes | yes, including an external OIDC IdP |
+
+`src/auth` needs `JsonWebToken` and `JwtSecurityData` (and, to log a worker in,
+`GsTsExternalSession>>jwtPassword:`), none of which exist before 3.7.5; on 3.7.2 those methods
+cannot compile at all, so `install.sh` detects the image and leaves the group out. Everything else —
+the server, all 31 base tools, per-client sessions, read-only mode, server-initiated messages — is
+unaffected. The 3.7.6 line is a separate matter: earlier releases have a bug connecting to an
+*external* OIDC IdP.
 
 ## Install & run
 
 ```bash
 export GEMSTONE=/path/to/GemStone64Bit3.7.x   # product dir
 
-./install.sh --check                # verify the environment first -- do this on a new machine
-./install.sh                        # file in the classes (core + tests + auth) and commit
-./install.sh --grail                # ...and the optional Grail/Python toolset (Grail image only)
+./install.sh --check                # verify the environment and report what would be installed
+./install.sh                        # file in the classes and commit; auth included if the image can
+./install.sh --auth                 # ...and fail loudly if it cannot, instead of quietly skipping
+./install.sh --no-auth              # ...or leave the auth group out of an image that could take it
+./install.sh --grail                # ...plus the optional Grail/Python toolset (Grail image only)
 GS_MCP_PORT=8000 ./run-server.sh    # fork a detached, independent localhost server gem and return
 GS_MCP_READONLY=1 ./run-server.sh   # ...read-only (browse/search only; no accidental mutation)
 GS_MCP_TOOLSETS="McpBrowsingToolset McpSearchToolset" ./run-server.sh   # ...only these tools
@@ -30,10 +44,19 @@ GS_MCP_WORKER_CLASS=MyMcpServer ./run-server.sh                        # ...a su
 
 `install.sh` and the `run-*.sh` scripts use topaz; set `GEMSTONE`, `GS_STONE`, `GS_USER`,
 `GS_PASS` to match your environment — and read **Environment** below before assuming those four are
-enough, because on many machines they are not. `install.sh` files the code in with topaz from `load.gs` —
-which on this branch includes `src/auth/`, since the OAuth front end is the point of it; `--grail`
-(or `GS_MCP_WITH_GRAIL=1`) files in `load-grail.gs` instead, which adds the `src/grail/` group on
-top. `run-server.sh` builds a base `McpRouter` instance and calls
+enough, because on many machines they are not. `install.sh` files the code in with topaz, one
+group at a time: `src/core` and `src/tests` always, `src/auth` when the image can compile it, and
+`src/grail` on `--grail` (or `GS_MCP_WITH_GRAIL=1`).
+
+The two optional groups are selected differently on purpose. Loading `McpAuthRouter` is **inert** —
+nothing instantiates it until you fork one with `run-auth-server.sh` — so it can be detected rather
+than asked about, and `install.sh` probes the image for `JsonWebToken` to decide. Loading
+`McpGrailToolset` is **not** inert: it joins the default tool surface automatically (see
+`McpServer class>>installedDefaultToolsetNames`), so whether to have it is a decision about the
+server you are running, and it stays opt-in. Use `--auth` to turn a skip into an error, `--no-auth`
+to force one; `--check` reports the decision without installing anything.
+
+`run-server.sh` builds a base `McpRouter` instance and calls
 its `forkOnPort:` (`run-auth-server.sh` builds an OIDC-configured `McpAuthRouter` — resource-server
 config as code, no commit), which launches a detached, independent front-end gem and returns; stop it
 with `./stop-server.sh` (by port), or the `System stopSession: <id>` / `kill <pid>` line it prints.
@@ -86,14 +109,17 @@ by construction and points at a port nothing is listening on.
 **Which scripts need a netldi.** `install.sh` talks only to the stone, so it runs fine on a host
 with no netldi at all. The `run-*.sh` scripts need one — not because of how they log in, but
 because `McpRouter>>forkOnPort:` and every per-client worker create a `GsTsExternalSession`, and
-netldi is what forks those gems. `run-unit-tests.sh` needs one too, because `McpAuthTest` spawns a
-real worker. Each script checks for what it actually needs, and says which is missing.
+netldi is what forks those gems. `run-unit-tests.sh` needs one **only if the auth group is
+installed**, because `McpAuthTest` is the one suite that spawns a real worker; on a base install it
+asks the image, finds no `McpAuthTest`, and runs happily without a netldi. Each script checks for
+what it actually needs, and says which is missing.
 
 **Linked vs RPC.** These scripts run `topaz -l` (linked). That is deliberate, and it is not the
 cause of the error above: a linked login resolves the stone through the same lock files, so it
 needs `GEMSTONE_GLOBAL_DIR` and nothing else — no netldi, no NRS, no service entries. Dropping `-l`
 routes the login through netldi instead, which works equally well once `GEMSTONE_GLOBAL_DIR` is
 right, but it would make `install.sh` depend on a netldi it otherwise has no use for.
+
 
 ## Transport
 
@@ -129,7 +155,8 @@ prevent DNS-rebinding — a present `Origin` whose host is not loopback (`localh
 gets **`403`**; an absent `Origin` (non-browser clients like curl) is allowed. Add a browser app's
 origin host by configuring the router instance — `(McpRouter new allowedOriginHosts: #(...)) forkOnPort: 8000`.
 For network-facing use,
-the `McpAuthRouter` subclass adds OAuth 2.1 / JWT bearer-token authentication (per-user worker gems),
+the optional `McpAuthRouter` subclass (see [Install & run](#install--run)) adds OAuth 2.1 / JWT
+bearer-token authentication (per-user worker gems),
 a `WWW-Authenticate` challenge + RFC 9728 Protected Resource Metadata, TLS (`GsSecureSocket`), and
 scope-based [read-only sessions](#read-only-mode); the base `McpRouter` is the localhost,
 unauthenticated front end.
@@ -662,13 +689,19 @@ The classes live on disk as plain **topaz file-outs** — canonical `Class>>file
 grouped by area, with one loader per group:
 
 ```
-src/core/    18 classes  the server itself: protocol, transport, dispatch, toolsets
-src/tests/   15 classes  the SUnit suites and their fixtures
-src/auth/     3 classes  the OAuth/OIDC front end McpAuthRouter + its two suites
-src/grail/    2 classes  the optional GemStone-Python toolset + its suite
-load.gs                  files in core + tests + auth, then commits
-load-grail.gs            files in core + tests + auth + grail, then commits
+src/core/    18 classes  the server itself: protocol, transport, dispatch, toolsets   (always)
+src/tests/   16 classes  the SUnit suites and their fixtures                          (always)
+src/auth/     3 classes  the OAuth/OIDC front end McpAuthRouter + its two suites      (3.7.5+)
+src/grail/    2 classes  the optional GemStone-Python toolset + its suite             (--grail)
+load.gs                  files in core + tests, then commits
 ```
+
+`install.sh` does not use `load.gs`: it composes the `input` lines for the groups it selected, so
+all four combinations of auth and Grail are reachable without a wrapper file per combination.
+`load.gs` is for the case where you are already inside a topaz session — it files in the base, and
+its header shows the one extra `input` line each optional group needs. Every group holds exactly one
+`.gs` file per class plus its `load.gs`, so the file names are the manifest: `install.sh` derives its
+post-load verification list from the directories rather than from a list kept in step by hand.
 
 Each group's `load.gs` names its files in dependency order, and every `input` path is relative to the
 **repository root** — `install.sh` `cd`s there before starting topaz, so run any loader from the root
@@ -714,8 +747,9 @@ f nextPutAll: s; close.
 Two complementary suites:
 
 **Unit tests (in-image, no socket)** — `./run-unit-tests.sh` logs in via topaz and runs the base
-`GsTestCase` suites against the server's logic directly (milliseconds, no network), plus the Grail
-suite when `McpGrailToolset` is installed:
+`GsTestCase` suites against the server's logic directly (milliseconds, no network), plus each
+optional group's suites where that group was installed — resolved by class name rather than by a
+flag, so a missing suite is a skip and not an error:
 - `McpToolTest` — every `tool_*` handler called directly on its owning toolset (grouped by the
   `tools - *` categories). Tests operate on throwaway fixtures rather than on the production classes: a
   plain `McpTestFixture` and a `McpTestSuiteFixture` (a `GsTestCase` subclass with passing/
@@ -773,11 +807,10 @@ suite when `McpGrailToolset` is installed:
   the worker entry answering as the named subclass, and the identity precedence — router config
   relabels a subclass's own default. `McpStubSession` lets it drive
   `McpRouter>>openSessionCreating:` (configure **and** prepare) with no login.
-- `McpAuthTest` — the authenticated front end (`McpAuthRouter`): missing / non-bearer / garbage /
-  valid tokens, RS-layer `exp` / issuer / audience / scope validation, and the write-scope read-only
-  sessions. It commits a throwaway JWT user and spawns real worker gems (needs netldi), so — like
-  `test-tls.sh` — it runs via the `run_test_class` tool or the scripts rather than the socket-less
-  `run-unit-tests.sh`.
+- `McpAuthTest` *(3.7.5+ images, where the auth group installs)* — the authenticated front end
+  (`McpAuthRouter`): missing / non-bearer / garbage / valid tokens, RS-layer `exp` / issuer /
+  audience / scope validation, and the write-scope read-only sessions. Unlike every suite above it
+  commits a throwaway JWT user and spawns real worker gems, so it needs a netldi running.
 - `McpGrailToolsetTest` *(Grail images only)* — the optional Python toolset: `eval_python`→`42`,
   `compile_python`→`___binOpMul___:`, `print`→`None`, all three Python failure paths (undefined name,
   runtime, syntax) surfacing as `isError` with `kind = "pythonError"`, a 33-tool `tools/list` check on
@@ -789,11 +822,12 @@ Run a single suite while a server is up via the `run_test_class` tool (e.g. `run
 McpToolTest`). `./run-unit-tests.sh` runs them all and exits 0 when every test passes: the
 socket-less suites `McpToolTest` (52), `McpDispatcherTest` (14), `McpSessionTest` (9),
 `McpOutboxTest` (9), `McpStreamTest` (17), `McpLifetimeTest` (36), `McpTransportTest` (22),
-`McpContractTest` (34) and `McpExtensionTest` (9), plus `McpAuthTest` (34) and
-`McpAuthConformanceTest` (25) — **261 tests**, **270 with the 9 in `McpGrailToolsetTest`** on a
-Grail image. The two auth suites are not purely in-image (they commit a throwaway JWT user and spawn
-real worker gems, so a netldi must be running); they are in the runner anyway, because they are the
-only cover for the token → session path.
+`McpContractTest` (34) and `McpExtensionTest` (9) — **202 tests**, which is the whole suite on a base
+install and on 3.7.2. Where the optional groups are installed the runner picks their suites up
+automatically: plus `McpAuthTest` (34) and `McpAuthConformanceTest` (25) — **261 tests** — and
+**270 with the 9 in `McpGrailToolsetTest`** on a Grail image. The two auth suites are not purely
+in-image (they commit a throwaway JWT user and spawn real worker gems, so a netldi must be running);
+they are in the runner anyway, because they are the only cover for the token → session path.
 
 Those two also need **spare login slots**, which is the likeliest reason for a failure that is
 nothing to do with the code: each spawns worker gems of its own, so a stone whose `StnMaxSessions`
