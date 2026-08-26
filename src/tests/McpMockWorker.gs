@@ -208,7 +208,14 @@ stoneSessionId
 %
 category: 'session protocol'
 method: McpMockWorker
+onetimePassword: aString
+  "This is for compatibility with 3.7.2. In 3.7.5, #useOnetimePassword could be used instead."
+  ^self
+%
+category: 'session protocol'
+method: McpMockWorker
 useOnetimePassword
+  "This is not called in 3.7.2-compatible code, but it could be used in 3.7.5."
   ^self
 %
 category: 'session protocol'
