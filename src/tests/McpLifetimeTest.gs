@@ -770,3 +770,30 @@ testMaxSessionLifetimeBecomesAnExpiryAtOpen
   self deny: sess isExpired.
   self assert: (sess expiresAtSeconds - System timeGmt) <= 60
 %
+category: 'tests - shutdown'
+method: McpLifetimeTest
+testClosingAllSessionsReleasesEveryWorkerWhateverThePolicySays
+  "#closeAllSessions is the shutdown counterpart to the reaper, and asks none of the reaper's
+   questions. Both sessions here are ones #reapReasonFor: would SPARE -- streamed, just touched, no
+   deadline -- and both go anyway, unmapped as well as closed, because the caller is finished with
+   the router. It answers the count so a caller can log what it let go, and it is safe to send twice:
+   the second call finds nothing and says so rather than failing.
+   Worth a test of its own because the alternative was invisible. A worker gem is a real login, not
+   an object, so a router that is merely dropped on the floor leaks one login slot per session it
+   ever opened -- which is what the auth tests did until they were given this to call."
+  | r a b |
+  r := McpFixtureRouter new.
+  r sessionIdleTimeoutSeconds: nil.
+  a := self streamedSessionOn: r.
+  b := self streamedSessionOn: r.
+  a touch.
+  b touch.
+  self assert: (r reapReasonFor: a) isNil.
+  self assert: (r reapReasonFor: b) isNil.
+  self assert: r closeAllSessions equals: 2.
+  self assert: (r sessionAt: a id) isNil.
+  self assert: (r sessionAt: b id) isNil.
+  self assert: a outbox isClosing.
+  self assert: b outbox isClosing.
+  self assert: r closeAllSessions equals: 0
+%

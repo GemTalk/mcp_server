@@ -534,7 +534,7 @@ testSessionIsCappedAtTheTokenExpiry
   | router |
   router := McpAuthRouter new.
   router expectedAudience: nil; expectedIssuer: nil; requiredScopes: #(); userIdClaim: 'sub'.
-  self withJwtUser: 'McpExpiryTestUser' do: [:jwt | | sid sess exp |
+  self withJwtUser: 'McpExpiryTestUser' router: router do: [:jwt | | sid sess exp |
     exp := router tokenExpirySecondsOf: jwt.
     self deny: exp isNil.
     sid := self sessionIdFrom: (self runRequest:
@@ -545,8 +545,7 @@ testSessionIsCappedAtTheTokenExpiry
     self assert: sess expiresAtSeconds equals: exp.
     self deny: sess isExpired.
     "the fixture mints an hour-long token, and that hour is what the session gets"
-    self assert: ((sess expiresAtSeconds - System timeGmt) - 3600) abs < 60.
-    router reapIdleSessions]
+    self assert: ((sess expiresAtSeconds - System timeGmt) - 3600) abs < 60]
 %
 category: 'tests'
 method: McpAuthTest
@@ -611,7 +610,7 @@ testTokenWithoutWriteScopeGivesReadOnlySession
   router := McpAuthRouter new.
   router expectedAudience: nil; expectedIssuer: nil; requiredScopes: #(); writeScope: 'mcp:write';
     userIdClaim: 'sub'.
-  self withJwtUser: 'McpWriteScopeUser' do: [:jwt | | sid out |
+  self withJwtUser: 'McpWriteScopeUser' router: router do: [:jwt | | sid out |
     out := self runRequest: (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: router.
     self assert: (self includesCS: 'HTTP/1.1 200 OK' in: out).
     sid := self sessionIdFrom: out.
@@ -631,7 +630,7 @@ testTokenWithWriteScopeGivesWritableSession
   router := McpAuthRouter new.
   router expectedAudience: nil; expectedIssuer: nil; requiredScopes: #(); writeScope: 'mcp:write';
     userIdClaim: 'sub'.
-  self withJwtUser: 'McpWriteScopeUser' scope: 'openid mcp:write' do: [:jwt | | sid out |
+  self withJwtUser: 'McpWriteScopeUser' scope: 'openid mcp:write' router: router do: [:jwt | | sid out |
     out := self runRequest: (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: router.
     sid := self sessionIdFrom: out.
     self deny: sid isNil.
@@ -648,7 +647,7 @@ testValidScopedTokenOpensSession
   | router |
   router := McpAuthRouter new.
   router expectedAudience: nil; expectedIssuer: nil; requiredScopes: #('mcp:use'); userIdClaim: 'sub'.
-  self withJwtUser: 'McpScopeTestUser' scope: 'openid mcp:use' do: [:jwt | | out |
+  self withJwtUser: 'McpScopeTestUser' scope: 'openid mcp:use' router: router do: [:jwt | | out |
     out := self runRequest: (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: router.
     self assert: (self includesCS: 'HTTP/1.1 200 OK' in: out).
     self assert: (self includesCS: 'MCP-Session-Id:' in: out)]
@@ -664,7 +663,7 @@ testValidTokenOpensPerUserSession
   | router |
   router := McpAuthRouter new.
   router requiredScopes: #(); expectedAudience: nil; expectedIssuer: nil; userIdClaim: 'sub'.
-  self withJwtUser: 'McpAuthTestUser' do: [:jwt | | initOut sid statusOut |
+  self withJwtUser: 'McpAuthTestUser' router: router do: [:jwt | | initOut sid statusOut |
     initOut := self runRequest: (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: router.
     self assert: (self includesCS: 'HTTP/1.1 200 OK' in: initOut).
     self assert: (self includesCS: 'MCP-Session-Id:' in: initOut).
@@ -681,11 +680,19 @@ withJwtUser: aUserId do: aOneArgBlock
 %
 category: 'helpers'
 method: McpAuthTest
+withJwtUser: aUserId router: aRouter do: aOneArgBlock
+  "withJwtUser:scope:router:do: with no scope claim on the token."
+  ^self withJwtUser: aUserId scope: nil router: aRouter do: aOneArgBlock
+%
+category: 'helpers'
+method: McpAuthTest
 withJwtUser: aUserId scope: aScopeStringOrNil do: aOneArgBlock
   "Provision a JWT-enabled UserProfile for aUserId (identity from the 'sub' claim, wildcard
    issuer/audience) + register a signing key, mint a matching JWT (carrying aScopeStringOrNil as its
    space-delimited `scope` claim when non-nil), evaluate aOneArgBlock with the JWT string, and
-   ALWAYS clean up the key + user afterward. Answers the block's value."
+   ALWAYS clean up the key + user afterward. Answers the block's value.
+   A test that drives a SUCCESSFUL initialize wants #withJwtUser:scope:router:do: instead -- this
+   variant releases no worker gem, because it is given no router to release one from."
   | keyId jwtSec up now tok |
   keyId := 'mcp-authtest-key'.
   (AllUsers userWithId: aUserId ifAbsent: [nil]) ifNotNil: [:u |
@@ -711,4 +718,21 @@ withJwtUser: aUserId scope: aScopeStringOrNil do: aOneArgBlock
   ^[aOneArgBlock value: tok asJwtString] ensure: [
     [System removeJwtKeyWithId: keyId] on: Error do: [:e | nil].
     [AllUsers removeAndCleanupUserWithId: aUserId ifAbsent: [nil]. System commitTransaction] on: Error do: [:e | nil]]
+%
+category: 'helpers'
+method: McpAuthTest
+withJwtUser: aUserId scope: aScopeStringOrNil router: aRouter do: aOneArgBlock
+  "#withJwtUser:scope:do:, plus the release of every worker gem aRouter opened while the block ran.
+   EVERY test whose initialize is meant to SUCCEED must use this variant. A successful initialize
+   logs in a real worker gem, and nothing else here would ever log it out: the idle reaper runs only
+   inside a live accept loop, which these tests never start, and #withJwtUser:scope:do: removing the
+   UserProfile does NOT terminate a session already logged in as it. Left alone, each such test costs
+   one login slot for the life of the gem RUNNING the tests -- invisible under ./run-unit-tests.sh,
+   whose topaz exits and takes the gems with it, but cumulative when the suite is re-run inside one
+   long-lived gem, until logins start failing and the tests that assert nothing about the login fail
+   for a reason unrelated to what they check.
+   Releases the gems INSIDE the outer fixture, so a worker is logged out while the UserProfile it
+   authenticated as still exists."
+  ^self withJwtUser: aUserId scope: aScopeStringOrNil do: [:jwt |
+    [aOneArgBlock value: jwt] ensure: [[aRouter closeAllSessions] on: Error do: [:e | nil]]]
 %

@@ -596,7 +596,7 @@ testRoutedRequestRequiresBearerToken
    Needs NETLDI + AllUsers (see the class comment)."
   | router |
   router := self conformantRouter.
-  self withJwtUser: 'McpConformanceUser' scope: 'openid mcp:use' do: [:jwt | | initOut sid out |
+  self withJwtUser: 'McpConformanceUser' scope: 'openid mcp:use' router: router do: [:jwt | | initOut sid out |
     initOut := self driveRequest: (self postInitWithToken: jwt) on: router.
     self assert: (self statusOf: initOut) equals: 200.
     sid := self sessionIdFrom: initOut.
@@ -620,7 +620,7 @@ testRoutedRequestWithExpiredTokenRejected
   expiredClaims := self validClaims.
   expiredClaims at: 'exp' put: System timeGmt - 60.
   expired := self tokenWithClaims: expiredClaims.
-  self withJwtUser: 'McpConformanceUser' scope: 'openid mcp:use' do: [:jwt | | initOut sid out |
+  self withJwtUser: 'McpConformanceUser' scope: 'openid mcp:use' router: router do: [:jwt | | initOut sid out |
     initOut := self driveRequest: (self postInitWithToken: jwt) on: router.
     sid := self sessionIdFrom: initOut.
     self deny: sid isNil.
@@ -738,7 +738,9 @@ withJwtUser: aUserId scope: aScopeStringOrNil do: aOneArgBlock
   "Provision a JWT-enabled UserProfile for aUserId plus a trusted signing key, mint a matching JWT
    whose claims satisfy conformantRouter, evaluate aOneArgBlock with the JWT string, and ALWAYS
    clean up. Mirrors McpAuthTest>>withJwtUser:scope:do: -- it commits, so it touches AllUsers, and
-   the caller will spawn a worker gem (needs NETLDI)."
+   the caller will spawn a worker gem (needs NETLDI).
+   A test that drives a SUCCESSFUL initialize wants #withJwtUser:scope:router:do: instead -- this
+   variant releases no worker gem, because it is given no router to release one from."
   | keyId jwtSec up now tok |
   keyId := 'mcp-conformance-key'.
   (AllUsers userWithId: aUserId ifAbsent: [nil]) ifNotNil: [:u |
@@ -764,4 +766,21 @@ withJwtUser: aUserId scope: aScopeStringOrNil do: aOneArgBlock
     [System removeJwtKeyWithId: keyId] on: Error do: [:e | nil].
     [AllUsers removeAndCleanupUserWithId: aUserId ifAbsent: [nil]. System commitTransaction]
       on: Error do: [:e | nil]]
+%
+category: 'token fixtures'
+method: McpAuthConformanceTest
+withJwtUser: aUserId scope: aScopeStringOrNil router: aRouter do: aOneArgBlock
+  "#withJwtUser:scope:do:, plus the release of every worker gem aRouter opened while the block ran.
+   EVERY test whose initialize is meant to SUCCEED must use this variant. A successful initialize
+   logs in a real worker gem, and nothing else here would ever log it out: the idle reaper runs only
+   inside a live accept loop, which these tests never start, and #withJwtUser:scope:do: removing the
+   UserProfile does NOT terminate a session already logged in as it. Left alone, each such test costs
+   one login slot for the life of the gem RUNNING the tests -- invisible under ./run-unit-tests.sh,
+   whose topaz exits and takes the gems with it, but cumulative when the suite is re-run inside one
+   long-lived gem, until logins start failing and the tests that assert nothing about the login fail
+   with a nil session id instead.
+   Releases the gems INSIDE the outer fixture, so a worker is logged out while the UserProfile it
+   authenticated as still exists."
+  ^self withJwtUser: aUserId scope: aScopeStringOrNil do: [:jwt |
+    [aOneArgBlock value: jwt] ensure: [[aRouter closeAllSessions] on: Error do: [:e | nil]]]
 %

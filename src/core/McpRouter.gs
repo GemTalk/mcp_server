@@ -289,6 +289,31 @@ buildRoutes
   d at: 'DELETE' put: [:req :conn | self serveDelete: req on: conn].
   ^d
 %
+category: 'lifecycle'
+method: McpRouter
+closeAllSessions
+  "Close and unmap EVERY client session, releasing its worker gem, and answer how many were let go.
+   Unlike #reapIdleSessions this asks no policy question: the caller is done with this router, so
+   every worker goes regardless of idleness, deadline, or work in flight. Same concurrency
+   discipline as the reaper -- collect and unmap under the mutex, close (a blocking logout) outside
+   it -- so a session cannot be closed while another GsProcess is routing to it.
+   Deliberately does NOT announce the ending on each client's stream, as the reaper does: nothing
+   will drain an outbox after this, so a notice enqueued here would be written nowhere. Callers
+   ending a SERVING router should say their goodbyes first if they want them heard.
+   Needed because a worker gem outlives the router object -- it is a real logged-in gem, not an
+   object -- so anything holding a router transiently (above all a test, which drives
+   #handleConnection: without ever starting the accept loop that runs the reaper) leaks a login slot
+   per session it opened."
+  | doomed |
+  doomed := mutex critical: [
+    | found |
+    found := OrderedCollection new.
+    sessions values do: [:s | found add: s].
+    found do: [:s | sessions removeKey: s id ifAbsent: [nil]].
+    found].
+  doomed do: [:s | [s close] on: Error do: [:e | nil]].
+  ^doomed size
+%
 category: 'running'
 method: McpRouter
 completeHandshake: aClientSocket
@@ -1236,6 +1261,13 @@ runOnPort: aPort
         do: [:e | self log: 'accept failed: ' , ([e description] on: Error do: [:x | e class name asString]). nil].
       client ifNotNil: [self serve: client]]].
   serverSocket close.
+  "Release the worker gems before returning. Almost always redundant -- a gem dedicated to this loop
+   exits once it returns, and every attached worker dies with the process owning its GCI connection
+   (which is also why ./stop-server.sh, a kill on that process, leaks nothing). It matters in the one
+   case where the gem OUTLIVES the loop: an interactive topaz that called #runOnPort: and was then
+   stopped in-image. There the workers would sit logged in, holding login slots and transaction
+   views, until that session happened to end."
+  self log: 'Released ' , self closeAllSessions printString , ' worker gem(s).'.
   self log: 'McpRouter stopped.'.
   ^self
 %
