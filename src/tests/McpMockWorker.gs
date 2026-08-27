@@ -7,7 +7,8 @@ Object subclass: 'McpMockWorker'
                     waitsRemaining waitsBeforeDone waitMs nextResult
                     lastResult errorOnComplete waitCount blockingExecuteCount
                     overlapDetected staleReadAttempted loginCount stoneSessionId
-                    gemProcessId idFetchCount)
+                    gemProcessId idFetchCount objInfoBuffers bufferContents
+                    refetchOnlyWhenGrowing probeExpressions currentIsProbe dropResultNonce)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -36,7 +37,22 @@ each verified against GemStone 3.7.5:
     first send of each overwrites lastResult -- the clobber McpSession>>cacheWorkerIds defuses by
     fetching them at login, before any request can be in flight.
 Its waits really do wait a few milliseconds, so a forked GsProcess gets to run during one.
-The blocking executeString: is implemented too, and counted: a test asserts it is never used.'
+The blocking executeString: is implemented too, and counted: a test asserts it is never used.
+
+It also models the kernel''s RESULT FETCH, including the pre-3.7.4.1 defect in it -- an
+objInfoBuffers instance variable of the same name and shape, and a fetch that refetches a large
+result either whenever the initial 1024-byte fetch was too small (a fixed image) or only when the
+buffer has to grow (#simulateResultCorruption:, an image with bug #51438). That is what lets
+McpSession''s workaround be tested on any version, since the shipping code finds the buffer here the
+same way it finds it in a real session.
+
+Fidelity probes are answered like a real gem would answer them, but they are kept OUT of the
+instrumentation a test reads -- #expressions, #waitCount and the rest count requests only, with the
+probes recorded separately as #probeExpressions.
+
+A real gem also appends the per-call nonce McpSession>>runWorker: asked for, since that is part of
+the expression it was handed; this mock does the same, and #dropResultNonce: makes it stop -- which
+is how a response that lost its tail is tested without having to corrupt one.'
 %
 expectvalue /Class
 doit
@@ -61,6 +77,14 @@ blockingExecuteCount
 %
 category: 'configuring'
 method: McpMockWorker
+dropResultNonce: aBoolean
+  "Stop appending the nonce the expression asked for, so the next response arrives looking complete
+   but missing its tail -- what a truncated or stale response looks like to McpSession. The failure
+   it produces is McpSession>>resultOf:withoutNonce: refusing the response."
+  dropResultNonce := aBoolean
+%
+category: 'configuring'
+method: McpMockWorker
 errorOnComplete: aMessageString
   "Raise an Error with this text when the in-flight call completes, standing in for a worker-side
    error (which the real class relays as a GciError). The call is marked finished first, as the real
@@ -82,6 +106,33 @@ method: McpMockWorker
 expressions
   "Every expression handed to this worker, in order."
   ^expressions
+%
+category: 'result fetch'
+method: McpMockWorker
+fetchThroughBuffer: aResult
+  "Answer aResult as the kernel's result fetch would deliver it, buffer and all.
+   GsTsExternalSession copies a byte-format result into a per-session buffer that starts at 1024
+   bytes and only ever grows. The first fetch brings back at most 1024 bytes; anything longer needs a
+   second one. A fixed image performs that second fetch whenever the first was too small. Before
+   3.7.4.1 it performed it only when the buffer had to GROW, so a result that fitted in an
+   already-grown buffer kept its first 1024 bytes and inherited the previous result's tail --
+   #simulateResultCorruption: chooses which of the two this mock is.
+   Restoring the buffer to 1024 bytes, which is what McpSession>>resetWorkerResultBuffer does before
+   every call, makes the two behave identically. That is the whole point of the workaround, and this
+   is where a test can watch it work."
+  | n bufSize |
+  aResult isString ifFalse: [^aResult].
+  n := aResult size.
+  self writeIntoResultBuffer: (aResult copyFrom: 1 to: (n min: McpSession resultBufferBytes)).
+  n > McpSession resultBufferBytes ifTrue: [
+    bufSize := (objInfoBuffers at: 2) size.
+    n > bufSize
+      ifTrue: [
+        objInfoBuffers at: 2 put: (CByteArray gcMalloc: n).
+        self writeIntoResultBuffer: aResult]
+      ifFalse: [
+        refetchOnlyWhenGrowing ifFalse: [self writeIntoResultBuffer: aResult]]].
+  ^self resultBufferPrefix: n
 %
 category: 'session protocol'
 method: McpMockWorker
@@ -117,6 +168,15 @@ initialize
   overlapDetected := false.
   staleReadAttempted := false.
   idFetchCount := 0.
+  probeExpressions := OrderedCollection new.
+  currentIsProbe := false.
+  refetchOnlyWhenGrowing := false.
+  dropResultNonce := false.
+  bufferContents := String new.
+  objInfoBuffers := Array
+    with: (CByteArray gcMalloc: 40)
+    with: (CByteArray gcMalloc: McpSession resultBufferBytes)
+    with: Array new.
   ^self
 %
 category: 'session protocol'
@@ -164,7 +224,10 @@ nbExecute: aString
   inProgress ifTrue: [
     overlapDetected := true.
     ^self error: 'session has a GciTsNb operation in progress'].
-  expressions add: aString.
+  currentIsProbe := (McpSession resultFidelityProbeRequestFrom: aString) notNil.
+  currentIsProbe
+    ifTrue: [probeExpressions add: aString]
+    ifFalse: [expressions add: aString].
   currentExpression := aString.
   waitsRemaining := waitsBeforeDone.
   inProgress := true.
@@ -177,11 +240,61 @@ nextResult: anObject
    expression, so a test with two calls in flight can tell their results apart."
   nextResult := anObject
 %
+category: 'session protocol'
+method: McpMockWorker
+onetimePassword: aString
+  "This is for compatibility with 3.7.2. In 3.7.5, #useOnetimePassword could be used instead."
+  ^self
+%
 category: 'instrumentation'
 method: McpMockWorker
 overlapDetected
   "Whether two calls were ever in flight at once -- the thing McpSession's worker mutex prevents."
   ^overlapDetected
+%
+category: 'instrumentation'
+method: McpMockWorker
+probeExpressions
+  "The fidelity probes handed to this worker, in order. They are kept out of #expressions so that a
+   test counting the requests a session made is not counting the two probes McpSession runs at
+   login -- or the two more it runs to confirm a workaround took."
+  ^probeExpressions
+%
+category: 'result fetch'
+method: McpMockWorker
+resultBufferPrefix: anInteger
+  "The first anInteger bytes of what is currently in the buffer -- what resolveResult: answers, since
+   it trusts the object's reported size rather than what was actually fetched. This is why a corrupt
+   result has the RIGHT length and the wrong bytes."
+  ^bufferContents size > anInteger
+    ifTrue: [bufferContents copyFrom: 1 to: anInteger]
+    ifFalse: [bufferContents]
+%
+category: 'result fetch'
+method: McpMockWorker
+resultForCurrentExpression
+  "What the in-flight call computes, before it is fetched back through the buffer. A fidelity probe
+   is answered the way a real gem would answer it -- the string it asked for -- so that McpSession's
+   probe exercises the same path here as it does against a gem.
+   The per-call nonce is appended for the same reason: a gem evaluating the wrapped expression would
+   append it, and McpSession requires it back. #dropResultNonce: is the seam that withholds it."
+  | req base nonce |
+  req := McpSession resultFidelityProbeRequestFrom: currentExpression.
+  base := req notNil
+    ifTrue: [(String new: (req at: 1)) atAllPut: (req at: 2); yourself]
+    ifFalse: [nextResult ifNil: ['echo: ' , currentExpression]].
+  base isString ifFalse: [^base].
+  dropResultNonce == true ifTrue: [^base].
+  nonce := McpSession resultNonceIn: currentExpression.
+  ^nonce isNil ifTrue: [base] ifFalse: [base , nonce]
+%
+category: 'configuring'
+method: McpMockWorker
+simulateResultCorruption: aBoolean
+  "Make this worker behave like a pre-3.7.4.1 image (true) or a fixed one (false, the default): see
+   #fetchThroughBuffer:. It is the ONE line of difference between the two versions of
+   GsTsExternalSession>>resolveResult:."
+  refetchOnlyWhenGrowing := aBoolean
 %
 category: 'instrumentation'
 method: McpMockWorker
@@ -237,7 +350,7 @@ waitForResultForSeconds: anInteger otherwise: aBlock
    lastResult -- which is why the caller reads lastResult and not nbResult. The wait genuinely
    waits, so another GsProcess runs during it, as it does in the real class."
   | msg |
-  waitCount := waitCount + 1.
+  currentIsProbe ifFalse: [waitCount := waitCount + 1].
   (Delay forMilliseconds: waitMs) wait.
   waitsRemaining := waitsRemaining - 1.
   waitsRemaining > 0 ifTrue: [^aBlock value].
@@ -246,7 +359,7 @@ waitForResultForSeconds: anInteger otherwise: aBlock
     msg := errorOnComplete.
     errorOnComplete := nil.
     ^self error: msg].
-  lastResult := nextResult ifNil: ['echo: ' , currentExpression].
+  lastResult := self fetchThroughBuffer: self resultForCurrentExpression.
   ^self
 %
 category: 'configuring'
@@ -262,4 +375,13 @@ waitsBeforeDone: anInteger
   "How many waits a call takes to finish, standing in for a slow worker. 1 (the default) completes
    on the first wait."
   waitsBeforeDone := anInteger
+%
+category: 'result fetch'
+method: McpMockWorker
+writeIntoResultBuffer: aString
+  "Copy aString into the front of the buffer, leaving any bytes beyond it untouched -- which is what
+   a fetch of fewer bytes than the buffer holds does, and why the leftovers are the PREVIOUS result."
+  bufferContents := aString size >= bufferContents size
+    ifTrue: [aString copy]
+    ifFalse: [aString , (bufferContents copyFrom: aString size + 1 to: bufferContents size)]
 %

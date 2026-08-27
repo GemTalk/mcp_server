@@ -2,21 +2,37 @@
 # Install the native GemStone MCP server classes into the image.
 #
 # Logs in via topaz, ensures the Published dictionary exists, files in the Mcp* classes as plain
-# topaz file-outs (src/core, src/tests, src/auth -- see load.gs), and commits. No Rowan, no Tonel: the .gs
-# files are canonical `fileOutClass` output and load into any image topaz can log into.
+# topaz file-outs, and commits. No Rowan, no Tonel: the .gs files are canonical `fileOutClass`
+# output and load into any image topaz can log into.
+#
+# The code is grouped by area, one directory and one loader per group -- src/core, src/tests,
+# src/auth, src/grail. core and tests are always filed in; the other two are selected below and
+# this script composes the `input` lines, so all four combinations are reachable.
 #
 # NOTE: filing these .gs files over classes a Rowan project had loaded fails at the first method
 # with "Duplicate definition of ... (error 2318)". Install into an image that never loaded the Rowan
 # 'Mcp' project, or remove the Mcp* keys from Published and commit first. See README, Source layout.
 #
-#   --grail   file in load-grail.gs instead: the base PLUS the optional GemStone-Python toolset
-#             (src/grail). Only valid on an image that has Grail/ModuleAst -- those methods
-#             reference ModuleAst and BaseException and cannot compile without it. Equivalently,
-#             set GS_MCP_WITH_GRAIL=1. Once loaded, the toolset joins the default tool surface
-#             automatically (see McpServer class>>installedDefaultToolsetNames).
+#   --grail   ALSO file in the optional GemStone-Python toolset (src/grail). Only valid on an image
+#             that has Grail/ModuleAst -- those methods reference ModuleAst and BaseException and
+#             cannot compile without it. Equivalently, set GS_MCP_WITH_GRAIL=1. Opt-in rather than
+#             detected, because loading it is NOT inert: the toolset joins the default tool surface
+#             automatically (see McpServer class>>installedDefaultToolsetNames), so whether to have
+#             it is a decision about the server you are running, not about the image.
 #
-#   --check   verify the environment (product, GEMSTONE_GLOBAL_DIR, the stone) and report, without
-#             installing anything. Run this first on a machine you have not installed on before.
+#   --auth    require the OAuth/OIDC front end (src/auth); fail if this image cannot compile it.
+#   --no-auth skip it.
+#             Neither flag is normally needed. By DEFAULT the auth group is filed in when the image
+#             can take it and skipped when it cannot, because McpAuthRouter needs kernel JWT classes
+#             (JsonWebToken, JwtSecurityData) and GsTsExternalSession>>jwtPassword:, which arrived
+#             after 3.7.2 -- on 3.7.2 those methods cannot compile at all. Detecting rather than
+#             asking is safe here precisely because loading McpAuthRouter IS inert: it is a class
+#             nothing instantiates until you fork one with run-auth-server.sh. Use --auth when you
+#             would rather fail loudly than quietly get a server with no authentication available,
+#             and --no-auth to leave it out of an image that could take it.
+#
+#   --check   verify the environment (product, GEMSTONE_GLOBAL_DIR, the stone), report which groups
+#             would be filed in, and install nothing. Run this first on a new machine.
 #
 # Configure these (or export before running):
 #   GEMSTONE       - GemStone product directory (REQUIRED; no default can be guessed)
@@ -34,25 +50,93 @@ GS_STONE="${GS_STONE:-gs64stone}"
 GS_USER="${GS_USER:-DataCurator}"
 GS_PASS="${GS_PASS:-swordfish}"
 
-# Base classes only by default; pass --grail (or set GS_MCP_WITH_GRAIL) to also load the
-# optional GemStone-Python (Grail) toolset -- only valid on an image that has Grail/ModuleAst.
-LOAD_FILE="load.gs"
+# core + tests always; auth detected unless pinned; grail opt-in. See the header for why the two
+# optional groups are selected differently.
+WANT_AUTH="auto"      # auto | yes | no
+WANT_GRAIL=0
 CHECK_ONLY=0
 for arg in "$@"; do
   case "$arg" in
-    --grail) LOAD_FILE="load-grail.gs" ;;
-    --check) CHECK_ONLY=1 ;;
-    *) echo "usage: $0 [--grail] [--check]" >&2; exit 2 ;;
+    --grail)   WANT_GRAIL=1 ;;
+    --auth)    WANT_AUTH="yes" ;;
+    --no-auth) WANT_AUTH="no" ;;
+    --check)   CHECK_ONLY=1 ;;
+    *) echo "usage: $0 [--auth|--no-auth] [--grail] [--check]" >&2; exit 2 ;;
   esac
 done
-[ -n "${GS_MCP_WITH_GRAIL:-}" ] && LOAD_FILE="load-grail.gs"
+[ -n "${GS_MCP_WITH_GRAIL:-}" ] && WANT_GRAIL=1
 
 # Resolve GEMSTONE/TOPAZ/GEMSTONE_GLOBAL_DIR and confirm the stone is actually running, so a
 # misconfigured environment is reported in its own terms instead of as a topaz login failure.
 . ./gs-env.sh
 gs_env_resolve
-if [ "$CHECK_ONLY" = "1" ]; then gs_env_check; exit $?; fi
+
+# Settle the auth group before anything is filed in, so an image that cannot take it is reported
+# here -- in terms of the missing kernel classes -- rather than as a wall of compile errors in
+# load.out and an McpAuthRouter left half-built. JsonWebToken stands in for the whole group: it is
+# the one McpAuthRouter itself names (in tokenRejectionFor:, userIdFromToken: and payloadOf:), and
+# an image with it has JwtSecurityData and jwtPassword: too.
+gs_mcp_select_groups() {
+  local have
+  if [ "$WANT_AUTH" = "no" ]; then
+    AUTH_NOTE="skipped (--no-auth)"
+  else
+    gs_env_image_has JsonWebToken && have=0 || have=$?
+    case "$have" in
+      0) AUTH_NOTE="yes" ;;
+      1) if [ "$WANT_AUTH" = "yes" ]; then
+           echo "error: --auth was given, but this image has no JsonWebToken, so src/auth cannot" >&2
+           echo "       compile here. Kernel JWT support arrived after 3.7.2; McpAuthRouter needs" >&2
+           echo "       JsonWebToken and JwtSecurityData, and a JWT worker login additionally needs" >&2
+           echo "       GsTsExternalSession>>jwtPassword:. Install on 3.7.5 or later for the" >&2
+           echo "       authenticating front end, or drop --auth to install the rest without it." >&2
+           echo "       (stone: $GS_STONE)" >&2
+           return 1
+         fi
+         AUTH_NOTE="skipped (no kernel JWT support in this image)" ;;
+      *) return 1 ;;   # gs_env_image_has has already said why
+    esac
+  fi
+
+  # MCP_GROUPS, not GROUPS: bash reserves GROUPS for the current user's group list, and assigning
+  # to it silently fails (returning an error status, which under `set -e` aborts this function
+  # mid-way and leaves GROUP_INPUTS unset).
+  MCP_GROUPS="core tests"
+  [ "$AUTH_NOTE" = "yes" ] && MCP_GROUPS="$MCP_GROUPS auth"
+  [ "$WANT_GRAIL" = "1" ] && MCP_GROUPS="$MCP_GROUPS grail"
+
+  # Two things derived from the selection, both from the group directories rather than from a list
+  # kept in step by hand: the `input` lines topaz runs, and the class names the post-load check
+  # looks for. Every group holds exactly one .gs file per class plus its load.gs, so the file names
+  # ARE the manifest -- adding a class to a group needs no edit here.
+  local g f b
+  GROUP_INPUTS=""
+  CLASS_ADDS=""
+  for g in $MCP_GROUPS; do
+    GROUP_INPUTS="${GROUP_INPUTS}input src/$g/load.gs
+"
+    for f in src/$g/*.gs; do
+      b="$(basename "$f" .gs)"
+      [ "$b" = "load" ] && continue
+      # One `add:` per line: a generated `#( ... )` literal would put a '(' at the start of a
+      # heredoc line, which bash 3.2 (macOS) mis-parses inside a command substitution.
+      CLASS_ADDS="${CLASS_ADDS}names add: '$b'.
+"
+    done
+  done
+}
+
+if [ "$CHECK_ONLY" = "1" ]; then
+  gs_env_check || exit $?
+  gs_mcp_select_groups || exit 1
+  echo
+  echo "auth group   $AUTH_NOTE"
+  echo "groups       $MCP_GROUPS"
+  exit 0
+fi
 gs_env_require_stone
+gs_mcp_select_groups
+echo "Filing in: $MCP_GROUPS  (auth: $AUTH_NOTE)"
 
 # The loaders `input` their class files by paths relative to the repository root, so topaz must run
 # with this directory as its current directory -- hence the cd above, and no `cd` after it.
@@ -87,8 +171,7 @@ existing isNil
 display oops
 errorcount
 output push load.out only
-input $LOAD_FILE
-errorcount
+${GROUP_INPUTS}errorcount
 output pop
 errorcount
 commit
@@ -97,15 +180,8 @@ run
  the shell can gate on. A file-in reports its compile errors into load.out and then carries on, so
  topaz's own exit status is not enough -- ask the image what it actually has."
 | up names missing |
-names := #( 'McpError' 'McpTool' 'McpToolRegistry' 'McpToolset' 'McpBrowsingToolset'
-  'McpExecutionToolset' 'McpListingToolset' 'McpMutationToolset' 'McpSearchToolset'
-  'McpSessionToolset' 'McpTestingToolset' 'McpHttpConnection' 'McpDispatcher' 'McpBase'
-  'McpServer' 'McpSession' 'McpRouter' 'McpMockSocket' 'McpMockWorker' 'McpMockSession'
-  'McpStubSession' 'McpFixtureToolset' 'McpFixtureServer' 'McpToolTest' 'McpDispatcherTest'
-  'McpTransportTest' 'McpContractTest' 'McpExtensionTest' 'McpSessionTest' ) asOrderedCollection.
-'$LOAD_FILE' = 'load-grail.gs'
-  ifTrue: [ names add: 'McpGrailToolset'; add: 'McpGrailToolsetTest' ].
-up := System myUserProfile.
+names := OrderedCollection new.
+${CLASS_ADDS}up := System myUserProfile.
 missing := names select: [:nm | (up objectNamed: nm asSymbol) isNil ].
 missing isEmpty
   ifTrue: [ 'MCP LOAD OK: ' , names size printString , ' classes' ]
@@ -124,10 +200,10 @@ rm -f "$TMP"
 # topaz prints ("[oop size:N Class] <value>") so the grep cannot match the block's own source, which
 # topaz echoes back too.
 if ! echo "$OUT" | grep -qE '^\[[0-9]+ size:[0-9]+ +[A-Za-z0-9]+\] MCP LOAD OK'; then
-  echo "MCP file-in FAILED (loaded: $LOAD_FILE) -- see load.out for the compiler errors:" >&2
+  echo "MCP file-in FAILED (groups: $MCP_GROUPS) -- see load.out for the compiler errors:" >&2
   echo "$OUT" | grep -E '^\[[0-9]+ size:[0-9]+ +[A-Za-z0-9]+\] MCP LOAD FAILED' >&2 || true
   [ "$rc" -ne 0 ] && echo "(topaz also exited $rc)" >&2
   exit 1
 fi
 [ "$rc" -ne 0 ] && echo "WARNING: topaz exited $rc -- session status was tainted (see above)." >&2
-echo "Mcp* classes installed and committed (loaded: $LOAD_FILE)."
+echo "Mcp* classes installed and committed (groups: $MCP_GROUPS)."
