@@ -748,6 +748,11 @@ withJwtUser: aUserId scope: aScopeStringOrNil do: aOneArgBlock
   up := AllUsers addNewUserWithId: aUserId password: 'swordfishXYZ'.
   up enableJwtAuthenticationWith: jwtSec.
   System commitTransaction.
+  "Clear any leftover of this id first, for the reason #withConformanceKeyDo: already spells out:
+   System addJwtKey:withId: RAISES on a duplicate, the register is STONE-wide runtime state, and a
+   test that died before its ensure would otherwise break every test after it -- across runs, until
+   somebody removed the key by hand."
+  [System removeJwtKeyWithId: keyId] on: Error do: [:e | nil].
   System addJwtKey: JsonWebToken example_publicKey withId: keyId.
   now := System timeGmt.
   tok := JsonWebToken newForRsa256.

@@ -695,6 +695,12 @@ withJwtUser: aUserId scope: aScopeStringOrNil do: aOneArgBlock
   up := AllUsers addNewUserWithId: aUserId password: 'swordfishXYZ'.
   up enableJwtAuthenticationWith: jwtSec.
   System commitTransaction.
+  "Clear the key first, exactly as the user above is cleared first and for the same reason: the key
+   register is STONE-wide runtime state, so a run that was interrupted between #addJwtKey: and the
+   ensure below leaves it behind, and every later run of every test that uses this fixture dies on
+   'key already exists' until someone removes it by hand. The ensure is the tidy path, not the
+   guarantee -- one is needed at each end."
+  [System removeJwtKeyWithId: keyId] on: Error do: [:e | nil].
   System addJwtKey: JsonWebToken example_publicKey withId: keyId.
   now := System timeGmt.
   tok := JsonWebToken newForRsa256.
