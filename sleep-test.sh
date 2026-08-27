@@ -282,7 +282,7 @@ print_sleep_instructions() {
   # case that CAN advance a count while the lid is shut: a Power Nap dark wake runs the front end
   # for a few seconds, and a pass that runs is a pass that counts. Longer is strictly more
   # informative, which is the opposite of the old advice, where too long merely wasted a night.
-  local idle_s streamless_s passes
+  local idle_s streamless_s passes GRACE_S
   case "$(printf '%s' "$IDLE" | tr 'A-Z' 'a-z')" in
     none|off|0) idle_s=0 ;;
     *m) idle_s=$(( ${IDLE%[mM]} * 60 )) ;;
@@ -290,8 +290,10 @@ print_sleep_instructions() {
     *s) idle_s=${IDLE%[sS]} ;;
     *)  idle_s=$IDLE ;;
   esac
-  streamless_s="${GS_MCP_STREAMLESS_TIMEOUT:-1800}"
+  streamless_s="${GS_MCP_STREAMLESS_TIMEOUT:-300}"
   passes=$(( streamless_s / ${GS_MCP_REAPER_INTERVAL:-60} ))
+  GRACE_S="${GS_MCP_STREAM_LOSS_GRACE:-10}"
+
   echo
   echo "=== ready. Now sleep the Mac. ==="
   echo
@@ -306,6 +308,12 @@ print_sleep_instructions() {
   dim "  (streamless ${streamless_s}s / reaper ${GS_MCP_REAPER_INTERVAL:-60}s), and a ping the client is too frozen"
   dim "  to answer advances toward three. That is the one way a night could still end a session,"
   dim "  and the only way to find out is to give it a whole night to try."
+  dim ""
+  dim "  One more outcome is possible now, and it is NOT a suspend failure: if this curl's stream"
+  dim "  dies during the night and nothing reopens one, the front end treats that as the client"
+  dim "  hanging up and releases the gem ${GRACE_S}s later. That is the correct answer to a client that"
+  dim "  really did go away -- a real client would have reconnected. The verdicts below tell the two"
+  dim "  apart by reporting whether the stream was still connected on wake."
   if [ "$idle_s" -gt 0 ]; then
     dim ""
     dim "  NOTE: you have an idle deadline set (${IDLE}), so this run also carries a second, expected"
@@ -403,6 +411,8 @@ check() {
     verdict ok "the SSE stream survived the sleep" "still connected"
   else
     verdict huh "the SSE stream survived the sleep" "curl exited (a real client would reconnect)"
+    dim "    -> if the session check below says 404, THAT is why: a closed stream with no reconnect"
+    dim "       is a client hanging up, and is released after streamLossGraceSeconds by design."
   fi
 
   # 4. the whole point: is the session still usable, or was its gem freed while we slept?

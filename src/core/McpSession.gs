@@ -8,7 +8,8 @@ Object subclass: 'McpSession'
                     toolsetNames serverName serverTitle serverVersion
                     workerPid workerStoneSession outbox logLevel
                     idleWarned expiryWarned startedAtSeconds expiresAtSeconds
-                    quietProbes unansweredProbes streamlessPasses passesSinceProbe)
+                    quietProbes unansweredProbes streamlessPasses passesSinceProbe
+                    streamClosedByClient)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -41,7 +42,14 @@ the only thing that resets the idle cycle. A ping the client ANSWERS proves it i
 gone (#noteProbeUnanswered) and frees the gem early, without waiting out the full timeout. What an
 answered ping deliberately does NOT do is stamp the activity clock: if it did, every well-behaved
 client would hold its worker gem and its transaction view forever, and the warning would only ever
-reach clients unable to act on it.'
+reach clients unable to act on it.
+
+None of that is needed for the commonest ending of all, which is a client simply hanging up -- a
+shut editor tab. There the front end has something better than any inference: the drain loop watches
+the read side, so it SEES the connection end (#noteStreamClosedByClient). That fact is paired with
+the present state of the outbox rather than trusted alone, and #noteStreamSeen or #touch retracts it,
+so a client that reopened a stream, or that is simply working without one, is never taken for a
+client that left.'
 %
 expectvalue /Class
 doit
@@ -268,6 +276,9 @@ initialize
   unansweredProbes := 0.   "consecutive pings sent on the current stream with no answer"
   streamlessPasses := 0.   "consecutive passes on which there was no stream to ask down"
   passesSinceProbe := 0.   "passes since the last ping, for the probe cadence"
+  "The one fact here that is not a count, because it is not an inference either: the client's own
+   connection ended, and the drain loop watched it happen. See #noteStreamClosedByClient."
+  streamClosedByClient := false.
   ^self
 %
 category: 'liveness'
@@ -284,6 +295,13 @@ unansweredProbes
   "How many pings are outstanding on the stream the client is still holding. Evidence of death only
    in numbers -- see McpRouter>>unansweredProbesBeforeGone."
   ^unansweredProbes
+%
+category: 'liveness'
+method: McpSession
+streamClosedByClient
+  "Whether this client has been seen to close its event stream and has done nothing since to suggest
+   it is still there. Set by #noteStreamClosedByClient; retracted by #noteStreamSeen and by #touch."
+  ^streamClosedByClient == true
 %
 category: 'liveness'
 method: McpSession
@@ -304,7 +322,9 @@ notePassWithStream: aBoolean
    when the front end is actually running, which is what makes every count below immune to a host
    suspend without anyone having to detect one."
   passesSinceProbe := passesSinceProbe + 1.
-  streamlessPasses := aBoolean ifTrue: [0] ifFalse: [streamlessPasses + 1].
+  aBoolean
+    ifTrue: [self noteStreamSeen]
+    ifFalse: [streamlessPasses := streamlessPasses + 1].
   ^self
 %
 category: 'activity'
@@ -407,10 +427,28 @@ noteProbeUnanswered
 %
 category: 'liveness'
 method: McpSession
+noteStreamClosedByClient
+  "The client's own end of the SSE stream closed -- an EOF the drain loop read, or a write that
+   failed -- rather than the stream being superseded by a newer GET or ended by this server.
+   This is the strongest evidence of departure anywhere in the transport, and unlike everything else
+   the reaper reads it is not a count: it is one observed fact, so a suspended host cannot
+   manufacture it either. It does not by itself condemn the session -- the reaper also requires that
+   no stream be open when it looks (McpRouter>>reapReasonFor:), which is what lets a client that
+   closes one stream and immediately opens another keep its worker gem."
+  streamClosedByClient := true
+%
+category: 'liveness'
+method: McpSession
 noteStreamSeen
   "A stream is attached right now. That is the only thing that can be observed about reachability
-   without asking the client, so it resets the count of passes on which nothing could be asked."
-  streamlessPasses := 0
+   without asking the client, so it resets the count of passes on which nothing could be asked --
+   and it retracts #noteStreamClosedByClient, because a client that has just opened a stream is
+   plainly not the one that went away.
+   Sent both by the maintenance pass (#notePassWithStream:) and by the arriving GET itself
+   (McpRouter>>serveGetStream:forSession:), which is what lets a reconnect land inside the grace
+   rather than a whole pass later."
+  streamlessPasses := 0.
+  streamClosedByClient := false
 %
 category: 'accessing'
 method: McpSession
@@ -558,11 +596,18 @@ method: McpSession
 touch
   "A client request arrived: the session is not idle, and everything counted about its quietness
    starts again. Resets the confirmation count (it is no longer idle), the unanswered-ping count (a
-   request is far better evidence of life than a ping answer), and the probe cadence."
+   request is far better evidence of life than a ping answer), and the probe cadence.
+   It also retracts everything the transport had concluded from silence: a client making tool calls
+   is alive whether or not it holds a stream, so neither the streamless count nor a stream it was
+   seen to close may go on counting against it. Without that, an actively working client whose
+   stream had dropped was released mid-conversation -- survivable while the streamless floor was
+   half an hour, fatal beside a ten-second grace."
   lastActivitySeconds := System timeGmt.
   quietProbes := 0.
   unansweredProbes := 0.
   passesSinceProbe := 0.
+  streamlessPasses := 0.
+  streamClosedByClient := false.
   idleWarned := false
 %
 category: 'accessing'

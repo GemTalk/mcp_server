@@ -26,8 +26,11 @@ answers true and the loop ends after ONE full pass. That is exactly the disconne
 detect, and it is also what keeps a test from hanging.
 
 Every interval a test needs to bend -- the pending-request timeout, the idle deadline, the probe
-cadence -- is now ordinary router config (McpRouter>>sessionIdleTimeoutSeconds: and friends), so this
-fixture no longer overrides any of them.'
+cadence -- is ordinary router config (McpRouter>>sessionIdleTimeoutSeconds: and friends), which this
+fixture leaves alone. The single exception is #streamLossGraceSeconds, and it is not a policy the
+fixture is bending: a mock socket is at EOF from the start, so EVERY stream test ends by the
+client-went-away path, and a shipping grace would charge each of them a real ten-second wait for a
+reconnect that no mock will ever make. A test that wants the fast release asks for it by name.'
 %
 expectvalue /Class
 doit
@@ -43,4 +46,15 @@ method: McpFixtureRouter
 isRunning
   "Running, with no listener behind it. The one seam a stream test needs."
   ^true
+%
+category: 'initialization'
+method: McpFixtureRouter
+initialize
+  "The shipping router, with the stream-loss grace seeded to nil instead of ten seconds: no wait and
+   no fast release, so a stream test's session is left exactly where the loop left it and can be
+   asserted on. It is seeded rather than overridden so that a test which DOES want the fast release
+   turns it on the ordinary way -- #streamLossGraceSeconds: 0 -- and gets it."
+  super initialize.
+  self streamLossGraceSeconds: nil.
+  ^self
 %

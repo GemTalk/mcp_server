@@ -468,7 +468,9 @@ tools itself (those run in the per-client `McpServer` workers):
 - **DELETE** closes the worker; and a **background maintenance `GsProcess`** (every 60s) probes,
   warns and reaps idle sessions, so abandoned test gems don't pile up. A session is reaped after
   **30 minutes** idle by default (`sessionIdleTimeoutSeconds`, configurable and optional) — or
-  sooner, if it fails a liveness probe on the stream it opened. See
+  sooner, if it fails a liveness probe on the stream it opened. A client that simply **hangs up**
+  (a closed editor tab) does not wait for any of that: its socket closing is watched for, and its
+  gem is released about **10 seconds** later. See
   [Server-initiated messages](#server-initiated-messages).
 
 Isolation comes from each worker being a separate gem = a separate transaction view, and clients
@@ -544,7 +546,16 @@ well-behaved client — they all answer `ping` — held a gem and a transaction 
 stayed open, and the warning would only ever reach clients unable to act on it.
 
 A client that never opens a GET stream is left exactly as it was: never probed, never warned, reaped
-on the plain 30-minute timeout. Pinging it would only mark it unanswered and cost it its gem early.
+on `streamlessIdleTimeoutSeconds` (5 minutes). Pinging it would only mark it unanswered and cost it
+its gem early.
+
+**A client that closes its stream is a different case entirely, and a much easier one.** The drain
+loop is already watching the read side, so a client that hangs up is detected within ~100ms — not
+inferred from silence, observed. Such a session gets `streamLossGraceSeconds` (10s) to open another
+stream, and is then released on the spot rather than at the next maintenance pass. Anything the
+client does in the meantime retracts the verdict: a new stream, a call in flight, or any request at
+all. Measured end to end: 10 seconds from closing a VS Code tab to the worker gem being logged out,
+where it used to be half an hour.
 
 **An unanswered ping is evidence of death only if it went down the stream the client is still on.**
 A message is written to exactly one stream, and both shipping clients reconnect a dropped standalone
@@ -885,9 +896,6 @@ default stays plaintext — nothing to restore even if interrupted. Uses port `8
 - SSE resumability (`Last-Event-ID`).
 - Mapping **OAuth scopes to toolsets**, so a token's scopes select what it may *see* rather than only
   whether it may write.
-- Reaping a session as soon as its client **closes the event stream**, rather than waiting out
-  `streamlessIdleTimeoutSeconds`. A closed socket is evidence the client is gone, so an abandoned
-  worker gem need not hold a login slot for 30 minutes.
 - A deadline for a forwarded request, now that a non-blocking forward makes one possible.
 - The draft `2026-07-28` protocol revision, which first needs a decision about how per-client
   worker-gem isolation survives a protocol with no session id — see

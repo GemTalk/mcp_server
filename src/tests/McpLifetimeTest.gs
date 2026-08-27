@@ -421,6 +421,136 @@ testProbesGoOutOnThePassCadenceNotTheClock
   sess notePassWithStream: true.
   self assert: (r probeDue: sess)
 %
+category: 'tests - departure'
+method: McpLifetimeTest
+testAClosedStreamReleasesTheGemWithoutWaitingForTheFloor
+  "The point of the whole mechanism. A client that closed its own connection is not merely quiet,
+   and need not be counted at for the length of a floor written for a client that never connected."
+  | r sess |
+  r := McpFixtureRouter new.
+  sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
+  self assert: (r reapReasonFor: sess) isNil.
+  sess noteStreamClosedByClient.
+  self assert: (self includesCS: 'closed the event stream' in: (r reapReasonFor: sess)).
+  self assert: sess streamlessPasses equals: 0     "not one pass has had to go by"
+%
+category: 'tests - departure'
+method: McpLifetimeTest
+testAClosedStreamProvesNothingWhileAStreamIsOpen
+  "The pairing that makes the flag safe to act on: it is read together with the present state of the
+   outbox, never alone. A client holding a stream cannot be the client that went away, whatever was
+   concluded about an earlier connection of its own."
+  | r sess |
+  r := McpFixtureRouter new.
+  sess := self streamedSessionOn: r.
+  sess noteStreamClosedByClient.
+  self assert: sess outbox hasStream.
+  self assert: (r reapReasonFor: sess) isNil
+%
+category: 'tests - departure'
+method: McpLifetimeTest
+testAReconnectRetractsADepartureAlreadyNoticed
+  "Both shipping clients reopen a dropped stream on their own, and one of them does it by closing
+   first. The arriving GET sends #noteStreamSeen, so the retraction does not wait for a pass."
+  | r sess |
+  r := McpFixtureRouter new.
+  sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
+  sess noteStreamClosedByClient.
+  self assert: sess streamClosedByClient.
+  sess noteStreamSeen.
+  self deny: sess streamClosedByClient.
+  self assert: (r reapReasonFor: sess) isNil
+%
+category: 'tests - departure'
+method: McpLifetimeTest
+testAWorkingClientIsNeverReleasedForAStreamItLost
+  "A request is proof of life the transport cannot argue with, and it has to clear BOTH things the
+   transport concluded from silence. Before this, a client whose stream had dropped went on
+   accruing streamless passes while it worked -- survivable at a thirty-minute floor, and not at all
+   beside a ten-second grace."
+  | r sess |
+  r := McpFixtureRouter new.
+  sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
+  1 to: 20 do: [:i | sess notePassWithStream: false].
+  sess noteStreamClosedByClient.
+  self assert: (r reapReasonFor: sess) notNil.
+  sess touch.
+  self deny: sess streamClosedByClient.
+  self assert: sess streamlessPasses equals: 0.
+  self assert: (r reapReasonFor: sess) isNil
+%
+category: 'tests - departure'
+method: McpLifetimeTest
+testAClientThatKeepsCallingSurvivesLosingItsStream
+  "A client is not obliged to hold a stream, and one making tool calls is alive on better evidence
+   than the transport could ever offer. Its dropped stream must not cost it a worker gem ten seconds
+   later -- which is what the activity stamp taken before the grace is for. Driven through the
+   verdict half directly, since 'a request arrived while we waited' is otherwise a race to stage."
+  | r sess stale |
+  r := McpFixtureRouter new.
+  sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
+  stale := sess lastActivitySeconds - 1.        "as if the client had called during the grace"
+  r releaseAbandonedSession: sess unlessActiveSince: stale.
+  self deny: sess streamClosedByClient.
+  self assert: (r sessionAt: sess id) notNil.
+  "and a client that did nothing at all is released by the same method"
+  r releaseAbandonedSession: sess unlessActiveSince: sess lastActivitySeconds.
+  self assert: sess streamClosedByClient.
+  self assert: (r sessionAt: sess id) isNil
+%
+category: 'tests - departure'
+method: McpLifetimeTest
+testAZeroGraceIsAValidConfigurationAndNilIsADifferentOne
+  "The two are opposites and both are meaningful, so validation has to admit zero -- which
+   #validateSeconds:named:allowingNil: would not, since every other interval is a period rather than
+   a wait. Worth a test because the tests here USE a zero grace, and would have gone on passing
+   against a configuration no deployment could actually start."
+  | r |
+  r := McpRouter new.
+  r streamLossGraceSeconds: 0.
+  self assert: r validateTimerConfig == r.
+  r streamLossGraceSeconds: nil.
+  self assert: r validateTimerConfig == r.
+  r streamLossGraceSeconds: -5.
+  self should: [r validateTimerConfig] raise: Error
+%
+category: 'tests - departure'
+method: McpLifetimeTest
+testTheGraceCanBeTurnedOffAndTheFloorStillCatchesTheClient
+  "nil grace means the fast path is not wanted -- a deployment behind something that drops streams
+   routinely, say. Turning it off must not turn off the release: the streamless floor is exactly
+   where such a client was handled before, and still is."
+  | r sess |
+  r := McpFixtureRouter new.
+  r streamLossGraceSeconds: nil; streamlessIdleTimeoutSeconds: 300; reaperIntervalSeconds: 60.
+  sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
+  r releaseAbandonedSession: sess.
+  self deny: sess streamClosedByClient.
+  self assert: (r sessionAt: sess id) notNil.
+  1 to: r streamlessPassesBeforeRelease do: [:i | sess notePassWithStream: false].
+  self assert: (self includesCS: 'no event stream' in: (r reapReasonFor: sess))
+%
+category: 'tests - departure'
+method: McpLifetimeTest
+testTheGraceIsWaitedOutBeforeTheDepartureIsRecorded
+  "Which is what keeps a clock out of #reapReasonFor:. By the time the flag is set it already means
+   'the client did not come back', so the reaper never has to ask how long ago the stream closed --
+   and a maintenance pass landing in the gap cannot pre-empt the grace."
+  | r sess |
+  r := McpFixtureRouter new.
+  r streamLossGraceSeconds: 0.
+  sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
+  "a client that came back inside the grace is not recorded as having left, and is not reaped"
+  sess outbox attachStream.
+  r releaseAbandonedSession: sess.
+  self deny: sess streamClosedByClient.
+  self assert: (r sessionAt: sess id) notNil.
+  "one that did not is recorded, and released by the same pass"
+  sess outbox detachStream: sess outbox currentStreamGeneration.
+  r releaseAbandonedSession: sess.
+  self assert: sess streamClosedByClient.
+  self assert: (r sessionAt: sess id) isNil
+%
 category: 'tests - unreachable'
 method: McpLifetimeTest
 testAStreamlessSessionIsReleasedAfterEnoughPasses
@@ -494,20 +624,24 @@ testTheWarningIsSentOncePerQuietPeriod
 %
 category: 'tests - config'
 method: McpLifetimeTest
-testDefaultsAreUnchangedWhereTheyStillExist
+testTheShippingDefaultsAreTheDocumentedOnes
+  "A lock on the numbers a deployment gets without asking, and on what each one MEANS once the
+   reaper has divided it -- which is the half that is easy to change by accident."
   | r |
   r := McpRouter new.
   self assert: r sessionIdleTimeoutSeconds equals: 1800.
-  self assert: r streamlessIdleTimeoutSeconds equals: 1800.
-  self assert: r livenessProbeIntervalSeconds equals: 300.
+  self assert: r streamlessIdleTimeoutSeconds equals: 300.
+  self assert: r streamLossGraceSeconds equals: 10.
+  self assert: r livenessProbeIntervalSeconds equals: 120.
   self assert: r reaperIntervalSeconds equals: 60.
   self assert: r expiryWarningLeadSeconds equals: 300.
   self assert: r maxSessionLifetimeSeconds isNil.
   self assert: r reapOnFailedProbe.
   "and what those seconds mean to the reaper"
-  self assert: r confirmationsBeforeRelease equals: 6.
-  self assert: r probePassInterval equals: 5.
-  self assert: r streamlessPassesBeforeRelease equals: 30
+  self assert: r confirmationsBeforeRelease equals: 15.
+  self assert: r probePassInterval equals: 2.
+  self assert: r streamlessPassesBeforeRelease equals: 5.
+  self assert: r validateTimerConfig == r
 %
 category: 'tests - config'
 method: McpLifetimeTest
@@ -520,6 +654,7 @@ testIntervalsTravelToAForkedChild
   r := McpRouter new.
   r sessionIdleTimeoutSeconds: nil;
     streamlessIdleTimeoutSeconds: 900;
+    streamLossGraceSeconds: 25;
     livenessProbeIntervalSeconds: 120;
     reaperIntervalSeconds: 30;
     expiryWarningLeadSeconds: 45;
@@ -529,6 +664,7 @@ testIntervalsTravelToAForkedChild
   self assert: child sessionIdleTimeoutSeconds isNil.
   self deny: child hasSessionIdleDeadline.
   self assert: child streamlessIdleTimeoutSeconds equals: 900.
+  self assert: child streamLossGraceSeconds equals: 25.
   self assert: child livenessProbeIntervalSeconds equals: 120.
   self assert: child reaperIntervalSeconds equals: 30.
   self assert: child expiryWarningLeadSeconds equals: 45.

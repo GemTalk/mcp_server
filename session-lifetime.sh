@@ -21,12 +21,22 @@
 #   GS_MCP_MAX_LIFETIME     Absolute cap on any session's life, however busy it is. Unset = none.
 #                           Never forgiven, unlike idleness -- including across a host suspend.
 #   GS_MCP_PROBE_INTERVAL   How often a quiet session is asked whether its client is still there.
-#                           Default 5m. This is also the unit idleness is MEASURED in: a session is
+#                           Default 2m. This is also the unit idleness is MEASURED in: a session is
 #                           released once it has answered GS_MCP_IDLE_TIMEOUT worth of these pings
-#                           with no work in between (six of them, at the defaults).
+#                           with no work in between (fifteen of them, at the defaults) -- and a
+#                           client that holds its stream open but stops answering is released after
+#                           three, so this interval sets that deadline too.
+#   GS_MCP_STREAM_LOSS_GRACE
+#                           How long a session survives its client CLOSING the event stream, before
+#                           the worker gem is released. Default 10s. This is the path a shut editor
+#                           tab takes, and the grace exists only to cover a client that closes one
+#                           stream and immediately opens another. `0` and `none` are OPPOSITES here:
+#                           0 releases the gem the moment the socket closes, with no pause for a
+#                           reconnect, while `none` turns the fast release off altogether and leaves
+#                           such a client to GS_MCP_STREAMLESS_TIMEOUT, as it was before.
 #   GS_MCP_STREAMLESS_TIMEOUT
-#                           The deadline that applies to a client which never opened an SSE stream.
-#                           Default 30m. Such a client can never be pinged, so there is no evidence
+#                           The floor for a client that never opened an SSE stream AT ALL.
+#                           Default 5m. Such a client can never be pinged, so there is no evidence
 #                           to count and this is the only thing that can free its gem.
 #   GS_MCP_REAPER_INTERVAL  How often the maintenance pass runs. Default 60s. The pass is the
 #                           server's clock -- it ticks only while the front end is running -- so
@@ -81,6 +91,13 @@ case "$(printf '%s' "${GS_MCP_IDLE_TIMEOUT:-}" | tr 'A-Z' 'a-z')" in
   none|off|0)  LIFETIME_LINES="$LIFETIME_LINES
 r sessionIdleTimeoutSeconds: nil." ;;
   *)           mcp_lifetime_line "$GS_MCP_IDLE_TIMEOUT" sessionIdleTimeoutSeconds GS_MCP_IDLE_TIMEOUT ;;
+esac
+
+case "$(printf '%s' "${GS_MCP_STREAM_LOSS_GRACE:-}" | tr 'A-Z' 'a-z')" in
+  '')          ;;
+  none|off|0)  LIFETIME_LINES="$LIFETIME_LINES
+r streamLossGraceSeconds: nil." ;;
+  *)           mcp_lifetime_line "$GS_MCP_STREAM_LOSS_GRACE" streamLossGraceSeconds GS_MCP_STREAM_LOSS_GRACE ;;
 esac
 
 mcp_lifetime_line "${GS_MCP_MAX_LIFETIME:-}"        maxSessionLifetimeSeconds     GS_MCP_MAX_LIFETIME
