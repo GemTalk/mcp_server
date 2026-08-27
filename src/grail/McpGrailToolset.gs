@@ -16,8 +16,8 @@ doit
 McpGrailToolset comment: 
 'The optional GemStone-Python (Grail) tools: eval_python and compile_python. Its own source group
 (src/grail/) because it loads ONLY into a Grail-equipped image -- a method referencing ModuleAst
-cannot be compiled without Grail present -- so it is reached through a separate loader
-(load-grail.gs, i.e. install.sh --grail) rather than the default one.
+cannot be compiled without Grail present -- so it is an opt-in group (src/grail/load.gs, filed in by
+install.sh --grail) rather than part of the base load.
 
 A toolset rather than a server subclass, which is the point: python tools can now be combined with
 anyone else''s tools, whereas the old McpServerWithGrail was a rung in the hierarchy that a developer

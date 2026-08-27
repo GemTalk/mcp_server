@@ -177,6 +177,12 @@ nextResult: anObject
    expression, so a test with two calls in flight can tell their results apart."
   nextResult := anObject
 %
+category: 'session protocol'
+method: McpMockWorker
+onetimePassword: aString
+  "This is for compatibility with 3.7.2. In 3.7.5, #useOnetimePassword could be used instead."
+  ^self
+%
 category: 'instrumentation'
 method: McpMockWorker
 overlapDetected
@@ -205,12 +211,6 @@ stoneSessionId
     idFetchCount := idFetchCount + 1.
     lastResult := stoneSessionId := 77].
   ^stoneSessionId
-%
-category: 'session protocol'
-method: McpMockWorker
-onetimePassword: aString
-  "This is for compatibility with 3.7.2. In 3.7.5, #useOnetimePassword could be used instead."
-  ^self
 %
 category: 'session protocol'
 method: McpMockWorker
