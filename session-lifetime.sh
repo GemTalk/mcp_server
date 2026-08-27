@@ -36,8 +36,10 @@
 #                           such a client to GS_MCP_STREAMLESS_TIMEOUT, as it was before.
 #   GS_MCP_STREAMLESS_TIMEOUT
 #                           The floor for a client that never opened an SSE stream AT ALL.
-#                           Default 5m. Such a client can never be pinged, so there is no evidence
-#                           to count and this is the only thing that can free its gem.
+#                           Default 60s. Such a client can never be pinged, so there is no evidence
+#                           to count and this is the only thing that can free its gem. It bounds the
+#                           gap between such a client's requests, not the life of its session, so
+#                           raise it where streamless clients POST in sequence rather than once.
 #   GS_MCP_REAPER_INTERVAL  How often the maintenance pass runs. Default 60s. The pass is the
 #                           server's clock -- it ticks only while the front end is running -- so
 #                           every count below is measured in passes, not in elapsed time.

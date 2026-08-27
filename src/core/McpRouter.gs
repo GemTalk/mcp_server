@@ -150,13 +150,21 @@ defaultStreamLossGraceSeconds
 category: 'session lifetime defaults'
 classmethod: McpRouter
 defaultStreamlessIdleTimeoutSeconds
-  "The floor for a client that never opened an SSE stream at all. Five minutes: such a client can
+  "The floor for a client that never opened an SSE stream at all. One minute: such a client can
    never be pinged, so there is no evidence to count and this is the only thing that would ever free
    its gem. It used to be half an hour, because it also had to cover the client that opened a stream
    and then vanished -- much the commoner case, and now handled far sooner and on real evidence by
    #defaultStreamLossGraceSeconds. What is left is a client that initialized and never came back,
-   which is a narrower and more suspect thing, and deserves less patience."
-  ^300
+   which is a narrower and more suspect thing, and deserves little patience.
+   One minute is the shortest this can honestly be, and it is short on purpose: the commonest
+   streamless client is a one-shot POST -- a curl, a probe, a script -- whose gem is pure overhead
+   the moment it returns. What keeps a minute from being reckless is #streamlessPassesBeforeRelease
+   paying for the pass it starts on, so the release comes no sooner than a full minute after the
+   last request; a client has that whole minute to open the stream its initialize just earned it.
+   Raise it where streamless clients are SEQUENCES of POSTs sharing one session id: what this
+   bounds for them is the gap between calls, not the life of the session, and a gem reaped between
+   two of them takes its uncommitted work with it."
+  ^60
 %
 category: 'network'
 classmethod: McpRouter
@@ -942,6 +950,20 @@ reapOnFailedProbe: aBoolean
 %
 category: 'session lifetime'
 method: McpRouter
+phraseForSeconds: aSeconds
+  "An interval as a phrase for the notice a reaped client is sent -- '30 minutes', '1 minute',
+   '90 seconds'. Minutes only where the interval is whole minutes and there is more than one of
+   them, because 'over 1 minutes' and 'over 1 minutes' rounded down from 90 seconds are both worse
+   than saying the seconds. The notice is often the only account of a reap the operator ever sees,
+   so it should say a number they can find in their own configuration."
+  | minutes |
+  minutes := aSeconds // 60.
+  ((minutes > 1) and: [minutes * 60 = aSeconds]) ifTrue: [^minutes printString , ' minutes'].
+  aSeconds = 60 ifTrue: [^'1 minute'].
+  ^aSeconds printString , ' seconds'
+%
+category: 'session lifetime'
+method: McpRouter
 countCovering: aTotalSeconds every: aUnitSeconds
   "How many intervals of aUnitSeconds it takes to COVER aTotalSeconds -- the ceiling of the
    division, never less than one. Every count the reaper derives from a configured interval comes
@@ -1114,11 +1136,11 @@ reapReasonFor: sess
     ifTrue: [^'it did not answer ' , self unansweredProbesBeforeGone printString
       , ' liveness pings in a row'].
   (self hasSessionIdleDeadline and: [sess quietProbes >= self confirmationsBeforeRelease])
-    ifTrue: [^'it was idle for ' , (self sessionIdleTimeoutSeconds // 60) printString
-      , ' minutes of liveness checks'].
+    ifTrue: [^'it was idle for ' , (self phraseForSeconds: self sessionIdleTimeoutSeconds)
+      , ' of liveness checks'].
   sess streamlessPasses >= self streamlessPassesBeforeRelease
     ifTrue: [^'no event stream was open to ping it for over '
-      , (self streamlessIdleTimeoutSeconds // 60) printString , ' minutes'].
+      , (self phraseForSeconds: self streamlessIdleTimeoutSeconds)].
   ^nil
 %
 category: 'routing'

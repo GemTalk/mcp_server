@@ -319,6 +319,19 @@ testAnIntervalThatDoesNotDivideRoundsUp
 %
 category: 'tests - counting'
 method: McpLifetimeTest
+testTheReapNoticeSaysANumberTheOperatorCanRecognise
+  "The notice is often the only account of a reap anybody sees, so it has to name the interval that
+   was actually configured. Flooring 60 seconds to '1 minutes' does neither."
+  | r |
+  r := McpFixtureRouter new.
+  self assert: (r phraseForSeconds: 1800) equals: '30 minutes'.
+  self assert: (r phraseForSeconds: 120) equals: '2 minutes'.
+  self assert: (r phraseForSeconds: 60) equals: '1 minute'.
+  self assert: (r phraseForSeconds: 90) equals: '90 seconds'.
+  self assert: (r phraseForSeconds: 45) equals: '45 seconds'
+%
+category: 'tests - counting'
+method: McpLifetimeTest
 testTheIdleDeadlineCountsAgainstTheCadenceActuallyDelivered
   "The compounding error, and the reason #realizedProbeIntervalSeconds exists. A 90-second probe
    interval on a 60-second pass really goes out every 120 seconds; dividing a 30-minute timeout by
@@ -674,7 +687,7 @@ testTheShippingDefaultsAreTheDocumentedOnes
   | r |
   r := McpRouter new.
   self assert: r sessionIdleTimeoutSeconds equals: 1800.
-  self assert: r streamlessIdleTimeoutSeconds equals: 300.
+  self assert: r streamlessIdleTimeoutSeconds equals: 60.
   self assert: r streamLossGraceSeconds equals: 10.
   self assert: r livenessProbeIntervalSeconds equals: 120.
   self assert: r reaperIntervalSeconds equals: 60.
@@ -685,7 +698,7 @@ testTheShippingDefaultsAreTheDocumentedOnes
   self assert: r confirmationsBeforeRelease equals: 15.
   self assert: r probePassInterval equals: 2.
   self assert: r realizedProbeIntervalSeconds equals: 120.
-  self assert: r streamlessPassesBeforeRelease equals: 6.
+  self assert: r streamlessPassesBeforeRelease equals: 2.
   self assert: r validateTimerConfig == r
 %
 category: 'tests - config'

@@ -290,8 +290,10 @@ print_sleep_instructions() {
     *s) idle_s=${IDLE%[sS]} ;;
     *)  idle_s=$IDLE ;;
   esac
-  streamless_s="${GS_MCP_STREAMLESS_TIMEOUT:-300}"
-  passes=$(( streamless_s / ${GS_MCP_REAPER_INTERVAL:-60} ))
+  streamless_s="${GS_MCP_STREAMLESS_TIMEOUT:-60}"
+  # ceiling of the division, plus the pass the count starts on -- see
+  # McpRouter>>streamlessPassesBeforeRelease.
+  passes=$(( (streamless_s + ${GS_MCP_REAPER_INTERVAL:-60} - 1) / ${GS_MCP_REAPER_INTERVAL:-60} + 1 ))
   GRACE_S="${GS_MCP_STREAM_LOSS_GRACE:-10}"
 
   echo

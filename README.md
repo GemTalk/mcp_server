@@ -546,8 +546,12 @@ well-behaved client — they all answer `ping` — held a gem and a transaction 
 stayed open, and the warning would only ever reach clients unable to act on it.
 
 A client that never opens a GET stream is left exactly as it was: never probed, never warned, reaped
-on `streamlessIdleTimeoutSeconds` (5 minutes). Pinging it would only mark it unanswered and cost it
-its gem early.
+on `streamlessIdleTimeoutSeconds` (1 minute). Pinging it would only mark it unanswered and cost it
+its gem early. A minute is short on purpose — the commonest streamless client is a one-shot POST
+whose gem is pure overhead the moment it returns — and it is safe because the count pays for the
+pass it starts on, so nothing is released sooner than a full minute after its last request. Raise it
+where streamless clients are *sequences* of POSTs sharing a session id: what it bounds for them is
+the gap between calls, not the life of the session.
 
 **A client that closes its stream is a different case entirely, and a much easier one.** The drain
 loop is already watching the read side, so a client that hangs up is detected within ~100ms — not

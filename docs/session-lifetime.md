@@ -14,7 +14,7 @@ against the others before a port is bound.
 |---|---|---|
 | `sessionIdleTimeoutSeconds` | 1800 | how long a client may be quiet. **`nil` = no deadline at all** |
 | `streamLossGraceSeconds` | 10 | how long a client that **closed its stream** gets to open another. `0` = release at once; `nil` = no fast release |
-| `streamlessIdleTimeoutSeconds` | 300 | the floor for a client that opens **no** stream |
+| `streamlessIdleTimeoutSeconds` | 60 | the floor for a client that opens **no** stream |
 | `livenessProbeIntervalSeconds` | 120 | how often a quiet session is re-asked |
 | `reaperIntervalSeconds` | 60 | how often the maintenance pass runs |
 | `expiryWarningLeadSeconds` | 300 | how long before an *absolute* deadline a client is warned |
