@@ -16,9 +16,12 @@ server with one that any MCP client can reach over plain HTTP.
 `src/auth` needs `JsonWebToken` and `JwtSecurityData` (and, to log a worker in,
 `GsTsExternalSession>>jwtPassword:`), none of which exist before 3.7.5; on 3.7.2 those methods
 cannot compile at all, so `install.sh` detects the image and leaves the group out. Everything else —
-the server, all 31 base tools, per-client sessions, read-only mode — is unaffected. The 3.7.6 line is
-a separate matter: earlier releases have a bug connecting to an *external* OIDC IdP. Instructions for
-installing and running are later in this document.
+the server, all 31 base tools, per-client sessions, read-only mode — is unaffected. Note that 3.7.2
+carries a separate *kernel* defect that this repository does not work around: responses over 1024
+bytes can come back corrupted (#51438, fixed in 3.7.4.1). `McpExternalSessionTest` fails there on
+purpose to say so — see the testing section. The 3.7.6 line is a separate matter: earlier releases
+have a bug connecting to an *external* OIDC IdP. Instructions for installing and running are later
+in this document.
 
 ## Transport
 
@@ -463,7 +466,7 @@ grouped by area, with one loader per group:
 
 ```
 src/core/    17 classes  the server itself: protocol, transport, dispatch, toolsets   (always)
-src/tests/   12 classes  the SUnit suites and their fixtures                        (always)
+src/tests/   13 classes  the SUnit suites and their fixtures                        (always)
 src/auth/     3 classes  the OAuth/OIDC front end McpAuthRouter + its two suites     (3.7.5+)
 src/grail/    2 classes  the optional GemStone-Python toolset + its suite            (--grail)
 load.gs                  files in core + tests, then commits
@@ -574,13 +577,29 @@ suite when `McpGrailToolset` is installed:
 Run a single suite while a server is up via the `run_test_class` tool (e.g. `run_test_class
 McpToolTest`). `./run-unit-tests.sh` runs them all and exits 0 when every test passes: the
 socket-less suites `McpToolTest` (52), `McpDispatcherTest` (11), `McpSessionTest` (9),
-`McpTransportTest` (22), `McpContractTest` (34) and `McpExtensionTest` (9) — **137 tests**, which is
-the whole suite on a base install and on 3.7.2. Where the optional groups are installed the runner
-picks their suites up automatically, by resolving the class names rather than by a flag: plus
-`McpAuthTest` (24) and `McpAuthConformanceTest` (25) — **186 tests** — and **195 with the 9 in
-`McpGrailToolsetTest`** on a Grail image. The two auth suites are not purely in-image (they commit a
-throwaway JWT user and spawn real worker gems, so a netldi must be running); they are in the runner
-anyway, because they are the only cover for the token → session path.
+`McpTransportTest` (22), `McpContractTest` (34) and `McpExtensionTest` (9), plus
+`McpExternalSessionTest` (5) — **142 tests**, the whole suite on a base install. Where the optional
+groups are installed the runner picks their suites up automatically, by resolving the class names
+rather than by a flag: plus `McpAuthTest` (24) and `McpAuthConformanceTest` (25) — **191 tests** —
+and **200 with the 9 in `McpGrailToolsetTest`** on a Grail image.
+
+Three suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
+`McpAuthConformanceTest` commit a throwaway JWT user and spawn real worker gems; they are in the
+runner anyway, because they are the only cover for the token → session path.
+`McpExternalSessionTest` drives a real worker gem to check that a result arrives carrying the bytes
+the worker sent, so the runner asks for a netldi on any image where it is installed — which is every
+image, since it is part of the base install. That is no new burden in practice: gs-mcp gives every
+client its own worker gem, so it cannot serve a single request without a netldi either.
+
+> **On 3.7.2 two of those five tests fail, and that is the suite working.** Every GemStone before
+> 3.7.4.1 carries kernel defect #51438: `GsTsExternalSession>>resolveResult:` refetches an object
+> only when its 1024-byte fetch buffer has to *grow*, so once one large result has enlarged the
+> buffer, every later result between 1025 bytes and that size arrives as 1024 good bytes followed by
+> the tail of an earlier result — right length, plausible bytes, no error raised. gs-mcp meets this
+> on its main path, since every MCP response is a String of JSON pulled out of a worker gem. Nothing
+> in `src/` can make those two tests pass; the fix is to run on 3.7.4.1 or later. The three that do
+> pass everywhere are controls that localise the failure — see the `McpExternalSessionTest` class
+> comment for the mechanism.
 
 > Note: a test helper must never reuse a SUnit framework selector (`run:`, `setUp`, …) — doing
 > so shadows the framework method and silently breaks `suite run`. The transport helper is named

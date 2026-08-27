@@ -7,15 +7,19 @@
 #
 # WHICH SUITES RUN depends on what is installed, not on a list kept here: the auth suites and the
 # Grail suite are added only if their classes resolve, because install.sh files in src/auth only on
-# an image with kernel JWT support and src/grail only on --grail. A base install runs the six core
-# suites and needs nothing but the stone.
+# an image with kernel JWT support and src/grail only on --grail. A base install runs the seven core
+# suites.
 #
-# NB: McpAuthTest is not purely in-image -- its fixtures create and commit a throwaway JWT-enabled
-# UserProfile (touching AllUsers) and it spawns a real worker gem, so a NETLDI must be running.
-# That is the ONLY reason this script ever wants one, which is why the requirement below is gated on
-# McpAuthTest actually being installed rather than asserted unconditionally. The suite is run
-# whenever it is present: it is the only coverage of the token->session path, and leaving it out
-# once let a broken parse in McpAuthRouter (every token rejected as malformed) go unnoticed.
+# NB: two suites are NOT purely in-image, and both need a NETLDI.
+#   McpExternalSessionTest  drives a real worker gem to check that a result comes back with the
+#                           bytes the worker sent. It fails on any image before 3.7.4.1, which
+#                           carries kernel defect #51438 -- that failure is the suite working, not
+#                           a regression in gs-mcp. See its class comment.
+#   McpAuthTest             creates and commits a throwaway JWT-enabled UserProfile (touching
+#                           AllUsers) and spawns a real worker gem. It is run whenever present: it
+#                           is the only coverage of the token->session path, and leaving it out once
+#                           let a broken parse in McpAuthRouter (every token rejected as malformed)
+#                           go unnoticed.
 #
 # Configure (or export before running):
 #   GEMSTONE   - GemStone product directory (REQUIRED; no default can be guessed)
@@ -30,29 +34,38 @@ GS_STONE="${GS_STONE:-gs64stone}"
 GS_USER="${GS_USER:-DataCurator}"
 GS_PASS="${GS_PASS:-swordfish}"
 
-# A netldi is needed for McpAuthTest and nothing else, so ask the image whether that suite is
-# installed before insisting on one. Checking up front beats discovering it as a GciError partway
-# through a suite run -- but demanding a netldi on an image that has no auth suites to run would
-# refuse to test a perfectly good base install (3.7.2, or any --no-auth image).
-gs_mcp_require_netldi_if_auth_installed() {
-  local have
-  gs_env_image_has McpAuthTest && have=0 || have=$?
-  case "$have" in
-    0) gs_env_require_netldi ;;
-    1) return 0 ;;      # no auth suites installed: nothing here forks a gem
-    *) return 1 ;;      # gs_env_image_has has already said why
-  esac
+# Two suites fork a real worker gem and so need a NETLDI: McpExternalSessionTest (always installed,
+# see below) and McpAuthTest (only where the auth group could be). Ask the image which are present
+# rather than asserting a netldi unconditionally -- the check still has to survive an image where
+# neither is installed, and discovering the lack up front beats hitting it as a GciError partway
+# through a suite run.
+#
+# In practice McpExternalSessionTest is always there, so a netldi is in practice always required.
+# That is not a new burden: gs-mcp gives every client its own worker gem, so it cannot serve a
+# single request without a netldi. What changed is that the test run now says so plainly instead of
+# passing on an image the server could not actually run on.
+gs_mcp_require_netldi_if_forking_suite_installed() {
+  local nm have
+  for nm in McpExternalSessionTest McpAuthTest; do
+    gs_env_image_has "$nm" && have=0 || have=$?
+    case "$have" in
+      0) gs_env_require_netldi; return $? ;;
+      1) ;;               # not installed: keep looking
+      *) return 1 ;;      # gs_env_image_has has already said why
+    esac
+  done
+  return 0                # no gem-forking suite installed: nothing here needs a netldi
 }
 
 . ./gs-env.sh
 gs_env_resolve
 if [ "${1:-}" = "--check" ]; then
   gs_env_check || exit $?
-  gs_mcp_require_netldi_if_auth_installed || exit 1
+  gs_mcp_require_netldi_if_forking_suite_installed || exit 1
   exit 0
 fi
 gs_env_require_stone
-gs_mcp_require_netldi_if_auth_installed
+gs_mcp_require_netldi_if_forking_suite_installed
 
 # Stream topaz output live AND keep a copy to gate on. Do NOT wrap the heredoc in $( ... ):
 # under `set -e`, a command substitution that exits non-zero aborts the script BEFORE anything
@@ -74,7 +87,7 @@ run
 | s classes up optional |
 up := System myUserProfile.
 classes := #( 'McpToolTest' 'McpDispatcherTest' 'McpSessionTest' 'McpTransportTest'
-  'McpContractTest' 'McpExtensionTest' ) asOrderedCollection.
+  'McpContractTest' 'McpExtensionTest' 'McpExternalSessionTest' ) asOrderedCollection.
 "Suites from the optional groups, run only where their group was installed. Named as a list so
  adding one is a one-word change, and so a missing suite is a skip rather than a doesNotUnderstand."
 optional := #( 'McpAuthTest' 'McpAuthConformanceTest' 'McpGrailToolsetTest' ).
