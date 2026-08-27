@@ -197,6 +197,24 @@ method: McpAuthRouter
 expectedIssuer: aStringOrNil
   expectedIssuer := aStringOrNil
 %
+category: 'session lifetime'
+method: McpAuthRouter
+expiryAdviceFor: sess
+  "On an authenticated router the deadline is usually the access token's exp, and that IS extendable
+   -- a request carrying a refreshed token moves it (#renewSessionExpiry:from:), and clients refresh
+   ahead of expiry on their own. So the useful advice is the opposite of the base class's.
+   Except when it is not. #maxSessionLifetimeSeconds, if configured, also lands on this session as an
+   expiry, and whichever bound is sooner wins -- expiresAtSeconds: keeps the earlier. Telling a
+   client to refresh its token when the binding deadline is a fixed cap would be advice that cannot
+   work, so compare the two: the cap falls exactly at startedAtSeconds + the cap, and if that is the
+   deadline in force then the cap is what is ending this session and the base advice is the true one.
+   Both computed from stored integers, so no clock is read twice to decide."
+  self maxSessionLifetimeSeconds ifNotNil: [:secs |
+    sess expiresAtSeconds = (sess startedAtSeconds + secs)
+      ifTrue: [^super expiryAdviceFor: sess]].
+  ^'This is your access credential''s expiry. A client that refreshes its token keeps the session: '
+    , 'the next call carrying a refreshed token extends it, and no work is lost.'
+%
 category: 'validation'
 method: McpAuthRouter
 extraScopes
@@ -358,6 +376,30 @@ rejectionForPayload: payload
       ^Array with: 403 with: 'insufficient_scope'
         with: 'Token missing required scope(s): ' , (self spaceSeparated: missing)]].
   ^nil
+%
+category: 'session lifetime'
+method: McpAuthRouter
+renewSessionExpiry: sess from: aJwtString
+  "Extend sess's deadline to the exp of aJwtString -- the token on the request being served right
+   now -- so that a client which keeps proving its authorization keeps its worker gem. Answers
+   whether the deadline moved.
+   Called from #tokenOwnsNamedSession:on:, which is the one place that has everything required and
+   has already established it: the signature, exp, scopes, issuer and audience passed
+   #tokenRejectionFor:, and the subject matches sess userId. A fresh token for the same user IS a
+   renewed grant, and honouring its exp is reading the credential in front of you rather than
+   relaxing a rule.
+   The scope check is the part that is easy to miss. A session's read/write mode is fixed at open
+   from the opening token's write scope (#openSessionForUser:jwt:readOnly:), so extending a
+   read-WRITE session on a token that no longer carries the write scope would keep the broader
+   authorization alive on the strength of a narrower grant -- a privilege the client has just
+   demonstrably lost. Such a token is allowed to keep working (it is valid, and the session is still
+   its user's) but it buys no more time: the session runs out at its existing deadline, and the
+   client's next session is opened read-only, which is what its current grant actually says.
+   A session already past its deadline but not yet reaped is renewable on purpose. The reaper runs on
+   an interval, so that window is an artefact of scheduling, and the client presenting a valid token
+   inside it is exactly the client that should keep its gem."
+  (sess readOnly not and: [(self tokenGrantsWrite: aJwtString) not]) ifTrue: [^false].
+  ^sess renewExpiryTo: (self tokenExpirySecondsOf: aJwtString)
 %
 category: 'routing'
 method: McpAuthRouter
@@ -643,48 +685,6 @@ tokenExpirySecondsOf: aJwtString
      exp := (JsonWebToken fromJwtString: aJwtString) payload at: 'exp' ifAbsent: [nil].
      (exp isKindOf: Number) ifTrue: [exp truncated] ifFalse: [nil] ]
    on: Error do: [:e | nil]
-%
-category: 'session lifetime'
-method: McpAuthRouter
-expiryAdviceFor: sess
-  "On an authenticated router the deadline is usually the access token's exp, and that IS extendable
-   -- a request carrying a refreshed token moves it (#renewSessionExpiry:from:), and clients refresh
-   ahead of expiry on their own. So the useful advice is the opposite of the base class's.
-   Except when it is not. #maxSessionLifetimeSeconds, if configured, also lands on this session as an
-   expiry, and whichever bound is sooner wins -- expiresAtSeconds: keeps the earlier. Telling a
-   client to refresh its token when the binding deadline is a fixed cap would be advice that cannot
-   work, so compare the two: the cap falls exactly at startedAtSeconds + the cap, and if that is the
-   deadline in force then the cap is what is ending this session and the base advice is the true one.
-   Both computed from stored integers, so no clock is read twice to decide."
-  self maxSessionLifetimeSeconds ifNotNil: [:secs |
-    sess expiresAtSeconds = (sess startedAtSeconds + secs)
-      ifTrue: [^super expiryAdviceFor: sess]].
-  ^'This is your access credential''s expiry. A client that refreshes its token keeps the session: '
-    , 'the next call carrying a refreshed token extends it, and no work is lost.'
-%
-category: 'session lifetime'
-method: McpAuthRouter
-renewSessionExpiry: sess from: aJwtString
-  "Extend sess's deadline to the exp of aJwtString -- the token on the request being served right
-   now -- so that a client which keeps proving its authorization keeps its worker gem. Answers
-   whether the deadline moved.
-   Called from #tokenOwnsNamedSession:on:, which is the one place that has everything required and
-   has already established it: the signature, exp, scopes, issuer and audience passed
-   #tokenRejectionFor:, and the subject matches sess userId. A fresh token for the same user IS a
-   renewed grant, and honouring its exp is reading the credential in front of you rather than
-   relaxing a rule.
-   The scope check is the part that is easy to miss. A session's read/write mode is fixed at open
-   from the opening token's write scope (#openSessionForUser:jwt:readOnly:), so extending a
-   read-WRITE session on a token that no longer carries the write scope would keep the broader
-   authorization alive on the strength of a narrower grant -- a privilege the client has just
-   demonstrably lost. Such a token is allowed to keep working (it is valid, and the session is still
-   its user's) but it buys no more time: the session runs out at its existing deadline, and the
-   client's next session is opened read-only, which is what its current grant actually says.
-   A session already past its deadline but not yet reaped is renewable on purpose. The reaper runs on
-   an interval, so that window is an artefact of scheduling, and the client presenting a valid token
-   inside it is exactly the client that should keep its gem."
-  (sess readOnly not and: [(self tokenGrantsWrite: aJwtString) not]) ifTrue: [^false].
-  ^sess renewExpiryTo: (self tokenExpirySecondsOf: aJwtString)
 %
 category: 'validation'
 method: McpAuthRouter

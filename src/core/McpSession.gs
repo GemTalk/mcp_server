@@ -171,61 +171,11 @@ expiresAtSeconds: aSecondOrNil
 %
 category: 'session lifetime'
 method: McpSession
-renewExpiryTo: aSecondOrNil
-  "Move this session's existing deadline LATER, to aSecondOrNil, because its client has just proved
-   a fresh credential that runs that long. Answers whether the deadline actually moved.
-   The counterpart to #expiresAtSeconds:, and deliberately a separate selector rather than a relaxed
-   ratchet. That ratchet conflates two invariants: a session must not outlive its CURRENT grant,
-   which has to hold, and a session must not outlive its FIRST grant, which nothing requires. Access
-   tokens are short by design -- thirty minutes is a common default -- so under the ratchet alone a
-   client working steadily still loses its worker gem, and the uncommitted transaction inside it, on
-   the first maintenance pass after its opening token's exp. Refreshing cannot save it, because the
-   renewed token was never consulted about lifetime. That is silent data loss, not an inconvenience:
-   the client obtains a new token, opens a new session, and nothing looks broken.
-   Two boundaries are kept. A nil argument moves nothing, so a token with no readable exp cannot
-   turn a bounded session unbounded. And a session with no deadline at all is left alone: renewal
-   extends a deadline, it never introduces one -- that is #expiresAtSeconds:'s job. So the pair is
-   strictly complementary, one tightening and one extending, and neither can do the other's work.
-   Only the authenticated request path may send this, and only after the token's signature, subject
-   and write scope have been checked -- see McpAuthRouter>>renewSessionExpiry:from:."
-  aSecondOrNil isNil ifTrue: [^false].
-  expiresAtSeconds isNil ifTrue: [^false].
-  aSecondOrNil <= expiresAtSeconds ifTrue: [^false].
-  expiresAtSeconds := aSecondOrNil.
-  "The client was warned about a deadline that no longer applies, so it is owed a fresh warning
-   before the new one. Without this a long-lived session is warned exactly once, ever."
-  expiryWarned := false.
-  ^true
-%
-category: 'accessing'
-method: McpSession
-startedAtSeconds
-  "When this session was opened, as a wall-clock second. Exposed so a router can tell WHICH bound is
-   about to end a session -- an absolute lifetime cap is startedAtSeconds + the cap, and comparing
-   that against #expiresAtSeconds says whether the cap or a credential is the binding one, without
-   either storing that fact or reading a clock twice to infer it."
-  ^startedAtSeconds
-%
-category: 'session lifetime'
-method: McpSession
-secondsUntilExpiry
-  "Seconds remaining before this session's absolute deadline, or nil if it has none. Negative once
-   the deadline has passed and the reaper has not yet come round."
-  ^expiresAtSeconds isNil ifTrue: [nil] ifFalse: [expiresAtSeconds - System timeGmt]
-%
-category: 'session lifetime'
-method: McpSession
 expiryWarned
   "Whether this client has already been told its session is nearing its absolute deadline. Separate
    from #idleWarned because the two deadlines are independent: a busy authenticated session can be
    minutes from its credential's exp while nowhere near an idle timeout."
   ^expiryWarned == true
-%
-category: 'session lifetime'
-method: McpSession
-noteExpiryWarned
-  expiryWarned := true.
-  ^self
 %
 category: 'routing'
 method: McpSession
@@ -279,52 +229,6 @@ initialize
   "The one fact here that is not a count, because it is not an inference either: the client's own
    connection ended, and the drain loop watched it happen. See #noteStreamClosedByClient."
   streamClosedByClient := false.
-  ^self
-%
-category: 'liveness'
-method: McpSession
-quietProbes
-  "How many consecutive liveness pings this client has answered with no request in between. The
-   idleness measure: each one is a fact this server asked for and was told, not an interval it
-   inferred from a clock it cannot trust across a suspend."
-  ^quietProbes
-%
-category: 'liveness'
-method: McpSession
-unansweredProbes
-  "How many pings are outstanding on the stream the client is still holding. Evidence of death only
-   in numbers -- see McpRouter>>unansweredProbesBeforeGone."
-  ^unansweredProbes
-%
-category: 'liveness'
-method: McpSession
-streamClosedByClient
-  "Whether this client has been seen to close its event stream and has done nothing since to suggest
-   it is still there. Set by #noteStreamClosedByClient; retracted by #noteStreamSeen and by #touch."
-  ^streamClosedByClient == true
-%
-category: 'liveness'
-method: McpSession
-streamlessPasses
-  "Consecutive maintenance passes on which this session had no stream, so nothing could be asked of
-   its client at all. The only ground for releasing a session that can never be confirmed."
-  ^streamlessPasses
-%
-category: 'liveness'
-method: McpSession
-passesSinceProbe
-  ^passesSinceProbe
-%
-category: 'liveness'
-method: McpSession
-notePassWithStream: aBoolean
-  "One maintenance pass observed this session. This is the server's entire clock: it advances only
-   when the front end is actually running, which is what makes every count below immune to a host
-   suspend without anyone having to detect one."
-  passesSinceProbe := passesSinceProbe + 1.
-  aBoolean
-    ifTrue: [self noteStreamSeen]
-    ifFalse: [streamlessPasses := streamlessPasses + 1].
   ^self
 %
 category: 'activity'
@@ -391,11 +295,29 @@ noteAlive
   unansweredProbes := 0.
   quietProbes := quietProbes + 1
 %
+category: 'session lifetime'
+method: McpSession
+noteExpiryWarned
+  expiryWarned := true.
+  ^self
+%
 category: 'activity'
 method: McpSession
 noteIdleWarned
   "Remember that the near-the-deadline warning has been sent for this idle period."
   idleWarned := true.
+  ^self
+%
+category: 'liveness'
+method: McpSession
+notePassWithStream: aBoolean
+  "One maintenance pass observed this session. This is the server's entire clock: it advances only
+   when the front end is actually running, which is what makes every count below immune to a host
+   suspend without anyone having to detect one."
+  passesSinceProbe := passesSinceProbe + 1.
+  aBoolean
+    ifTrue: [self noteStreamSeen]
+    ifFalse: [streamlessPasses := streamlessPasses + 1].
   ^self
 %
 category: 'activity'
@@ -457,6 +379,11 @@ outbox
    the worker gem neither has one nor could write to it."
   ^outbox
 %
+category: 'liveness'
+method: McpSession
+passesSinceProbe
+  ^passesSinceProbe
+%
 category: 'initialization'
 method: McpSession
 prepareWorker
@@ -472,6 +399,14 @@ prepareWorker
     do: [:ex | self error: 'Could not prepare the MCP worker gem for session ' , id printString
       , ' (worker class ' , self workerClassName , '): '
       , ([ex description] on: Error do: [:x | ex class name asString])]
+%
+category: 'liveness'
+method: McpSession
+quietProbes
+  "How many consecutive liveness pings this client has answered with no request in between. The
+   idleness measure: each one is a fact this server asked for and was told, not an interval it
+   inferred from a clock it cannot trust across a suspend."
+  ^quietProbes
 %
 category: 'private'
 method: McpSession
@@ -493,6 +428,34 @@ readOnly
   "Whether this client's worker is read-only. Recorded when the session starts and applied to the
    worker gem by prepareWorker."
   ^readOnly == true
+%
+category: 'session lifetime'
+method: McpSession
+renewExpiryTo: aSecondOrNil
+  "Move this session's existing deadline LATER, to aSecondOrNil, because its client has just proved
+   a fresh credential that runs that long. Answers whether the deadline actually moved.
+   The counterpart to #expiresAtSeconds:, and deliberately a separate selector rather than a relaxed
+   ratchet. That ratchet conflates two invariants: a session must not outlive its CURRENT grant,
+   which has to hold, and a session must not outlive its FIRST grant, which nothing requires. Access
+   tokens are short by design -- thirty minutes is a common default -- so under the ratchet alone a
+   client working steadily still loses its worker gem, and the uncommitted transaction inside it, on
+   the first maintenance pass after its opening token's exp. Refreshing cannot save it, because the
+   renewed token was never consulted about lifetime. That is silent data loss, not an inconvenience:
+   the client obtains a new token, opens a new session, and nothing looks broken.
+   Two boundaries are kept. A nil argument moves nothing, so a token with no readable exp cannot
+   turn a bounded session unbounded. And a session with no deadline at all is left alone: renewal
+   extends a deadline, it never introduces one -- that is #expiresAtSeconds:'s job. So the pair is
+   strictly complementary, one tightening and one extending, and neither can do the other's work.
+   Only the authenticated request path may send this, and only after the token's signature, subject
+   and write scope have been checked -- see McpAuthRouter>>renewSessionExpiry:from:."
+  aSecondOrNil isNil ifTrue: [^false].
+  expiresAtSeconds isNil ifTrue: [^false].
+  aSecondOrNil <= expiresAtSeconds ifTrue: [^false].
+  expiresAtSeconds := aSecondOrNil.
+  "The client was warned about a deadline that no longer applies, so it is owed a fresh warning
+   before the new one. Without this a long-lived session is warned exactly once, ever."
+  expiryWarned := false.
+  ^true
 %
 category: 'private'
 method: McpSession
@@ -517,6 +480,13 @@ runWorker: anExpressionString
     self touch.
     worker lastResult]
 %
+category: 'session lifetime'
+method: McpSession
+secondsUntilExpiry
+  "Seconds remaining before this session's absolute deadline, or nil if it has none. Negative once
+   the deadline has passed and the reaper has not yet come round."
+  ^expiresAtSeconds isNil ifTrue: [nil] ifFalse: [expiresAtSeconds - System timeGmt]
+%
 category: 'accessing'
 method: McpSession
 serverName: aStringOrNil
@@ -533,6 +503,15 @@ category: 'accessing'
 method: McpSession
 serverVersion: aStringOrNil
   serverVersion := aStringOrNil
+%
+category: 'accessing'
+method: McpSession
+startedAtSeconds
+  "When this session was opened, as a wall-clock second. Exposed so a router can tell WHICH bound is
+   about to end a session -- an absolute lifetime cap is startedAtSeconds + the cap, and comparing
+   that against #expiresAtSeconds says whether the cap or a credential is the binding one, without
+   either storing that fact or reading a clock twice to infer it."
+  ^startedAtSeconds
 %
 category: 'initialization'
 method: McpSession
@@ -584,6 +563,20 @@ startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
   self touch.
   ^self
 %
+category: 'liveness'
+method: McpSession
+streamClosedByClient
+  "Whether this client has been seen to close its event stream and has done nothing since to suggest
+   it is still there. Set by #noteStreamClosedByClient; retracted by #noteStreamSeen and by #touch."
+  ^streamClosedByClient == true
+%
+category: 'liveness'
+method: McpSession
+streamlessPasses
+  "Consecutive maintenance passes on which this session had no stream, so nothing could be asked of
+   its client at all. The only ground for releasing a session that can never be confirmed."
+  ^streamlessPasses
+%
 category: 'accessing'
 method: McpSession
 toolsetNames: aCollectionOfNamesOrNil
@@ -609,6 +602,13 @@ touch
   streamlessPasses := 0.
   streamClosedByClient := false.
   idleWarned := false
+%
+category: 'liveness'
+method: McpSession
+unansweredProbes
+  "How many pings are outstanding on the stream the client is still holding. Evidence of death only
+   in numbers -- see McpRouter>>unansweredProbesBeforeGone."
+  ^unansweredProbes
 %
 category: 'accessing'
 method: McpSession

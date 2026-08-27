@@ -3,7 +3,7 @@ set compile_env: 0
 expectvalue /Class
 doit
 GsTestCase subclass: 'McpExternalSessionTest'
-  instVarNames: #( session )
+  instVarNames: #( session)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()

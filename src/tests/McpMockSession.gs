@@ -36,20 +36,15 @@ removeallclassmethods McpMockSession
 ! ------------------- Instance methods for McpMockSession
 category: 'testing support'
 method: McpMockSession
-fakeQuietProbes: anIntegerOrNil
-  "Report this instead of the real confirmation count (nil restores the real one)."
-  fakeQuietProbes := anIntegerOrNil
-%
-category: 'testing support'
-method: McpMockSession
-quietProbes
-  ^fakeQuietProbes ifNil: [super quietProbes]
-%
-category: 'testing support'
-method: McpMockSession
 fakeIdleSeconds: anIntegerOrNil
   "Report this instead of the real idle time (nil restores the clock)."
   fakeIdleSeconds := anIntegerOrNil
+%
+category: 'testing support'
+method: McpMockSession
+fakeQuietProbes: anIntegerOrNil
+  "Report this instead of the real confirmation count (nil restores the real one)."
+  fakeQuietProbes := anIntegerOrNil
 %
 category: 'activity'
 method: McpMockSession
@@ -69,4 +64,9 @@ newWorkerSession
    GsTsExternalSession. Everything else -- the login sends, prepareWorker, forward: -- runs the
    shipping code against it."
   ^mockWorker := McpMockWorker new
+%
+category: 'testing support'
+method: McpMockSession
+quietProbes
+  ^fakeQuietProbes ifNil: [super quietProbes]
 %

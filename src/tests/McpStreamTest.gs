@@ -112,6 +112,22 @@ streamOn: aRouter forSession: sess
   aRouter serveGetStream: (McpHttpConnection on: mock) forSession: sess.
   ^mock
 %
+category: 'tests - stream'
+method: McpStreamTest
+testAnArrivingStreamRetractsADepartureAtOnce
+  "#serveGetStream:forSession: sends #noteStreamSeen on the way IN. Without it a client that closed
+   one stream and opened another would keep the flag until a maintenance pass noticed the new
+   stream -- and the pass is a minute wide, where the grace is ten seconds."
+  | r sess |
+  r := McpFixtureRouter new.
+  sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
+  sess noteStreamClosedByClient.
+  1 to: 20 do: [:i | sess notePassWithStream: false].
+  self streamOn: r forSession: sess.
+  self deny: sess streamClosedByClient.
+  self assert: sess streamlessPasses equals: 0.
+  self assert: (r sessionAt: sess id) notNil
+%
 category: 'tests - idle probe'
 method: McpStreamTest
 testAnsweredPingDoesNotRestartTheIdleClock
@@ -128,6 +144,38 @@ testAnsweredPingDoesNotRestartTheIdleClock
   self assert: (r resolvePendingRequest: ((self firstQueuedIn: sess) at: 'id') forSession: sess) notNil.
   self assert: sess quietProbes equals: 1.
   self assert: sess lastActivitySeconds equals: before
+%
+category: 'tests - stream'
+method: McpStreamTest
+testAStreamEndedByThisServerIsNotAVanishedClient
+  "The distinction #runStreamLoop:forSession:generation: exists to make, and the one that would be
+   expensive to get wrong: a newer GET superseding this stream is the latest-GET-wins rule doing its
+   job, not a client leaving. Reading it as a departure would free the gem of the client that had
+   just reconnected."
+  | r sess stale |
+  r := McpFixtureRouter new.
+  sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
+  stale := sess outbox attachStream.
+  sess outbox attachStream.        "a newer GET arrives and supersedes it"
+  self deny: (r runStreamLoop: (McpHttpConnection on: (McpMockSocket on: '' chunkSize: 1000000))
+    forSession: sess generation: stale).
+  "whereas the current stream's loop, meeting EOF, does answer that the client went away"
+  self assert: (r runStreamLoop: (McpHttpConnection on: (McpMockSocket on: '' chunkSize: 1000000))
+    forSession: sess generation: sess outbox currentStreamGeneration)
+%
+category: 'tests - stream'
+method: McpStreamTest
+testAVanishedClientHasItsGemReleasedByTheLoopItself
+  "End to end through the real drain loop: a mock socket is at EOF, so this is precisely the shut
+   tab -- and with the grace set to zero the release happens in the stream's own GsProcess rather
+   than waiting for a maintenance pass. The session is unmapped and its worker logged out."
+  | r sess |
+  r := McpFixtureRouter new.
+  r streamLossGraceSeconds: 0.
+  sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
+  self streamOn: r forSession: sess.
+  self assert: sess streamClosedByClient.
+  self assert: (r sessionAt: sess id) isNil
 %
 category: 'tests - stream'
 method: McpStreamTest
@@ -339,54 +387,6 @@ testSetLevelIsRecordedByTheFrontEndAndStillReachesTheWorker
     '{"jsonrpc":"2.0","id":8,"method":"logging/setLevel","params":{"level":"chatty"}}'
     sessionId: sess id) on: r.
   self assert: sess logLevel equals: 'debug'
-%
-category: 'tests - stream'
-method: McpStreamTest
-testAVanishedClientHasItsGemReleasedByTheLoopItself
-  "End to end through the real drain loop: a mock socket is at EOF, so this is precisely the shut
-   tab -- and with the grace set to zero the release happens in the stream's own GsProcess rather
-   than waiting for a maintenance pass. The session is unmapped and its worker logged out."
-  | r sess |
-  r := McpFixtureRouter new.
-  r streamLossGraceSeconds: 0.
-  sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
-  self streamOn: r forSession: sess.
-  self assert: sess streamClosedByClient.
-  self assert: (r sessionAt: sess id) isNil
-%
-category: 'tests - stream'
-method: McpStreamTest
-testAStreamEndedByThisServerIsNotAVanishedClient
-  "The distinction #runStreamLoop:forSession:generation: exists to make, and the one that would be
-   expensive to get wrong: a newer GET superseding this stream is the latest-GET-wins rule doing its
-   job, not a client leaving. Reading it as a departure would free the gem of the client that had
-   just reconnected."
-  | r sess stale |
-  r := McpFixtureRouter new.
-  sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
-  stale := sess outbox attachStream.
-  sess outbox attachStream.        "a newer GET arrives and supersedes it"
-  self deny: (r runStreamLoop: (McpHttpConnection on: (McpMockSocket on: '' chunkSize: 1000000))
-    forSession: sess generation: stale).
-  "whereas the current stream's loop, meeting EOF, does answer that the client went away"
-  self assert: (r runStreamLoop: (McpHttpConnection on: (McpMockSocket on: '' chunkSize: 1000000))
-    forSession: sess generation: sess outbox currentStreamGeneration)
-%
-category: 'tests - stream'
-method: McpStreamTest
-testAnArrivingStreamRetractsADepartureAtOnce
-  "#serveGetStream:forSession: sends #noteStreamSeen on the way IN. Without it a client that closed
-   one stream and opened another would keep the flag until a maintenance pass noticed the new
-   stream -- and the pass is a minute wide, where the grace is ten seconds."
-  | r sess |
-  r := McpFixtureRouter new.
-  sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
-  sess noteStreamClosedByClient.
-  1 to: 20 do: [:i | sess notePassWithStream: false].
-  self streamOn: r forSession: sess.
-  self deny: sess streamClosedByClient.
-  self assert: sess streamlessPasses equals: 0.
-  self assert: (r sessionAt: sess id) notNil
 %
 category: 'tests - stream'
 method: McpStreamTest

@@ -41,12 +41,6 @@ removeallmethods McpFixtureRouter
 removeallclassmethods McpFixtureRouter
 ! ------------------- Class methods for McpFixtureRouter
 ! ------------------- Instance methods for McpFixtureRouter
-category: 'running'
-method: McpFixtureRouter
-isRunning
-  "Running, with no listener behind it. The one seam a stream test needs."
-  ^true
-%
 category: 'initialization'
 method: McpFixtureRouter
 initialize
@@ -57,4 +51,10 @@ initialize
   super initialize.
   self streamLossGraceSeconds: nil.
   ^self
+%
+category: 'running'
+method: McpFixtureRouter
+isRunning
+  "Running, with no listener behind it. The one seam a stream test needs."
+  ^true
 %
