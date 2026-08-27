@@ -304,6 +304,34 @@ testASessionGoesAtTheConfirmationCount
 %
 category: 'tests - counting'
 method: McpLifetimeTest
+testAnIntervalThatDoesNotDivideRoundsUp
+  "A configured timeout is a floor on what the deployment gets, not a ceiling. 150 seconds against a
+   60-second pass has to be three passes and not two, or the number in the configuration would be
+   the most anybody ever waited rather than the least."
+  | r |
+  r := McpFixtureRouter new.
+  self assert: (r countCovering: 150 every: 60) equals: 3.
+  self assert: (r countCovering: 180 every: 60) equals: 3.
+  self assert: (r countCovering: 181 every: 60) equals: 4.
+  self assert: (r countCovering: 1 every: 60) equals: 1.
+  r livenessProbeIntervalSeconds: 90; reaperIntervalSeconds: 60.
+  self assert: r probePassInterval equals: 2
+%
+category: 'tests - counting'
+method: McpLifetimeTest
+testTheIdleDeadlineCountsAgainstTheCadenceActuallyDelivered
+  "The compounding error, and the reason #realizedProbeIntervalSeconds exists. A 90-second probe
+   interval on a 60-second pass really goes out every 120 seconds; dividing a 30-minute timeout by
+   the 90 that was ASKED for would release the gem after twenty minutes of pings."
+  | r |
+  r := McpFixtureRouter new.
+  r sessionIdleTimeoutSeconds: 1800; livenessProbeIntervalSeconds: 90; reaperIntervalSeconds: 60.
+  self assert: r realizedProbeIntervalSeconds equals: 120.
+  self assert: r confirmationsBeforeRelease equals: 15.
+  self assert: r confirmationsBeforeRelease * r realizedProbeIntervalSeconds >= 1800
+%
+category: 'tests - counting'
+method: McpLifetimeTest
 testTheCountsOnlyMoveOnAMaintenancePass
   "The pass IS the clock. A front end that is not running holds no passes, so a suspended host
    advances nothing -- which is the property that replaced the suspend detector."
@@ -560,8 +588,24 @@ testAStreamlessSessionIsReleasedAfterEnoughPasses
   r := McpFixtureRouter new.
   r streamlessIdleTimeoutSeconds: 300; reaperIntervalSeconds: 60.
   sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
-  self assert: r streamlessPassesBeforeRelease equals: 5.
-  1 to: 4 do: [:i | sess notePassWithStream: false].
+  self assert: r streamlessPassesBeforeRelease equals: 6.
+  1 to: 5 do: [:i | sess notePassWithStream: false].
+  self assert: (r reapReasonFor: sess) isNil.
+  sess notePassWithStream: false.
+  self assert: (self includesCS: 'no event stream' in: (r reapReasonFor: sess))
+%
+category: 'tests - unreachable'
+method: McpLifetimeTest
+testTheStreamlessCountPaysForThePassItStartsOn
+  "The pass a session opens on is a fragment of an interval, not a whole one, so N passes prove only
+   N-1 intervals of this server running. The extra pass is what keeps a 60-second timeout from
+   meaning 'any moment now' for a session that opened just before a pass."
+  | r sess |
+  r := McpFixtureRouter new.
+  r streamlessIdleTimeoutSeconds: 60; reaperIntervalSeconds: 60.
+  sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
+  self assert: r streamlessPassesBeforeRelease equals: 2.
+  sess notePassWithStream: false.
   self assert: (r reapReasonFor: sess) isNil.
   sess notePassWithStream: false.
   self assert: (self includesCS: 'no event stream' in: (r reapReasonFor: sess))
@@ -587,7 +631,7 @@ testTheStreamlessFloorAppliesEvenWithADeadline
   r := McpFixtureRouter new.
   r sessionIdleTimeoutSeconds: 1800; streamlessIdleTimeoutSeconds: 120; reaperIntervalSeconds: 60.
   sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
-  1 to: 2 do: [:i | sess notePassWithStream: false].
+  1 to: r streamlessPassesBeforeRelease do: [:i | sess notePassWithStream: false].
   self assert: (self includesCS: 'no event stream' in: (r reapReasonFor: sess))
 %
 category: 'tests - warning'
@@ -640,7 +684,8 @@ testTheShippingDefaultsAreTheDocumentedOnes
   "and what those seconds mean to the reaper"
   self assert: r confirmationsBeforeRelease equals: 15.
   self assert: r probePassInterval equals: 2.
-  self assert: r streamlessPassesBeforeRelease equals: 5.
+  self assert: r realizedProbeIntervalSeconds equals: 120.
+  self assert: r streamlessPassesBeforeRelease equals: 6.
   self assert: r validateTimerConfig == r
 %
 category: 'tests - config'

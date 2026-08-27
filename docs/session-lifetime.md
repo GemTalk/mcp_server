@@ -56,13 +56,24 @@ From the shell, `GS_MCP_IDLE_TIMEOUT` and friends set these on either launcher �
 **Almost nothing here is measured in elapsed time.** The knobs are seconds because that is how a
 deployment thinks; what the reaper counts is derived from them. Idleness is a count of **liveness
 pings the client answered with no work in between** — `sessionIdleTimeoutSeconds ÷
-livenessProbeIntervalSeconds` of them, fifteen at the defaults. Unreachability is a count of
+realizedProbeIntervalSeconds` of them, fifteen at the defaults. Unreachability is a count of
 **maintenance passes with no stream**. Both advance only when the front end is running, so a host
 that suspends simply stops the count where it was: there is no suspend to detect, nothing to forgive,
 and no threshold to get wrong.
-`validateTimerConfig` refuses a combination whose counts would floor to zero before binding a port —
-and `forkOnPort:` checks too, so the message reaches whoever typed the command rather than a
-detached gem's log.
+
+**Every one of those divisions rounds up, and one of them adds a pass.** A configured timeout is a
+floor on what a deployment gets, never a ceiling: 150 seconds against a 60-second pass is three
+passes, not two. The extra pass on the streamless count pays for the one it starts on — a session's
+first pass lands in whatever fragment of an interval was left when it opened, so *N* passes prove
+only *N−1* whole intervals of the server running. Together those two make the guarantee legible:
+**a session is released no sooner than its configured timeout, and no later than one maintenance
+pass after it.** The idle count is taken against the *realized* ping cadence rather than the
+configured one, since a 90-second probe interval on a 60-second pass really fires every 120 seconds,
+and counting against the 90 that was asked for would spend a 30-minute deadline in twenty minutes.
+`validateTimerConfig` refuses a combination whose counts would round up to something other than what
+was written — a probe interval shorter than a pass, or an idle timeout shorter than a probe interval
+— before binding a port, and `forkOnPort:` checks too, so the message reaches whoever typed the
+command rather than a detached gem's log.
 
 **Sessions with no deadline.** `GS_MCP_IDLE_TIMEOUT=none` is the localhost case: a developer who
 comes back hours later resumes rather than re-initializing. The session then lives exactly as long

@@ -942,22 +942,52 @@ reapOnFailedProbe: aBoolean
 %
 category: 'session lifetime'
 method: McpRouter
+countCovering: aTotalSeconds every: aUnitSeconds
+  "How many intervals of aUnitSeconds it takes to COVER aTotalSeconds -- the ceiling of the
+   division, never less than one. Every count the reaper derives from a configured interval comes
+   through here, and the direction is deliberate. Flooring would make a configured timeout the most
+   a deployment could get rather than the least: 150 seconds against a 60-second pass would come out
+   at two passes and fire somewhere under two and a half minutes, when the person who wrote 150
+   plainly meant not before then. Rounding up costs at most one interval of extra gem lifetime,
+   which is cheap; rounding down breaks the promise the number was making."
+  ^((aTotalSeconds + aUnitSeconds - 1) // aUnitSeconds) max: 1
+%
+category: 'session lifetime'
+method: McpRouter
+realizedProbeIntervalSeconds
+  "How far apart the liveness pings ACTUALLY go out, in seconds. #livenessProbeIntervalSeconds is
+   what a deployment asked for; this is what the pass cadence can deliver, and they differ whenever
+   the one does not divide evenly into #reaperIntervalSeconds. Anything measuring a deadline in
+   pings has to count against this one -- see #confirmationsBeforeRelease."
+  ^self probePassInterval * self reaperIntervalSeconds
+%
+category: 'session lifetime'
+method: McpRouter
 confirmationsBeforeRelease
   "How many liveness pings a client must answer, with no work in between, before its worker gem is
    released. The idle deadline, expressed in the only unit this server can actually observe.
    Derived from the two knobs a deployment sets, so configuration still reads in seconds:
-   #sessionIdleTimeoutSeconds of quiet at one ping per #livenessProbeIntervalSeconds. At the
-   defaults that is six answered pings -- about thirty minutes of REACHABLE idleness, which is what
-   the old wall-clock timeout meant on a host that never slept, and a better thing on one that does."
-  ^(self sessionIdleTimeoutSeconds // self livenessProbeIntervalSeconds) max: 1
+   #sessionIdleTimeoutSeconds of quiet at one ping per #realizedProbeIntervalSeconds. At the
+   defaults that is fifteen answered pings -- about thirty minutes of REACHABLE idleness, which is
+   what the old wall-clock timeout meant on a host that never slept, and a better thing on one
+   that does.
+   Against the REALIZED cadence rather than the configured one, which is the difference between a
+   deadline that is honoured and one that quietly halves: a 90-second probe interval on a
+   60-second pass is really sent every 120 seconds, and dividing the timeout by 90 would count
+   fifteen pings where twenty minutes of them had gone by."
+  ^self countCovering: self sessionIdleTimeoutSeconds every: self realizedProbeIntervalSeconds
 %
 category: 'session lifetime'
 method: McpRouter
 probePassInterval
   "How many maintenance passes apart the liveness pings go out. The pass is this server's clock --
    it ticks only while the front end runs -- so a cadence counted in passes cannot drift because the
-   host slept, and needs nobody to notice that it did."
-  ^(self livenessProbeIntervalSeconds // self reaperIntervalSeconds) max: 1
+   host slept, and needs nobody to notice that it did.
+   Rounded up, so a configured interval is the CLOSEST two pings will ever come rather than the
+   furthest apart: a 90-second interval on a 60-second pass sends one every 120 seconds, not every
+   60. See #realizedProbeIntervalSeconds for what that comes to in seconds, which is what the idle
+   deadline is then counted against."
+  ^self countCovering: self livenessProbeIntervalSeconds every: self reaperIntervalSeconds
 %
 category: 'session lifetime'
 method: McpRouter
@@ -983,8 +1013,15 @@ method: McpRouter
 streamlessPassesBeforeRelease
   "How many consecutive passes a session may go with no stream before its gem is released. A client
    that has opened no stream can be asked nothing, so there is no evidence to count and this is the
-   one place the server must give up rather than confirm."
-  ^(self streamlessIdleTimeoutSeconds // self reaperIntervalSeconds) max: 1
+   one place the server must give up rather than confirm.
+   One MORE pass than the timeout divides into, and the extra one is not slack. This count starts at
+   the session's first pass, and that pass lands somewhere in the fragment of a reaper interval left
+   over from whenever the session happened to open -- so N passes prove only N-1 whole intervals of
+   this server running. Without the extra pass a session created just before a pass is released on
+   the next one, which at a 60-second timeout is a release after anything from a moment to a minute.
+   With it the release comes between the configured timeout and one pass later, which is the reading
+   a number in a configuration file invites."
+  ^(self countCovering: self streamlessIdleTimeoutSeconds every: self reaperIntervalSeconds) + 1
 %
 category: 'session lifetime'
 method: McpRouter
@@ -1578,10 +1615,12 @@ validateTimerConfig
    combination that cannot work fails at startup with a clear message instead of silently never
    warning anybody -- the same bargain #validateWorkerConfig makes for the worker class.
    Both invariants have the same shape, and both follow from the reaper counting rather than timing:
-   each derived count is a division, and a division that floors to zero is a rule that never fires.
-   The #max: 1 in those accessors keeps that from being a crash, but a probe interval shorter than a
-   pass, or an idle timeout shorter than a probe interval, is a configuration someone got wrong and
-   should hear about rather than have quietly rounded up."
+   each derived count is a division, and #countCovering:every: rounds it up so that a configured
+   interval is a floor on what a deployment gets rather than a ceiling. That rounding is honest for
+   a remainder and dishonest for a whole interval: an interval shorter than a pass rounds up to a
+   pass, which is not the number that was written down. A probe interval shorter than a pass, or an
+   idle timeout shorter than a probe interval, is a configuration someone got wrong and should hear
+   about rather than have silently multiplied."
   self validateSeconds: sessionIdleTimeoutSeconds named: 'sessionIdleTimeoutSeconds' allowingNil: true.
   self validateSeconds: maxSessionLifetimeSeconds named: 'maxSessionLifetimeSeconds' allowingNil: true.
   self validateSeconds: self streamlessIdleTimeoutSeconds named: 'streamlessIdleTimeoutSeconds' allowingNil: false.
@@ -1604,7 +1643,8 @@ validateTimerConfig
   self streamlessIdleTimeoutSeconds >= self reaperIntervalSeconds ifFalse: [
     ^self error: 'streamlessIdleTimeoutSeconds (' , self streamlessIdleTimeoutSeconds printString
       , 's) is shorter than reaperIntervalSeconds (' , self reaperIntervalSeconds printString
-      , 's), so a session with no stream would be released on its first pass.'].
+      , 's), which is the shortest span the maintenance pass can measure, so the timeout would be '
+      , 'rounded up to one pass and never honoured as written.'].
   self hasSessionIdleDeadline ifFalse: [^self].
   self sessionIdleTimeoutSeconds >= self livenessProbeIntervalSeconds ifFalse: [
     ^self error: 'sessionIdleTimeoutSeconds (' , self sessionIdleTimeoutSeconds printString
