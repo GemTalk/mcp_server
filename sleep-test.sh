@@ -276,45 +276,48 @@ EOF
 
 print_sleep_instructions() {
   . "$META"
-  # Two independent floors. The detector needs a gap of more than suspendDetectionFactor (3) x
-  # reaperIntervalSeconds (60) = 180s, or it reads the pass as merely late. And the sleep has to
-  # exceed the idle timeout, or forgiveness changes nothing and a passing result proves nothing.
-  local idle_s rec
+  # There is no detector floor any more, so there is no threshold a sleep has to clear to be
+  # "seen". A suspend advances no count because no maintenance pass runs, and that is true of a
+  # two-minute nap and an eight-hour night alike. What length still buys is exposure to the one
+  # case that CAN advance a count while the lid is shut: a Power Nap dark wake runs the front end
+  # for a few seconds, and a pass that runs is a pass that counts. Longer is strictly more
+  # informative, which is the opposite of the old advice, where too long merely wasted a night.
+  local idle_s streamless_s passes
   case "$(printf '%s' "$IDLE" | tr 'A-Z' 'a-z')" in
-    none|off|0) idle_s=0 ;;   # no deadline: only the detector's own floor applies
+    none|off|0) idle_s=0 ;;
     *m) idle_s=$(( ${IDLE%[mM]} * 60 )) ;;
     *h) idle_s=$(( ${IDLE%[hH]} * 3600 )) ;;
     *s) idle_s=${IDLE%[sS]} ;;
     *)  idle_s=$IDLE ;;
   esac
-  rec=$(( idle_s > 180 ? idle_s : 180 ))
-  rec=$(( rec * 2 ))
+  streamless_s="${GS_MCP_STREAMLESS_TIMEOUT:-1800}"
+  passes=$(( streamless_s / ${GS_MCP_REAPER_INTERVAL:-60} ))
   echo
   echo "=== ready. Now sleep the Mac. ==="
   echo
-  printf '  Sleep for %s. The floor is %s -- below that the result means nothing.\n' \
-    "$(( rec / 60 )) minutes" "$(( (idle_s + 120) / 60 )) minutes"
-  if [ "$idle_s" -gt 0 ]; then
-    dim "  And on this hardware, longer still: macOS fragments the first ~40 minutes of a sleep into"
-    dim "  20-30s pieces with dark wakes between, and pieces under 3 x the maintenance interval are"
-    dim "  not forgiven at all. Only past that does it settle into pieces of many minutes. A sleep"
-    dim "  short enough to sit entirely in the fragmented phase understates what the detector does."
-  fi
+  echo "  Sleep for as long as you like -- overnight is ideal. There is no minimum."
   echo
-  dim "  Two independent floors, and the sleep has to clear both:"
-  dim "    - the detector ignores a gap under 3 x the maintenance interval, so a sleep under about"
-  dim "      3 minutes is read as a merely-late pass and nothing is forgiven at all;"
-  dim "    - the sleep must EXCEED the ${IDLE} idle timeout, or the session would have survived"
-  dim "      without any of this and a pass would prove nothing."
-  dim "  $(( rec / 60 )) minutes is roughly double the larger of the two, so either outcome is"
-  dim "  unambiguous: the session is there afterwards because the suspend was forgiven, or it is"
-  dim "  gone because it was not."
+  dim "  Nothing here is measured in elapsed time, so there is no gap too short to be forgiven and"
+  dim "  none too long to survive. The front end holds no maintenance passes while it is not"
+  dim "  running, so a suspend of any length advances no count and needs no handling."
+  dim ""
+  dim "  What the length actually buys is dark wakes. Each one lets the front end run a few passes,"
+  dim "  and those DO count: a pass with no stream advances toward release at ${passes} of them"
+  dim "  (streamless ${streamless_s}s / reaper ${GS_MCP_REAPER_INTERVAL:-60}s), and a ping the client is too frozen"
+  dim "  to answer advances toward three. That is the one way a night could still end a session,"
+  dim "  and the only way to find out is to give it a whole night to try."
+  if [ "$idle_s" -gt 0 ]; then
+    dim ""
+    dim "  NOTE: you have an idle deadline set (${IDLE}), so this run also carries a second, expected"
+    dim "  outcome -- the session is released after the client ANSWERS enough pings, which is correct"
+    dim "  behaviour and not a suspend failure. Run with no deadline to isolate the suspend question."
+  fi
   echo
   echo "  Put it to sleep with either:"
   echo "      pmset sleepnow          # no sudo needed"
   echo "      (or just close the lid)"
   echo
-  echo "  Wake it after $(( rec / 60 )) minutes, then run:"
+  echo "  Wake it in the morning, then run:"
   echo "      ./sleep-test.sh check"
   echo
   dim "  Take as long as you like getting to the sleep: a background loop makes a real MCP call"
