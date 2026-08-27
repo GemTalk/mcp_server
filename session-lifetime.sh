@@ -30,10 +30,15 @@
 #                           How long a session survives its client CLOSING the event stream, before
 #                           the worker gem is released. Default 10s. This is the path a shut editor
 #                           tab takes, and the grace exists only to cover a client that closes one
-#                           stream and immediately opens another. `0` and `none` are OPPOSITES here:
-#                           0 releases the gem the moment the socket closes, with no pause for a
-#                           reconnect, while `none` turns the fast release off altogether and leaves
-#                           such a client to GS_MCP_STREAMLESS_TIMEOUT, as it was before.
+#                           stream and opens another ON THE SAME SESSION. Measured, a reopened VS
+#                           Code tab does NOT do that -- it initializes a new session -- so for that
+#                           client the grace is pure delay and 0 is the honest setting. It is kept
+#                           as insurance for the clients and proxies that do reattach, where the
+#                           cost of guessing wrong is a live gem and its uncommitted work.
+#                           `0` and `none` are OPPOSITES here: 0 releases the gem the moment the
+#                           socket closes, with no pause for a reconnect, while `none` turns the
+#                           fast release off altogether and leaves such a client to
+#                           GS_MCP_STREAMLESS_TIMEOUT, as it was before.
 #   GS_MCP_STREAMLESS_TIMEOUT
 #                           The floor for a client that never opened an SSE stream AT ALL.
 #                           Default 60s. Such a client can never be pinged, so there is no evidence

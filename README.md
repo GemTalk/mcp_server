@@ -470,7 +470,8 @@ tools itself (those run in the per-client `McpServer` workers):
   **30 minutes** idle by default (`sessionIdleTimeoutSeconds`, configurable and optional) — or
   sooner, if it fails a liveness probe on the stream it opened. A client that simply **hangs up**
   (a closed editor tab) does not wait for any of that: its socket closing is watched for, and its
-  gem is released about **10 seconds** later. See
+  gem is released about **10 seconds** later — the delay being a grace for a client that might
+  reattach to the same session, which a reopened editor tab does not. See
   [Server-initiated messages](#server-initiated-messages).
 
 Isolation comes from each worker being a separate gem = a separate transaction view, and clients
@@ -558,8 +559,17 @@ loop is already watching the read side, so a client that hangs up is detected wi
 inferred from silence, observed. Such a session gets `streamLossGraceSeconds` (10s) to open another
 stream, and is then released on the spot rather than at the next maintenance pass. Anything the
 client does in the meantime retracts the verdict: a new stream, a call in flight, or any request at
-all. Measured end to end: 10 seconds from closing a VS Code tab to the worker gem being logged out,
-where it used to be half an hour.
+all. Measured end to end over four tab closes: 9.7–10.2 seconds from closing a VS Code tab to the
+worker gem being logged out, where it used to be half an hour.
+
+The grace is **insurance, not a description of what editors do.** Measured on those same closes,
+Claude Code in VS Code does not resume its MCP session across a tab close — it returns as a fresh
+`initialize` on a new session id, so no GET ever arrives for the old one and its grace runs out
+untouched. Reconnects landed 3.8s and 4.3s after the close, well inside the window, and changed
+nothing. The grace is kept for the case the protocol actually allows — a client closing one stream
+and opening another on the same session, which a proxy or a network blip can force — and because the
+cost of guessing wrong the other way is a live client losing its gem and its uncommitted work.
+`GS_MCP_STREAM_LOSS_GRACE=0` releases immediately where no client is expected to reattach.
 
 **An unanswered ping is evidence of death only if it went down the stream the client is still on.**
 A message is written to exactly one stream, and both shipping clients reconnect a dropped standalone

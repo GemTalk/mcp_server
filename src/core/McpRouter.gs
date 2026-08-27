@@ -142,9 +142,19 @@ defaultStreamLossGraceSeconds
   "How long a session outlives its client CLOSING the event stream, before the worker gem is
    released. Ten seconds, and the two bounds are close together: the whole point is to free the gem
    while the person who shut the tab is still looking at the screen, and the only thing the wait is
-   for is a client that closes one stream and opens another. Both shipping clients reconnect
-   promptly when they reconnect at all, so ten seconds is many times the gap that has to be covered.
-   nil turns the fast path off, leaving such a client to #streamlessIdleTimeoutSeconds as before."
+   for is a client that closes one stream and opens another ON THE SAME SESSION.
+   Be clear about which reconnect that is, because the two look alike and only one of them lands
+   here. A client whose standalone GET drops while the client itself keeps running does reattach,
+   promptly, and #verdictAdmissible:forSession: exists because of it. A client whose PROCESS dies --
+   a shut editor tab -- does not: measured over four closes, Claude Code in VS Code comes back as a
+   fresh initialize on a new session id, a new worker gem inside 160ms of the new socket, and no GET
+   ever arrives for the old session. Reconnects at 3.8 and 4.3 seconds sat well inside this grace
+   and retracted nothing, because there was nothing addressed to the old session to retract.
+   So for that client this wait buys nothing but delay, and zero is the honest setting. It is ten by
+   default because the case it covers is real in the protocol, a proxy or a network blip can force
+   it, and the cost of being wrong the other way is a live client losing its gem and whatever it had
+   not committed. nil turns the fast path off, leaving such a client to
+   #streamlessIdleTimeoutSeconds as before."
   ^10
 %
 category: 'session lifetime defaults'
@@ -1085,8 +1095,10 @@ releaseAbandonedSession: sess unlessActiveSince: aStamp
    this session's worker gem unless the client has shown, in any of the ways it can, that it is
    still there. Separate from the wait so that 'the client called while we were waiting' is a state
    a test can put a session into, rather than one it would have to win a race to produce.
-   Three ways to survive. A new stream is the expected one -- a handover that closed before it
-   reopened. A call in flight is the second. The third is the one that is easy to leave out and
+   Three ways to survive. A new stream is the one the grace was written for -- a handover that closed
+   before it reopened -- though it is claimed far less often than that suggests; see
+   #defaultStreamLossGraceSeconds for what a shut editor tab actually does. A call in flight is the
+   second. The third is the one that is easy to leave out and
    expensive to: a client is not obliged to hold a stream AT ALL, and one that is calling tools is
    alive on far better evidence than anything the transport can offer. Without it, a client whose
    stream dropped and which did not reopen one would lose its gem ten seconds later, mid-

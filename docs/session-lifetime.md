@@ -32,10 +32,26 @@ that hangs up, or that never opened a stream, is still released.
 client process, which closes its SSE socket, and the drain loop sees the EOF within one 100 ms poll —
 so the front end knows the client is gone long before any count could say so. It waits
 `streamLossGraceSeconds` for the client to open another stream, and if none arrives, frees the worker
-gem immediately rather than at the next maintenance pass. Measured end to end against a real router:
-**10 seconds** from closing the tab to the gem being logged out. It used to be half an hour, because
-a departure that had actually been observed was being handled by the floor written for a client that
-was never reachable in the first place.
+gem immediately rather than at the next maintenance pass. Measured end to end against a real router
+across four tab closes: **9.7 to 10.2 seconds** from closing the tab to the gem being logged out. It
+used to be half an hour, because a departure that had actually been observed was being handled by the
+floor written for a client that was never reachable in the first place.
+
+**The grace is insurance, and at least one real client never claims it.** Measured on the same four
+closes, Claude Code in VS Code does *not* resume its MCP session across a tab close: what comes back
+is a fresh `initialize` on a new session id — a new worker gem appeared within 160 ms of the new
+socket every time — and no GET ever arrives bearing the old id. The old session's grace therefore
+runs out untouched and it is released on schedule, which is the right answer, reached for the right
+reason: no client returned for it. Reconnects were measured at 3.8 s and 4.3 s, well inside a
+10-second grace, and made no difference. So for this client the grace buys nothing but a
+ten-second delay before a release that was already certain.
+
+It is kept because the case it covers is real in the protocol — MCP lets a client close one stream and
+open another on the same session, and a proxy or a network blip can force exactly that — and because
+the cost of being wrong in the other direction is a client losing a live gem and its uncommitted work
+to a transport hiccup. Set `GS_MCP_STREAM_LOSS_GRACE=0` where every client is known to behave like
+this one, and the release becomes immediate. Do not read the default as a claim that reconnection is
+what editors do; on the evidence here, it is not.
 
 The grace is the one interval here that is a **wait** rather than a measurement, and that is what
 keeps it consistent with the rest: nothing is inferred from how long it lasted. The verdict at the
