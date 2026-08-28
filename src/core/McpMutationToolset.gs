@@ -14,8 +14,20 @@ McpToolset subclass: 'McpMutationToolset'
 expectvalue /Class
 doit
 McpMutationToolset comment: 
-'The tools that change the image and commit: define/redefine a class, compile or delete a method,
-set a class comment, add or remove a symbol dictionary.
+'The tools that change the image: define/redefine a class, compile or delete a method, set a class
+comment, add or remove a symbol dictionary.
+
+THESE TOOLS DO NOT COMMIT (changed 2026-08-28; docs/server-to-client-messaging.md 10.11). Each one
+committed at the end until then, which was the only way a change could outlive the call -- the
+dispatcher aborted before every tool, so nothing else survived. Now that the pre-call refresh keeps
+uncommitted work (System continueTransaction), autocommitting is a liability rather than a feature:
+it publishes a half-finished class redefinition whose method recompiles failed, it makes it
+impossible to run the tests BEFORE deciding to keep a change, and it puts a commit -- the one
+operation that can fail on conflict and jam the session -- inside seven tools that have no
+business reporting one. `commit` is now the only tool that commits, and everything measured here
+is undone by `abort`: a method, a class binding, a shape-changing redefinition with its recompiled
+methods (the class history shrinks back too) and, contrary to the obvious guess, a symbol
+dictionary added to or removed from the user''s symbol list.
 
 NONE are read-only-safe (readOnlySafeToolNames is inherited, i.e. empty), so a read-only session
 drops this toolset whole. Every handler additionally passes through the inherited kernel guard
@@ -68,14 +80,13 @@ recompileMethodsFrom: oldClass into: newClass named: classNameSymbol
         environmentId: (src compiledMethodAt: sel) environmentId.
         nil] on: CompileError do: [:ex | ex errorDetails].
       errs ifNotNil: [failures add: (Array with: side with: sel with: errs)]]].
-  System commitTransaction.
   classNameString := classNameSymbol asString.
   s := WriteStream on: String new.
   s nextPutAll: 'Redefined ' , classNameString , '; recompiled ' , (total - failures size) printString
     , '/' , total printString , ' methods'.
   failures isEmpty
-    ifTrue: [s nextPutAll: '; all recompiled. Committed.']
-    ifFalse: [s nextPutAll: '; ' , failures size printString , ' failed (committed anyway):'; nextPut: Character lf.
+    ifTrue: [s nextPutAll: '; all recompiled.']
+    ifFalse: [s nextPutAll: '; ' , failures size printString , ' failed:'; nextPut: Character lf.
       failures do: [:f |
         s nextPutAll: '  ' , (f at: 1) , ' ' , classNameString , '>>' , (f at: 2) asString , ' - ' , (f at: 3) printString;
           nextPut: Character lf]].
@@ -92,10 +103,10 @@ registerOn: aToolRegistry
     (Dictionary new at: 'dictionaryName' put: (self propString: 'Name of the symbol dictionary'); yourself)
     required: (Array with: 'dictionaryName').
   aToolRegistry name: 'add_dictionary'
-    description: 'Create a new symbol dictionary, append it to the user symbol list, and commit.'
+    description: 'Create a new symbol dictionary and append it to the user symbol list. Not committed: call commit to persist, abort to discard.'
     inputSchema: dictArg do: [:args | self tool_add_dictionary: args].
   aToolRegistry name: 'compile_class_definition'
-    description: 'Evaluate a class-definition expression (e.g. Object subclass: ... inDictionary: ...), then commit. The source must evaluate to a class; other expressions are rejected (use execute_code for those). On a shape-changing redefinition of an existing class, by default recompiles its existing methods onto the new version (a raw redefine drops them) and reports any that fail; refused if the class has subclasses.'
+    description: 'Evaluate a class-definition expression (e.g. Object subclass: ... inDictionary: ...). Not committed: call commit to persist, abort to discard (which restores the previous class and its methods intact). The source must evaluate to a class; other expressions are rejected (use execute_code for those). On a shape-changing redefinition of an existing class, by default recompiles its existing methods onto the new version (a raw redefine drops them) and reports any that fail; refused if the class has subclasses.'
     inputSchema: (self objectSchema:
       (Dictionary new
         at: 'source' put: (self propString: 'Full class-definition Smalltalk expression including the subclass: send and inDictionary:');
@@ -104,7 +115,7 @@ registerOn: aToolRegistry
       required: (Array with: 'source'))
     do: [:args | self tool_compile_class_definition: args].
   aToolRegistry name: 'compile_method'
-    description: 'Compile (add or update) a method on a class, then commit. Set meta=true for class-side. Category defaults to "mcp".'
+    description: 'Compile (add or update) a method on a class. Not committed: call commit to persist, abort to discard. The method is usable in this session immediately, so tests can be run against it before deciding to commit. Set meta=true for class-side. Category defaults to "mcp".'
     inputSchema: (self objectSchema:
       (Dictionary new
         at: 'className' put: (self propString: 'Name of the class');
@@ -115,10 +126,10 @@ registerOn: aToolRegistry
       required: (Array with: 'className' with: 'source'))
     do: [:args | self tool_compile_method: args].
   aToolRegistry name: 'delete_class'
-    description: 'Remove a class from its dictionary and commit. Destructive.'
+    description: 'Remove a class from its dictionary. Destructive. Not committed: call commit to persist, abort to discard.'
     inputSchema: classArg do: [:args | self tool_delete_class: args].
   aToolRegistry name: 'delete_method'
-    description: 'Remove a method from a class and commit. Set meta=true for the class-side method. Destructive.'
+    description: 'Remove a method from a class. Destructive. Not committed: call commit to persist, abort to discard. Set meta=true for the class-side method.'
     inputSchema: (self objectSchema:
       (Dictionary new
         at: 'className' put: (self propString: 'Name of the class');
@@ -128,10 +139,10 @@ registerOn: aToolRegistry
       required: (Array with: 'className' with: 'selector'))
     do: [:args | self tool_delete_method: args].
   aToolRegistry name: 'remove_dictionary'
-    description: 'Remove a symbol dictionary from the user symbol list and commit. Destructive.'
+    description: 'Remove a symbol dictionary from the user symbol list. Destructive. Not committed: call commit to persist, abort to discard.'
     inputSchema: dictArg do: [:args | self tool_remove_dictionary: args].
   aToolRegistry name: 'set_class_comment'
-    description: 'Set (replace) the class comment and commit.'
+    description: 'Set (replace) the class comment. Not committed: call commit to persist, abort to discard.'
     inputSchema: (self objectSchema:
       (Dictionary new
         at: 'className' put: (self propString: 'Name of the class');
@@ -151,13 +162,12 @@ tool_add_dictionary: args
     ifFalse: [up := System myUserProfile.
       d := up createDictionary: name asSymbol.
       up insertDictionary: d at: up symbolList size + 1.
-      System commitTransaction.
       'Created dictionary: ' , name]
 %
 category: 'tools - mutation'
 method: McpMutationToolset
 tool_compile_class_definition: args
-  "Evaluate a class-definition expression and commit. If recompileMethods is true (default)
+  "Evaluate a class-definition expression. Does NOT commit (see the class comment). If recompileMethods is true (default)
    and this is a shape-changing redefinition of an existing class (which would otherwise drop
    all its methods), recompile the prior version's methods onto the new version and report any
    that fail. Refused when the class has subclasses (handle the hierarchy manually, or pass
@@ -174,13 +184,14 @@ tool_compile_class_definition: args
       , (oldClass subclasses collect: [:c | c name asString]) asArray printString
       , '. Recompiling methods across a subclass hierarchy is unsupported; pass recompileMethods=false to redefine without preserving methods, or update the hierarchy manually.'].
   newClass := source evaluate.
+  "NB no abort here. Evaluating the source may well have changed something, but aborting would
+   also destroy every unrelated uncommitted change the caller had staged -- a failure of THIS call
+   must not discard work from earlier ones. Report it and let the client decide (abort or commit)."
   (newClass isKindOf: Behavior) ifFalse: [
-    System abortTransaction.
     ^'Source did not evaluate to a class (got ' , newClass class name asString
       , '). Use execute_code to evaluate arbitrary expressions.'].
   (recompile not or: [oldClass isNil or: [oldClass == newClass]]) ifTrue: [
-    System commitTransaction.
-    ^'Compiled and committed class: ' , newClass name asString].
+    ^'Compiled class: ' , newClass name asString].
   ^self recompileMethodsFrom: oldClass into: newClass named: name
 %
 category: 'tools - mutation'
@@ -197,9 +208,11 @@ tool_compile_method: args
         compileMethod: (args at: 'source')
         dictionaries: System myUserProfile symbolList
         category: (args at: 'category' ifAbsent: ['mcp']).
+      "A failed compileMethod: installs nothing, so there is nothing to undo -- and an abort here
+       would discard the caller's unrelated uncommitted work along with it."
       errs isNil
-        ifTrue: [System commitTransaction. 'Compiled ' , (args at: 'className') , ' and committed.']
-        ifFalse: [System abortTransaction. 'Compile errors: ' , errs printString]]
+        ifTrue: ['Compiled ' , (args at: 'className')]
+        ifFalse: ['Compile errors: ' , errs printString]]
 %
 category: 'tools - mutation'
 method: McpMutationToolset
@@ -215,8 +228,7 @@ tool_delete_class: args
         ifTrue: ['Class is not resident in a dictionary: ' , (args at: 'className')]
         ifFalse: [dict := arr at: 1.
           dict removeKey: (arr at: 2).
-          System commitTransaction.
-          'Deleted class ' , (args at: 'className') , ' from ' , dict name asString , ' and committed.']]
+          'Deleted class ' , (args at: 'className') , ' from ' , dict name asString]]
 %
 category: 'tools - mutation'
 method: McpMutationToolset
@@ -232,8 +244,7 @@ tool_delete_method: args
       (target selectors includes: sel)
         ifFalse: ['Method not found: ' , (args at: 'className') , '>>' , (args at: 'selector')]
         ifTrue: [target removeSelector: sel.
-          System commitTransaction.
-          'Deleted method ' , (args at: 'className') , '>>' , (args at: 'selector') , ' and committed.']]
+          'Deleted method ' , (args at: 'className') , '>>' , (args at: 'selector')]]
 %
 category: 'tools - mutation'
 method: McpMutationToolset
@@ -247,7 +258,6 @@ tool_remove_dictionary: args
       up := System myUserProfile.
       up removeDictionaryAt: (up symbolList indexOf: dict).
       up symbolList do: [:d | (d at: name asSymbol ifAbsent: [nil]) == dict ifTrue: [d removeKey: name asSymbol ifAbsent: [nil]]].
-      System commitTransaction.
       'Removed dictionary: ' , name]
 %
 category: 'tools - mutation'
@@ -258,8 +268,7 @@ tool_set_class_comment: args
   ^cls isNil ifTrue: ['Class not found: ' , (args at: 'className')] ifFalse: [
     self assertMutableClass: cls.
     cls comment: (args at: 'comment').
-    System commitTransaction.
-    'Comment set on ' , cls name asString , ' and committed.']
+    'Comment set on ' , cls name asString]
 %
 category: 'accessing'
 method: McpMutationToolset

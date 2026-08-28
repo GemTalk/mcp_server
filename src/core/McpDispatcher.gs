@@ -3,7 +3,7 @@ set compile_env: 0
 expectvalue /Class
 doit
 Object subclass: 'McpDispatcher'
-  instVarNames: #( toolRegistry server)
+  instVarNames: #( toolRegistry server viewRefreshError)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -58,6 +58,31 @@ withToolRegistry: aRegistry server: aServerOrNil
   ^self new setRegistry: aRegistry server: aServerOrNil
 %
 ! ------------------- Instance methods for McpDispatcher
+category: 'transaction'
+method: McpDispatcher
+annotateContent: aResultDict
+  "Append the session-state note (transactionNote) to an already-built tools/call envelope's text,
+   or answer it unchanged when there is nothing to say. Applied to BOTH the success and the error
+   envelope, because a tool that raised is exactly when dirty state most needs reporting.
+
+   WHY AFTER THE TOOL AND NOT BEFORE. The note describes the state the client is actually left in,
+   not the state the call arrived in. That is what lets `abort` clear a pending commit conflict and
+   answer 'Transaction aborted' with no contradicting warning stapled to it, while abort itself
+   stays two lines that know nothing about any of this -- the alternative, annotating from the
+   pre-call state, would need every transaction tool to suppress a note the dispatcher had already
+   decided to add.
+
+   structuredContent is deliberately NOT touched: its error kind and message stay exactly what the
+   tool raised, so a client branching on the kind is unaffected by prose meant for the model."
+  | note content item |
+  note := self transactionNote.
+  note isNil ifTrue: [^aResultDict].
+  content := aResultDict at: 'content' ifAbsent: [nil].
+  (content isNil or: [content isEmpty]) ifTrue: [^aResultDict].
+  item := content at: 1.
+  item at: 'text' put: (item at: 'text' ifAbsent: ['']) , (String with: Character lf) , note.
+  ^aResultDict
+%
 category: 'responses'
 method: McpDispatcher
 contentText: aString isError: aBool
@@ -127,7 +152,12 @@ handleToolsCall: params id: id
        These carry actionable feedback the model can use to self-correct and retry, so the spec
        wants them in the result, not as a JSON-RPC error. (Before 2025-11-25 we answered -32602
        here too; only the envelope changed -- the check still runs BEFORE the tool is invoked, so
-       a rejected call still has no side effect.)"
+       a rejected call still has no side effect.)
+
+   THE VIEW, AND WHAT SURVIVES A CALL. The pre-call refresh keeps this session's uncommitted work
+   (refreshViewForCall); the post-call annotation reports what state the call left behind
+   (annotateContent:). Together they are what makes a multi-call workflow -- compile, run the
+   tests, then commit -- possible at all. No tool commits: see McpMutationToolset."
   | name tool args argErr |
   name := params at: 'name' ifAbsent: [nil].
   name isNil ifTrue: [^self errorFor: id code: -32602 message: 'Missing tool name' kind: 'invalidParams'].
@@ -144,10 +174,11 @@ handleToolsCall: params id: id
   argErr := tool validationErrorFor: args.
   argErr ifNotNil: [
     ^self resultFor: id with: (self structuredErrorContent: argErr kind: 'invalidParams')].
-  System abortTransaction.
-  ^[ self resultFor: id with: (self contentText: (tool callWith: args) isError: false) ]
+  self refreshViewForCall.
+  ^[ self resultFor: id
+       with: (self annotateContent: (self contentText: (tool callWith: args) isError: false)) ]
    on: Error
-   do: [:ex | self resultFor: id with: (self toolErrorContentFrom: ex) ]
+   do: [:ex | self resultFor: id with: (self annotateContent: (self toolErrorContentFrom: ex)) ]
 %
 category: 'responses'
 method: McpDispatcher
@@ -214,6 +245,31 @@ readOnlyGated: aToolName
    False when there is no server (isolated dispatcher tests), so an unknown tool stays 'notFound'."
   ^server notNil
     and: [(server allToolNames includes: aToolName) and: [(server isToolAllowed: aToolName) not]]
+%
+category: 'transaction'
+method: McpDispatcher
+refreshViewForCall
+  "Give the tool that is about to run a current view of other sessions' committed work WITHOUT
+   destroying this session's uncommitted changes.
+
+   This sent `System abortTransaction` until 2026-08-28. The freshness was right and is still
+   wanted -- a gem that never refreshes reads stale source and pins pages -- but the abort bought
+   it by emptying the transaction, which meant `commit` committed a transaction emptied a
+   microsecond earlier, and no work could survive from one call to the next at all
+   (docs/server-to-client-messaging.md 10.11). continueTransaction buys the same freshness and
+   destroys nothing.
+
+   NEVER RAISES, and decides nothing. continueTransaction is illegal in exactly two states, both
+   measured on 3.7.5/3.7.6:
+     nested transaction               ImproperOperation 2717
+     commit failed on conflict        TransactionError 2409 -- and STICKY, raising on every later
+                                      call until someone aborts
+   Raising here would be worst precisely in the second case: it would poison every subsequent call
+   INCLUDING the `abort` that is the only way out. So a failure is RECORDED rather than raised --
+   the tool runs on the view it has, and transactionNote reports afterwards what could not be done
+   and why. Always assigns, so what is reported is always this call's answer."
+  viewRefreshError := McpToolset refreshView.
+  ^self
 %
 category: 'responses'
 method: McpDispatcher
@@ -296,4 +352,27 @@ toolsListResult
   d := Dictionary new.
   d at: 'tools' put: (toolRegistry descriptors select: [:desc | self toolAllowed: (desc at: 'name')]).
   ^d
+%
+category: 'transaction'
+method: McpDispatcher
+transactionNote
+  "One line of session state the model must act on, or nil when there is nothing to say. Appended
+   to every tool result by annotateContent:, and computed from the state left AFTER the tool ran.
+
+   Kept to one line and one subject on purpose: the tool's own text says what the tool did, this
+   says what the SESSION now needs, and the transaction model that makes both intelligible is
+   stated once in the initialize instructions rather than repeated per call.
+
+   Ordered most-blocking first. A view that could not be refreshed subsumes everything else: the
+   session is reading stale data and cannot commit until it is aborted, and GemStone's own text for
+   the error says which of the two causes it was, so it is quoted rather than re-worded."
+  viewRefreshError ifNotNil: [:ex | | why |
+    why := [ex description] on: Error do: [:e | 'reason unavailable'].
+    ^'[session] This session''s view could NOT be refreshed and is stale: ' , why
+      , ' Call abort to recover -- it is the only operation that clears this state, and it '
+      , 'discards any uncommitted changes.'].
+  System needsCommit ifTrue: [
+    ^'[session] You have uncommitted changes. No tool commits for you: call commit to persist '
+      , 'them or abort to discard them. They are lost if this session ends first.'].
+  ^nil
 %

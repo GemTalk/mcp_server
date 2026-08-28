@@ -74,6 +74,29 @@ capResult: aString
     ifTrue: [(aString copyFrom: 1 to: 50000) , ' ...[truncated]']
     ifFalse: [aString]
 %
+category: 'transaction'
+classmethod: McpToolset
+commitConflictReport
+  "A short human-readable summary of the last commit's conflicts: each conflict category and how
+   many objects it names, e.g. 'Write-Write(2)'. Deliberately NOT the conflict dictionary's
+   printString -- that holds the conflicting OBJECTS themselves and can be enormous.
+   #commitResult and #RcReadSet are skipped: the first is the verdict rather than a conflict, and
+   the second is populated on success too. The remaining keys are read generically and sorted, so
+   this reports a category a future version adds without naming any version's set here."
+  | conflicts keys s any |
+  conflicts := [System transactionConflicts] on: Error do: [:e | nil].
+  conflicts isNil ifTrue: [^'(conflict details unavailable)'].
+  keys := (conflicts keys reject: [:k | k == #commitResult or: [k == #RcReadSet]]) asSortedCollection.
+  s := WriteStream on: String new.
+  any := false.
+  keys do: [:k | | objs |
+    objs := conflicts at: k ifAbsent: [nil].
+    (objs notNil and: [objs isEmpty not]) ifTrue: [
+      any ifTrue: [s nextPutAll: ', '].
+      s nextPutAll: k asString , '(' , objs size printString , ')'.
+      any := true]].
+  ^any ifTrue: [s contents] ifFalse: ['(no conflict category reported)']
+%
 category: 'private'
 classmethod: McpToolset
 dictNamed: aName
@@ -121,6 +144,24 @@ propString: aDescription
   d at: 'type' put: 'string'.
   d at: 'description' put: aDescription.
   ^d
+%
+category: 'transaction'
+classmethod: McpToolset
+refreshView
+  "Take a current view of the work other sessions have committed while KEEPING this session's
+   uncommitted changes (System continueTransaction). Answers nil when the view was refreshed, or
+   the Error that stopped it -- it never raises, so a caller decides what a failure means.
+
+   ATTEMPTING IT IS THE TEST. continueTransaction is illegal in two states, and an earlier version
+   of this predicted them by reading `System transactionConflicts at: #commitResult`, which was
+   wrong in a way worth recording: continueTransaction itself sets that to #readOnly, so a session
+   was reported as jammed from its first successful refresh onward. Asking the image to do the
+   thing and reporting what it said cannot drift from what is actually true, and needs no list of
+   this version's result symbols. The two known failures, measured on 3.7.5 and 3.7.6:
+     ImproperOperation 2717   inside a nested transaction
+     TransactionError  2409   after a commit failed on conflict -- STICKY, and cleared only by an
+                              abort, so it will keep answering here until one happens."
+  ^[System continueTransaction. nil] on: Error do: [:ex | ex]
 %
 category: 'private'
 classmethod: McpToolset
@@ -170,6 +211,11 @@ method: McpToolset
 capResult: aString
   ^self class capResult: aString
 %
+category: 'transaction'
+method: McpToolset
+commitConflictReport
+  ^self class commitConflictReport
+%
 category: 'private'
 method: McpToolset
 dictNamed: aName
@@ -197,6 +243,11 @@ readOnlySafeToolNames
    the default is none, so a tool this toolset does not list here is gated in read-only mode --
    including a future one its author forgot to classify."
   ^#()
+%
+category: 'transaction'
+method: McpToolset
+refreshView
+  ^self class refreshView
 %
 category: 'registration'
 method: McpToolset

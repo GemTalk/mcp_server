@@ -228,10 +228,20 @@ with no session id to key it on.
 
 | Tool | Arguments | Result |
 |------|-----------|--------|
-| `abort` | – | abort the transaction, refresh the view |
-| `commit` | – | commit the transaction |
-| `refresh` | – | refresh the view to see other sessions' commits |
+| `abort` | – | discard uncommitted changes and refresh the view *(destructive)* |
+| `commit` | – | persist this session's changes. **The only tool that commits** |
+| `refresh` | – | refresh the view to see other sessions' commits, **keeping** uncommitted changes |
 | `status` | – | session user, id, stone, uncommitted-changes flag |
+
+A worker gem sits in one long-lived GemStone transaction, and since 2026-08-28 a change made by one
+tool call is still there for the next one: every call is preceded by `System continueTransaction`,
+which takes a current view of other sessions' commits without discarding this session's uncommitted
+work. So the ordinary Smalltalk loop — compile, run the tests against what you compiled, *then*
+commit — works across calls. Nothing commits on the client's behalf; a result whose session has
+uncommitted changes carries a one-line `[session]` note saying so. Until 2026-08-28 the dispatcher
+sent `System abortTransaction` before every tool instead, which meant no change survived a call and
+`commit` committed a transaction emptied a microsecond earlier — see
+`docs/server-to-client-messaging.md` 10.11.
 
 **Listing**
 
@@ -264,15 +274,21 @@ with no session id to key it on.
 
 **Mutation**
 
+None of these commit — call `commit` when you want the change to outlive the session, or `abort` to
+throw it away. Every one of them is undone by `abort`, including the two that look like they would
+not be: a shape-changing class redefinition (the previous class comes back with its methods, and the
+class history shrinks back with it) and a symbol dictionary added to or removed from the user's
+symbol list.
+
 | Tool | Arguments | Result |
 |------|-----------|--------|
-| `add_dictionary` | `dictionaryName` | create + append a dictionary, commit |
-| `compile_class_definition` | `source`, `recompileMethods?` | evaluate a class-definition expression, commit; the source must evaluate to a class (other expressions are rejected — use `execute_code`); on a shape change, by default recompiles the class's methods onto the new version and reports any that fail (refused if it has subclasses) |
-| `compile_method` | `className`, `source`, `category?`, `meta?` | compile a method, commit |
-| `delete_class` | `className` | remove a class, commit *(destructive)* |
-| `delete_method` | `className`, `selector`, `meta?` | remove a method, commit *(destructive)* |
-| `remove_dictionary` | `dictionaryName` | remove a dictionary, commit *(destructive)* |
-| `set_class_comment` | `className`, `comment` | set the class comment, commit |
+| `add_dictionary` | `dictionaryName` | create + append a dictionary |
+| `compile_class_definition` | `source`, `recompileMethods?` | evaluate a class-definition expression; the source must evaluate to a class (other expressions are rejected — use `execute_code`); on a shape change, by default recompiles the class's methods onto the new version and reports any that fail (refused if it has subclasses) |
+| `compile_method` | `className`, `source`, `category?`, `meta?` | compile a method |
+| `delete_class` | `className` | remove a class *(destructive)* |
+| `delete_method` | `className`, `selector`, `meta?` | remove a method *(destructive)* |
+| `remove_dictionary` | `dictionaryName` | remove a dictionary *(destructive)* |
+| `set_class_comment` | `className`, `comment` | set the class comment |
 
 **Testing (SUnit)**
 

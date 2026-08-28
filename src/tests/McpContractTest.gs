@@ -73,6 +73,16 @@ savingReadOnlyDo: aBlock
   SessionTemps current removeKey: #McpReadOnly ifAbsent: [nil].
   ^[aBlock value] ensure: [SessionTemps current removeKey: #McpReadOnly ifAbsent: [nil]]
 %
+category: 'running'
+method: McpContractTest
+setUp
+  "Start every test on a clean transaction. These tests assert the EXACT text of a tools/call
+   result, and since 2026-08-28 a result carries a trailing session note whenever the session has
+   uncommitted changes (McpDispatcher>>transactionNote) -- so ambient dirt left by whatever ran
+   before would change the bytes under an equality assertion. Aborting here also makes each test
+   independent of the order the suite runs in, which nothing guaranteed before."
+  System abortTransaction
+%
 category: 'tests - guard'
 method: McpContractTest
 testAssertMutableClassRaisesRefused

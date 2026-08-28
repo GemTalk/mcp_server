@@ -101,8 +101,13 @@ sessionTools
 category: 'running'
 method: McpToolTest
 tearDown
-  "Force-remove any throwaway fixtures a test created, then commit, so nothing leaks."
+  "Force-remove any throwaway fixtures a test created, then commit, so nothing leaks.
+   Aborts FIRST: since the mutation tools stopped committing (McpMutationToolset), a test can end
+   with uncommitted changes, and without this the commit below would persist them instead of the
+   removals alone. It also clears a deliberately-provoked commit conflict, which would otherwise
+   make that commit fail and leak the fixture."
   | up dict |
+  System abortTransaction.
   up := System myUserProfile.
   #(McpTestSub McpTestFixture McpTestSuiteFixture) do: [:sym |
     (up objectNamed: sym) ifNotNil: [:cls |
@@ -159,7 +164,7 @@ testCompileClassDefinition
   | out |
   out := self mutationTools tool_compile_class_definition: (self oneArg: 'source' value:
     'Object subclass: ''McpTestFixture'' instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()').
-  self assert: (self includesCS: 'committed class: McpTestFixture' in: out).
+  self assert: (self includesCS: 'Compiled class: McpTestFixture' in: out).
   self assert: (System myUserProfile objectNamed: #McpTestFixture) notNil
 %
 category: 'tools - mutation'
@@ -239,7 +244,7 @@ testCompileMethod
   self createFixtureClass.
   out := self mutationTools tool_compile_method:
     (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'source' put: 'answer ^42'; at: 'category' put: 'tmp'; yourself).
-  self assert: (self includesCS: 'and committed' in: out).
+  self assert: (self includesCS: 'Compiled McpTestFixture' in: out).
   self assert: ((System myUserProfile objectNamed: #McpTestFixture) canUnderstand: #answer)
 %
 category: 'tools - mutation'
@@ -250,7 +255,7 @@ testCompileMethodMeta
   cls := self createFixtureClass.
   out := self mutationTools tool_compile_method:
     (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'source' put: 'classAnswer ^42'; at: 'category' put: 'tmp'; at: 'meta' put: true; yourself).
-  self assert: (self includesCS: 'and committed' in: out).
+  self assert: (self includesCS: 'Compiled McpTestFixture' in: out).
   self assert: (cls class canUnderstand: #classAnswer).
   self deny: (cls canUnderstand: #classAnswer)
 %
@@ -563,22 +568,58 @@ method: McpToolTest
 testListTestClasses
   self assert: (self includesCS: 'SUnitTest' in: (self testingTools tool_list_test_classes: Dictionary new))
 %
+category: 'tools - mutation'
+method: McpToolTest
+testMutationToolsDoNotCommit
+  "Since 2026-08-28 no mutation tool commits: commit is the only tool that does. Compile a method
+   through the tool, abort with the primitive, and the method must be GONE -- the mirror of
+   testCommit, which proves the same abort cannot touch what commit persisted.
+
+   This is what makes compile -> run the tests -> commit possible: the method is live in this
+   session (asserted before the abort) without being published to anyone else."
+  | cls out |
+  cls := self createFixtureClass.
+  out := self mutationTools tool_compile_method:
+    (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'source' put: 'uncommittedAnswer ^42'; yourself).
+  self assert: (self includesCS: 'Compiled McpTestFixture' in: out).
+  self deny: (self includesCS: 'committed' in: out).
+  self assert: (cls canUnderstand: #uncommittedAnswer).
+  self assert: System needsCommit.
+  System abortTransaction.
+  self deny: ((System myUserProfile objectNamed: #McpTestFixture) canUnderstand: #uncommittedAnswer)
+%
 category: 'tools - session'
 method: McpToolTest
 testRefresh
-  "tool_refresh reveals the committed view, discarding uncommitted work (it is
-   System abortTransaction under a friendlier name). Commit a fixture baseline, change its
-   comment without committing, refresh, and confirm the committed comment is restored.
-   A true cross-session refresh (another gem commits, we see it) is an integration concern,
-   not a unit test. (tearDown removes McpTestFixture.)"
-  | cls out baseline |
+  "tool_refresh must KEEP uncommitted work while taking a current view (System
+   continueTransaction). Until 2026-08-28 it was abortTransaction under a friendlier name, so this
+   test asserted the opposite: that refresh discarded the caller's change. Commit a fixture
+   baseline, change its comment without committing, refresh, and confirm the change SURVIVES and
+   the transaction is still dirty. A true cross-session refresh (another gem commits, we see it)
+   is an integration concern, not a unit test. (tearDown removes McpTestFixture.)"
+  | cls out changed |
   cls := self createFixtureClass.
-  baseline := cls comment.
-  cls comment: 'uncommitted - should be dropped by refresh'.
-  self assert: (cls comment = 'uncommitted - should be dropped by refresh').
+  changed := 'uncommitted - must SURVIVE refresh'.
+  cls comment: changed.
   out := self sessionTools tool_refresh: Dictionary new.
   self assert: (self includesCS: 'refreshed' in: out).
-  self assert: (cls comment = baseline)
+  self assert: (cls comment = changed).
+  self assert: System needsCommit
+%
+category: 'tools - session'
+method: McpToolTest
+testRefreshRefusesWhenNestedTransaction
+  "continueTransaction is illegal inside a nested transaction (ImproperOperation 2717), so
+   tool_refresh refuses with a message naming the state rather than letting the raw error out --
+   the recovery move differs from the other illegal state's, and the caller has to know which."
+  | raised |
+  System beginNestedTransaction.
+  raised := [self sessionTools tool_refresh: Dictionary new. nil]
+    on: McpError do: [:ex | ex].
+  System abortTransaction.
+  self assert: raised notNil.
+  self assert: raised kind equals: #refused.
+  self assert: (self includesCS: 'nested transaction' in: raised description)
 %
 category: 'tools - mutation'
 method: McpToolTest
@@ -655,7 +696,7 @@ testSetClassComment
   self createFixtureClass.
   out := self mutationTools tool_set_class_comment:
     (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'comment' put: 'hello there'; yourself).
-  self assert: (self includesCS: 'committed' in: out).
+  self assert: (self includesCS: 'Comment set on McpTestFixture' in: out).
   self assert: (System myUserProfile objectNamed: #McpTestFixture) comment equals: 'hello there'
 %
 category: 'tools - session'
