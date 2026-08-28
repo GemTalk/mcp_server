@@ -422,6 +422,65 @@ testIntervalsTravelToAForkedChild
   "reapOnFailedProbe travelled, but is FORCED on where there is no deadline"
   self assert: child reapOnFailedProbe
 %
+category: 'tests - lifetime note'
+method: McpLifetimeTest
+testLifetimeNoteIsNilWhenNothingBoundsTheSession
+  "No deadline and no idle rule means nothing to warn about, and the worker's uncommitted-changes
+   warning falls back to its unqualified form rather than inventing a bound."
+  | r sess |
+  r := McpFixtureRouter new.
+  r applyConfig: (Dictionary new at: 'sessionIdleTimeoutSeconds' put: nil; yourself).
+  sess := self streamedSessionOn: r.
+  self assert: (r lifetimeNoteFor: sess) isNil
+%
+category: 'tests - lifetime note'
+method: McpLifetimeTest
+testLifetimeNoteNamesTheCapWhenTheCapIsTheDeadline
+  "A cap and a credential can both be set, and the client can do something about only one of them --
+   so the note has to say WHICH, and it works that out from the start time rather than storing it."
+  | r sess |
+  r := McpFixtureRouter new.
+  r applyConfig: (Dictionary new at: 'maxSessionLifetimeSeconds' put: 1800; yourself).
+  sess := self streamedSessionOn: r.
+  sess expiresAtSeconds: sess startedAtSeconds + 1800.
+  self assert: (self includesCS: 'session lifetime cap' in: (r lifetimeNoteFor: sess)).
+  self deny: (self includesCS: 'credential' in: (r lifetimeNoteFor: sess))
+%
+category: 'tests - lifetime note'
+method: McpLifetimeTest
+testLifetimeNoteNamesTheCredentialAndThatRefreshingExtendsIt
+  "A deadline earlier than the cap came from the credential, and refreshing one buys more life
+   (10.10) -- which is the difference worth telling the client about."
+  | r sess |
+  r := McpFixtureRouter new.
+  r applyConfig: (Dictionary new at: 'maxSessionLifetimeSeconds' put: 1800; yourself).
+  sess := self streamedSessionOn: r.
+  sess expiresAtSeconds: System timeGmt + 600.
+  self assert: (self includesCS: 'credential' in: (r lifetimeNoteFor: sess)).
+  self assert: (self includesCS: 'refreshing' in: (r lifetimeNoteFor: sess))
+%
+category: 'tests - lifetime note'
+method: McpLifetimeTest
+testLifetimeNoteQuotesTheIdleDeadlineForAStreamedSession
+  "The bound a working client controls: it goes on holding its gem by continuing to call."
+  | r sess |
+  r := McpFixtureRouter new.
+  sess := self streamedSessionOn: r.
+  self assert: (self includesCS: 'of inactivity' in: (r lifetimeNoteFor: sess))
+%
+category: 'tests - lifetime note'
+method: McpLifetimeTest
+testLifetimeNoteQuotesTheStreamlessFloorWhenNoStreamIsOpen
+  "With no stream, liveness can ask nothing, so the give-up rule is what will actually fire --
+   typically far sooner than the idle deadline. Quoting the idle deadline here would be a
+   comfortable lie to a client whose gem is about to go in a fraction of the time."
+  | r sess note |
+  r := McpFixtureRouter new.
+  sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
+  note := r lifetimeNoteFor: sess.
+  self assert: (self includesCS: 'no event stream' in: note).
+  self deny: (self includesCS: 'inactivity' in: note)
+%
 category: 'tests - expiry'
 method: McpLifetimeTest
 testMaxSessionLifetimeBecomesAnExpiryAtOpen

@@ -156,12 +156,24 @@ expiresAtSeconds: aSecondOrNil
 category: 'routing'
 method: McpSession
 forward: aRawJsonString
+  "Forward with no lifetime note -- the direct form, kept for callers with no router policy to
+   report (the tests, and any embedder driving a session itself)."
+  ^self forward: aRawJsonString lifetimeNote: nil
+%
+category: 'requests'
+method: McpSession
+forward: aRawJsonString lifetimeNote: aStringOrNil
   "Run a JSON-RPC request in this client's worker gem (an isolated session) and answer the JSON
    response string ('' for a notification). Runs WITHOUT stalling the front-end gem -- see
    #runWorker:, which is what keeps one client's long tool call from freezing every other GsProcess
-   in the front end. The request is embedded via printString for safe quoting."
+   in the front end. The request is embedded via printString for safe quoting.
+
+   aStringOrNil is what the ROUTER says would end this session (McpRouter>>lifetimeNoteFor:),
+   carried in on the request rather than asked for by the worker, which cannot see the front end's
+   configuration and must not hold a stale copy of it. The worker uses it only when it has
+   uncommitted work to warn about."
   self touch.
-  ^self runWorker: (self workerExpressionFor: aRawJsonString)
+  ^self runWorker: (self workerExpressionFor: aRawJsonString lifetimeNote: aStringOrNil)
 %
 category: 'accessing'
 method: McpSession
@@ -580,10 +592,24 @@ workerClassName: aNameOrNil
 category: 'routing'
 method: McpSession
 workerExpressionFor: aRawJsonString
+  ^self workerExpressionFor: aRawJsonString lifetimeNote: nil
+%
+category: 'private'
+method: McpSession
+workerExpressionFor: aRawJsonString lifetimeNote: aStringOrNil
   "The expression forward: runs in the worker gem: the NAMED worker class handles the request, so the
    worker never decides which server class to build. The request body is embedded via printString for
-   safe quoting."
-  ^self workerClassName , ' handleJsonString: ' , aRawJsonString printString
+   safe quoting, and so is the note.
+
+   The lifetimeNote: keyword is appended ONLY when there is a note, so a deployment that bounds
+   nothing sends the expression it always sent, and the one-argument entry point stays the form
+   documented for a direct call. The worker's one-argument handleJsonString: clears any note from a
+   previous request, so an omitted keyword means 'nothing bounds this session' rather than 'no news'."
+  | base |
+  base := self workerClassName , ' handleJsonString: ' , aRawJsonString printString.
+  ^aStringOrNil isNil
+    ifTrue: [base]
+    ifFalse: [base , ' lifetimeNote: ' , aStringOrNil printString]
 %
 category: 'private'
 method: McpSession

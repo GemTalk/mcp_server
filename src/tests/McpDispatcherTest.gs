@@ -236,6 +236,25 @@ testUncommittedWorkIsReportedInTheResult
 %
 category: 'tests'
 method: McpDispatcherTest
+testUncommittedWorkWarningNamesTheDeadlineWhenOneIsKnown
+  "The warning is worth more when it says WHICH deadline is coming and how long is left, and only
+   the front end knows that -- so it arrives with the request and the worker appends it. Without one
+   the warning keeps its unqualified form rather than guessing."
+  | srv text |
+  System abortTransaction.
+  srv := McpServer new.
+  UserGlobals at: #McpDispatcherTxnProbe put: 'planted'.
+  text := ((((McpDispatcher withToolRegistry: srv toolRegistry server: srv) handle:
+    (self toolCall: 'status')) at: 'result') at: 'content') first at: 'text'.
+  self assert: (text includesString: 'lost if this session ends first').
+  srv handleJsonString: '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+    lifetimeNote: '4 minutes left on your access credential'.
+  text := ((((McpDispatcher withToolRegistry: srv toolRegistry server: srv) handle:
+    (self toolCall: 'status')) at: 'result') at: 'content') first at: 'text'.
+  self assert: (text includesString: 'lost when this session ends: 4 minutes left on your access credential')
+%
+category: 'tests'
+method: McpDispatcherTest
 testUnknownMethodReturns32601
   | resp |
   resp := self dispatch: (self request: 'no/such/method' params: nil).

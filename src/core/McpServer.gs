@@ -4,7 +4,7 @@ expectvalue /Class
 doit
 McpBase subclass: 'McpServer'
   instVarNames: #( dispatcher toolRegistry toolsets
-                    serverName serverTitle serverVersion)
+                    serverName serverTitle serverVersion lifetimeNote)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -95,9 +95,9 @@ defaultServerInstructions
     , 'THE [session] LINE. A result may end with one line starting "[session]". It describes your '
     , 'session, not the tool you just called, and it appears only when there is something to do:'
     , lf
-    , '  - uncommitted changes pending -> commit them or abort them. If this session ends first '
-    , '(idle timeout, deadline, or an expired credential) they are lost, so commit anything you '
-    , 'want to keep rather than leaving it staged.' , lf
+    , '  - uncommitted changes pending -> commit them or abort them. The line names what would end '
+    , 'this session first and how long that is; if it ends, they are lost. Commit anything you want '
+    , 'to keep rather than leaving it staged.' , lf
     , '  - view could not be refreshed -> a commit of yours failed because another session changed '
     , 'the same objects. Nothing was written, your changes are still there, and you are now reading '
     , 'stale data and cannot commit again until you call `abort`. `abort` is the only way out and '
@@ -154,13 +154,27 @@ handleJsonString: aRawJsonString
    class the sender named. It no longer looks for the Grail subclass: which server class and which
    toolsets a worker uses is the front end's decision, pushed down per session, and Grail is a toolset
    now rather than a rung in the hierarchy. A direct `McpServer handleJsonString:` therefore gets the
-   base tool surface; ask for a different one by name, or via McpServer installedDefaultToolsetNames."
+   base tool surface; ask for a different one by name, or via McpServer installedDefaultToolsetNames.
+
+   Answers as if nothing bounds this session's lifetime -- see the lifetimeNote: variant, which the
+   front end uses. Routing through it rather than duplicating the lookup is what CLEARS a note left
+   by an earlier request, so a stale bound is never reported after the deadline that set it is gone."
+  ^self handleJsonString: aRawJsonString lifetimeNote: nil
+%
+category: 'worker'
+classmethod: McpServer
+handleJsonString: aRawJsonString lifetimeNote: aStringOrNil
+  "As handleJsonString:, plus what the FRONT END says would end this session
+   (McpRouter>>lifetimeNoteFor:). The worker cannot work this out: reaping policy is the router's
+   configuration, and a worker holding its own copy would go stale the moment a credential was
+   refreshed. It is passed per request for the same reason, and used only when there is uncommitted
+   work to warn about (McpDispatcher>>transactionNote)."
   | srv |
   srv := SessionTemps current at: #McpServer otherwise: nil.
   srv isNil ifTrue: [
     srv := self new.
     SessionTemps current at: #McpServer put: srv].
-  ^srv handleJsonString: aRawJsonString
+  ^srv handleJsonString: aRawJsonString lifetimeNote: aStringOrNil
 %
 category: 'toolsets'
 classmethod: McpServer
@@ -293,7 +307,16 @@ handleJsonString: aRawJsonString
    response). No mutex: a worker gem serves one client, whose requests the front end already
    serializes onto it. The class-side handleJsonString: (invoked by McpRouter via
    McpSession>>forward:) relays this answer to the client."
+  ^self handleJsonString: aRawJsonString lifetimeNote: nil
+%
+category: 'protocol'
+method: McpServer
+handleJsonString: aRawJsonString lifetimeNote: aStringOrNil
+  "As handleJsonString:, recording what the front end says bounds this session before dispatching.
+   ALWAYS assigns, including nil: this instance is cached for the life of the gem, so a note left by
+   an earlier request would otherwise outlive the deadline that produced it."
   | parsed response |
+  lifetimeNote := aStringOrNil.
   parsed := self parseBody: aRawJsonString.
   response := dispatcher handle: parsed.
   ^response isNil ifTrue: [''] ifFalse: [response asJson]
@@ -347,6 +370,13 @@ isToolAllowed: aToolName
    when read-only. Asks THIS server's toolsets (readOnlySafeToolNames), so a third-party toolset's
    own declaration is honored."
   ^self isReadOnly not or: [self readOnlySafeToolNames includes: aToolName]
+%
+category: 'session lifetime'
+method: McpServer
+lifetimeNote
+  "What the front end said would end this session, as of the request being served, or nil if
+   nothing bounds it or nobody said. Set per request by handleJsonString:lifetimeNote:."
+  ^lifetimeNote
 %
 category: 'guards'
 method: McpServer

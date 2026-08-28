@@ -316,6 +316,15 @@ serverVersion
   "See serverName."
   ^server isNil ifTrue: [McpServer defaultServerVersion] ifFalse: [server serverVersion]
 %
+category: 'transaction'
+method: McpDispatcher
+sessionLifetimeNote
+  "What the front end said would end this session, or nil -- the clause transactionNote appends to
+   the uncommitted-changes warning, so it names WHICH deadline is coming rather than only that one
+   is. nil whenever there is no server (isolated dispatcher tests) or no front end said anything,
+   in which case the warning falls back to its unqualified form."
+  ^server isNil ifTrue: [nil] ifFalse: [server lifetimeNote]
+%
 category: 'initialization'
 method: McpDispatcher
 setRegistry: aRegistry server: aServerOrNil
@@ -384,8 +393,12 @@ transactionNote
     ^'[session] This session''s view could NOT be refreshed and is stale: ' , why
       , ' Call abort to recover -- it is the only operation that clears this state, and it '
       , 'discards any uncommitted changes.'].
-  System needsCommit ifTrue: [
+  System needsCommit ifTrue: [ | note |
+    note := self sessionLifetimeNote.
     ^'[session] You have uncommitted changes. No tool commits for you: call commit to persist '
-      , 'them or abort to discard them. They are lost if this session ends first.'].
+      , 'them or abort to discard them. '
+      , (note isNil
+          ifTrue: ['They are lost if this session ends first.']
+          ifFalse: ['They are lost when this session ends: ' , note , '.'])].
   ^nil
 %

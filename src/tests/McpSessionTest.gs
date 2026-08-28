@@ -201,6 +201,23 @@ testWorkerErrorPropagatesAndLeavesTheSessionUsable
   w nextResult: 'AFTER-ERROR'.
   self assert: (sess forward: 'NEXT-REQUEST') equals: 'AFTER-ERROR'
 %
+category: 'tests - forwarding'
+method: McpSessionTest
+testWorkerExpressionCarriesALifetimeNoteOnlyWhenThereIsOne
+  "The note rides in on the request because the worker cannot see the front end's configuration.
+   The keyword is omitted when there is no note, so a deployment that bounds nothing sends exactly
+   the expression it always sent -- and the one-argument entry point stays the documented direct
+   call. A note is embedded via printString, like the body, so an apostrophe in it cannot break the
+   expression."
+  | sess |
+  sess := McpMockSession startWithId: 'expr'.
+  self assert: (sess workerExpressionFor: '{}')
+    equals: 'McpServer handleJsonString: ''{}'''.
+  self assert: (sess workerExpressionFor: '{}' lifetimeNote: nil)
+    equals: 'McpServer handleJsonString: ''{}'''.
+  self assert: (sess workerExpressionFor: '{}' lifetimeNote: '10 minutes, it''s ending')
+    equals: 'McpServer handleJsonString: ''{}'' lifetimeNote: ''10 minutes, it''''s ending'''
+%
 category: 'helpers'
 method: McpSessionTest
 waitUpTo: aMillisecondCount for: aBlock

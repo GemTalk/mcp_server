@@ -388,6 +388,20 @@ countCovering: aTotalSeconds every: aUnitSeconds
    which is cheap; rounding down breaks the promise the number was making."
   ^((aTotalSeconds + aUnitSeconds - 1) // aUnitSeconds) max: 1
 %
+category: 'session lifetime'
+method: McpRouter
+deadlineSourceFor: sess
+  "Which bound set this session's absolute deadline, phrased for the client, because the two differ
+   in what the client can DO about it: a credential can be refreshed and a server's cap cannot.
+   Told apart without storing the fact: a deadline equal to the session's start plus the configured
+   cap is the cap's, and anything earlier came from the credential -- which is exactly what
+   McpSession>>startedAtSeconds exists for. Both may be set, in which case the earlier one is in
+   force, since #expiresAtSeconds: only ever moves a deadline earlier."
+  (maxSessionLifetimeSeconds notNil
+    and: [sess expiresAtSeconds = (sess startedAtSeconds + maxSessionLifetimeSeconds)])
+      ifTrue: [^'this server''s session lifetime cap'].
+  ^'your access credential, which refreshing it extends'
+%
 category: 'tls'
 method: McpRouter
 disableTls
@@ -580,6 +594,40 @@ keepaliveIntervalSeconds
   "How often an otherwise silent SSE stream gets a comment line. Comfortably under the usual 30-60
    second proxy and NAT idle timeouts, which is the only thing this interval has to beat."
   ^15
+%
+category: 'session lifetime'
+method: McpRouter
+lifetimeNoteFor: sess
+  "What would end this session, phrased for the client, or nil if nothing bounds it. Sent to the
+   worker with each request (McpSession>>forward:lifetimeNote:) and used by the worker only when it
+   has uncommitted changes to warn about (McpDispatcher>>transactionNote) -- so the policy is
+   rendered HERE, where it is configured and enforced, and the worker appends a sentence rather
+   than duplicating a rule it cannot see.
+
+   At most two clauses, the deadline first: an absolute deadline runs down whether the client works
+   or not, while the inactivity bound is the one it controls by continuing to call.
+
+   The inactivity bound is whichever rule can actually fire. With no stream open, liveness cannot be
+   asked anything and #streamlessIdleTimeoutSeconds is the give-up rule -- typically far shorter
+   than the idle deadline, so quoting the idle deadline there would be a comfortable lie.
+
+   COMPUTED WHEN THE REQUEST ARRIVES, so a client reading it after a long tool call has a number
+   that much out of date. Naming a bound is the point; the number is an aid, and it is generous by
+   the length of the call rather than short."
+  | s secs |
+  s := WriteStream on: String new.
+  secs := sess secondsUntilExpiry.
+  secs ifNotNil: [:n |
+    s nextPutAll: (self phraseForSeconds: (n max: 0)) , ' left on ' , (self deadlineSourceFor: sess)].
+  sess outbox hasStream
+    ifTrue: [self hasSessionIdleDeadline ifTrue: [
+      s contents isEmpty ifFalse: [s nextPutAll: ', or '].
+      s nextPutAll: (self phraseForSeconds: self sessionIdleTimeoutSeconds) , ' of inactivity']]
+    ifFalse: [
+      s contents isEmpty ifFalse: [s nextPutAll: ', or '].
+      s nextPutAll: (self phraseForSeconds: self streamlessIdleTimeoutSeconds)
+        , ' with no event stream open'].
+  ^s contents isEmpty ifTrue: [nil] ifFalse: [s contents]
 %
 category: 'session lifetime'
 method: McpRouter
@@ -1310,7 +1358,8 @@ serveInitialize: req on: conn
    McpAuthRouter overrides this to authenticate the request and open a per-user (JWT) session."
   | sess |
   sess := self openSession.
-  conn writeJson: (sess forward: (req at: 'body' ifAbsent: [''])) sessionId: sess id
+  conn writeJson: (sess forward: (req at: 'body' ifAbsent: [''])
+    lifetimeNote: (self lifetimeNoteFor: sess)) sessionId: sess id
 %
 category: 'running'
 method: McpRouter
@@ -1357,7 +1406,7 @@ serveRouted: body sessionId: sid on: conn
   sid isNil ifTrue: [^self writeSessionError: 'Missing MCP-Session-Id header (call initialize first)' code: 400 reason: 'Bad Request' on: conn].
   sess := self sessionAt: sid.
   sess isNil ifTrue: [^self writeSessionError: 'Unknown or expired session: ' , sid code: 404 reason: 'Not Found' on: conn].
-  resp := sess forward: body.
+  resp := sess forward: body lifetimeNote: (self lifetimeNoteFor: sess).
   resp isEmpty
     ifTrue: [conn writeStatus: 202 reason: 'Accepted' body: '']
     ifFalse: [conn writeJson: resp]

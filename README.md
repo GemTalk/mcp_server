@@ -238,10 +238,10 @@ tool call is still there for the next one: every call is preceded by `System con
 which takes a current view of other sessions' commits without discarding this session's uncommitted
 work. So the ordinary Smalltalk loop — compile, run the tests against what you compiled, *then*
 commit — works across calls. Nothing commits on the client's behalf; a result whose session has
-uncommitted changes carries a one-line `[session]` note saying so. Until 2026-08-28 the dispatcher
-sent `System abortTransaction` before every tool instead, which meant no change survived a call and
-`commit` committed a transaction emptied a microsecond earlier — see
-`docs/server-to-client-messaging.md` 10.11.
+uncommitted changes carries a one-line `[session]` note saying so, and naming what would end the
+session before the work is committed. Until 2026-08-28 the dispatcher sent `System abortTransaction`
+before every tool instead, which meant no change survived a call and `commit` committed a
+transaction emptied a microsecond earlier.
 
 **Listing**
 
