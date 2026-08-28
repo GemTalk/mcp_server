@@ -48,11 +48,6 @@
 #   GS_MCP_REAPER_INTERVAL  How often the maintenance pass runs. Default 60s. The pass is the
 #                           server's clock -- it ticks only while the front end is running -- so
 #                           every count below is measured in passes, not in elapsed time.
-#   GS_MCP_EXPIRY_WARNING_LEAD
-#                           How long before an ABSOLUTE deadline -- a lifetime cap, or an access
-#                           token's exp -- a client is warned. Default 5m, and in seconds because
-#                           that deadline is itself a wall-clock fact. There is no equivalent knob
-#                           for the idle warning: it goes out when exactly one answered ping remains.
 #   GS_MCP_REAP_ON_FAILED_PROBE
 #                           0 to stop treating an unanswered liveness ping as grounds for releasing
 #                           a gem early. Default 1. Ignored (forced on) with no idle deadline, where
@@ -108,7 +103,6 @@ r streamLossGraceSeconds: nil." ;;
 esac
 
 mcp_lifetime_line "${GS_MCP_MAX_LIFETIME:-}"        maxSessionLifetimeSeconds     GS_MCP_MAX_LIFETIME
-mcp_lifetime_line "${GS_MCP_EXPIRY_WARNING_LEAD:-}" expiryWarningLeadSeconds      GS_MCP_EXPIRY_WARNING_LEAD
 mcp_lifetime_line "${GS_MCP_PROBE_INTERVAL:-}"      livenessProbeIntervalSeconds  GS_MCP_PROBE_INTERVAL
 mcp_lifetime_line "${GS_MCP_STREAMLESS_TIMEOUT:-}"  streamlessIdleTimeoutSeconds  GS_MCP_STREAMLESS_TIMEOUT
 mcp_lifetime_line "${GS_MCP_REAPER_INTERVAL:-}"     reaperIntervalSeconds         GS_MCP_REAPER_INTERVAL

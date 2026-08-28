@@ -31,9 +31,9 @@ What each group is for:
   - return path: a client answers a server request by POSTing a JSON-RPC response, which has an id
     and no method. That used to fall through to the worker and come back as -32600 Invalid Request.
   - idle: a session IS a gem with its own transaction view, so reaping one discards uncommitted
-    work. A ping decides whether anyone is still listening; a client that answers gets a warning in
-    time to commit; one that does not has its gem freed early. An answered ping deliberately does
-    NOT restart the idle clock -- see McpSession''s class comment.'
+    work. A ping decides whether anyone is still listening: a client that answers keeps its gem, one
+    that does not has it freed early. An answered ping deliberately does NOT restart the idle clock
+    -- see McpSession''s class comment.'
 %
 expectvalue /Class
 doit
@@ -132,9 +132,9 @@ category: 'tests - idle probe'
 method: McpStreamTest
 testAnsweredPingDoesNotRestartTheIdleClock
   "The decision this design turns on. If an answered ping counted as work, every well-behaved client
-   would hold its worker gem -- and its transaction view -- for as long as it stayed open, and the
-   warning would only ever reach clients unable to act on it. So an answer spares the gem an early
-   reap and ADVANCES the idleness count; only real MCP traffic resets it."
+   would hold its worker gem -- and its transaction view -- for as long as it stayed open. So an
+   answer spares the gem an early reap and ADVANCES the idleness count; only real MCP traffic
+   resets it."
   | r sess before |
   r := McpFixtureRouter new.
   sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
@@ -179,28 +179,32 @@ testAVanishedClientHasItsGemReleasedByTheLoopItself
 %
 category: 'tests - stream'
 method: McpStreamTest
-testDroppedMessagesAreAdmittedOnTheStream
-  "Silent truncation reads as full delivery. When the overflow policy discards messages the client
-   is told how many, before the survivors."
+testDroppedMessagesAreCountedOffTheStreamNotAnnouncedOnIt
+  "The gap used to be announced to the client in a notifications/message. It is recorded in the gem
+   log now, and this pins the part that is observable from here: the stream carries the SURVIVORS
+   and nothing else. The oldest go, so the count is taken and the newest maxQueueSize arrive."
   | r sess out |
   r := McpFixtureRouter new.
   sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
   1 to: sess outbox maxQueueSize + 2 do: [:i | sess outbox add: '{"n":' , i printString , '}'].
+  self assert: sess outbox size equals: sess outbox maxQueueSize.
   out := (self streamOn: r forSession: sess) output.
-  self assert: (self includesCS: 'notifications/message' in: out).
-  self assert: (self includesCS: '2 server message(s)' in: out).
-  self assert: (self includesCS: 'overflowed' in: out)
+  self deny: (self includesCS: 'notifications/message' in: out).
+  self deny: (self includesCS: 'overflowed' in: out).
+  self deny: (self includesCS: '{"n":1}' in: out).      "oldest, discarded"
+  self assert: (self includesCS: '{"n":3}' in: out).    "oldest survivor"
+  self assert: sess outbox droppedCount equals: 0       "taken by the drain loop"
 %
 category: 'tests - stream'
 method: McpStreamTest
 testGetStreamFlushesAClosingOutboxThenEnds
-  "Reaping enqueues a notice and marks the outbox closing rather than closing it, precisely so the
-   drain loop gets one more turn. Without this the client is cut off in the same instant as its gem
-   and learns nothing."
+  "Reaping marks the outbox closing rather than closing it, so the drain loop gets one more turn and
+   whatever was already queued still reaches the client. Nothing is enqueued AT reap time any more,
+   but a message in flight when the reaper runs must not die with the gem."
   | r sess out |
   r := McpFixtureRouter new.
   sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
-  sess outbox add: '{"jsonrpc":"2.0","method":"notifications/message","params":{"data":"goodbye"}}'.
+  sess outbox add: '{"jsonrpc":"2.0","method":"notifications/progress","params":{"value":"goodbye"}}'.
   sess outbox beginClosing.
   out := (self streamOn: r forSession: sess) output.
   self assert: (self includesCS: 'goodbye' in: out).
@@ -254,11 +258,11 @@ testGetStreamWritesWhatIsQueued
 %
 category: 'tests - idle probe'
 method: McpStreamTest
-testIdleSessionWithAStreamIsProbedThenWarned
-  "The two steps of the idle window: a ping first, and the warning only for a client that answered
-   it -- so the warning always goes to someone who can act on it. Sized so that one answered ping is
-   the last one: 600s of quiet at one ping per 300s is two confirmations."
-  | r sess ping warning |
+testIdleSessionWithAStreamIsProbedAndItsAnswerCounted
+  "What is left of the idle window now that the warning is gone: the ping, and the accounting its
+   answer feeds. An answered ping is evidence for #reapReasonFor: and nothing else -- it no longer
+   earns the client a message. Sized at 600s of quiet, one ping per 300s: two confirmations."
+  | r sess ping |
   r := McpFixtureRouter new.
   r sessionIdleTimeoutSeconds: 600; livenessProbeIntervalSeconds: 300; reaperIntervalSeconds: 60.
   sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
@@ -269,27 +273,13 @@ testIdleSessionWithAStreamIsProbedThenWarned
   self assert: (ping at: 'method') equals: 'ping'.
   self assert: (self includesCS: 'srv-' in: (ping at: 'id')).
   self assert: sess unansweredProbes equals: 1.
-  "the client answers; now it has earned a warning"
+  "the client answers, which is what turns an outstanding probe into a quiet one"
   r resolvePendingRequest: (ping at: 'id') forSession: sess.
   self assert: sess quietProbes equals: 1.
-  self assert: r probeIdleSessions equals: 1.
-  warning := self firstQueuedIn: sess.
-  self assert: (warning at: 'method') equals: 'notifications/message'.
-  self assert: ((warning at: 'params') at: 'level') equals: 'warning'
-%
-category: 'tests - logging'
-method: McpStreamTest
-testLogLevelFiltersWhatIsQueued
-  "A client that asked for 'error' does not get the 'warning' idle notices. The front end enforces
-   this because the front end is what generates them."
-  | r sess |
-  r := McpFixtureRouter new.
-  sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
-  self assert: (r enqueueLog: 'noticed' level: 'warning' toSession: sess).
-  sess logLevel: 'error'.
-  self deny: (r enqueueLog: 'ignored' level: 'warning' toSession: sess).
-  self assert: (r enqueueLog: 'kept' level: 'critical' toSession: sess).
-  self assert: sess outbox size equals: 2
+  self assert: sess unansweredProbes equals: 0.
+  "the next pass sends nothing: there is no warning left to send, and no probe is due yet"
+  self assert: r probeIdleSessions equals: 0.
+  self assert: sess outbox size equals: 0
 %
 category: 'tests - return path'
 method: McpStreamTest
@@ -350,43 +340,28 @@ testProbeIsNotSentToASessionWithNoStream
 %
 category: 'tests - idle probe'
 method: McpStreamTest
-testReapedSessionIsToldOnItsStreamBeforeTheGemGoes
-  "A session reaped for idleness is by definition one making no calls, so the stream is the only way
-   to reach it. Enqueue the notice, mark the outbox CLOSING (not closed), then log the worker out --
-   the drain loop still gets its turn."
+testReapedSessionIsUnmappedAndClosedWithoutTellingItsClient
+  "A reaped session used to be told on its stream, in a notifications/message; that carrier is gone.
+   What the reaper still does is unmap it, mark the outbox CLOSING (not closed) so the drain loop can
+   finish what it holds, and log the worker out. The client learns from the 404 on its next call,
+   which is what the transport defines for exactly this -- so the stream must end SILENT here, not
+   carry a farewell."
   | r sess out |
   r := McpFixtureRouter new.
   r sessionIdleTimeoutSeconds: 600; livenessProbeIntervalSeconds: 300.
   sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
   sess outbox attachStream.
   1 to: r confirmationsBeforeRelease do: [:i | sess noteProbeSent; noteAlive].
+  "the ground is still stated -- it goes to the gem log now rather than to the client"
+  self assert: (self includesCS: 'idle for 10 minutes' in: (r reapReasonFor: sess)).
   self assert: r reapIdleSessions equals: 1.
   self assert: (r sessionAt: sess id) isNil.
   self assert: sess outbox isClosing.
+  self assert: sess outbox size equals: 0.
   out := (self streamOn: r forSession: sess) output.
-  self assert: (self includesCS: 'This MCP session has ended' in: out).
-  self assert: (self includesCS: 'idle for 10 minutes' in: out).
-  self assert: (self includesCS: 'uncommitted changes in it are gone' in: out)
-%
-category: 'tests - logging'
-method: McpStreamTest
-testSetLevelIsRecordedByTheFrontEndAndStillReachesTheWorker
-  "logging/setLevel is snooped as it passes, because the level has to land where the notifications
-   are generated -- and still forwarded, because the worker is what answers it."
-  | r sess out |
-  r := McpFixtureRouter new.
-  sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
-  self assert: sess logLevel equals: 'info'.       "the default lets a 'warning' through"
-  out := (self runRequest: (self postRequest:
-    '{"jsonrpc":"2.0","id":7,"method":"logging/setLevel","params":{"level":"debug"}}'
-    sessionId: sess id) on: r) output.
-  self assert: sess logLevel equals: 'debug'.
-  self assert: (self includesCS: 'HTTP/1.1 200 OK' in: out).
-  "a level naming nothing is left for the worker's dispatcher to refuse -- one validation, not two"
-  self runRequest: (self postRequest:
-    '{"jsonrpc":"2.0","id":8,"method":"logging/setLevel","params":{"level":"chatty"}}'
-    sessionId: sess id) on: r.
-  self assert: sess logLevel equals: 'debug'
+  self deny: (self includesCS: 'This MCP session has ended' in: out).
+  self deny: (self includesCS: 'notifications/message' in: out).
+  self deny: sess outbox isOpen      "the drain loop closed it, having nothing to flush"
 %
 category: 'tests - stream'
 method: McpStreamTest

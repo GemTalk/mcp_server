@@ -123,34 +123,6 @@ statusBody
 %
 category: 'tests'
 method: McpAuthTest
-testAFixedCapOutranksTheRefreshAdvice
-  "When maxSessionLifetimeSeconds is the BINDING deadline rather than the token, telling the client
-   to refresh would be advice that cannot work: the cap is on the session, not the credential. The
-   two are told apart by arithmetic on stored integers -- the cap falls at startedAtSeconds + cap."
-  | router sess advice |
-  router := McpAuthRouter new.
-  router maxSessionLifetimeSeconds: 600.
-  sess := McpStubSession new startWithId: 'sid-capped'.
-  sess expiresAtSeconds: sess startedAtSeconds + 600.
-  advice := router expiryAdviceFor: sess.
-  self assert: (self includesCS: 'cannot be extended' in: advice).
-  self deny: (self includesCS: 'refreshes its token' in: advice)
-%
-category: 'tests'
-method: McpAuthTest
-testAnAuthRouterTellsAClientToRefreshItsToken
-  "The advice that fits an access token's exp: refreshing keeps the session, because a request
-   carrying the refreshed token extends it."
-  | router sess advice |
-  router := McpAuthRouter new.
-  sess := McpStubSession new startWithId: 'sid-advice'.
-  sess expiresAtSeconds: System timeGmt + 60.
-  advice := router expiryAdviceFor: sess.
-  self assert: (self includesCS: 'refreshes its token' in: advice).
-  self deny: (self includesCS: 'cannot be extended' in: advice)
-%
-category: 'tests'
-method: McpAuthTest
 testAnUnparseableTokenBuysNoTimeOnAWriteSession
   "Fail safe in the direction that matters now that this parse can EXTEND a life rather than only
    shorten one: a token that cannot be read grants no write scope, so it cannot lengthen a
@@ -203,19 +175,6 @@ testARefreshedTokenBuysAWriteSessionMoreLife
   self assert: (router renewSessionExpiry: sess
     from: (self jwtForUser: 'alice' expiringIn: 1800 writeScope: true)).
   self assert: sess expiresAtSeconds > (System timeGmt + 1000)
-%
-category: 'tests'
-method: McpAuthTest
-testATokenExpiringBeforeTheCapStillGetsRefreshAdvice
-  "The other half: a cap is configured but the token expires first, so the token IS the binding
-   deadline and refreshing it is exactly the right advice."
-  | router sess advice |
-  router := McpAuthRouter new.
-  router maxSessionLifetimeSeconds: 86400.
-  sess := McpStubSession new startWithId: 'sid-token-first'.
-  sess expiresAtSeconds: System timeGmt + 300.
-  advice := router expiryAdviceFor: sess.
-  self assert: (self includesCS: 'refreshes its token' in: advice)
 %
 category: 'tests'
 method: McpAuthTest

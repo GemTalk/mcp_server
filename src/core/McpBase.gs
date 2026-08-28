@@ -28,9 +28,11 @@ cannot ask a worker that is busy running a tool to build an envelope for it. Del
 RESPONSE builder: the router never sends a JSON-RPC response on the stream (the spec forbids it,
 resumption replay aside), and duplicating McpDispatcher''s would invite it to.
 
-The RFC 5424 log levels the MCP logging utility uses (#logLevelNames and friends) live here too --
-the router filters notifications/message by the level a session asked for, and the worker''s
-dispatcher validates logging/setLevel against the same list.'
+Deliberately no log-level machinery any more. The RFC 5424 severities lived here to serve
+notifications/message, which carried the front end''s idle and session-ending warnings; those are
+gone (McpRouter), the logging capability that licensed them is undeclared (McpDispatcher), and the
+draft revision prohibits an unsolicited notifications/message outright.
+#log: is unrelated despite the name: it writes to the gem''s own log file, never to a client.'
 %
 expectvalue /Class
 doit
@@ -40,29 +42,6 @@ McpBase category: 'Mcp-Core'
 removeallmethods McpBase
 removeallclassmethods McpBase
 ! ------------------- Class methods for McpBase
-category: 'log levels'
-classmethod: McpBase
-isLogLevel: aString
-  "Whether aString is one of the MCP logging utility's levels. What logging/setLevel validates
-   against."
-  ^self logLevelNames includes: aString
-%
-category: 'log levels'
-classmethod: McpBase
-logLevelNames
-  "The eight RFC 5424 severities the MCP logging utility uses, in ASCENDING severity -- the order
-   IS the data: #logLevelRank: is an index into it, and a message is sent only when its rank is at
-   least the rank of the level the client asked for."
-  ^#( 'debug' 'info' 'notice' 'warning' 'error' 'critical' 'alert' 'emergency' )
-%
-category: 'log levels'
-classmethod: McpBase
-logLevelRank: aString
-  "aString's severity as a number, or nil if it names no level."
-  | i |
-  i := self logLevelNames indexOf: aString.
-  ^i = 0 ifTrue: [nil] ifFalse: [i]
-%
 ! ------------------- Instance methods for McpBase
 category: 'private'
 method: McpBase
@@ -76,21 +55,6 @@ log: aString
   | stamp |
   stamp := [DateTime now printString] on: Error do: [:ex | System timeGmt printString].
   [GsFile gciLogServer: stamp , '  ' , aString] on: Error do: [:ex | nil]
-%
-category: 'json-rpc'
-method: McpBase
-logNotification: aString level: aLevelString
-  "A notifications/message envelope (the MCP logging utility) carrying aString at an RFC 5424
-   level. This is the sanctioned generic carrier for anything the server wants to say
-   unprompted: MCP has no dedicated method for 'your session is about to end', and inventing one
-   would only produce a message every client ignores.
-   'logger' names the subsystem so a client can filter without parsing the text."
-  | p |
-  p := Dictionary new.
-  p at: 'level' put: aLevelString.
-  p at: 'logger' put: 'mcp.session'.
-  p at: 'data' put: aString.
-  ^self notification: 'notifications/message' params: p
 %
 category: 'json-rpc'
 method: McpBase

@@ -35,12 +35,14 @@ or close.
 
 Policies worth knowing:
   - Bounded at #maxQueueSize. On overflow the OLDEST message is discarded and #droppedCount is
-    bumped, so the client is told how many it missed rather than silently handed a gap.
+    bumped, so the gap reaches the GEM LOG rather than going unrecorded. It used to reach the
+    client instead; that took a notifications/message, which this server no longer sends.
   - Exactly one drainer. Two GsProcesses draining onto one socket would interleave SSE frames and
     corrupt the stream, so #attachStream hands out a generation and a loop runs only while it is
     #isCurrentStream: -- the newest GET wins and any earlier stream ends itself.
-  - #beginClosing then #close, not #close alone: a session being reaped enqueues a last notice, and
-    the drain loop has to get a turn before the stream ends or the notice dies with the gem.
+  - #beginClosing then #close, not #close alone: closing outright would discard whatever is still
+    queued, so a reaped session stops ACCEPTING messages and lets the drain loop write what it
+    already holds before the stream ends.
 No event ids and no Last-Event-ID replay yet -- that is deliberate. Ids are only useful with a
 replay buffer behind them, and offering them without one would invite a client to ask for a resume
 this server cannot honour.'
@@ -95,10 +97,11 @@ category: 'lifecycle'
 method: McpOutbox
 beginClosing
   "Stop accepting new messages, but leave what is queued deliverable. This is the first half of
-   ending a session: the reaper enqueues its session-ending notice, marks the outbox closing, and
-   logs the worker gem out; the drain loop then writes what it holds and closes the outbox itself.
-   Closing outright instead would drop the notice and leave the client to discover its session had
-   ended by meeting a 404 on its next call."
+   ending a session: the reaper marks the outbox closing and logs the worker gem out; the drain
+   loop then writes what it still holds and closes the outbox itself.
+   Nothing is enqueued at reap time any more -- the session-ending notice this was written for is
+   gone -- but what a session was in the middle of being sent is still owed to it, and a progress
+   tick already queued should not die in the same instant as the gem that produced it."
   mutex critical: [isClosing := true]
 %
 category: 'lifecycle'
@@ -141,15 +144,15 @@ category: 'accessing'
 method: McpOutbox
 droppedCount
   "How many messages the overflow policy has discarded and not yet reported. Read without clearing;
-   the drain loop uses #takeDroppedCount so the client is told once."
+   the drain loop uses #takeDroppedCount so the gap is logged once."
   ^mutex critical: [droppedCount]
 %
 category: 'streams'
 method: McpOutbox
 hasStream
   "Whether a GET stream is currently draining this outbox. What the reaper asks before probing a
-   session: a client with no stream cannot receive a ping or a warning, so there is nothing to be
-   gained by queueing one for it."
+   session: a client with no stream cannot receive a ping, so there is nothing to be gained by
+   queueing one for it."
   ^mutex critical: [streamCount > 0]
 %
 category: 'initialization'
@@ -192,8 +195,8 @@ isOpen
 category: 'accessing'
 method: McpOutbox
 maxQueueSize
-  "How many messages may wait for a stream. Generous for the traffic this carries (a ping, a
-   warning, later a progress tick) and small enough that a client which never opens a stream, or
+  "How many messages may wait for a stream. Generous for the traffic this carries (a ping, and
+   soon a progress tick) and small enough that a client which never opens a stream, or
    opens one and stops reading, cannot grow a session without bound."
   ^256
 %
@@ -206,7 +209,7 @@ category: 'accessing'
 method: McpOutbox
 takeDroppedCount
   "Answer how many messages have been dropped since this was last asked, and reset the counter --
-   so the drain loop reports a gap exactly once."
+   so the drain loop logs a gap exactly once."
   ^mutex critical: [
     | n |
     n := droppedCount.

@@ -58,19 +58,6 @@ includesCS: aSubstring in: aString
    findString:startingAt: for assert:/deny: substring checks."
   ^(aString findString: aSubstring startingAt: 1) > 0
 %
-category: 'helpers'
-method: McpLifetimeTest
-noticeIn: sess
-  "Drain sess's outbox and answer the `data` text of the first notifications/message in it, or nil."
-  | drained |
-  drained := sess outbox drain asArray.
-  drained do: [:each |
-    | msg |
-    msg := JsonParser parse: each.
-    (msg at: 'method' ifAbsent: [nil]) = 'notifications/message'
-      ifTrue: [^(msg at: 'params') at: 'data']].
-  ^nil
-%
 category: 'running'
 method: McpLifetimeTest
 setUp
@@ -185,24 +172,10 @@ testAnExpiredSessionGoesWhateverElseIsTrue
   sess noteAlive.
   sess expiresAtSeconds: System timeGmt - 1.
   self assert: sess isExpired.
+  self assert: (self includesCS: 'access credential expired' in: (r reapReasonFor: sess)).
   self assert: r reapIdleSessions equals: 1.
-  self assert: (self includesCS: 'access credential expired' in: (self noticeIn: sess))
-%
-category: 'tests - expiry'
-method: McpLifetimeTest
-testAnExpiringSessionIsWarnedEvenWhenItIsNowhereNearIdle
-  "The case the idle warning cannot cover. A client calling steadily is never probed, so it is never
-   #isKnownAlive, so gating the expiry warning the way the idle warning is gated would mean the
-   sessions most likely to reach an expiry are the only ones never told."
-  | router sess |
-  router := McpFixtureRouter new.
-  sess := self streamedSessionOn: router.
-  sess touch.
-  sess expiresAtSeconds: System timeGmt + 60.
-  self assert: (router expiryWarningDue: sess).
-  self assert: (router maintainIdleSession: sess).
-  self assert: sess expiryWarned.
-  self assert: (self includesCS: 'reaches its time limit' in: (self noticeIn: sess))
+  "the reason is for the gem log now; the client is not told, and meets a 404 on its next call"
+  self assert: sess outbox size equals: 0
 %
 category: 'tests - expiry'
 method: McpLifetimeTest
@@ -220,18 +193,6 @@ testAnExpiryOnlyEverMovesEarlier
   self assert: sess expiresAtSeconds equals: now + 50.
   sess expiresAtSeconds: nil.
   self assert: sess expiresAtSeconds equals: now + 50
-%
-category: 'tests - expiry'
-method: McpLifetimeTest
-testAnExpiryWarningIsSentOncePerDeadlineNotOncePerPass
-  "The maintenance pass runs every minute; the warning must not go out on each one."
-  | router sess |
-  router := McpFixtureRouter new.
-  sess := self streamedSessionOn: router.
-  sess expiresAtSeconds: System timeGmt + 60.
-  self assert: (router expiryWarningDue: sess).
-  router warnExpiringSession: sess.
-  self deny: (router expiryWarningDue: sess)
 %
 category: 'tests - counting'
 method: McpLifetimeTest
@@ -259,18 +220,6 @@ testAnIntervalThatDoesNotDivideRoundsUp
   self assert: (r countCovering: 1 every: 60) equals: 1.
   r livenessProbeIntervalSeconds: 90; reaperIntervalSeconds: 60.
   self assert: r probePassInterval equals: 2
-%
-category: 'tests - expiry'
-method: McpLifetimeTest
-testAPlainRouterDoesNotTellAClientToRefreshAnything
-  "The base advice must not repeat the idle warning's 'make a call': maxSessionLifetimeSeconds is a
-   cap on the session itself, and nothing the client does can extend it."
-  | router sess advice |
-  router := McpFixtureRouter new.
-  sess := self streamedSessionOn: router.
-  advice := router expiryAdviceFor: sess.
-  self assert: (self includesCS: 'cannot be extended' in: advice).
-  self deny: (self includesCS: 'refresh' in: advice)
 %
 category: 'tests - liveness'
 method: McpLifetimeTest
@@ -332,21 +281,6 @@ testARefreshedTokenExtendsAnExistingDeadline
   self assert: (sess renewExpiryTo: now + 900).
   self assert: sess expiresAtSeconds equals: now + 900
 %
-category: 'tests - expiry'
-method: McpLifetimeTest
-testARenewedDeadlineEarnsAFreshWarning
-  "A session whose credential is refreshed gets a new deadline, so it is owed a new warning. Without
-   clearing the flag a long-lived session would be warned exactly once, ever, about the first of
-   many deadlines."
-  | router sess |
-  router := McpFixtureRouter new.
-  sess := self streamedSessionOn: router.
-  sess expiresAtSeconds: System timeGmt + 60.
-  router warnExpiringSession: sess.
-  self assert: sess expiryWarned.
-  self assert: (sess renewExpiryTo: System timeGmt + 3600).
-  self deny: sess expiryWarned
-%
 category: 'tests - counting'
 method: McpLifetimeTest
 testASessionGoesAtTheConfirmationCount
@@ -359,16 +293,6 @@ testASessionGoesAtTheConfirmationCount
   self assert: (r reapReasonFor: sess) isNil.
   sess noteProbeSent; noteAlive.
   self assert: (self includesCS: 'idle' in: (r reapReasonFor: sess))
-%
-category: 'tests - expiry'
-method: McpLifetimeTest
-testASessionWithNoDeadlineIsNeverExpiryWarned
-  "Most sessions have no absolute deadline at all, and must not be warned about one."
-  | router sess |
-  router := McpFixtureRouter new.
-  sess := self streamedSessionOn: router.
-  self assert: sess secondsUntilExpiry isNil.
-  self deny: (router expiryWarningDue: sess)
 %
 category: 'tests - unreachable'
 method: McpLifetimeTest
@@ -485,7 +409,6 @@ testIntervalsTravelToAForkedChild
     streamLossGraceSeconds: 25;
     livenessProbeIntervalSeconds: 120;
     reaperIntervalSeconds: 30;
-    expiryWarningLeadSeconds: 45;
     maxSessionLifetimeSeconds: 7200;
     reapOnFailedProbe: false.
   child := McpRouter new applyConfigJson: r configJson.
@@ -495,7 +418,6 @@ testIntervalsTravelToAForkedChild
   self assert: child streamLossGraceSeconds equals: 25.
   self assert: child livenessProbeIntervalSeconds equals: 120.
   self assert: child reaperIntervalSeconds equals: 30.
-  self assert: child expiryWarningLeadSeconds equals: 45.
   self assert: child maxSessionLifetimeSeconds equals: 7200.
   "reapOnFailedProbe travelled, but is FORCED on where there is no deadline"
   self assert: child reapOnFailedProbe
@@ -695,7 +617,6 @@ testTheShippingDefaultsAreTheDocumentedOnes
   self assert: r streamLossGraceSeconds equals: 10.
   self assert: r livenessProbeIntervalSeconds equals: 120.
   self assert: r reaperIntervalSeconds equals: 60.
-  self assert: r expiryWarningLeadSeconds equals: 300.
   self assert: r maxSessionLifetimeSeconds isNil.
   self assert: r reapOnFailedProbe.
   "and what those seconds mean to the reaper"
@@ -732,38 +653,6 @@ testTheStreamlessFloorAppliesEvenWithADeadline
   sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
   1 to: r streamlessPassesBeforeRelease do: [:i | sess notePassWithStream: false].
   self assert: (self includesCS: 'no event stream' in: (r reapReasonFor: sess))
-%
-category: 'tests - warning'
-method: McpLifetimeTest
-testTheWarningGoesOutOneConfirmationBeforeTheEnd
-  "No lead to configure any more: the warning fires when exactly one answered ping remains, which is
-   what a lead in seconds was always trying to approximate and could get wrong in both directions."
-  | r sess |
-  r := McpFixtureRouter new.
-  r sessionIdleTimeoutSeconds: 1800; livenessProbeIntervalSeconds: 300.
-  sess := self streamedSessionOn: r.
-  1 to: 4 do: [:i | sess noteProbeSent; noteAlive].
-  self deny: (r idleWarningDue: sess).
-  sess noteProbeSent; noteAlive.
-  self assert: (r idleWarningDue: sess).
-  self assert: (r warnIdleSession: sess).
-  self assert: (self includesCS: 'one more liveness check' in: (self noticeIn: sess))
-%
-category: 'tests - warning'
-method: McpLifetimeTest
-testTheWarningIsSentOncePerQuietPeriod
-  | r sess |
-  r := McpFixtureRouter new.
-  r sessionIdleTimeoutSeconds: 600; livenessProbeIntervalSeconds: 300.
-  sess := self streamedSessionOn: r.
-  sess noteProbeSent; noteAlive.
-  self assert: (r idleWarningDue: sess).
-  r warnIdleSession: sess.
-  self deny: (r idleWarningDue: sess).
-  "a call makes it quiet again, and it is owed a fresh warning"
-  sess touch.
-  sess noteProbeSent; noteAlive.
-  self assert: (r idleWarningDue: sess)
 %
 category: 'tests - liveness'
 method: McpLifetimeTest

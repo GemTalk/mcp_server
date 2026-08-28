@@ -105,35 +105,12 @@ handle: requestDict
   method isNil ifTrue: [^self errorFor: id code: -32600 message: 'Invalid Request'].
   method = 'initialize' ifTrue: [^self resultFor: id with: (self initializeResultFor: (requestDict at: 'params' ifAbsent: [Dictionary new]))].
   method = 'ping' ifTrue: [^self resultFor: id with: self pingResult].
-  method = 'logging/setLevel' ifTrue: [
-    ^self handleSetLogLevel: (requestDict at: 'params' ifAbsent: [Dictionary new]) id: id].
   method = 'tools/list' ifTrue: [^self resultFor: id with: self toolsListResult].
   method = 'tools/call' ifTrue: [
     ^self handleToolsCall: (requestDict at: 'params' ifAbsent: [Dictionary new]) id: id].
   (method beginsWith: 'notifications/') ifTrue: [^nil].
   id isNil ifTrue: [^nil].
   ^self errorFor: id code: -32601 message: 'Method not found: ' , method
-%
-category: 'dispatch'
-method: McpDispatcher
-handleSetLogLevel: params id: id
-  "logging/setLevel (the MCP logging utility): the client sets the minimum severity it wants. The
-   result is an empty object.
-   The level that actually governs delivery is the FRONT END's. McpRouter generates every log
-   notification this server sends and owns the SSE stream they go down, so it records the level per
-   session as the request passes through (McpRouter>>noteLogLevelFrom:sessionId:) and then lets the
-   request come here to be answered. A worker gem could do neither: it has no stream to write to.
-   So this stores nothing -- deliberately, rather than keeping a level nothing in the gem would ever
-   read. What it does do is validate, in the one place both paths agree on, and give a directly
-   driven worker (McpServer handleJsonString:, no router in sight) the answer the declared 'logging'
-   capability promises."
-  | level |
-  level := params at: 'level' ifAbsent: [nil].
-  (McpBase isLogLevel: level) ifFalse: [
-    ^self errorFor: id code: -32602
-      message: 'Invalid params: level must be one of ' ,
-        (McpBase logLevelNames inject: '' into: [:a :b | a isEmpty ifTrue: [b] ifFalse: [a , ' ' , b]])].
-  ^self resultFor: id with: Dictionary new
 %
 category: 'dispatch'
 method: McpDispatcher
@@ -188,13 +165,16 @@ initializeResultFor: params
   tools := Dictionary new.
   caps := Dictionary new.
   caps at: 'tools' put: tools.
-  "A server may send only what it has declared. 'logging' is what permits notifications/message,
-   the sanctioned generic carrier for anything the server says unprompted -- today the front end's
-   idle warning and session-ending notice, which reach the client on its SSE stream. Declaring it
-   also promises logging/setLevel, which is why #handleSetLogLevel: exists.
+  "A server may send only what it has declared, and this server declares only its tools.
+   'logging' was declared until 2026-08-27, solely to license notifications/message as the generic
+   carrier for the front end's idle warning and session-ending notice. Both warnings are gone, the
+   draft revision prohibits an unsolicited notifications/message anyway, and declaring the
+   capability would go on promising a logging/setLevel that nothing in this server would read.
    Deliberately NOT declared: tools listChanged (no session's tool surface changes after
-   initialize), resources, prompts, and completions -- none of which this server has."
-  caps at: 'logging' put: Dictionary new.
+   initialize), resources, prompts, and completions -- none of which this server has.
+   Note what needs no declaration: progress. notifications/progress is a base-protocol utility a
+   client opts into per REQUEST, by putting a progressToken in the request's _meta, so there has
+   never been anything for a server to advertise -- see docs/server-to-client-messaging.md 2.2."
   info := Dictionary new.
   info at: 'name' put: self serverName.
   "title is OMITTED when nil rather than sent as null: an absent title is what tells a client to

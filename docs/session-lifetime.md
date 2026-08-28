@@ -17,7 +17,6 @@ against the others before a port is bound.
 | `streamlessIdleTimeoutSeconds` | 60 | the floor for a client that opens **no** stream |
 | `livenessProbeIntervalSeconds` | 120 | how often a quiet session is re-asked |
 | `reaperIntervalSeconds` | 60 | how often the maintenance pass runs |
-| `expiryWarningLeadSeconds` | 300 | how long before an *absolute* deadline a client is warned |
 | `maxSessionLifetimeSeconds` | `nil` | absolute cap, however busy the session is |
 | `reapOnFailedProbe` | `true` | whether an unanswered ping frees a gem early. Forced on with no deadline |
 
@@ -61,10 +60,19 @@ only one of them: it opened another stream, it has a call in flight, or it made 
 while the grace ran. That last one matters more than it looks: a client is not obliged to hold a
 stream, and one that is calling tools is alive on far better evidence than the transport can offer.
 
-Before either deadline the client is warned on its stream, once, with advice that fits which deadline
-is approaching: an idle timeout says to make any call (`status` is enough), while an absolute one —
-`maxSessionLifetimeSeconds`, or an access token's `exp` — says whether it can be extended at all. A
-refreshed deadline earns a fresh warning.
+**The client is not warned before either deadline, and is not told when one arrives.** It was until
+2026-08-27, on its SSE stream, in a `notifications/message`. That warning is gone, and with it
+`expiryWarningLeadSeconds`, `GS_MCP_EXPIRY_WARNING_LEAD`, and the `logging` capability that licensed
+the carrier: `notifications/message` is the MCP *logging* utility, which the draft revision both
+deprecates and — for anything unsolicited — prohibits outright. Measurement, separately, said the
+warning was not being read: no client in the captured logs surfaced one to its model.
+
+What a client gets instead is the **404** on its next call, which is what the Streamable HTTP
+transport already defines for a session that no longer exists, and which tells it to re-initialize.
+The reason a session was reaped is still stated in full — to the **gem log**, where an operator
+diagnosing a reap can find it. See
+[server-to-client-messaging.md](server-to-client-messaging.md) §2.1 for the retirement, and §2.2 for
+what the stream is being kept for: progress on long-running tool calls.
 
 From the shell, `GS_MCP_IDLE_TIMEOUT` and friends set these on either launcher — durations like
 `90s`, `30m`, `4h`, or `none`. See [session-lifetime.sh](../session-lifetime.sh), which documents each.

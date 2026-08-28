@@ -97,8 +97,7 @@ testDrainIsFifoAndClears
 category: 'tests - streams'
 method: McpOutboxTest
 testHasStreamTracksAttachedStreams
-  "What the reaper asks before probing: a client with no stream can receive neither a ping nor a
-   warning."
+  "What the reaper asks before probing: a client with no stream cannot receive a ping."
   | o g |
   o := McpOutbox new.
   self deny: o hasStream.

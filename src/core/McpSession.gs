@@ -6,10 +6,9 @@ Object subclass: 'McpSession'
   instVarNames: #( id worker workerMutex
                     lastActivitySeconds userId readOnly workerClassName
                     toolsetNames serverName serverTitle serverVersion
-                    workerPid workerStoneSession outbox logLevel
-                    idleWarned expiryWarned startedAtSeconds expiresAtSeconds
-                    quietProbes unansweredProbes streamlessPasses passesSinceProbe
-                    streamClosedByClient)
+                    workerPid workerStoneSession outbox startedAtSeconds
+                    expiresAtSeconds quietProbes unansweredProbes streamlessPasses
+                    passesSinceProbe streamClosedByClient)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -35,14 +34,12 @@ two remote accessors -- harmless afterwards.
 
 A session also carries the state the SERVER-INITIATED side of the transport needs, all of it held
 by the front end and none of it in the worker: an McpOutbox of messages waiting for this client''s
-SSE stream, the log level the client asked for (logging/setLevel), and what the last liveness probe
-found. That last one is why reaping is no longer a single clock. #touch -- real MCP traffic -- is
-the only thing that resets the idle cycle. A ping the client ANSWERS proves it is still there
-(#noteAlive) and earns a genuine warning before the deadline; a ping it never answers proves it is
-gone (#noteProbeUnanswered) and frees the gem early, without waiting out the full timeout. What an
-answered ping deliberately does NOT do is stamp the activity clock: if it did, every well-behaved
-client would hold its worker gem and its transaction view forever, and the warning would only ever
-reach clients unable to act on it.
+SSE stream, and what the last liveness probe found. That second one is why reaping is no longer a
+single clock. #touch -- real MCP traffic -- is the only thing that resets the idle cycle. A ping the
+client ANSWERS proves it is still there (#noteAlive) and spares its gem an early reap; a ping it
+never answers proves it is gone (#noteProbeUnanswered) and frees the gem early, without waiting out
+the full timeout. What an answered ping deliberately does NOT do is stamp the activity clock: if it
+did, every well-behaved client would hold its worker gem and its transaction view forever.
 
 None of that is needed for the commonest ending of all, which is a client simply hanging up -- a
 shut editor tab. There the front end has something better than any inference: the drain loop watches
@@ -100,18 +97,6 @@ ageSeconds
    measured against, unlike #idleSeconds."
   ^System timeGmt - startedAtSeconds
 %
-category: 'logging'
-method: McpSession
-allowsLogLevel: aLevelString
-  "Whether a notifications/message at aLevelString is at or above the severity this client asked
-   for with logging/setLevel. An unknown level is let through rather than swallowed: dropping a
-   message because the SERVER mislabelled it would hide exactly the events worth seeing."
-  | wanted sending |
-  wanted := McpBase logLevelRank: self logLevel.
-  sending := McpBase logLevelRank: aLevelString.
-  (wanted isNil or: [sending isNil]) ifTrue: [^true].
-  ^sending >= wanted
-%
 category: 'initialization'
 method: McpSession
 cacheWorkerIds
@@ -140,10 +125,9 @@ method: McpSession
 close
   "Terminate the worker gem. It is attached (the front end drives it via executeString:), so a
    logout stops it.
-   The outbox is only marked CLOSING, not closed: whatever is queued -- a session-ending notice
-   above all -- is still owed to the client, and the drain loop closes the outbox itself once it has
-   written it. Closing outright here would kill the stream in the same instant as the gem and drop
-   the one message explaining why."
+   The outbox is only marked CLOSING, not closed: whatever is already queued is still owed to the
+   client, and the drain loop closes the outbox itself once it has written it. Closing outright here
+   would kill the stream in the same instant as the gem and drop what was in flight."
   outbox ifNotNil: [:o | o beginClosing].
   [worker logout] on: Error do: [:e | nil].
   ^self
@@ -169,14 +153,6 @@ expiresAtSeconds: aSecondOrNil
     ifTrue: [expiresAtSeconds := aSecondOrNil].
   ^self
 %
-category: 'session lifetime'
-method: McpSession
-expiryWarned
-  "Whether this client has already been told its session is nearing its absolute deadline. Separate
-   from #idleWarned because the two deadlines are independent: a busy authenticated session can be
-   minutes from its credential's exp while nowhere near an idle timeout."
-  ^expiryWarned == true
-%
 category: 'routing'
 method: McpSession
 forward: aRawJsonString
@@ -200,13 +176,6 @@ idleSeconds
    from time it spent suspended, and inferring one from the other is what #quietProbes replaced."
   ^System timeGmt - lastActivitySeconds
 %
-category: 'activity'
-method: McpSession
-idleWarned
-  "Whether this client has already been told its session is nearing the idle deadline. Cleared by
-   #touch, so the warning is sent once per idle period rather than on every reaper cycle."
-  ^idleWarned == true
-%
 category: 'initialization'
 method: McpSession
 initialize
@@ -214,9 +183,6 @@ initialize
    it the way #prepareWorker prepares the worker before the session is registered, so two
    GsProcesses -- an arriving GET stream and the reaper -- really could race to create it."
   outbox := McpOutbox new.
-  logLevel := nil.
-  idleWarned := false.
-  expiryWarned := false.
   startedAtSeconds := System timeGmt.
   expiresAtSeconds := nil.   "nil = no absolute deadline; McpAuthRouter sets one from the token exp"
   "Everything the reaper measures is a COUNT of things this front end observed, never an elapsed
@@ -254,22 +220,6 @@ method: McpSession
 lastActivitySeconds
   ^lastActivitySeconds
 %
-category: 'logging'
-method: McpSession
-logLevel
-  "The minimum severity this client wants in notifications/message. 'info' until it says otherwise
-   with logging/setLevel -- quiet enough to keep debug chatter off the stream, low enough that the
-   idle warning (a 'warning') is never filtered out by default."
-  ^logLevel ifNil: ['info']
-%
-category: 'logging'
-method: McpSession
-logLevel: aLevelString
-  "Record the level from logging/setLevel. The front end enforces it, because the front end is what
-   generates these notifications and owns the stream they go down -- see
-   McpRouter>>noteLogLevelFrom:sessionId:."
-  logLevel := aLevelString
-%
 category: 'initialization'
 method: McpSession
 newWorkerSession
@@ -294,19 +244,6 @@ noteAlive
    Deliberately NOT #touch -- see the class comment. Answering a ping is not work."
   unansweredProbes := 0.
   quietProbes := quietProbes + 1
-%
-category: 'session lifetime'
-method: McpSession
-noteExpiryWarned
-  expiryWarned := true.
-  ^self
-%
-category: 'activity'
-method: McpSession
-noteIdleWarned
-  "Remember that the near-the-deadline warning has been sent for this idle period."
-  idleWarned := true.
-  ^self
 %
 category: 'liveness'
 method: McpSession
@@ -452,9 +389,6 @@ renewExpiryTo: aSecondOrNil
   expiresAtSeconds isNil ifTrue: [^false].
   aSecondOrNil <= expiresAtSeconds ifTrue: [^false].
   expiresAtSeconds := aSecondOrNil.
-  "The client was warned about a deadline that no longer applies, so it is owed a fresh warning
-   before the new one. Without this a long-lived session is warned exactly once, ever."
-  expiryWarned := false.
   ^true
 %
 category: 'private'
@@ -600,8 +534,7 @@ touch
   unansweredProbes := 0.
   passesSinceProbe := 0.
   streamlessPasses := 0.
-  streamClosedByClient := false.
-  idleWarned := false
+  streamClosedByClient := false
 %
 category: 'liveness'
 method: McpSession

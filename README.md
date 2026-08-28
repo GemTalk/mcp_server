@@ -148,8 +148,11 @@ sessions** — each client gets its own isolated worker gem (see [Per-client ses
 `ping` is answered with an empty result on every session, as the spec requires — and is also **sent**
 by the server, as a liveness probe on idle sessions.
 
-Declared capabilities: `tools` and `logging`. `logging/setLevel` is honoured (RFC 5424 levels,
-default `info`); the level is recorded by the front end, which is what generates log notifications.
+Declared capabilities: `tools`, and nothing else. `logging` was declared until 2026-08-27 to license
+`notifications/message` as the carrier for the front end's session warnings; those warnings are gone
+(see [Session lifetime](docs/session-lifetime.md)), so `logging/setLevel` is now answered `-32601`
+like any other undeclared method. Progress needs no capability either way: `notifications/progress`
+is a base-protocol utility a **client** opts into per request, via a `progressToken` in `_meta`.
 
 **Security (per the MCP spec):** the server binds only to `127.0.0.1`, session ids are
 cryptographically-random 128-bit tokens, and every request's `Origin` header is validated to
@@ -412,7 +415,7 @@ forbidden here" from "no such tool". A tool absent because its toolset was never
 | `McpSession` | one client's isolated worker handle: a `GsTsExternalSession` gem + session id + last-activity + the worker class/toolsets/identity the front end resolved, plus the front-end-side outbox, log level and liveness state. `prepareWorker` sets the gem up in one call; `forward:` runs a request in it (`<workerClass> handleJsonString: …`) without blocking the front end (`runWorker:`); `close` stops it |
 | `McpOutbox` | one session's queue of server-initiated messages waiting for its SSE stream. Front-end-only and never committed; owns the bound/overflow policy, the closing handshake, and the latest-GET-wins rule |
 | `McpHttpConnection` | reads one HTTP/1.1 request, writes one JSON response (incl. `MCP-Session-Id`), and writes the SSE stream — every frame gated on the socket being writable, plus a non-blocking read-side disconnect check |
-| `McpDispatcher` | JSON-RPC 2.0 / MCP routing (`initialize`, `tools/list`, `tools/call`, `ping`, `logging/setLevel`); read-only tool gating; structured error kinds |
+| `McpDispatcher` | JSON-RPC 2.0 / MCP routing (`initialize`, `tools/list`, `tools/call`, `ping`); read-only tool gating; structured error kinds |
 | `McpToolRegistry` | name → `McpTool` map; produces `tools/list` descriptors |
 | `McpTool` | one tool: name, description, JSON Schema, handler block; validates arguments against the schema |
 | `McpError` | an error carrying a machine-readable `kind` (e.g. `refused`, `readOnly`) that the dispatcher surfaces in the tool-call error envelope |
@@ -530,23 +533,28 @@ client POSTs back.
 ### What it is for today: idle sessions
 
 This matters more here than for a typical MCP server, because a session **is a gem with its own
-transaction view** — reaping one throws away uncommitted work. Previously a client discovered that
-by meeting a cold `404` on its next call. Now, for a session drifting toward the idle deadline and
-holding an open stream:
+transaction view** — reaping one throws away uncommitted work, so the server's problem is telling a
+client that has *gone* from one that is merely quiet. For a session drifting toward the idle deadline
+and holding an open stream:
 
 | When | What happens |
 |---|---|
 | idle > 25 min | the server sends a `ping` on the stream (`ping` is bidirectional; the receiver MUST answer) |
-| the client answers | it is **proven live** — and gets a `warning`-level `notifications/message` saying how long is left and that uncommitted changes will be lost |
+| the client answers | it is **proven live** — its gem is kept, and the answer counts toward the idleness total |
 | the client does not answer | it is **proven gone** — its worker gem is released early rather than waited out |
-| the session is reaped | a last notice goes out on the stream first, explaining why the gem went |
+| the session is reaped | it is unmapped silently; the client meets a `404` on its next call, and the reason is written to the gem log |
+
+The ping earned the client a warning on its stream until 2026-08-27. It no longer does: the carrier
+was `notifications/message`, which the draft revision deprecates and — unsolicited — prohibits, and
+measurement said no client was surfacing it to its model anyway. The ping stays, because what it
+buys is the **evidence**, not the message.
 
 **An answered `ping` deliberately does *not* reset the activity clock.** It proves someone is
 listening; only real MCP traffic keeps a session alive. Refreshing the clock instead would mean any
 well-behaved client — they all answer `ping` — held a gem and a transaction view for as long as it
-stayed open, and the warning would only ever reach clients unable to act on it.
+stayed open.
 
-A client that never opens a GET stream is left exactly as it was: never probed, never warned, reaped
+A client that never opens a GET stream is left exactly as it was: never probed, reaped
 on `streamlessIdleTimeoutSeconds` (1 minute). Pinging it would only mark it unanswered and cost it
 its gem early. A minute is short on purpose — the commonest streamless client is a one-shot POST
 whose gem is pure overhead the moment it returns — and it is safe because the count pays for the
@@ -580,16 +588,11 @@ was written to, and a verdict is drawn only if that generation is still current;
 is discarded and re-sent down the new stream on the next pass. (Measured against real clients on
 2026-08-23, this accounted for 6 of 14 pings.)
 
-**A session that reaches the deadline unwarned gets one bounded grace period.** The warning is the
-promise this makes — commit or lose the uncommitted work in your gem — and a session can arrive at
-the deadline never having heard it. That grace is not a liveness reprieve: answering the ping does
-not save the session, it only means the notice reaches someone listening.
-
 ### The pieces
 
 | | |
 |---|---|
-| `McpOutbox` | per-session FIFO queue, bounded at 256 (drops oldest, then admits the gap on the stream). Its own mutex — the router's is held across reaping. Hands out a **stream generation** so the newest `GET` wins and two drainers can never interleave frames on one socket |
+| `McpOutbox` | per-session FIFO queue, bounded at 256 (drops oldest, then records the gap in the gem log). Its own mutex — the router's is held across reaping. Hands out a **stream generation** so the newest `GET` wins and two drainers can never interleave frames on one socket |
 | `McpRouter>>serveGetStream:forSession:` | the drain loop. Yields every tick, so holding a stream open costs the gem nothing |
 | `McpBase>>notification:params:` / `request:params:id:` | envelope builders on the front-end side. `McpDispatcher` lives in the worker and cannot be asked to build one mid-tool-call |
 | pending-request table | `srv-N` ids in their own namespace, timed out at 30s — an unanswered ping must decide something, never hang a session |
@@ -784,9 +787,8 @@ flag, so a missing suite is a skip and not an error:
   `McpTestDict` symbol dictionary of its own. All are cleaned up in `tearDown`.
 - `McpDispatcherTest` — JSON-RPC routing/envelope: initialize, tools/list (31, alphabetical),
   success + error wrapping, `-32601`/`-32602`/`-32700`, notifications → nil, the per-worker
-  entry `handleJsonString:`, and the declared capabilities — `logging` present, `listChanged` /
-  `resources` / `prompts` / `completions` deliberately absent — plus `logging/setLevel` and its
-  `-32602` on an unknown level.
+  entry `handleJsonString:`, and the declared capabilities — `tools` present, `logging` /
+  `listChanged` / `resources` / `prompts` / `completions` deliberately absent.
 - `McpSessionTest` — how a session drives its worker gem: the non-blocking `runWorker:` that
   `forward:` and `prepareWorker` both use, that it reads the result only once the call is over (a
   premature read would answer one request with another's response), that two concurrent requests on
@@ -809,17 +811,17 @@ flag, so a missing suite is a skip and not an error:
   stale and end too.
 - `McpStreamTest` — the whole server-to-client pathway with no sockets: the session-scoped GET
   (`400`/`404`/stream), the drain onto the stream, a closing outbox getting its last flush, a POSTed
-  JSON-RPC response → `202` and its correlation back to the ping that caused it, the probe-then-warn
-  sequence over an idle session, that a session with no stream is never probed, that an answered
-  ping does **not** move the activity clock, that an unanswered one frees the gem early, and that a
-  reaped session is told on its stream first. Uses `McpFixtureRouter`, a real router that reports
+  JSON-RPC response → `202` and its correlation back to the ping that caused it, the probe over an
+  idle session and the accounting its answer feeds, that a session with no stream is never probed,
+  that an answered ping does **not** move the activity clock, that an unanswered one frees the gem
+  early, and that a reaped session is unmapped and closed **without** a farewell on its stream. Uses `McpFixtureRouter`, a real router that reports
   itself running without binding a socket, so the drain loop can be driven at all.
 - `McpLifetimeTest` — the *policy* riding on that pathway, which is a separate thing: that the
   intervals are config and survive the fork (including the JSON `null` that means "no deadline"),
-  that the warning lead derives from the timeout and an unworkable combination is refused at startup,
-  that a probe lost to a stream handover is **discarded rather than condemned** while one lost on the
-  current stream still condemns, that an unwarned session at the deadline gets one bounded grace
-  period, that an indefinite session lives while it answers and goes when it stops — with a floor for
+  that an unworkable combination of them is refused at startup, that a probe lost to a stream
+  handover is **discarded rather than condemned** while one lost on the
+  current stream still condemns,
+  that an indefinite session lives while it answers and goes when it stops — with a floor for
   the client that opens no stream — that an expiry is absolute, and that a wildly late maintenance
   pass is read as a host suspend and forgiven instead of reaping every live client at once.
 - `McpContractTest` — contract / property tests over the tool surface, all driven through the real
