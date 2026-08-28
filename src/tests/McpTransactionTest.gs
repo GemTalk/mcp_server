@@ -44,13 +44,20 @@ removeallclassmethods McpTransactionTest
 category: 'helpers'
 method: McpTransactionTest
 dispatchStatus
-  "The text of a real tools/call for `status`, dispatched exactly as a client's would be -- so the
-   post-call session note (McpDispatcher>>transactionNote) is attached the way a client sees it.
-   `status` is used because it is the tool least likely to change what it is reporting on."
+  "The text of a real tools/call for `status`. `status` is used because it is the tool least likely
+   to change what it is reporting on."
+  ^self dispatchTool: 'status' args: Dictionary new
+%
+category: 'helpers'
+method: McpTransactionTest
+dispatchTool: aName args: anArgsDict
+  "Drive a tool exactly as a client's request would, through McpDispatcher, so that everything the
+   dispatcher does on the way in and out is in the path: the post-call session note is attached the
+   way a client sees it, and -- the point of several tests here -- nothing refreshes the view."
   | params response |
   params := Dictionary new.
-  params at: 'name' put: 'status'.
-  params at: 'arguments' put: Dictionary new.
+  params at: 'name' put: aName.
+  params at: 'arguments' put: anArgsDict.
   response := (McpDispatcher withToolRegistry: McpServer new toolRegistry) handle:
     (Dictionary new
       at: 'jsonrpc' put: '2.0';
@@ -126,6 +133,36 @@ testAbortIsTheWayOutAndSaysNothingElse
 %
 category: 'tests'
 method: McpTransactionTest
+testAStaleWriteIsRefusedRatherThanSilentlyOverwriting
+  "The guardrail, in the shape it is actually needed. A client reads something, thinks (or asks a
+   human) across several calls, and only then acts on what it read. In between, another session
+   commits a change to the same thing. Its commit must FAIL rather than quietly erase that work.
+
+   This holds only because no tool refreshes the view: GemStone's check is write-write against the
+   view and does not track reads, so the view is the whole of the stone's record of what this client
+   saw. A refresh anywhere between the read and the write -- which the dispatcher did before
+   2026-08-28, first via abortTransaction and then via continueTransaction -- makes this commit
+   succeed and the other session's work vanish with nothing raised."
+  | probe err |
+  probe := self probeKey.
+  UserGlobals at: probe put: 'baseline'.
+  System commitTransaction.
+  self assert: (UserGlobals at: probe) equals: 'baseline'.
+  other := McpSession startWithId: 'transaction-stale-write-fixture'.
+  other runWorker: 'UserGlobals at: #' , probe asString
+    , ' put: ''committed by the other session''. System commitTransaction'.
+  "Several tool calls pass between the read and the write, as they would in a real conversation."
+  self dispatchStatus.
+  self dispatchTool: 'execute_code'
+    args: (Dictionary new at: 'code' put: 'UserGlobals at: #' , probe asString , ' put: ''mine'''; yourself).
+  err := [self sessionTools tool_commit: Dictionary new. nil] on: McpError do: [:ex | ex].
+  self assert: err notNil description: 'a stale write was COMMITTED instead of being refused'.
+  self assert: err kind equals: #commitConflict.
+  System abortTransaction.
+  self assert: (UserGlobals at: probe) equals: 'committed by the other session'
+%
+category: 'tests'
+method: McpTransactionTest
 testCommitConflictIsRaisedNotReported
   "A failed commit reaches the client as an isError result with kind #commitConflict, naming what
    conflicted. It answered a success-shaped string until 2026-08-28 -- and, before that, a plain
@@ -147,16 +184,56 @@ testJammedSessionKeepsItsUncommittedWork
 %
 category: 'tests'
 method: McpTransactionTest
-testJammedSessionReportsAStaleView
-  "The state is sticky -- continueTransaction answers 2409 until an abort -- so the per-call
-   refresh cannot do its job, and every result says so until the client acts. The message quotes
-   GemStone's own text rather than re-wording it, so it stays true if the wording changes."
+testJammedSessionReportsTheFailedCommit
+  "The state is sticky -- no commit can succeed and the view cannot move until an abort -- so every
+   result says so until the client acts, and says what the recovery costs."
   | text |
   self jamTheSession.
-  self assert: McpToolset refreshView notNil.
+  self assert: McpToolset commitConflictPending.
   text := self dispatchStatus.
-  self assert: (text includesString: 'could NOT be refreshed').
+  self assert: (text includesString: 'last commit FAILED').
   self assert: (text includesString: 'abort')
+%
+category: 'tests'
+method: McpTransactionTest
+testNoToolMovesTheView
+  "A session sees one snapshot until it asks for another. Every tool call in between leaves it
+   exactly where it was -- which is what makes the check in
+   testAStaleWriteIsRefusedRatherThanSilentlyOverwriting possible -- and `refresh` is what moves it."
+  | probe |
+  probe := self probeKey.
+  UserGlobals at: probe put: 'baseline'.
+  System commitTransaction.
+  other := McpSession startWithId: 'transaction-view-fixture'.
+  other runWorker: 'UserGlobals at: #' , probe asString
+    , ' put: ''committed by the other session''. System commitTransaction'.
+  self dispatchStatus.
+  self dispatchTool: 'list_dictionaries' args: Dictionary new.
+  self dispatchTool: 'execute_code' args: (Dictionary new at: 'code' put: '1 + 1'; yourself).
+  self assert: (UserGlobals at: probe) equals: 'baseline'.
+  self sessionTools tool_refresh: Dictionary new.
+  self assert: (UserGlobals at: probe) equals: 'committed by the other session'
+%
+category: 'tests'
+method: McpTransactionTest
+testRefreshAdoptsTheOtherVersionAsTheStartingPoint
+  "The cost of `refresh`, pinned so that it stays a decision rather than becoming a surprise. Once
+   the view has moved, a change made afterwards is no longer stale by the stone's reckoning, so it
+   commits cleanly OVER the other session's work. That is correct for a client that refreshed and
+   then looked again; it is a trap for one acting on what it read before refreshing, which is why
+   the refresh tool's description and the server instructions both say to re-read first."
+  | probe |
+  probe := self probeKey.
+  UserGlobals at: probe put: 'baseline'.
+  System commitTransaction.
+  other := McpSession startWithId: 'transaction-adopt-fixture'.
+  other runWorker: 'UserGlobals at: #' , probe asString
+    , ' put: ''committed by the other session''. System commitTransaction'.
+  self sessionTools tool_refresh: Dictionary new.
+  UserGlobals at: probe put: 'mine'.
+  self assert: (self sessionTools tool_commit: Dictionary new) equals: 'Transaction committed.'.
+  System abortTransaction.
+  self assert: (UserGlobals at: probe) equals: 'mine'
 %
 category: 'tests'
 method: McpTransactionTest

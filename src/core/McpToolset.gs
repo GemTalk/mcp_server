@@ -76,6 +76,21 @@ capResult: aString
 %
 category: 'transaction'
 classmethod: McpToolset
+commitConflictPending
+  "Whether this session's last commit FAILED on conflict and left the transaction in the state the
+   manual calls must-abort: the view is frozen, no commit can succeed, and only an abort clears it.
+
+   TEST #retryFailure SPECIFICALLY, never 'anything but #success'. Measured on 3.7.5 and 3.7.6,
+   `System transactionConflicts at: #commitResult` answers #success on a fresh session, after a
+   successful commit and after an abort; #retryFailure while a failed commit is unresolved; and
+   #readOnly after a System continueTransaction, which the `refresh` tool sends. An earlier version
+   of this read 'not #success' and so reported a jammed session from the first successful refresh
+   onward. Reading it does not clear it."
+  ^[(System transactionConflicts at: #commitResult ifAbsent: [#success]) == #retryFailure]
+    on: Error do: [:e | false]
+%
+category: 'transaction'
+classmethod: McpToolset
 commitConflictReport
   "A short human-readable summary of the last commit's conflicts: each conflict category and how
    many objects it names, e.g. 'Write-Write(2)'. Deliberately NOT the conflict dictionary's
@@ -210,6 +225,11 @@ category: 'private'
 method: McpToolset
 capResult: aString
   ^self class capResult: aString
+%
+category: 'transaction'
+method: McpToolset
+commitConflictPending
+  ^self class commitConflictPending
 %
 category: 'transaction'
 method: McpToolset

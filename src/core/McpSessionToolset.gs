@@ -23,12 +23,18 @@ rather than persisting any), while commit persists and so is NOT read-only-safe.
 read-only screens individual tools and not just whole toolsets -- see McpToolset.
 
 THE TRANSACTION MODEL THESE TOOLS EXPOSE (changed 2026-08-28; docs/server-to-client-messaging.md
-10.11). A worker gem sits in one long-lived GemStone transaction. Every tools/call is preceded by
-System continueTransaction, which takes a current view of other sessions'' committed work while
-KEEPING this session''s uncommitted changes -- so a change made by one call is still there for the
-next one, and compile -> run the tests -> commit is a workflow rather than three unrelated calls.
-It used to be System abortTransaction, which made all three of these tools very nearly lies:
-commit committed a transaction emptied a microsecond earlier, and refresh was abort in disguise.
+10.11 and 15). A worker gem sits in one long-lived GemStone transaction and sees one consistent
+snapshot of the repository. NO TOOL REFRESHES THAT SNAPSHOT: it moves only when the client moves it,
+with commit, abort or refresh. A change made by one call is still there for the next one, so
+compile -> run the tests -> commit is a workflow rather than three unrelated calls.
+
+Two things used to refresh it on every single call, first System abortTransaction and then briefly
+System continueTransaction, and both were wrong for the same reason. GemStone''s conflict check is
+write-write AGAINST THE VIEW and does not track what a session read, so the view is the only record
+the stone holds of what this client has seen. Refreshing under the client asserts it has seen
+changes it has not, and a commit that should have been refused as stale is accepted instead --
+silently destroying another session''s work. Refusing to refresh is therefore not laziness about
+freshness; it is what makes the conflict check mean anything.
 
 Nothing else in the server commits. abort and commit are therefore the only two tools that end a
 transaction, and they are the two moves the client is told about whenever the dispatcher''s
@@ -65,7 +71,7 @@ registerOn: aToolRegistry
     description: 'Persist this session''s changes to the repository. The ONLY tool that commits; no other tool commits on your behalf. Fails (without writing) if another session changed the same objects.'
     inputSchema: noArgs do: [:args | self tool_commit: args].
   aToolRegistry name: 'refresh'
-    description: 'Take a current view of work other sessions have committed, KEEPING this session''s uncommitted changes. Does not commit and does not discard.'
+    description: 'Take a current view of work other sessions have committed, KEEPING this session''s uncommitted changes. Does not commit and does not discard. NOTE: this also adopts their version as your starting point, so a change you make afterwards on the strength of something you read BEFORE refreshing will commit cleanly over their work instead of being refused as stale. Re-read anything you are about to act on.'
     inputSchema: noArgs do: [:args | self tool_refresh: args].
   aToolRegistry name: 'status'
     description: 'Report the GemStone session: user, session id, stone, and whether there are uncommitted changes.'

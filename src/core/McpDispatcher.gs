@@ -3,7 +3,7 @@ set compile_env: 0
 expectvalue /Class
 doit
 Object subclass: 'McpDispatcher'
-  instVarNames: #( toolRegistry server viewRefreshError)
+  instVarNames: #( toolRegistry server)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -83,6 +83,13 @@ annotateContent: aResultDict
   item at: 'text' put: (item at: 'text' ifAbsent: ['']) , (String with: Character lf) , note.
   ^aResultDict
 %
+category: 'transaction'
+method: McpDispatcher
+commitConflictPending
+  "Whether a failed commit has left this session in the must-abort state; see
+   McpToolset class>>commitConflictPending, which is the single implementation."
+  ^McpToolset commitConflictPending
+%
 category: 'responses'
 method: McpDispatcher
 contentText: aString isError: aBool
@@ -154,10 +161,18 @@ handleToolsCall: params id: id
        here too; only the envelope changed -- the check still runs BEFORE the tool is invoked, so
        a rejected call still has no side effect.)
 
-   THE VIEW, AND WHAT SURVIVES A CALL. The pre-call refresh keeps this session's uncommitted work
-   (refreshViewForCall); the post-call annotation reports what state the call left behind
-   (annotateContent:). Together they are what makes a multi-call workflow -- compile, run the
-   tests, then commit -- possible at all. No tool commits: see McpMutationToolset."
+   THE VIEW. NO TOOL REFRESHES IT. A session sees one consistent snapshot of the repository until
+   the client itself asks for another, by committing, aborting, or calling `refresh`. That is not
+   an omission, it is the guardrail: GemStone's conflict check is write-write AGAINST THE VIEW and
+   does not track what a client read, so the view is the only record the stone has of what this
+   client saw. Refreshing under it -- which this method did before 2026-08-28, first with
+   abortTransaction and then briefly with continueTransaction -- tells the stone the client has
+   seen changes it has not, and a commit that should have been refused as stale is accepted
+   instead, silently discarding another session's work. Measured both ways; see
+   docs/server-to-client-messaging.md 15.
+
+   What the call left behind is reported afterwards by annotateContent:. No tool commits either:
+   see McpMutationToolset."
   | name tool args argErr |
   name := params at: 'name' ifAbsent: [nil].
   name isNil ifTrue: [^self errorFor: id code: -32602 message: 'Missing tool name' kind: 'invalidParams'].
@@ -174,7 +189,6 @@ handleToolsCall: params id: id
   argErr := tool validationErrorFor: args.
   argErr ifNotNil: [
     ^self resultFor: id with: (self structuredErrorContent: argErr kind: 'invalidParams')].
-  self refreshViewForCall.
   ^[ self resultFor: id
        with: (self annotateContent: (self contentText: (tool callWith: args) isError: false)) ]
    on: Error
@@ -250,31 +264,6 @@ readOnlyGated: aToolName
    False when there is no server (isolated dispatcher tests), so an unknown tool stays 'notFound'."
   ^server notNil
     and: [(server allToolNames includes: aToolName) and: [(server isToolAllowed: aToolName) not]]
-%
-category: 'transaction'
-method: McpDispatcher
-refreshViewForCall
-  "Give the tool that is about to run a current view of other sessions' committed work WITHOUT
-   destroying this session's uncommitted changes.
-
-   This sent `System abortTransaction` until 2026-08-28. The freshness was right and is still
-   wanted -- a gem that never refreshes reads stale source and pins pages -- but the abort bought
-   it by emptying the transaction, which meant `commit` committed a transaction emptied a
-   microsecond earlier, and no work could survive from one call to the next at all
-   (docs/server-to-client-messaging.md 10.11). continueTransaction buys the same freshness and
-   destroys nothing.
-
-   NEVER RAISES, and decides nothing. continueTransaction is illegal in exactly two states, both
-   measured on 3.7.5/3.7.6:
-     nested transaction               ImproperOperation 2717
-     commit failed on conflict        TransactionError 2409 -- and STICKY, raising on every later
-                                      call until someone aborts
-   Raising here would be worst precisely in the second case: it would poison every subsequent call
-   INCLUDING the `abort` that is the only way out. So a failure is RECORDED rather than raised --
-   the tool runs on the view it has, and transactionNote reports afterwards what could not be done
-   and why. Always assigns, so what is reported is always this call's answer."
-  viewRefreshError := McpToolset refreshView.
-  ^self
 %
 category: 'responses'
 method: McpDispatcher
@@ -385,14 +374,17 @@ transactionNote
    says what the SESSION now needs, and the transaction model that makes both intelligible is
    stated once in the initialize instructions rather than repeated per call.
 
-   Ordered most-blocking first. A view that could not be refreshed subsumes everything else: the
-   session is reading stale data and cannot commit until it is aborted, and GemStone's own text for
-   the error says which of the two causes it was, so it is quoted rather than re-worded."
-  viewRefreshError ifNotNil: [:ex | | why |
-    why := [ex description] on: Error do: [:e | 'reason unavailable'].
-    ^'[session] This session''s view could NOT be refreshed and is stale: ' , why
-      , ' Call abort to recover -- it is the only operation that clears this state, and it '
-      , 'discards any uncommitted changes.'].
+   Ordered most-blocking first. A failed commit subsumes everything else -- no further commit can
+   succeed and the view cannot move until the transaction is aborted -- and a nested transaction
+   subsumes pending changes, since nothing can be committed out of one either."
+  self commitConflictPending ifTrue: [
+    ^'[session] Your last commit FAILED: another session changed the same objects since your view '
+      , 'was taken (' , McpToolset commitConflictReport , '). Nothing was written. Your changes are '
+      , 'still here but cannot be committed and your view cannot move until you call abort, which '
+      , 'discards them -- save anything you need first, then abort, re-read, and redo it.'].
+  System transactionLevel > 1 ifTrue: [
+    ^'[session] This session is inside a nested transaction; commit and abort cannot act on the '
+      , 'outer one until it is closed.'].
   System needsCommit ifTrue: [ | note |
     note := self sessionLifetimeNote.
     ^'[session] You have uncommitted changes. No tool commits for you: call commit to persist '

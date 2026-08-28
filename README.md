@@ -233,15 +233,24 @@ with no session id to key it on.
 | `refresh` | – | refresh the view to see other sessions' commits, **keeping** uncommitted changes |
 | `status` | – | session user, id, stone, uncommitted-changes flag |
 
-A worker gem sits in one long-lived GemStone transaction, and since 2026-08-28 a change made by one
-tool call is still there for the next one: every call is preceded by `System continueTransaction`,
-which takes a current view of other sessions' commits without discarding this session's uncommitted
-work. So the ordinary Smalltalk loop — compile, run the tests against what you compiled, *then*
-commit — works across calls. Nothing commits on the client's behalf; a result whose session has
-uncommitted changes carries a one-line `[session]` note saying so, and naming what would end the
-session before the work is committed. Until 2026-08-28 the dispatcher sent `System abortTransaction`
-before every tool instead, which meant no change survived a call and `commit` committed a
-transaction emptied a microsecond earlier.
+A worker gem sits in one long-lived GemStone transaction and sees **one consistent snapshot** of the
+repository. A change made by one tool call is still there for the next one, so the ordinary
+Smalltalk loop — compile, run the tests against what you compiled, *then* commit — works across
+calls. Nothing commits on the client's behalf; a result whose session has uncommitted changes
+carries a one-line `[session]` note saying so, and naming what would end the session before the work
+is committed.
+
+**No tool refreshes the view.** It moves only when the client moves it — `commit`, `abort` and
+`refresh` each take a current view, and nothing else does. That is the guardrail rather than an
+oversight: GemStone's conflict check is write-write *against the view* and does not track what a
+session read, so the view is the only record the stone holds of what this client has seen. A client
+that reads a method, deliberates over several calls, and then rewrites it has its `commit` **refused**
+if someone else changed that class in the meantime — nothing is silently overwritten. Refreshing
+under the client would assert it had seen changes it had not, and turn that refusal into a silent
+overwrite; two earlier designs did exactly that, first with `System abortTransaction` before every
+tool and then briefly with `System continueTransaction`. The same reasoning is why `refresh` is not
+free: it adopts the other version as your starting point, so re-read anything you are about to act
+on.
 
 **Listing**
 

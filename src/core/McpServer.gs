@@ -85,25 +85,37 @@ defaultServerInstructions
   lf := String with: Character lf.
   ^'This server is one GemStone session, in one long-running database transaction, for as long as '
     , 'the connection lasts.' , lf , lf
+    , 'YOUR VIEW IS A SNAPSHOT. You see the repository as it was at one instant, and it does not '
+    , 'change under you while you work. It moves only when YOU move it: `commit`, `abort` and '
+    , '`refresh` each take a current view, and nothing else does. So anything you read before your '
+    , 'last one of those may since have been changed by somebody else.' , lf , lf
+    , 'THE DATABASE PROTECTS YOU FROM ACTING ON A STALE SNAPSHOT. If you change something that '
+    , 'another session has committed a change to since your view was taken, your `commit` FAILS and '
+    , 'writes nothing -- it will not silently overwrite their work. This is why the snapshot is '
+    , 'worth having, and it is also why a `refresh` in the middle of a plan is not free: refreshing '
+    , 'adopts their version as your starting point, so a change you then make on the strength of '
+    , 'what you read EARLIER will commit cleanly and erase what they did. If you read something, '
+    , 'thought about it, and are only now acting, re-read it first.' , lf , lf
     , 'WHAT SURVIVES A CALL. Every change you make stays in your session until you commit or abort '
     , 'it -- so you can compile a method, run its tests against what you just compiled, and only '
     , 'then decide to keep it. Nobody else can see any of it until you commit.' , lf , lf
     , 'NOTHING COMMITS FOR YOU. Only the `commit` tool commits. The tools that change the image '
     , '(compile_method, compile_class_definition, delete_class, delete_method, set_class_comment, '
     , 'add_dictionary, remove_dictionary) leave their work uncommitted. `abort` discards everything '
-    , 'uncommitted; `refresh` takes a current view of other sessions'' work and keeps yours.' , lf , lf
+    , 'uncommitted; `refresh` takes a current view and keeps your uncommitted changes.' , lf , lf
     , 'THE [session] LINE. A result may end with one line starting "[session]". It describes your '
     , 'session, not the tool you just called, and it appears only when there is something to do:'
     , lf
     , '  - uncommitted changes pending -> commit them or abort them. The line names what would end '
     , 'this session first and how long that is; if it ends, they are lost. Commit anything you want '
     , 'to keep rather than leaving it staged.' , lf
-    , '  - view could not be refreshed -> a commit of yours failed because another session changed '
-    , 'the same objects. Nothing was written, your changes are still there, and you are now reading '
-    , 'stale data and cannot commit again until you call `abort`. `abort` is the only way out and '
-    , 'it discards your uncommitted changes; there is no way to keep them.' , lf , lf
-    , 'A failed commit is the one failure here you cannot retry your way out of. If the work matters, '
-    , 'save the source before aborting.'
+    , '  - your last commit FAILED -> another session changed the same objects since your view was '
+    , 'taken. Nothing was written and your changes are still here, but no commit can succeed and '
+    , 'your view cannot move until you call `abort`, which discards them. Save anything you need, '
+    , 'abort, re-read the current state, and redo the change against it.' , lf , lf
+    , 'A failed commit is the one failure here you cannot retry your way out of, and the conflict is '
+    , 'reported per CLASS rather than per method -- two sessions compiling different methods on one '
+    , 'class still collide. If the work matters, save the source before aborting.'
 %
 category: 'identity'
 classmethod: McpServer
