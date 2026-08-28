@@ -156,24 +156,25 @@ expiresAtSeconds: aSecondOrNil
 category: 'routing'
 method: McpSession
 forward: aRawJsonString
-  "Forward with no lifetime note -- the direct form, kept for callers with no router policy to
+  "Forward with no lifetime bounds -- the direct form, kept for callers with no router policy to
    report (the tests, and any embedder driving a session itself)."
-  ^self forward: aRawJsonString lifetimeNote: nil
+  ^self forward: aRawJsonString lifetimeBounds: nil
 %
 category: 'requests'
 method: McpSession
-forward: aRawJsonString lifetimeNote: aStringOrNil
+forward: aRawJsonString lifetimeBounds: anArrayOrNil
   "Run a JSON-RPC request in this client's worker gem (an isolated session) and answer the JSON
    response string ('' for a notification). Runs WITHOUT stalling the front-end gem -- see
    #runWorker:, which is what keeps one client's long tool call from freezing every other GsProcess
    in the front end. The request is embedded via printString for safe quoting.
 
-   aStringOrNil is what the ROUTER says would end this session (McpRouter>>lifetimeNoteFor:),
+   anArrayOrNil is what the ROUTER says bounds this session (McpRouter>>lifetimeBoundsFor:),
    carried in on the request rather than asked for by the worker, which cannot see the front end's
-   configuration and must not hold a stale copy of it. The worker uses it only when it has
-   uncommitted work to warn about."
+   configuration and must not hold a stale copy of it. Values rather than a sentence, because the
+   deadline in it is an instant the worker counts down from when it ANSWERS -- see that method. The
+   worker uses them only when it has uncommitted work to warn about."
   self touch.
-  ^self runWorker: (self workerExpressionFor: aRawJsonString lifetimeNote: aStringOrNil)
+  ^self runWorker: (self workerExpressionFor: aRawJsonString lifetimeBounds: anArrayOrNil)
 %
 category: 'accessing'
 method: McpSession
@@ -592,24 +593,28 @@ workerClassName: aNameOrNil
 category: 'routing'
 method: McpSession
 workerExpressionFor: aRawJsonString
-  ^self workerExpressionFor: aRawJsonString lifetimeNote: nil
+  ^self workerExpressionFor: aRawJsonString lifetimeBounds: nil
 %
 category: 'private'
 method: McpSession
-workerExpressionFor: aRawJsonString lifetimeNote: aStringOrNil
+workerExpressionFor: aRawJsonString lifetimeBounds: anArrayOrNil
   "The expression forward: runs in the worker gem: the NAMED worker class handles the request, so the
    worker never decides which server class to build. The request body is embedded via printString for
-   safe quoting, and so is the note.
+   safe quoting, and so is every element of the bounds -- which is what makes an apostrophe in a
+   phrase, or a nil in any slot, safe to send.
 
-   The lifetimeNote: keyword is appended ONLY when there is a note, so a deployment that bounds
+   The lifetimeBounds: keyword is appended ONLY when there are bounds, so a deployment that bounds
    nothing sends the expression it always sent, and the one-argument entry point stays the form
-   documented for a direct call. The worker's one-argument handleJsonString: clears any note from a
+   documented for a direct call. The worker's one-argument handleJsonString: clears bounds left by a
    previous request, so an omitted keyword means 'nothing bounds this session' rather than 'no news'."
-  | base |
+  | base s |
   base := self workerClassName , ' handleJsonString: ' , aRawJsonString printString.
-  ^aStringOrNil isNil
-    ifTrue: [base]
-    ifFalse: [base , ' lifetimeNote: ' , aStringOrNil printString]
+  anArrayOrNil isNil ifTrue: [^base].
+  s := WriteStream on: String new.
+  s nextPutAll: base , ' lifetimeBounds: (Array'.
+  anArrayOrNil do: [:e | s nextPutAll: ' with: ' , e printString].
+  s nextPutAll: ')'.
+  ^s contents
 %
 category: 'private'
 method: McpSession

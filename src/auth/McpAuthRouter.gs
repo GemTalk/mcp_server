@@ -578,7 +578,7 @@ serveInitialize: req on: conn
   sess isNil ifTrue: [^self writeAuthError: 401 oauthError: 'invalid_token'
     description: 'Authentication failed' on: conn].
   conn writeJson: (sess forward: (req at: 'body' ifAbsent: [''])
-    lifetimeNote: (self lifetimeNoteFor: sess)) sessionId: sess id
+    lifetimeBounds: (self lifetimeBoundsFor: sess)) sessionId: sess id
 %
 category: 'routing'
 method: McpAuthRouter

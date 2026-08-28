@@ -499,6 +499,43 @@ method: McpToolTest
 testingTools
   ^self toolsetOfClass: McpTestingToolset
 %
+category: 'tools - session'
+method: McpToolTest
+testLifetimeNoteCountsDownFromAnInstantAndOrdersByWhatComesFirst
+  "The worker renders the countdown when it ANSWERS, from an instant the front end sent, so a long
+   tool call cannot leave it promising time that has already gone. And it puts the nearer bound
+   first -- which is not a fixed order, because it inverts: a 33-minute credential outlasts a
+   30-minute idle rule when a request arrives and undercuts it six minutes later. Both are always
+   reported, since only one of them fires whatever the client does next."
+  | srv now note |
+  srv := McpServer new.
+  now := System timeGmt.
+  srv handleJsonString: '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+    lifetimeBounds: (Array with: now + 1980 with: 'your access credential'
+      with: 1800 with: 'of inactivity').
+  note := srv lifetimeNote.
+  self assert: (self includesCS: '30 minutes of inactivity, or 33 minutes left' in: note).
+  "the same session six minutes into a call: the credential is now the nearer of the two"
+  srv handleJsonString: '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+    lifetimeBounds: (Array with: now + 1620 with: 'your access credential'
+      with: 1800 with: 'of inactivity').
+  note := srv lifetimeNote.
+  self assert: (self includesCS: '27 minutes left on your access credential, or 30 minutes of inactivity' in: note)
+%
+category: 'tools - session'
+method: McpToolTest
+testLifetimeNoteIsNilWithoutBounds
+  "No bounds means no clause, and the warning keeps its unqualified form. Also the state a direct
+   in-image send leaves: handleJsonString: routes through the bounds variant with nil, so bounds
+   from an earlier request can never outlive the deadline that produced them."
+  | srv |
+  srv := McpServer new.
+  srv handleJsonString: '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+    lifetimeBounds: (Array with: System timeGmt + 60 with: 'your access credential' with: nil with: nil).
+  self assert: srv lifetimeNote notNil.
+  srv handleJsonString: '{"jsonrpc":"2.0","method":"notifications/initialized"}'.
+  self assert: srv lifetimeNote isNil
+%
 category: 'tools - listing'
 method: McpToolTest
 testListAllClasses

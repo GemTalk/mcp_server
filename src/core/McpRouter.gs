@@ -597,37 +597,48 @@ keepaliveIntervalSeconds
 %
 category: 'session lifetime'
 method: McpRouter
-lifetimeNoteFor: sess
-  "What would end this session, phrased for the client, or nil if nothing bounds it. Sent to the
-   worker with each request (McpSession>>forward:lifetimeNote:) and used by the worker only when it
-   has uncommitted changes to warn about (McpDispatcher>>transactionNote) -- so the policy is
-   rendered HERE, where it is configured and enforced, and the worker appends a sentence rather
-   than duplicating a rule it cannot see.
+lifetimeBoundsFor: sess
+  "What bounds this session, as the VALUES the worker needs to describe them when it reports them:
+     #( deadlineAtSeconds deadlineSource inactivitySeconds inactivityLabel )
+   or nil if nothing bounds this session at all. Any element may be nil.
 
-   At most two clauses, the deadline first: an absolute deadline runs down whether the client works
-   or not, while the inactivity bound is the one it controls by continuing to call.
+   DELIBERATELY NOT A RENDERED SENTENCE, and specifically not a rendered countdown. This is computed
+   when the request ARRIVES; the client reads it when the call RETURNS. A duration rendered here is
+   therefore wrong by the length of the call -- and wrong in the dangerous direction, telling a
+   client 24 minutes remain when a six-minute tool call has left it 18. So the deadline crosses as
+   an INSTANT and the worker subtracts when it answers (McpServer>>lifetimeNote). What stays here is
+   every policy choice: which bounds exist, what they are called, and which of the two inactivity
+   rules can actually fire.
 
-   The inactivity bound is whichever rule can actually fire. With no stream open, liveness cannot be
-   asked anything and #streamlessIdleTimeoutSeconds is the give-up rule -- typically far shorter
-   than the idle deadline, so quoting the idle deadline there would be a comfortable lie.
+   BOTH bounds are reported, never only the nearer one, because they run on different clocks and
+   which of them binds can invert during a single call: a 33-minute credential outlasts a 30-minute
+   idle rule when the request arrives and undercuts it six minutes later. The worker orders them by
+   which comes first at the moment it answers.
 
-   COMPUTED WHEN THE REQUEST ARRIVES, so a client reading it after a long tool call has a number
-   that much out of date. Naming a bound is the point; the number is an aid, and it is generous by
-   the length of the call rather than short."
-  | s secs |
-  s := WriteStream on: String new.
-  secs := sess secondsUntilExpiry.
-  secs ifNotNil: [:n |
-    s nextPutAll: (self phraseForSeconds: (n max: 0)) , ' left on ' , (self deadlineSourceFor: sess)].
+   The inactivity bound is whichever rule can actually fire. With no stream open, liveness can be
+   asked nothing -- #quietProbes cannot advance without answered pings -- so the give-up rule is
+   #streamlessIdleTimeoutSeconds, typically far shorter than the idle deadline, and quoting the idle
+   deadline there would be a comfortable lie.
+
+   Two reaping grounds are deliberately absent: three unanswered pings, and a client closing its
+   stream. Neither is a timer a client can plan around -- a client reading this answered the request
+   that carried it, and one that has stopped answering is not reading anything."
+  | deadlineAt inactivity label |
+  deadlineAt := sess expiresAtSeconds.
   sess outbox hasStream
-    ifTrue: [self hasSessionIdleDeadline ifTrue: [
-      s contents isEmpty ifFalse: [s nextPutAll: ', or '].
-      s nextPutAll: (self phraseForSeconds: self sessionIdleTimeoutSeconds) , ' of inactivity']]
+    ifTrue: [
+      self hasSessionIdleDeadline ifTrue: [
+        inactivity := self sessionIdleTimeoutSeconds.
+        label := 'of inactivity']]
     ifFalse: [
-      s contents isEmpty ifFalse: [s nextPutAll: ', or '].
-      s nextPutAll: (self phraseForSeconds: self streamlessIdleTimeoutSeconds)
-        , ' with no event stream open'].
-  ^s contents isEmpty ifTrue: [nil] ifFalse: [s contents]
+      inactivity := self streamlessIdleTimeoutSeconds.
+      label := 'with no event stream open'].
+  (deadlineAt isNil and: [inactivity isNil]) ifTrue: [^nil].
+  ^Array
+    with: deadlineAt
+    with: (deadlineAt isNil ifTrue: [nil] ifFalse: [self deadlineSourceFor: sess])
+    with: inactivity
+    with: label
 %
 category: 'session lifetime'
 method: McpRouter
@@ -800,20 +811,6 @@ originAllowed: req
   origin := (req at: 'headers' ifAbsent: [Dictionary new]) at: 'origin' ifAbsent: [nil].
   origin isNil ifTrue: [^true].
   ^self allowedOriginHosts includes: (self hostOfOrigin: origin) asLowercase
-%
-category: 'session lifetime'
-method: McpRouter
-phraseForSeconds: aSeconds
-  "An interval as a phrase for the notice a reaped client is sent -- '30 minutes', '1 minute',
-   '90 seconds'. Minutes only where the interval is whole minutes and there is more than one of
-   them, because 'over 1 minutes' and 'over 1 minutes' rounded down from 90 seconds are both worse
-   than saying the seconds. The notice is often the only account of a reap the operator ever sees,
-   so it should say a number they can find in their own configuration."
-  | minutes |
-  minutes := aSeconds // 60.
-  ((minutes > 1) and: [minutes * 60 = aSeconds]) ifTrue: [^minutes printString , ' minutes'].
-  aSeconds = 60 ifTrue: [^'1 minute'].
-  ^aSeconds printString , ' seconds'
 %
 category: 'session lifetime'
 method: McpRouter
@@ -1359,7 +1356,7 @@ serveInitialize: req on: conn
   | sess |
   sess := self openSession.
   conn writeJson: (sess forward: (req at: 'body' ifAbsent: [''])
-    lifetimeNote: (self lifetimeNoteFor: sess)) sessionId: sess id
+    lifetimeBounds: (self lifetimeBoundsFor: sess)) sessionId: sess id
 %
 category: 'running'
 method: McpRouter
@@ -1406,7 +1403,7 @@ serveRouted: body sessionId: sid on: conn
   sid isNil ifTrue: [^self writeSessionError: 'Missing MCP-Session-Id header (call initialize first)' code: 400 reason: 'Bad Request' on: conn].
   sess := self sessionAt: sid.
   sess isNil ifTrue: [^self writeSessionError: 'Unknown or expired session: ' , sid code: 404 reason: 'Not Found' on: conn].
-  resp := sess forward: body lifetimeNote: (self lifetimeNoteFor: sess).
+  resp := sess forward: body lifetimeBounds: (self lifetimeBoundsFor: sess).
   resp isEmpty
     ifTrue: [conn writeStatus: 202 reason: 'Accepted' body: '']
     ifFalse: [conn writeJson: resp]

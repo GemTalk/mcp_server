@@ -4,7 +4,7 @@ expectvalue /Class
 doit
 McpBase subclass: 'McpServer'
   instVarNames: #( dispatcher toolRegistry toolsets
-                    serverName serverTitle serverVersion lifetimeNote)
+                    serverName serverTitle serverVersion lifetimeBounds)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -156,16 +156,16 @@ handleJsonString: aRawJsonString
    now rather than a rung in the hierarchy. A direct `McpServer handleJsonString:` therefore gets the
    base tool surface; ask for a different one by name, or via McpServer installedDefaultToolsetNames.
 
-   Answers as if nothing bounds this session's lifetime -- see the lifetimeNote: variant, which the
-   front end uses. Routing through it rather than duplicating the lookup is what CLEARS a note left
-   by an earlier request, so a stale bound is never reported after the deadline that set it is gone."
-  ^self handleJsonString: aRawJsonString lifetimeNote: nil
+   Answers as if nothing bounds this session's lifetime -- see the lifetimeBounds: variant, which
+   the front end uses. Routing through it rather than duplicating the lookup is what CLEARS bounds
+   left by an earlier request, so a stale one is never reported after the deadline that set it."
+  ^self handleJsonString: aRawJsonString lifetimeBounds: nil
 %
 category: 'worker'
 classmethod: McpServer
-handleJsonString: aRawJsonString lifetimeNote: aStringOrNil
-  "As handleJsonString:, plus what the FRONT END says would end this session
-   (McpRouter>>lifetimeNoteFor:). The worker cannot work this out: reaping policy is the router's
+handleJsonString: aRawJsonString lifetimeBounds: anArrayOrNil
+  "As handleJsonString:, plus what the FRONT END says bounds this session
+   (McpRouter>>lifetimeBoundsFor:). The worker cannot work this out: reaping policy is the router's
    configuration, and a worker holding its own copy would go stale the moment a credential was
    refreshed. It is passed per request for the same reason, and used only when there is uncommitted
    work to warn about (McpDispatcher>>transactionNote)."
@@ -174,7 +174,7 @@ handleJsonString: aRawJsonString lifetimeNote: aStringOrNil
   srv isNil ifTrue: [
     srv := self new.
     SessionTemps current at: #McpServer put: srv].
-  ^srv handleJsonString: aRawJsonString lifetimeNote: aStringOrNil
+  ^srv handleJsonString: aRawJsonString lifetimeBounds: anArrayOrNil
 %
 category: 'toolsets'
 classmethod: McpServer
@@ -307,16 +307,16 @@ handleJsonString: aRawJsonString
    response). No mutex: a worker gem serves one client, whose requests the front end already
    serializes onto it. The class-side handleJsonString: (invoked by McpRouter via
    McpSession>>forward:) relays this answer to the client."
-  ^self handleJsonString: aRawJsonString lifetimeNote: nil
+  ^self handleJsonString: aRawJsonString lifetimeBounds: nil
 %
 category: 'protocol'
 method: McpServer
-handleJsonString: aRawJsonString lifetimeNote: aStringOrNil
+handleJsonString: aRawJsonString lifetimeBounds: anArrayOrNil
   "As handleJsonString:, recording what the front end says bounds this session before dispatching.
-   ALWAYS assigns, including nil: this instance is cached for the life of the gem, so a note left by
-   an earlier request would otherwise outlive the deadline that produced it."
+   ALWAYS assigns, including nil: this instance is cached for the life of the gem, so bounds left by
+   an earlier request would otherwise outlive the deadline that produced them."
   | parsed response |
-  lifetimeNote := aStringOrNil.
+  lifetimeBounds := anArrayOrNil.
   parsed := self parseBody: aRawJsonString.
   response := dispatcher handle: parsed.
   ^response isNil ifTrue: [''] ifFalse: [response asJson]
@@ -374,9 +374,34 @@ isToolAllowed: aToolName
 category: 'session lifetime'
 method: McpServer
 lifetimeNote
-  "What the front end said would end this session, as of the request being served, or nil if
-   nothing bounds it or nobody said. Set per request by handleJsonString:lifetimeNote:."
-  ^lifetimeNote
+  "What would end this session before uncommitted work is committed, as the clause
+   McpDispatcher>>transactionNote appends -- or nil if nothing bounds it or no front end said.
+
+   RENDERED NOW, not when the request arrived, which is the whole reason the front end sends values
+   rather than a sentence (McpRouter>>lifetimeBoundsFor:). A countdown rendered on arrival is wrong
+   by the length of the call by the time the client reads it, and wrong in the dangerous direction:
+   it would promise 24 minutes to a client a six-minute tool call has left 18.
+
+   Both bounds are reported when both exist, NEARER FIRST -- 'nearer' meaning which would release
+   this session first if the client stopped calling now, which is the question the client is
+   actually deciding. The order is not fixed, because it inverts: a credential outlasting the idle
+   rule on arrival can undercut it by the time a long call returns."
+  | now deadlineAt source inactivity label deadlineClause inactivityClause |
+  lifetimeBounds isNil ifTrue: [^nil].
+  now := System timeGmt.
+  deadlineAt := lifetimeBounds at: 1.
+  source := lifetimeBounds at: 2.
+  inactivity := lifetimeBounds at: 3.
+  label := lifetimeBounds at: 4.
+  deadlineAt ifNotNil: [:at |
+    deadlineClause := (self phraseForSeconds: ((at - now) max: 0)) , ' left on ' , source].
+  inactivity ifNotNil: [:secs |
+    inactivityClause := (self phraseForSeconds: secs) , ' ' , label].
+  deadlineClause isNil ifTrue: [^inactivityClause].
+  inactivityClause isNil ifTrue: [^deadlineClause].
+  ^deadlineAt <= (now + inactivity)
+    ifTrue: [deadlineClause , ', or ' , inactivityClause]
+    ifFalse: [inactivityClause , ', or ' , deadlineClause]
 %
 category: 'guards'
 method: McpServer

@@ -203,20 +203,22 @@ testWorkerErrorPropagatesAndLeavesTheSessionUsable
 %
 category: 'tests - forwarding'
 method: McpSessionTest
-testWorkerExpressionCarriesALifetimeNoteOnlyWhenThereIsOne
-  "The note rides in on the request because the worker cannot see the front end's configuration.
-   The keyword is omitted when there is no note, so a deployment that bounds nothing sends exactly
-   the expression it always sent -- and the one-argument entry point stays the documented direct
-   call. A note is embedded via printString, like the body, so an apostrophe in it cannot break the
-   expression."
+testWorkerExpressionCarriesLifetimeBoundsOnlyWhenThereAreSome
+  "The bounds ride in on the request because the worker cannot see the front end's configuration.
+   The keyword is omitted when there are none, so a deployment that bounds nothing sends exactly the
+   expression it always sent -- and the one-argument entry point stays the documented direct call.
+   Every element is embedded via printString, so a nil slot and an apostrophe in a phrase are both
+   safe to send."
   | sess |
   sess := McpMockSession startWithId: 'expr'.
   self assert: (sess workerExpressionFor: '{}')
     equals: 'McpServer handleJsonString: ''{}'''.
-  self assert: (sess workerExpressionFor: '{}' lifetimeNote: nil)
+  self assert: (sess workerExpressionFor: '{}' lifetimeBounds: nil)
     equals: 'McpServer handleJsonString: ''{}'''.
-  self assert: (sess workerExpressionFor: '{}' lifetimeNote: '10 minutes, it''s ending')
-    equals: 'McpServer handleJsonString: ''{}'' lifetimeNote: ''10 minutes, it''''s ending'''
+  self assert: (sess workerExpressionFor: '{}'
+      lifetimeBounds: (Array with: 1756400000 with: 'your credential, it''s yours' with: nil with: nil))
+    equals: 'McpServer handleJsonString: ''{}'' lifetimeBounds: (Array with: 1756400000'
+      , ' with: ''your credential, it''''s yours'' with: nil with: nil)'
 %
 category: 'helpers'
 method: McpSessionTest

@@ -81,6 +81,24 @@ parseBody: aString
      (parsed isKindOf: Dictionary) ifTrue: [parsed] ifFalse: [nil] ]
    on: Error do: [:ex | nil]
 %
+category: 'formatting'
+method: McpBase
+phraseForSeconds: aSeconds
+  "An interval as a phrase -- '30 minutes', '1 minute', '90 seconds'. Minutes only where the
+   interval is whole minutes and there is more than one of them, because 'over 1 minutes' and
+   'over 1 minutes' rounded down from 90 seconds are both worse than saying the seconds. Where this
+   names a CONFIGURED interval (the notice a reaped client is sent) it is often the only account of
+   a reap an operator ever sees, so it should say a number they can find in their own configuration.
+
+   Shared rather than the router's alone: the router phrases a bound it has configured, and the
+   worker phrases the time left against one (McpServer>>lifetimeNote), and the two must not drift
+   into describing the same interval differently."
+  | minutes |
+  minutes := aSeconds // 60.
+  ((minutes > 1) and: [minutes * 60 = aSeconds]) ifTrue: [^minutes printString , ' minutes'].
+  aSeconds = 60 ifTrue: [^'1 minute'].
+  ^aSeconds printString , ' seconds'
+%
 category: 'json-rpc'
 method: McpBase
 request: aMethodString params: aDictOrNil id: anId
