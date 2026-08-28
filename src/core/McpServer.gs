@@ -67,6 +67,46 @@ coreReadOnlySafeToolNames
 %
 category: 'identity'
 classmethod: McpServer
+defaultServerInstructions
+  "The `instructions` a stock GemStone MCP server sends in its initialize result, and the hook A
+   PRODUCT OVERRIDES to describe its own surface. MCP calls this a hint to the model rather than
+   documentation for a person, so it says the things a model cannot work out by reading tool
+   descriptions one at a time: what a session IS here, and which of its properties outlive a call.
+
+   It is deliberately about the transaction and nothing else. A per-tool fact belongs in that
+   tool's description, where it is read at the moment it matters; what does not fit there is the
+   part that spans calls, because no single tool's description is the right place to explain that a
+   change made by one call is still there for the next -- and the terse '[session]' line the server
+   appends to results (McpDispatcher>>transactionNote) is unintelligible without it.
+
+   Kept short on purpose: it is prepended to the model's context for the whole conversation, so
+   every sentence competes with the client's own prompt for attention."
+  | lf |
+  lf := String with: Character lf.
+  ^'This server is one GemStone session, in one long-running database transaction, for as long as '
+    , 'the connection lasts.' , lf , lf
+    , 'WHAT SURVIVES A CALL. Every change you make stays in your session until you commit or abort '
+    , 'it -- so you can compile a method, run its tests against what you just compiled, and only '
+    , 'then decide to keep it. Nobody else can see any of it until you commit.' , lf , lf
+    , 'NOTHING COMMITS FOR YOU. Only the `commit` tool commits. The tools that change the image '
+    , '(compile_method, compile_class_definition, delete_class, delete_method, set_class_comment, '
+    , 'add_dictionary, remove_dictionary) leave their work uncommitted. `abort` discards everything '
+    , 'uncommitted; `refresh` takes a current view of other sessions'' work and keeps yours.' , lf , lf
+    , 'THE [session] LINE. A result may end with one line starting "[session]". It describes your '
+    , 'session, not the tool you just called, and it appears only when there is something to do:'
+    , lf
+    , '  - uncommitted changes pending -> commit them or abort them. If this session ends first '
+    , '(idle timeout, deadline, or an expired credential) they are lost, so commit anything you '
+    , 'want to keep rather than leaving it staged.' , lf
+    , '  - view could not be refreshed -> a commit of yours failed because another session changed '
+    , 'the same objects. Nothing was written, your changes are still there, and you are now reading '
+    , 'stale data and cannot commit again until you call `abort`. `abort` is the only way out and '
+    , 'it discards your uncommitted changes; there is no way to keep them.' , lf , lf
+    , 'A failed commit is the one failure here you cannot retry your way out of. If the work matters, '
+    , 'save the source before aborting.'
+%
+category: 'identity'
+classmethod: McpServer
 defaultServerName
   "The name a stock GemStone MCP server reports in the initialize result's serverInfo, and THE HOOK A
    SUBCLASS SHOULD OVERRIDE to name itself (see McpFixtureServer). serverInfo.name says WHICH SOFTWARE
@@ -348,6 +388,20 @@ registerToolsets
       (ts toolNames reject: [:n | safe includes: n])
         do: [:n | toolRegistry removeToolNamed: n]]].
   ^self
+%
+category: 'identity'
+method: McpServer
+serverInstructions
+  "The instructions to send in the initialize result, or nil to send none. Answers the class
+   default (defaultServerInstructions), which is where a product overrides them -- there is no
+   router-config path for these the way there is for serverName/serverTitle, because they describe
+   how the SOFTWARE behaves rather than which instance this is.
+
+   Answers nil for a READ-ONLY session, whose whole point is that it cannot write: telling it to
+   commit its changes, or how to recover a commit that failed, would be a page of instructions
+   about tools it does not have. Such a session never has uncommitted changes and so never sees a
+   [session] line either, which is the thing they exist to explain."
+  ^self isReadOnly ifTrue: [nil] ifFalse: [self class defaultServerInstructions]
 %
 category: 'identity'
 method: McpServer

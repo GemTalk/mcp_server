@@ -10,11 +10,14 @@
 # an image with kernel JWT support and src/grail only on --grail. A base install runs the ten core
 # suites.
 #
-# NB: two suites are NOT purely in-image, and both need a NETLDI.
+# NB: three suites are NOT purely in-image, and all three need a NETLDI.
 #   McpExternalSessionTest  drives a real worker gem to check that a result comes back with the
 #                           bytes the worker sent. It fails on any image before 3.7.4.1, which
 #                           carries kernel defect #51438 -- that failure is the suite working, not
 #                           a regression in gs-mcp. See its class comment.
+#   McpTransactionTest      spawns a worker gem to commit a CONFLICTING change, which is the only
+#                           way to reach the state a failed commit leaves a session in. Nothing
+#                           short of a real second session can produce it.
 #   McpAuthTest             creates and commits a throwaway JWT-enabled UserProfile (touching
 #                           AllUsers) and spawns a real worker gem. It is run whenever present: it
 #                           is the only coverage of the token->session path, and leaving it out once
@@ -34,8 +37,9 @@ GS_STONE="${GS_STONE:-gs64stone}"
 GS_USER="${GS_USER:-DataCurator}"
 GS_PASS="${GS_PASS:-swordfish}"
 
-# Two suites fork a real worker gem and so need a NETLDI: McpExternalSessionTest (always installed,
-# see below) and McpAuthTest (only where the auth group could be). Ask the image which are present
+# Three suites fork a real worker gem and so need a NETLDI: McpExternalSessionTest and
+# McpTransactionTest (always installed, see below) and McpAuthTest (only where the auth group could
+# be). Ask the image which are present
 # rather than asserting a netldi unconditionally -- the check still has to survive an image where
 # neither is installed, and discovering the lack up front beats hitting it as a GciError partway
 # through a suite run.
@@ -46,7 +50,7 @@ GS_PASS="${GS_PASS:-swordfish}"
 # passing on an image the server could not actually run on.
 gs_mcp_require_netldi_if_forking_suite_installed() {
   local nm have
-  for nm in McpExternalSessionTest McpAuthTest; do
+  for nm in McpExternalSessionTest McpTransactionTest McpAuthTest; do
     gs_env_image_has "$nm" && have=0 || have=$?
     case "$have" in
       0) gs_env_require_netldi; return $? ;;
@@ -88,7 +92,7 @@ run
 up := System myUserProfile.
 classes := #( 'McpToolTest' 'McpDispatcherTest' 'McpSessionTest' 'McpOutboxTest'
   'McpStreamTest' 'McpLifetimeTest' 'McpTransportTest' 'McpContractTest'
-  'McpExtensionTest' 'McpExternalSessionTest' ) asOrderedCollection.
+  'McpExtensionTest' 'McpExternalSessionTest' 'McpTransactionTest' ) asOrderedCollection.
 "Suites from the optional groups, run only where their group was installed. Named as a list so
  adding one is a one-word change, and so a missing suite is a skip rather than a doesNotUnderstand."
 optional := #( 'McpAuthTest' 'McpAuthConformanceTest' 'McpGrailToolsetTest' ).

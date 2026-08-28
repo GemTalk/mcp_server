@@ -216,6 +216,11 @@ initializeResultFor: params
   d at: 'protocolVersion' put: negotiated.
   d at: 'capabilities' put: caps.
   d at: 'serverInfo' put: info.
+  "instructions: OMITTED when nil, on the same rule as title -- an absent key is what a client
+   treats as 'none given', and sending null would have it render or forward the word. The spec
+   calls this a hint to the model, so what goes in it is what a model cannot get from tool
+   descriptions read one at a time: see McpServer class>>defaultServerInstructions."
+  self serverInstructions ifNotNil: [:i | d at: 'instructions' put: i].
   ^d
 %
 category: 'responses'
@@ -280,6 +285,14 @@ resultFor: id with: resultObj
   d at: 'id' put: id.
   d at: 'result' put: resultObj.
   ^d
+%
+category: 'accessing'
+method: McpDispatcher
+serverInstructions
+  "The initialize result's `instructions`, or nil for none -- see serverName for why this asks the
+   server rather than caching. nil means the key is omitted entirely, which is also what a
+   read-only session gets (McpServer>>serverInstructions)."
+  ^server isNil ifTrue: [McpServer defaultServerInstructions] ifFalse: [server serverInstructions]
 %
 category: 'accessing'
 method: McpDispatcher

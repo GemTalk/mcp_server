@@ -99,6 +99,20 @@ testInitialize
 %
 category: 'tests'
 method: McpDispatcherTest
+testInitializeCarriesTransactionInstructions
+  "initialize carries `instructions`, the spec's hint to the model. What it must contain is the
+   part no tool description can carry on its own: that work survives from one call to the next,
+   that only `commit` commits, and how to read the [session] line the server appends to results."
+  | result text |
+  result := (self dispatch: (self request: 'initialize' params: Dictionary new)) at: 'result'.
+  self assert: (result includesKey: 'instructions').
+  text := result at: 'instructions'.
+  self assert: (text includesString: 'Only the `commit` tool commits').
+  self assert: (text includesString: '[session]').
+  self assert: (text includesString: 'abort')
+%
+category: 'tests'
+method: McpDispatcherTest
 testInitializeDeclaresToolsAndNothingElse
   "A server may send only what it has declared, and must not declare what it cannot do. Tools are
    the whole of it. 'logging' was declared until 2026-08-27 to license notifications/message for the
