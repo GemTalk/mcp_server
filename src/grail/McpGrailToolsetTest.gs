@@ -139,11 +139,16 @@ method: McpGrailToolsetTest
 testToolsCallPythonPrintReturnsNone
   "Pins current Grail behavior: Python print() succeeds and yields None. It no longer raises
    the dead-stdout ImproperOperation (2364) it once did after the dispatcher's abort. A
-   tripwire: if print reverts to raising (or starts crashing), this flags the change."
+   tripwire: if print reverts to raising (or starts crashing), this flags the change.
+
+   What is asserted is the TOOL's text alone, with #withoutSessionNote: taking off anything the
+   dispatcher appended about the session. Without that this test was really two tests at once: it
+   failed whenever it ran in a dirty session, which made it a report on what the suite before it
+   left behind rather than on what print() answers."
   | result |
   result := (self dispatch: (self toolCall: 'eval_python' args: (Dictionary new at: 'code' put: 'print(6 * 7)'; yourself))) at: 'result'.
   self deny: (result at: 'isError').
-  self assert: ((result at: 'content') first at: 'text') equals: 'None'
+  self assert: (self withoutSessionNote: ((result at: 'content') first at: 'text')) equals: 'None'
 %
 category: 'tests'
 method: McpGrailToolsetTest
@@ -204,4 +209,31 @@ method: McpGrailToolsetTest
 toolCall: toolName args: argsDict
   ^self request: 'tools/call' params:
     (Dictionary new at: 'name' put: toolName; at: 'arguments' put: argsDict; yourself)
+%
+category: 'helpers'
+method: McpGrailToolsetTest
+withoutSessionNote: aString
+  "aString with the dispatcher's trailing [session] note removed, or unchanged when it carries none.
+   McpDispatcher>>annotateContent: appends that note to the first content item's text -- a newline
+   and one line opening '[session] ' -- whenever the session the tool ran in has state the model
+   must act on: uncommitted changes, a nested transaction, a failed commit.
+
+   A test about what a TOOL answered has to take the note off rather than assert around it. The two
+   cheaper-looking alternatives are both worse. Aborting in setUp (what McpContractTest and
+   McpExtensionTest do) would make this suite move the caller's transaction, which is a large price
+   for a text comparison and is exactly what these tests should not need. Relaxing the assertion to
+   a substring match would stop testing anything the day the note's own wording happens to contain
+   the expected text -- and 'None' is a word a note about session state could very plausibly use.
+
+   Cuts at the LAST such newline, not the first, because the note is always appended after whatever
+   the tool itself produced, and a tool's own output may run to several lines."
+  | marker idx last |
+  marker := (String with: Character lf) , '[session] '.
+  last := 0.
+  idx := aString findString: marker startingAt: 1.
+  [idx = 0] whileFalse: [
+    last := idx.
+    idx := aString findString: marker startingAt: idx + 1].
+  last = 0 ifTrue: [^aString].
+  ^aString copyFrom: 1 to: last - 1
 %
