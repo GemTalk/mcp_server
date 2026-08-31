@@ -112,10 +112,10 @@ by construction and points at a port nothing is listening on.
 **Which scripts need a netldi.** `install.sh` talks only to the stone, so it runs fine on a host
 with no netldi at all. The `run-*.sh` scripts need one — not because of how they log in, but
 because `McpRouter>>forkOnPort:` and every per-client worker create a `GsTsExternalSession`, and
-netldi is what forks those gems. `run-unit-tests.sh` needs one **only if the auth group is
-installed**, because `McpAuthTest` is the one suite that spawns a real worker; on a base install it
-asks the image, finds no `McpAuthTest`, and runs happily without a netldi. Each script checks for
-what it actually needs, and says which is missing.
+netldi is what forks those gems. `run-unit-tests.sh` needs one too: three of
+its suites spawn a real worker gem (`McpExternalSessionTest` and `McpWorkerDeadlineTest` always,
+`McpAuthTest` where the auth group is installed). It asks the image which are present rather than
+insisting unconditionally. Each script checks for what it actually needs, and says which is missing.
 
 **Linked vs RPC.** These scripts run `topaz -l` (linked). That is deliberate, and it is not the
 cause of the error above: a linked login resolves the stone through the same lock files, so it
@@ -506,8 +506,12 @@ Two guarantees the blocking call had been providing by accident are now explicit
 in flight per session, so each `McpSession` holds a mutex — a client with two requests outstanding
 queues rather than colliding. And the idle reaper, which previously could not run during a forward at
 all, now skips any session with a call in flight (`McpSession>>isBusy`) instead of logging a worker
-out mid-request. A forwarded request still has **no deadline**: a runaway tool ties up its own
-session for as long as it runs, though no longer anyone else's.
+out mid-request. And a forwarded request now has a **deadline** — 45s by default
+(`requestTimeoutSeconds`, `nil` for none) — which only a non-blocking forward makes possible: the
+front end is awake in the wait loop, so it can notice the call has outrun it and break the worker,
+answering the client a `-32001` error bearing the request's own id. The break leaves the gem usable,
+so the cost is that request and not the session. See
+[Session lifetime](docs/session-lifetime.md).
 
 **An open SSE stream costs the gem nothing.** Its drain loop yields on every tick (a 100ms `Delay`),
 so the accept loop, the reaper and every other session's stream keep running. Both directions of that
@@ -601,7 +605,8 @@ is discarded and re-sent down the new stream on the next pass. (Measured against
 ### Session lifetime
 
 How long a session lives is deployment policy, not a constant: the idle deadline, the liveness-probe
-interval, the absolute cap, and what an authenticated router does with a token's own `exp`. Because
+interval, the absolute cap, how long a single request may run, and what an authenticated router does
+with a token's own `exp`. Because
 a session here **is a gem holding a transaction view**, those choices decide when uncommitted work
 is thrown away — so they have their own document: **[docs/session-lifetime.md](docs/session-lifetime.md)**.
 It covers every knob and its default, what actually ends a session, why nothing is measured in
@@ -775,7 +780,7 @@ grouped by area, with one loader per group:
 
 ```
 src/core/    18 classes  the server itself: protocol, transport, dispatch, toolsets   (always)
-src/tests/   17 classes  the SUnit suites and their fixtures                          (always)
+src/tests/   18 classes  the SUnit suites and their fixtures                          (always)
 src/auth/     3 classes  the OAuth/OIDC front end McpAuthRouter + its two suites      (3.7.5+)
 src/grail/    2 classes  the optional GemStone-Python toolset + its suite             (--grail)
 load.gs                  files in core + tests, then commits
@@ -847,9 +852,18 @@ flag, so a missing suite is a skip and not an error:
 - `McpSessionTest` — how a session drives its worker gem: the non-blocking `runWorker:` that
   `forward:` and `prepareWorker` both use, that it reads the result only once the call is over (a
   premature read would answer one request with another's response), that two concurrent requests on
-  one session serialize instead of colliding, that a worker error leaves the session usable, and that
-  the idle reaper leaves a session with a call in flight alone. Driven through `McpMockWorker` /
+  one session serialize instead of colliding, that a worker error leaves the session usable, that
+  the idle reaper leaves a session with a call in flight alone, and the request deadline: a call that
+  beats it is untouched, one that outruns it is soft-broken and the session survives, a worker that
+  ignores that gets a hard break, and one that ignores both has its gem stopped and its session
+  finished. Driven through `McpMockWorker` /
   `McpMockSession`, which stand in for the `GsTsExternalSession` with no gem.
+- `McpWorkerDeadlineTest` — the other thing a mock cannot show: that a call which outruns the
+  request deadline is really **broken** in this image, and that the worker gem is usable again
+  afterwards — the claim the whole feature rests on, since a break that did not land would mean
+  answering a client while the gem computed on. Both shapes of runaway (a Smalltalk loop, a blocked
+  wait) plus the gem that takes neither break and has to be stopped from the stone. `McpSessionTest`
+  covers the policy against a mock; this covers the mechanism against a gem. Needs a netldi.
 - `McpExternalSessionTest` — the one thing a mock cannot show: that a result fetched out of a **real**
   worker gem arrives with the bytes the worker sent. It drives a real `McpSession` through the same
   `runWorker:` the forwarding path uses, so it measures the path the server runs on, and it tests the
@@ -913,22 +927,24 @@ flag, so a missing suite is a skip and not an error:
 
 Run a single suite while a server is up via the `run_test_class` tool (e.g. `run_test_class
 McpToolTest`). `./run-unit-tests.sh` runs them all and exits 0 when every test passes: the
-socket-less suites `McpToolTest` (52), `McpDispatcherTest` (12), `McpSessionTest` (9),
-`McpOutboxTest` (9), `McpStreamTest` (18), `McpLifetimeTest` (42), `McpTransportTest` (30),
-`McpContractTest` (34) and `McpExtensionTest` (9), plus `McpExternalSessionTest` (5) — **220 tests**,
+socket-less suites `McpToolTest` (52), `McpDispatcherTest` (12), `McpSessionTest` (14),
+`McpOutboxTest` (9), `McpStreamTest` (18), `McpLifetimeTest` (43), `McpTransportTest` (32),
+`McpContractTest` (34) and `McpExtensionTest` (9), plus `McpExternalSessionTest` (5) and
+`McpWorkerDeadlineTest` (4) — **232 tests**,
 which is the whole suite on a base install. Where the optional groups are installed the runner picks
-their suites up automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **276
-tests** — and **285 with the 9 in `McpGrailToolsetTest`** on a Grail image.
+their suites up automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **288
+tests** — and **297 with the 9 in `McpGrailToolsetTest`** on a Grail image.
 
-Three suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
+Four suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
 `McpAuthConformanceTest` commit a throwaway JWT user and spawn real worker gems; they are in the
 runner anyway, because they are the only cover for the token → session path.
-`McpExternalSessionTest` drives a real worker gem to check that a result arrives carrying the bytes
-the worker sent, so the runner asks for a netldi on any image where it is installed — which is every
-image, since it is part of the base install. That is no new burden in practice: gs-mcp gives every
+`McpExternalSessionTest` checks that a result arrives out of a real worker gem carrying the bytes
+the worker sent, and `McpWorkerDeadlineTest` that a call which outruns the request deadline is
+really broken in a real one — so the runner asks for a netldi on any image where they are installed,
+which is every image, since both are part of the base install. That is no new burden in practice: gs-mcp gives every
 client its own worker gem, so it cannot serve a single request without a netldi either.
 
-Those three also need **spare login slots**, which is the likeliest reason for a failure that is
+Those four also need **spare login slots**, which is the likeliest reason for a failure that is
 nothing to do with the code: each spawns worker gems of its own, so a stone whose `StnMaxSessions`
 is already consumed by running servers fails them with *"the maximum number of users are already
 logged in."* Stop the servers, or raise the limit, before reading such a failure as a regression.
@@ -974,7 +990,6 @@ default stays plaintext — nothing to restore even if interrupted. Uses port `8
 - Tracing the **outbound** half — responses, the error bodies behind a refusal, and server-initiated
   stream frames — to complete [Message trace](#message-trace), which today records only what the
   client sent.
-- A deadline for a forwarded request, now that a non-blocking forward makes one possible.
 - The draft `2026-07-28` protocol revision, which first needs a decision about how per-client
   worker-gem isolation survives a protocol with no session id — see
   [Protocol conformance](#protocol-conformance).
