@@ -15,8 +15,9 @@ expectvalue /Class
 doit
 McpSessionTest comment: 
 'Covers how McpSession drives its worker gem: McpSession>>runWorker:, the non-blocking call that
-#forward: and #prepareWorker both go through, and the two guarantees that come with it -- one call
-in flight per worker, and no reaping a session mid-call.
+#forward: and #prepareWorker both go through, and the three guarantees that come with it -- one call
+in flight per worker, no reaping a session mid-call, and no call outrunning the deadline its router
+configured.
 
 A blocking GCI executeString: blocks in C, so while one ran the front-end gem executed no Smalltalk
 and EVERY other GsProcess stopped: other clients'' requests, the accept loop, the idle reaper, and
@@ -43,6 +44,92 @@ includesCS: aSubstring in: aString
    (e.g. 'FAIL' matches the 'fail' in 'failed'), so use findString:startingAt: (which is
    case-sensitive) for assert:/deny: substring checks."
   ^(aString findString: aSubstring startingAt: 1) > 0
+%
+category: 'tests - deadline'
+method: McpSessionTest
+testACallThatBeatsTheDeadlineIsNeverBroken
+  "A deadline is a limit, not a schedule. An ordinary call that finishes inside it is untouched, and
+   a session with one configured drives its worker exactly as a session without one does."
+  | sess w |
+  sess := McpMockSession startWithId: 'in-time'.
+  sess requestTimeoutSeconds: 600.
+  w := sess mockWorker.
+  w waitsBeforeDone: 3; nextResult: 'DONE'.
+  self assert: (sess forward: 'QUICK') equals: 'DONE'.
+  self assert: w softBreakCount equals: 0.
+  self assert: w hardBreakCount equals: 0.
+  self deny: sess workerAbandoned
+%
+category: 'tests - deadline'
+method: McpSessionTest
+testADeadlineEndsARunawayCallAndLeavesTheSessionUsable
+  "What the deadline is for: a call that will not finish is ended, the client is told, and the client
+   keeps its gem. A soft break is what ends it -- the worker is usable immediately afterwards, so the
+   session and the uncommitted work in it survive -- and the worker mutex is released on the way out,
+   or one runaway would wedge that client for the life of its session."
+  | sess w raised |
+  sess := McpMockSession startWithId: 'deadline'.
+  sess requestTimeoutSeconds: 1.
+  w := sess mockWorker.
+  w waitsBeforeDone: 1000000.        "a call that never finishes on its own"
+  raised := nil.
+  [sess forward: 'RUNAWAY'] on: McpError do: [:ex | raised := ex].
+  self assert: raised notNil.
+  self assert: raised kind equals: #timeout.
+  self assert: w softBreakCount equals: 1.
+  self assert: w hardBreakCount equals: 0.
+  self deny: sess workerAbandoned.
+  self deny: sess workerGemStopped.
+  self deny: sess isBusy.
+  "the session is still the client's to use -- that is the whole difference between ending a call and
+   ending a session"
+  w waitsBeforeDone: 1; nextResult: 'AFTER-TIMEOUT'.
+  self assert: (sess forward: 'NEXT-REQUEST') equals: 'AFTER-TIMEOUT'
+%
+category: 'tests - deadline'
+method: McpSessionTest
+testAWorkerThatIgnoresBothBreaksIsStoppedAndFinishesTheSession
+  "The last resort. A gem that takes neither break can never serve again -- GCI allows one call in
+   flight and this one never ends -- so it is stopped from the stone side and the session is marked
+   finished. Two things follow that the reaper and the close path each have to get right: such a
+   session must not read as BUSY (its call is in flight and always will be), and closing it must not
+   send a logout, which is a GCI call that would queue behind the call that could not be ended."
+  | sess w raised |
+  sess := McpMockSession startWithId: 'unbreakable'.
+  sess requestTimeoutSeconds: 1.
+  w := sess mockWorker.
+  w waitsBeforeDone: 1000000; resistSoftBreak: true; resistHardBreak: true.
+  raised := nil.
+  [sess forward: 'UNBREAKABLE'] on: McpError do: [:ex | raised := ex].
+  self assert: raised notNil.
+  self assert: raised kind equals: #timeout.
+  self assert: w softBreakCount equals: 1.
+  self assert: w hardBreakCount equals: 1.
+  self assert: sess workerGemStopped.
+  self assert: sess workerAbandoned.
+  self deny: sess isBusy.
+  sess close.
+  self assert: w logoutCount equals: 0
+%
+category: 'tests - deadline'
+method: McpSessionTest
+testAWorkerThatIgnoresTheSoftBreakGetsAHardOne
+  "The middle step. A soft break that is not taken escalates to a hard one, and a worker that takes
+   THAT is still a worker the client keeps: the session is not abandoned and its gem is not stopped."
+  | sess w raised |
+  sess := McpMockSession startWithId: 'stubborn'.
+  sess requestTimeoutSeconds: 1.
+  w := sess mockWorker.
+  w waitsBeforeDone: 1000000; resistSoftBreak: true.
+  raised := nil.
+  [sess forward: 'STUBBORN'] on: McpError do: [:ex | raised := ex].
+  self assert: raised notNil.
+  self assert: raised kind equals: #timeout.
+  self assert: w softBreakCount equals: 1.
+  self assert: w hardBreakCount equals: 1.
+  self deny: sess workerAbandoned.
+  self deny: sess workerGemStopped.
+  self deny: sess isBusy
 %
 category: 'tests - forwarding'
 method: McpSessionTest
@@ -129,6 +216,21 @@ testIsBusyReportsACallInFlight
   [sess forward: 'REQUEST'] fork.
   self assert: (self waitUpTo: 1000 for: [sess isBusy]).
   self assert: (self waitUpTo: 1000 for: [sess isBusy not])
+%
+category: 'tests - deadline'
+method: McpSessionTest
+testNoDeadlineLetsALongCallRunToCompletion
+  "nil is a real setting, and the one a deployment asks for when its tools are legitimately slow:
+   with no deadline a call is waited out however long it takes. It is also what a session configures
+   for ITSELF -- the policy belongs to the router, which pushes one in as it opens the session."
+  | sess w |
+  sess := McpMockSession startWithId: 'no-deadline'.
+  self assert: sess requestTimeoutSeconds isNil.
+  w := sess mockWorker.
+  w waitsBeforeDone: 25; nextResult: 'SLOW-BUT-DONE'.
+  self assert: (sess forward: 'SLOW') equals: 'SLOW-BUT-DONE'.
+  self assert: w softBreakCount equals: 0.
+  self assert: w hardBreakCount equals: 0
 %
 category: 'tests - forwarding'
 method: McpSessionTest

@@ -16,7 +16,7 @@ d := System myUserProfile objectNamed: #Published.
 names := #( #McpMockSocket #McpMockWorker #McpMockSession #McpStubSession #McpFixtureToolset
   #McpFixtureServer #McpFixtureRouter #McpToolTest #McpDispatcherTest #McpTransportTest
   #McpContractTest #McpExtensionTest #McpSessionTest #McpOutboxTest #McpStreamTest
-  #McpLifetimeTest #McpExternalSessionTest #McpTransactionTest ).
+  #McpLifetimeTest #McpExternalSessionTest #McpTransactionTest #McpWorkerDeadlineTest ).
 names do: [:s | (d includesKey: s) ifFalse: [ d at: s put: nil ] ].
 names size
 %
@@ -46,3 +46,4 @@ input src/tests/McpLifetimeTest.gs
 ! These are the only suites here that are not purely in-image.
 input src/tests/McpExternalSessionTest.gs
 input src/tests/McpTransactionTest.gs
+input src/tests/McpWorkerDeadlineTest.gs

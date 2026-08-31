@@ -19,6 +19,7 @@ against the others before a port is bound.
 | `reaperIntervalSeconds` | 60 | how often the maintenance pass runs |
 | `maxSessionLifetimeSeconds` | `nil` | absolute cap, however busy the session is |
 | `reapOnFailedProbe` | `true` | whether an unanswered ping frees a gem early. Forced on with no deadline |
+| `requestTimeoutSeconds` | 45 | how long **one request** may run before it is ended. `nil` = no limit |
 
 **What actually ends a session**, in one place: a **deadline counts calls**; **`none` counts pings**;
 a client that **closed its stream** is released after `streamLossGraceSeconds`, whatever the idle
@@ -26,6 +27,25 @@ policy says; and a client that opens **no stream at all** gets `streamlessIdleTi
 a ping can only be sent down a stream the client itself opened. So `GS_MCP_IDLE_TIMEOUT=none` does not
 mean "no limit" — it means the client's own answers are the limit, and a client that stops answering,
 that hangs up, or that never opened a stream, is still released.
+
+**One request is bounded too, and that is a different question.** Everything above decides when a
+session is released; `requestTimeoutSeconds` decides how long a single call inside one may run.
+A call that outruns it is **ended** — the front end breaks the worker and answers the client a
+JSON-RPC error (`-32001`, `data.kind` `timeout`) bearing the request's own id — rather than waited
+out. 45 seconds by default, and the number is chosen against the CLIENT's patience rather than the
+server's: MCP clients seen so far give up around a minute, and a server limit above the client's is
+no limit at all, because the client abandons the request first and the gem goes on computing an
+answer nobody is waiting for.
+
+It costs the client that request and, almost always, nothing else. A soft break reaches both shapes
+a runaway takes — a Smalltalk loop, and a call blocked in a wait — and leaves the worker gem
+immediately usable, so the session, its view and its uncommitted work all survive; the client can
+call again at once. What it does *not* promise is that the call did nothing: it was cut partway, and
+whatever it had already done is still there in that gem's view, uncommitted. A gem that takes
+neither the soft break nor the hard one — code that handles `ControlInterrupt` and resumes — cannot
+be ended from the front end at all, so its gem is stopped from the stone side and the session is
+finished; that is the one case where the timeout costs the client its session, and the error says
+so. Set `GS_MCP_REQUEST_TIMEOUT=none` where the clients are known and long tools are the point.
 
 **A client that hangs up is released in seconds, not minutes.** Shutting an editor tab closes the
 client process, which closes its SSE socket, and the drain loop sees the EOF within one 100 ms poll —

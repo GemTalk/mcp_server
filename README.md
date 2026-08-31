@@ -41,6 +41,7 @@ GS_MCP_PORT=8000 ./run-server.sh    # fork a detached, independent localhost ser
 GS_MCP_READONLY=1 ./run-server.sh   # ...read-only (browse/search only; no accidental mutation)
 GS_MCP_TOOLSETS="McpBrowsingToolset McpSearchToolset" ./run-server.sh   # ...only these tools
 GS_MCP_WORKER_CLASS=MyMcpServer ./run-server.sh                        # ...a subclass as the worker
+GS_MCP_TRACE=1 ./run-server.sh      # ...logging every message a client sends (see Message trace)
 ./run-auth-server.sh                # ...the OAuth/OIDC network-facing server (McpAuthRouter)
 ```
 
@@ -111,10 +112,10 @@ by construction and points at a port nothing is listening on.
 **Which scripts need a netldi.** `install.sh` talks only to the stone, so it runs fine on a host
 with no netldi at all. The `run-*.sh` scripts need one — not because of how they log in, but
 because `McpRouter>>forkOnPort:` and every per-client worker create a `GsTsExternalSession`, and
-netldi is what forks those gems. `run-unit-tests.sh` needs one **only if the auth group is
-installed**, because `McpAuthTest` is the one suite that spawns a real worker; on a base install it
-asks the image, finds no `McpAuthTest`, and runs happily without a netldi. Each script checks for
-what it actually needs, and says which is missing.
+netldi is what forks those gems. `run-unit-tests.sh` needs one too: four of
+its suites spawn a real worker gem (`McpExternalSessionTest`, `McpTransactionTest` and
+`McpWorkerDeadlineTest` always, `McpAuthTest` where the auth group is installed). It asks the image which are present rather than
+insisting unconditionally. Each script checks for what it actually needs, and says which is missing.
 
 **Linked vs RPC.** These scripts run `topaz -l` (linked). That is deliberate, and it is not the
 cause of the error above: a linked login resolves the stone through the same lock files, so it
@@ -530,8 +531,12 @@ Two guarantees the blocking call had been providing by accident are now explicit
 in flight per session, so each `McpSession` holds a mutex — a client with two requests outstanding
 queues rather than colliding. And the idle reaper, which previously could not run during a forward at
 all, now skips any session with a call in flight (`McpSession>>isBusy`) instead of logging a worker
-out mid-request. A forwarded request still has **no deadline**: a runaway tool ties up its own
-session for as long as it runs, though no longer anyone else's.
+out mid-request. And a forwarded request now has a **deadline** — 45s by default
+(`requestTimeoutSeconds`, `nil` for none) — which only a non-blocking forward makes possible: the
+front end is awake in the wait loop, so it can notice the call has outrun it and break the worker,
+answering the client a `-32001` error bearing the request's own id. The break leaves the gem usable,
+so the cost is that request and not the session. See
+[Session lifetime](docs/session-lifetime.md).
 
 **An open SSE stream costs the gem nothing.** Its drain loop yields on every tick (a 100ms `Delay`),
 so the accept loop, the reaper and every other session's stream keep running. Both directions of that
@@ -625,7 +630,8 @@ is discarded and re-sent down the new stream on the next pass. (Measured against
 ### Session lifetime
 
 How long a session lives is deployment policy, not a constant: the idle deadline, the liveness-probe
-interval, the absolute cap, and what an authenticated router does with a token's own `exp`. Because
+interval, the absolute cap, how long a single request may run, and what an authenticated router does
+with a token's own `exp`. Because
 a session here **is a gem holding a transaction view**, those choices decide when uncommitted work
 is thrown away — so they have their own document: **[docs/session-lifetime.md](docs/session-lifetime.md)**.
 It covers every knob and its default, what actually ends a session, why nothing is measured in
@@ -647,6 +653,60 @@ Not yet built: anything originating in a **worker** gem — progress during a lo
 lines from tool internals — which needs a worker→router channel (`InterSessionSignal` is the
 candidate). Elicitation and sampling need more than that: a *bidirectional* worker channel, since
 their answers have to be delivered back into a gem whose GCI call is already in flight.
+
+## Message trace
+
+An MCP client's UI generally shows you the tool **name** it called and not the text of the JSON-RPC
+message it sent, so when a call goes wrong the arguments are often recorded nowhere. Turn the trace
+on and the front end writes each message it receives to the **gem log**:
+
+```bash
+GS_MCP_TRACE=1 ./run-server.sh                        # bodies capped at 4096 chars (the default)
+GS_MCP_TRACE=1 GS_MCP_TRACE_LIMIT=none ./run-server.sh   # whole bodies, no cap
+GS_MCP_TRACE=1 GS_MCP_TRACE_LIMIT=512  ./run-server.sh   # a tighter cap
+```
+
+Both work on either launcher, and both travel to the forked front-end gem in the config
+(`McpRouter>>configDict`) — which they have to, since forking is the only way the server is started.
+In the image they are `messageTrace:` and `messageTraceLimit:` on the router instance.
+
+Then find the log and follow it. It is the front end's own gem log — one file for every client:
+
+```bash
+lsof -nP -iTCP:8000 -sTCP:LISTEN            # the front-end gem's pid
+lsof -p <pid> | grep '\.log'                # .../<datadir>/log/gemnetobject_<pid>.log
+tail -f .../log/gemnetobject_<pid>.log
+```
+
+What a line looks like — verb, path, session id, body size, body:
+
+```
+31/08/2026 10:14:42  message trace: ON -- bodies capped at 4096 chars
+31/08/2026 10:14:53  --> POST /mcp session - 107 chars: {"jsonrpc":"2.0","id":1,"method":"initialize",...}
+31/08/2026 10:14:53  --> POST /mcp session 71FF1F5C... 136 chars: {"jsonrpc":"2.0","id":2,"method":"tools/call",...}
+31/08/2026 10:15:20  --> (unreadable request: client closed, timed out, or over-long head)
+```
+
+Four things worth knowing:
+
+- The tap is in `McpRouter>>handleConnection:`, **before** the Origin, protocol-version and (on
+  `McpAuthRouter`) credential gates — so a request refused with a `403`, `400` or `401` is traced
+  too. Those are the ones you are usually looking for.
+- **Headers are never traced.** One of them is the `Authorization` bearer token. The session id *is*
+  traced: it is the only thing that tells two concurrent clients apart in one log, and the reaper
+  already writes it in the clear.
+- One message is one line: real newlines and tabs in a body become `\n` and `\t`, so a tools/call
+  carrying Smalltalk source stays greppable. A body past the cap is followed by `...(+N more)`, so a
+  long message cannot be mistaken for a lost one.
+- The startup line says the trace is on. Without it, an absence of message lines would read as an
+  absence of traffic.
+
+Off by default, and deliberately so: a traced log holds every argument every client sent — source to
+compile, code to execute. On a shared `McpAuthRouter` deployment that is other people's work.
+
+This is **inbound only** — what the client sent. What the server sends back is not traced: neither
+the JSON-RPC responses, nor the error bodies behind those `403`/`400`/`401` statuses, nor the
+server-initiated frames on the SSE stream.
 
 ## Writing your own MCP server
 
@@ -745,7 +805,7 @@ grouped by area, with one loader per group:
 
 ```
 src/core/    18 classes  the server itself: protocol, transport, dispatch, toolsets   (always)
-src/tests/   17 classes  the SUnit suites and their fixtures                          (always)
+src/tests/   19 classes  the SUnit suites and their fixtures                          (always)
 src/auth/     3 classes  the OAuth/OIDC front end McpAuthRouter + its two suites      (3.7.5+)
 src/grail/    2 classes  the optional GemStone-Python toolset + its suite             (--grail)
 load.gs                  files in core + tests, then commits
@@ -817,19 +877,41 @@ flag, so a missing suite is a skip and not an error:
 - `McpSessionTest` — how a session drives its worker gem: the non-blocking `runWorker:` that
   `forward:` and `prepareWorker` both use, that it reads the result only once the call is over (a
   premature read would answer one request with another's response), that two concurrent requests on
-  one session serialize instead of colliding, that a worker error leaves the session usable, and that
-  the idle reaper leaves a session with a call in flight alone. Driven through `McpMockWorker` /
+  one session serialize instead of colliding, that a worker error leaves the session usable, that
+  the idle reaper leaves a session with a call in flight alone, and the request deadline: a call that
+  beats it is untouched, one that outruns it is soft-broken and the session survives, a worker that
+  ignores that gets a hard break, and one that ignores both has its gem stopped and its session
+  finished. Driven through `McpMockWorker` /
   `McpMockSession`, which stand in for the `GsTsExternalSession` with no gem.
+- `McpWorkerDeadlineTest` — the other thing a mock cannot show: that a call which outruns the
+  request deadline is really **broken** in this image, and that the worker gem is usable again
+  afterwards — the claim the whole feature rests on, since a break that did not land would mean
+  answering a client while the gem computed on. Both shapes of runaway (a Smalltalk loop, a blocked
+  wait) plus the gem that takes neither break and has to be stopped from the stone. `McpSessionTest`
+  covers the policy against a mock; this covers the mechanism against a gem. Needs a netldi.
 - `McpExternalSessionTest` — the one thing a mock cannot show: that a result fetched out of a **real**
   worker gem arrives with the bytes the worker sent. It drives a real `McpSession` through the same
   `runWorker:` the forwarding path uses, so it measures the path the server runs on, and it tests the
   *image* rather than gs-mcp — a failure means the running GemStone carries kernel defect #51438, not
   that `src/` is wrong. Needs a netldi; see the note below.
+- `McpTransactionTest` — the transaction model across tool calls, and the one state a session can
+  get stuck in. It spawns a second worker gem to commit a **conflicting** change, which is the only
+  way to reach a *failed* commit — nothing short of a real second session produces one. That state
+  is sticky (the per-call `continueTransaction` then raises `TransactionError` 2409 on every later
+  call), so the suite pins what the client is told and how it gets out: that the conflict is raised
+  rather than quietly reported as success, that the jammed session still reports the failed commit
+  and keeps its uncommitted work, that `refresh` is refused while jammed, and that `abort` is the
+  way out. Plus the ordinary-case guarantees the jam is measured against: no tool moves the view,
+  and a stale write is refused rather than silently overwriting. Needs a netldi.
 - `McpTransportTest` — `handleConnection:` driven over a **`McpMockSocket`** wrapped in a
   real `McpHttpConnection`, so the genuine HTTP parsing/writing runs with no TCP. Covers the
   paths that spawn **no** worker gem: a session-less GET→`400`, DELETE→`400`/`404`, unknown verb→405,
   malformed→`-32700`, a session-less POST→`400`, chunked delivery, EOF, Content-Length. (initialize
   and a routed tool call spawn a real worker, so they're exercised by the integration test instead.)
+  Also the **message trace**: off by default, the body text on the line, one line per message however
+  many newlines the body holds, the cap and its `...(+N more)`, a `403`-refused request traced anyway,
+  the `Authorization` header staying out, and both settings surviving the fork-string round-trip.
+  Uses `McpFixtureRouter`, whose second seam captures `log:` into `#loggedLines`.
 - `McpOutboxTest` — `McpOutbox` on its own: FIFO, the bound and the drop-oldest policy with its
   admitted gap, the `beginClosing`/`close` handshake, and latest-GET-wins — including that detaching
   a superseded stream must *not* roll the generation back, or the stream that replaced it would look
@@ -879,22 +961,26 @@ flag, so a missing suite is a skip and not an error:
 
 Run a single suite while a server is up via the `run_test_class` tool (e.g. `run_test_class
 McpToolTest`). `./run-unit-tests.sh` runs them all and exits 0 when every test passes: the
-socket-less suites `McpToolTest` (52), `McpDispatcherTest` (14), `McpSessionTest` (9),
-`McpOutboxTest` (9), `McpStreamTest` (17), `McpLifetimeTest` (36), `McpTransportTest` (22),
-`McpContractTest` (34) and `McpExtensionTest` (9), plus `McpExternalSessionTest` (5) — **207 tests**,
+socket-less suites `McpToolTest` (56), `McpDispatcherTest` (18), `McpSessionTest` (15),
+`McpOutboxTest` (9), `McpStreamTest` (18), `McpLifetimeTest` (49), `McpTransportTest` (32),
+`McpContractTest` (34) and `McpExtensionTest` (9), plus `McpExternalSessionTest` (5),
+`McpTransactionTest` (8) and `McpWorkerDeadlineTest` (4) — **257 tests**,
 which is the whole suite on a base install. Where the optional groups are installed the runner picks
-their suites up automatically: plus `McpAuthTest` (34) and `McpAuthConformanceTest` (25) — **266
-tests** — and **275 with the 9 in `McpGrailToolsetTest`** on a Grail image.
+their suites up automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **313
+tests** — and **322 with the 9 in `McpGrailToolsetTest`** on a Grail image.
 
-Three suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
+Five suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
 `McpAuthConformanceTest` commit a throwaway JWT user and spawn real worker gems; they are in the
 runner anyway, because they are the only cover for the token → session path.
-`McpExternalSessionTest` drives a real worker gem to check that a result arrives carrying the bytes
-the worker sent, so the runner asks for a netldi on any image where it is installed — which is every
-image, since it is part of the base install. That is no new burden in practice: gs-mcp gives every
+`McpExternalSessionTest` checks that a result arrives out of a real worker gem carrying the bytes
+the worker sent, `McpTransactionTest` that a *second* gem committing a conflicting change leaves
+this session in the state a failed commit really produces, and `McpWorkerDeadlineTest` that a call
+which outruns the request deadline is really broken in a real one — so the runner asks for a netldi
+on any image where they are installed, which is every image, since all three are part of the base
+install. That is no new burden in practice: gs-mcp gives every
 client its own worker gem, so it cannot serve a single request without a netldi either.
 
-Those three also need **spare login slots**, which is the likeliest reason for a failure that is
+Those five also need **spare login slots**, which is the likeliest reason for a failure that is
 nothing to do with the code: each spawns worker gems of its own, so a stone whose `StnMaxSessions`
 is already consumed by running servers fails them with *"the maximum number of users are already
 logged in."* Stop the servers, or raise the limit, before reading such a failure as a regression.
@@ -937,7 +1023,9 @@ default stays plaintext — nothing to restore even if interrupted. Uses port `8
 - SSE resumability (`Last-Event-ID`).
 - Mapping **OAuth scopes to toolsets**, so a token's scopes select what it may *see* rather than only
   whether it may write.
-- A deadline for a forwarded request, now that a non-blocking forward makes one possible.
+- Tracing the **outbound** half — responses, the error bodies behind a refusal, and server-initiated
+  stream frames — to complete [Message trace](#message-trace), which today records only what the
+  client sent.
 - The draft `2026-07-28` protocol revision, which first needs a decision about how per-client
   worker-gem isolation survives a protocol with no session id — see
   [Protocol conformance](#protocol-conformance).

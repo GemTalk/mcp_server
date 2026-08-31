@@ -3,7 +3,7 @@ set compile_env: 0
 expectvalue /Class
 doit
 McpRouter subclass: 'McpFixtureRouter'
-  instVarNames: #()
+  instVarNames: #( loggedLines)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -30,7 +30,12 @@ cadence -- is ordinary router config (McpRouter>>sessionIdleTimeoutSeconds: and 
 fixture leaves alone. The single exception is #streamLossGraceSeconds, and it is not a policy the
 fixture is bending: a mock socket is at EOF from the start, so EVERY stream test ends by the
 client-went-away path, and a shipping grace would charge each of them a real ten-second wait for a
-reconnect that no mock will ever make. A test that wants the fast release asks for it by name.'
+reconnect that no mock will ever make. A test that wants the fast release asks for it by name.
+
+The second seam is the log. #log: is captured into #loggedLines instead of reaching the gem log,
+which is what lets a test assert on what the ROUTER decided to record -- above all the message
+trace, whose whole point is that a line appears (McpRouter>>traceRequest:). Capturing also keeps a
+suite from writing its fixtures into the log of whatever gem happened to run it.'
 %
 expectvalue /Class
 doit
@@ -50,6 +55,7 @@ initialize
    turns it on the ordinary way -- #streamLossGraceSeconds: 0 -- and gets it."
   super initialize.
   self streamLossGraceSeconds: nil.
+  loggedLines := OrderedCollection new.
   ^self
 %
 category: 'running'
@@ -57,4 +63,17 @@ method: McpFixtureRouter
 isRunning
   "Running, with no listener behind it. The one seam a stream test needs."
   ^true
+%
+category: 'logging'
+method: McpFixtureRouter
+log: aString
+  "Capture instead of writing to the gem log -- see the class comment."
+  loggedLines add: aString.
+  ^self
+%
+category: 'logging'
+method: McpFixtureRouter
+loggedLines
+  "Every line this router has logged, oldest first."
+  ^loggedLines
 %
