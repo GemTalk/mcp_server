@@ -531,8 +531,9 @@ Two guarantees the blocking call had been providing by accident are now explicit
 in flight per session, so each `McpSession` holds a mutex — a client with two requests outstanding
 queues rather than colliding. And the idle reaper, which previously could not run during a forward at
 all, now skips any session with a call in flight (`McpSession>>isBusy`) instead of logging a worker
-out mid-request. And a forwarded request now has a **deadline** — 45s by default
-(`requestTimeoutSeconds`, `nil` for none) — which only a non-blocking forward makes possible: the
+out mid-request. And a forwarded request *can* have a **deadline** — `requestTimeoutSeconds`, off by
+default, since a client that carries a progressToken pushes its own deadline out as it reports and a
+client that stops waiting now says so — which only a non-blocking forward makes possible: the
 front end is awake in the wait loop, so it can notice the call has outrun it and break the worker,
 answering the client a `-32001` error bearing the request's own id. The break leaves the gem usable,
 so the cost is that request and not the session. See

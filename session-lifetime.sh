@@ -19,16 +19,19 @@
 #                           An authenticated router caps every session at its access token's exp
 #                           regardless, so `none` there means "until the token expires".
 #   GS_MCP_REQUEST_TIMEOUT  How long ONE request may run in a worker gem before the server ends it
-#                           and answers the client an error. Default 45s, chosen to sit under what
-#                           an MCP client will wait -- a limit above the client's own is no limit at
-#                           all, since the client gives up first and the gem runs on with nobody
-#                           left to answer. Ending a request costs the client that request only: the
-#                           worker is interrupted and stays usable, so the session and its
-#                           uncommitted work survive. `none` removes the limit, which is the right
-#                           setting where the clients are known and long tools are the point -- what
-#                           it gives up is the guarantee that a runaway ever ends. Raise it, rather
-#                           than removing it, where legitimate work is slow: a large fileIn, a broad
-#                           search, a test suite.
+#                           and answers the client an error. Unset = NO LIMIT. It used to default to
+#                           45s, chosen to sit under what an MCP client will wait -- but that number
+#                           was a guess at when nobody is waiting any more, and two things now tell
+#                           the server instead: a progressToken-carrying call pushes its own deadline
+#                           out as it reports, and a client that stops waiting says so, by a
+#                           notifications/cancelled or by closing the response stream. A deadline
+#                           approximates that; a cancel signal knows it. The guess also cut off
+#                           legitimate slow work -- a large fileIn, a broad search, a test suite --
+#                           far more often than a runaway. Set a number of seconds where the clients
+#                           are unknown or cannot be trusted to cancel; what no limit gives up is the
+#                           guarantee that a runaway ever ends on its own. Ending a request costs the
+#                           client that request only: the worker is interrupted and stays usable, so
+#                           the session and its uncommitted work survive.
 #   GS_MCP_MAX_LIFETIME     Absolute cap on any session's life, however busy it is. Unset = none.
 #                           Never forgiven, unlike idleness -- including across a host suspend.
 #   GS_MCP_PROBE_INTERVAL   How often a quiet session is asked whether its client is still there.

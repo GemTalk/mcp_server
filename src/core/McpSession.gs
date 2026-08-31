@@ -102,8 +102,8 @@ abandonWorker
    would queue behind it forever.
    Marking rather than unregistering is deliberate. The id -> session map belongs to the router, and
    a session that removed itself from it would have to reach around the mutex that guards it; the
-   router unmaps it when it answers the client (McpRouter>>writeTimeoutError:forSession:id:on:), and
-   the client's next request then gets the 404 that tells it to initialize again."
+   router unmaps it as it answers the client (McpRouter>>releaseSessionIfAbandoned:), and the
+   client's next request then gets the 404 that tells it to initialize again."
   workerAbandoned := true.
   self stopWorkerGem.
   ^self

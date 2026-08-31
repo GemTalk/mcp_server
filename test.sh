@@ -136,13 +136,13 @@ r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"3 + 4"}}}
 JSON
 )
-check "execute_code 3+4 => 7"                 '"text":"7"'               "$r"
+check "execute_code 3+4 => 7"                 '"text":"7'                "$r"
 
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"| x | x := 6. x * 7"}}}
 JSON
 )
-check "execute_code multi-statement => 42"    '"text":"42"'              "$r"
+check "execute_code multi-statement => 42"    '"text":"42'               "$r"
 
 # --- status (prints the server gem's session id) ---
 r=$(post <<'JSON'
@@ -176,13 +176,20 @@ r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"compile_method","arguments":{"className":"McpSmokeClass","source":"answer\n  ^42","category":"smoke"}}}
 JSON
 )
-check "compile_method commits"                'and committed'            "$r"
+check "compile_method compiles"               'Compiled McpSmokeClass'   "$r"
+# No tool commits any more except `commit` -- see docs/server-to-client-messaging.md 14.4 -- so the
+# result says the work is PENDING rather than saved, and the method is visible in this session only.
+check "...and says the work is pending"        'uncommitted changes'      "$r"
 
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"McpSmokeClass new answer"}}}
 JSON
 )
-check "compiled method runs => 42"            '"text":"42"'              "$r"
+# The value is matched WITHOUT its closing quote here and in the two execute_code checks above,
+# because a tool result may carry a trailing [session] note (McpDispatcher>>annotateContent:) and it
+# appears only when that session happens to have uncommitted work -- so an assertion that closed the
+# quote passed or failed by run order rather than by behaviour.
+check "compiled method runs => 42"            '"text":"42'               "$r"
 
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"UserGlobals removeKey: #McpSmokeClass ifAbsent: [nil]. System commitTransaction. 'cleaned'"}}}
@@ -340,13 +347,13 @@ r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":35,"method":"tools/call","params":{"name":"compile_class_definition","arguments":{"source":"TestCase subclass: 'McpParityTest' instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()"}}}
 JSON
 )
-check "compile_class_definition creates class" 'committed class: McpParityTest' "$r"
+check "compile_class_definition creates class" 'Compiled class: McpParityTest' "$r"
 
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":36,"method":"tools/call","params":{"name":"compile_method","arguments":{"className":"McpParityTest","source":"testWillFail self assert: 1 = 2","category":"tests"}}}
 JSON
 )
-check "compile_method onto parity class"       'and committed'           "$r"
+check "compile_method onto parity class"       'Compiled McpParityTest'  "$r"
 
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":37,"method":"tools/call","params":{"name":"run_test_method","arguments":{"className":"McpParityTest","selector":"testWillFail"}}}
@@ -370,7 +377,7 @@ r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":40,"method":"tools/call","params":{"name":"set_class_comment","arguments":{"className":"McpParityTest","comment":"throwaway parity test"}}}
 JSON
 )
-check "set_class_comment commits"              'and committed'           "$r"
+check "set_class_comment sets the comment"     'Comment set on McpParityTest' "$r"
 
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":41,"method":"tools/call","params":{"name":"delete_method","arguments":{"className":"McpParityTest","selector":"testWillFail"}}}
@@ -396,6 +403,27 @@ check "GET /mcp with a dead session id => 404" 'HTTP/1.1 404'            "$r"
 r=$(curl -s -i -N -m 3 "$URL" -H "MCP-Session-Id: $SID" 2>&1 | head -12)
 check "GET /mcp => text/event-stream"         'text/event-stream'        "$r"
 check "GET /mcp sends 'connected' comment"    ': connected'              "$r"
+
+# --- transport: a tools/call answered as a request-scoped SSE stream ---
+# A client that puts a progressToken in params._meta has asked to be kept informed while the call
+# runs, so its answer comes back on a stream instead of as one JSON object: frames first, then the
+# response as the last frame. Claude Code sends such a token on EVERY tools/call, measured, and this
+# server discarded all of them until now. The regression that matters is the second check: every
+# other request in this file must still get plain JSON, because none of them asks for a stream.
+r=$(curl -s -i -N -m 10 "$URL" -H "MCP-Session-Id: $SID" \
+  -H 'Accept: application/json, text/event-stream' \
+  --data-binary '{"jsonrpc":"2.0","id":77,"method":"tools/call","params":{"name":"status","arguments":{},"_meta":{"progressToken":77}}}' 2>&1)
+check "progressToken => text/event-stream"    'text/event-stream'        "$r"
+check "...with proxy buffering turned off"    'X-Accel-Buffering: no'    "$r"
+check "...the answer arrives as an SSE frame" 'event: message'           "$r"
+check "...carrying this request's own id"     '"id":77'                  "$r"
+echo "$r" | grep -qi 'content-length' && verdict='has Content-Length' || verdict='no Content-Length'
+check "...and no Content-Length"              'no Content-Length'        "$verdict"
+# The same call without the token: the shape every other check here relies on.
+r=$(curl -s -i -m 10 "$URL" -H "MCP-Session-Id: $SID" \
+  -H 'Accept: application/json, text/event-stream' \
+  --data-binary '{"jsonrpc":"2.0","id":78,"method":"tools/call","params":{"name":"status","arguments":{}}}' 2>&1)
+check "no progressToken => application/json"  'Content-Type: application/json' "$r"
 
 # --- transport: a POSTed JSON-RPC response ---
 # How a client answers a request the SERVER sent it (today a liveness ping): a body with an id and
@@ -442,7 +470,7 @@ check "second client is served during a slow call" 'MCP-Session-Id'       "$r"
 [ "$elapsed" -lt 6 ] && verdict="concurrent" || verdict="serialized after ${elapsed}s"
 check "...concurrently, not queued behind it (${elapsed}s)" 'concurrent'   "$verdict"
 wait "$slow_pid" || true
-check "the slow call still returned its own result" '"text":"4321"'        "$(cat "$SLOW_OUT")"
+check "the slow call still returned its own result" '"text":"4321'         "$(cat "$SLOW_OUT")"
 rm -f "$SLOW_OUT"
 
 # --- transport: ending a session closes its open stream ---

@@ -19,7 +19,7 @@ against the others before a port is bound.
 | `reaperIntervalSeconds` | 60 | how often the maintenance pass runs |
 | `maxSessionLifetimeSeconds` | `nil` | absolute cap, however busy the session is |
 | `reapOnFailedProbe` | `true` | whether an unanswered ping frees a gem early. Forced on with no deadline |
-| `requestTimeoutSeconds` | 45 | how long **one request** may run before it is ended. `nil` = no limit |
+| `requestTimeoutSeconds` | `nil` | how long **one request** may run before it is ended. `nil` = no limit |
 
 **What actually ends a session**, in one place: a **deadline counts calls**; **`none` counts pings**;
 a client that **closed its stream** is released after `streamLossGraceSeconds`, whatever the idle
@@ -32,10 +32,23 @@ that hangs up, or that never opened a stream, is still released.
 session is released; `requestTimeoutSeconds` decides how long a single call inside one may run.
 A call that outruns it is **ended** — the front end breaks the worker and answers the client a
 JSON-RPC error (`-32001`, `data.kind` `timeout`) bearing the request's own id — rather than waited
-out. 45 seconds by default, and the number is chosen against the CLIENT's patience rather than the
-server's: MCP clients seen so far give up around a minute, and a server limit above the client's is
-no limit at all, because the client abandons the request first and the gem goes on computing an
-answer nobody is waiting for.
+out. **There is no limit by default.**
+
+It was 45 seconds, chosen against the CLIENT's patience rather than the server's: MCP clients seen so
+far give up around a minute, and a server limit above the client's is no limit at all, because the
+client abandons the request first and the gem goes on computing an answer nobody is waiting for. What
+that number really was, though, is a *guess* at the moment nobody is waiting any more, made by a
+server with no way to find out. Two things now tell it instead. A call that carries a `progressToken`
+is answered as a stream and pushes its own deadline out as it reports, so a client watching progress
+is never told its job took too long. And a client that stops waiting says so — by a
+`notifications/cancelled`, or by closing the response stream — which ends the call at the moment it
+stops being wanted. A deadline approximates that; a cancel signal knows it.
+
+The cost of the guess also fell in the wrong place: a 45-second limit cut off legitimate slow work —
+a full suite run, a large fileIn, a broad search — far more often than a runaway, and that is exactly
+the work progress notifications exist to make watchable. Set `GS_MCP_REQUEST_TIMEOUT=45` (or any
+number of seconds) where the clients are unknown or cannot be trusted to cancel; what `none` gives up
+is the guarantee that a runaway ever ends on its own.
 
 It costs the client that request and, almost always, nothing else. A soft break reaches both shapes
 a runaway takes — a Smalltalk loop, and a call blocked in a wait — and leaves the worker gem
@@ -45,7 +58,8 @@ whatever it had already done is still there in that gem's view, uncommitted. A g
 neither the soft break nor the hard one — code that handles `ControlInterrupt` and resumes — cannot
 be ended from the front end at all, so its gem is stopped from the stone side and the session is
 finished; that is the one case where the timeout costs the client its session, and the error says
-so. Set `GS_MCP_REQUEST_TIMEOUT=none` where the clients are known and long tools are the point.
+so. All of which applies equally to a call ended by a **cancellation**, which runs the same
+escalation from a different trigger.
 
 **A client that hangs up is released in seconds, not minutes.** Shutting an editor tab closes the
 client process, which closes its SSE socket, and the drain loop sees the EOF within one 100 ms poll —

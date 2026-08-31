@@ -173,12 +173,20 @@ writeSseData: aJsonString
 category: 'writing-sse'
 method: McpHttpConnection
 writeSseStreamHeaders
-  "Begin a text/event-stream response (no Content-Length; the stream stays open)."
+  "Begin a text/event-stream response (no Content-Length; the stream stays open).
+   X-Accel-Buffering tells a reverse proxy -- nginx reads this one by name -- not to buffer the
+   response. Without it a proxy may hold frames until it has accumulated some, which turns a
+   progress tick into a progress tick that arrives with the answer and defeats the whole point. The
+   draft revision SHOULDs it on any SSE response; where no proxy is in front, it is one ignored
+   header.
+   No MCP-Session-Id: the header exists so a client LEARNS its id from the initialize response, and
+   a client opening a stream already has one."
   | crlf resp |
   crlf := String with: Character cr with: Character lf.
   resp := 'HTTP/1.1 200 OK' , crlf ,
     'Content-Type: text/event-stream' , crlf ,
     'Cache-Control: no-cache' , crlf ,
+    'X-Accel-Buffering: no' , crlf ,
     'Connection: keep-alive' , crlf , crlf.
   ^socket write: resp
 %

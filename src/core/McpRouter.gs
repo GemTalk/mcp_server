@@ -143,17 +143,25 @@ category: 'session lifetime defaults'
 classmethod: McpRouter
 defaultRequestTimeoutSeconds
   "How long one request may run in a client's worker gem before the server ends it and answers an
-   error. 45 seconds, chosen to sit UNDER what an MCP client will wait: the clients seen so far give
-   up around a minute, and a limit above theirs is no limit at all -- the client abandons the
-   request, and the gem goes on running it with nobody left to answer.
-   Ending a request costs the client that request and nothing else: the worker is interrupted and
-   stays usable, so the session, and the uncommitted work in it, survive (McpSession>>
-   endOverrunningCall). The reason not to make it much shorter is that some legitimate work is
-   slow -- a large fileIn, a broad search, a test suite -- and a limit that cuts those off makes the
-   server unable to do things it can do.
-   nil means no limit, which is the right setting where the clients are known and long tools are the
-   point; what it gives up is the guarantee that a runaway ever ends."
-  ^45
+   error. NO LIMIT by default.
+   It was 45 seconds, chosen to sit under what an MCP client will wait -- the clients seen so far
+   give up around a minute, and a limit above theirs is no limit at all. What that number really
+   was, though, is a GUESS at the moment nobody is waiting for the answer any more, made by a server
+   with no way to find out. What replaces the guess is knowing: a call that asked to be kept informed
+   is answered on a stream it can report progress down (#serveStreamedCall:id:forSession:on:), and a
+   client that stops waiting can say so -- by a notifications/cancelled, or by closing that stream --
+   which ends the call at the moment it stops being wanted. A deadline approximates that; a cancel
+   signal knows it. Prefer the signal. (The stream is here; the progress on it and the cancel
+   triggers that read it are being built on top of it.)
+   And the cost of the guess fell in the wrong place. A 45-second limit does not cut off runaways so
+   much as legitimate slow work -- a full suite run, a large fileIn, a broad search -- which is
+   exactly the work progress notifications exist to make watchable. A server that can do a thing but
+   refuses to finish it is worse than one that takes a while.
+   What nil gives up is the guarantee that a runaway ever ends on its own, so set a number where the
+   clients are unknown or cannot be trusted to cancel. Ending a request costs the client that request
+   and nothing else: the worker is interrupted and stays usable, so the session, and the uncommitted
+   work in it, survive (McpSession>>endOverrunningCall)."
+  ^nil
 %
 category: 'session lifetime defaults'
 classmethod: McpRouter
@@ -229,6 +237,22 @@ runOnPort: aPort configJson: aJsonString
   ^(self new applyConfigJson: aJsonString) runOnPort: aPort
 %
 ! ------------------- Instance methods for McpRouter
+category: 'routing'
+method: McpRouter
+acceptsEventStream: req
+  "Whether this request's Accept header offers to take an SSE stream as the answer.
+   The spec REQUIRES a client to list both application/json and text/event-stream, and both clients
+   do, so this is not really a capability check -- it is what keeps a hand-rolled caller that asked
+   for JSON from being handed a stream it cannot read. curl without an Accept header, and every
+   check in test.sh, stay on the plain-JSON path.
+   Header keys arrive lower-cased (McpHttpConnection>>parseHead:); the VALUE is lower-cased here
+   because a media type is case-insensitive and #includesString: would answer this one either way --
+   being explicit costs nothing and says which it meant."
+  | accept |
+  accept := (req at: 'headers' ifAbsent: [Dictionary new]) at: 'accept' ifAbsent: [nil].
+  accept isNil ifTrue: [^false].
+  ^(accept asLowercase indexOfSubCollection: 'text/event-stream') > 0
+%
 category: 'origin allowlist'
 method: McpRouter
 allowedOriginHosts
@@ -655,6 +679,23 @@ initialize
   messageTraceLimit := self class defaultMessageTraceLimit.
   ^self
 %
+category: 'routing'
+method: McpRouter
+internalErrorFor: anIdOrNil
+  "A JSON-RPC -32603 body bearing anIdOrNil, as a JSON String, for a failure the front end could not
+   turn into anything more specific.
+   It exists for exactly one caller: a streamed call whose forward raised something other than an
+   ended call (#serveStreamedCall:id:forSession:on:). handleConnection: answers an escaped error with
+   a complete HTTP 500 response, which on a connection already carrying SSE frames would be appended
+   to the stream and read as junk -- so that path has to end itself, with a frame, and a frame needs
+   a body. Everywhere else the 500 is the right answer and this is not used."
+  | err |
+  err := Dictionary new.
+  err at: 'jsonrpc' put: '2.0'; at: 'id' put: anIdOrNil.
+  err at: 'error' put: (Dictionary new
+    at: 'code' put: -32603; at: 'message' put: 'Internal error'; yourself).
+  ^err asJson
+%
 category: 'running'
 method: McpRouter
 isRunning
@@ -995,6 +1036,30 @@ probeSession: sess
 %
 category: 'routing'
 method: McpRouter
+progressTokenFor: parsed accepting: req
+  "The progressToken this request asked to be kept informed on, or nil where the answer must be
+   ordinary JSON. Three conditions, all here because this is where a reader will come looking for
+   them: the request is a tools/call, it carries params._meta.progressToken, and its Accept header
+   offers to take a stream.
+   Read HERE, in the front end, and not in the worker, for a reason that is not a preference: the
+   Content-Type of the answer has to be chosen before the worker is called at all, so the worker
+   cannot be what decides it. That is the one place this class deliberately parses more of a body
+   than routing needs -- see servePost:.
+   Nothing about this is advertised. Progress has no capability, no initialize field and no per-tool
+   annotation in either revision, so the client opts in unilaterally and cannot lose the ability by
+   failing to notice something this server declares. Claude Code has been sending a token on every
+   single tools/call since it first connected."
+  | params meta |
+  (parsed at: 'method' ifAbsent: [nil]) = 'tools/call' ifFalse: [^nil].
+  (self acceptsEventStream: req) ifFalse: [^nil].
+  params := parsed at: 'params' ifAbsent: [nil].
+  (params isKindOf: Dictionary) ifFalse: [^nil].
+  meta := params at: '_meta' ifAbsent: [nil].
+  (meta isKindOf: Dictionary) ifFalse: [^nil].
+  ^meta at: 'progressToken' ifAbsent: [nil]
+%
+category: 'routing'
+method: McpRouter
 protocolVersionAllowed: req
   "MCP spec: a request carrying an invalid or unsupported MCP-Protocol-Version MUST be rejected
    (400). An absent header is allowed: initialize legitimately carries no version yet, and for
@@ -1205,6 +1270,27 @@ releaseAbandonedSession: sess unlessActiveSince: aStamp
   self reapIdleSessions.
   ^self
 %
+category: 'session lifetime'
+method: McpRouter
+releaseSessionIfAbandoned: sess
+  "End a session whose worker gem had to be STOPPED to get a call out of it (McpSession>>
+   abandonWorker), which is the third and last step of ending a call and the only one that costs the
+   client its session. Unmapped here rather than left for the reaper: it can serve nothing, and the
+   sooner it is gone the sooner the client's next request gets the 404 that tells it to initialize
+   again. Closing it marks its outbox closing, so an open stream is drained and ended rather than
+   dropped.
+   Does nothing for a session whose worker took a break, which is nearly all of them: there the gem,
+   its view and its uncommitted work are all intact and the client lost only the one call.
+   Separate from the two methods that answer the client (#writeTimeoutError:forSession:id:on: and
+   #writeTimeoutFrame:forSession:id:on:) because both owe the client this and they differ only in
+   how the answer is framed."
+  sess workerAbandoned ifFalse: [^self].
+  mutex critical: [sessions removeKey: sess id ifAbsent: [nil]].
+  [sess close] on: Error do: [:ex | ex return: nil].
+  self log: 'Ended MCP session ' , sess id printString
+    , ' -- a request was ended and its worker gem could not be interrupted, so the gem was stopped.'.
+  ^self
+%
 category: 'routing'
 method: McpRouter
 requestAuthorized: req on: conn
@@ -1409,6 +1495,24 @@ serve: aClientSocket
 %
 category: 'routing'
 method: McpRouter
+serveCall: body id: anIdOrNil forSession: sess on: conn
+  "Answer one routed request as a single JSON object -- what this server has always done, and still
+   does for everything that did not ask to be kept informed. 202 for a notification, whose worker
+   answer is empty because a notification gets no response.
+   The session gates already ran in #serveRouted:id:progressToken:sessionId:on:."
+  | resp |
+  resp := [sess forward: body lifetimeBounds: (self lifetimeBoundsFor: sess)]
+    on: McpError
+    do: [:ex |
+      ex kind = #timeout
+        ifTrue: [^self writeTimeoutError: ex forSession: sess id: anIdOrNil on: conn]
+        ifFalse: [ex pass]].
+  resp isEmpty
+    ifTrue: [conn writeStatus: 202 reason: 'Accepted' body: '']
+    ifFalse: [conn writeJson: resp]
+%
+category: 'routing'
+method: McpRouter
 serveClientResponse: parsed sessionId: sid on: conn
   "A JSON-RPC RESPONSE the client POSTed: its answer to a request THIS server sent on the SSE stream
    (today only ping). It carries an id and no method, which is what tells it from a request.
@@ -1510,7 +1614,13 @@ servePost: req on: conn
    not block the front-end gem (McpSession>>runWorker:), so requests from different clients really do
    run concurrently -- serve: already gives each connection its own GsProcess; the id -> session map
    is guarded by the mutex, and one client's worker by that session's own. Only enough of the body is parsed
-   here to route it (is it initialize? is it well-formed?); full request handling is the worker's."
+   here to route it (is it initialize? is it well-formed? is it asking to be kept informed?); full
+   request handling is the worker's.
+   That last question is the one exception to 'only enough to route it', and it is not a slip. A
+   tools/call carrying a progressToken is answered as an SSE stream rather than one JSON object, and
+   the Content-Type has to be chosen BEFORE the worker is called -- so the front end has to look
+   inside params._meta, because the worker cannot be what decides how its own answer is framed. See
+   #progressTokenFor:accepting:."
   | body parsed method |
   body := req at: 'body' ifAbsent: [''].
   parsed := self parseBody: body.
@@ -1522,7 +1632,11 @@ servePost: req on: conn
   (method isNil and: [parsed includesKey: 'id'])
     ifTrue: [^self serveClientResponse: parsed sessionId: (self sessionIdOf: req) on: conn].
   method = 'initialize' ifTrue: [^self serveInitialize: req on: conn].
-  ^self serveRouted: body id: (parsed at: 'id' ifAbsent: [nil]) sessionId: (self sessionIdOf: req) on: conn
+  ^self serveRouted: body
+      id: (parsed at: 'id' ifAbsent: [nil])
+      progressToken: (self progressTokenFor: parsed accepting: req)
+      sessionId: (self sessionIdOf: req)
+      on: conn
 %
 category: 'worker identity'
 method: McpRouter
@@ -1539,26 +1653,25 @@ serverName: aStringOrNil
 %
 category: 'routing'
 method: McpRouter
-serveRouted: body id: anIdOrNil sessionId: sid on: conn
-  "Route a non-initialize request to the client's worker by session id (required). Relay the
-   worker's JSON response, or 202 for a notification (empty response).
-   anIdOrNil is the JSON-RPC id the request arrived with, carried in for one case: a call ended on
-   the request deadline (McpSession>>endOverrunningCall) is answered HERE rather than by the worker,
-   and an answer the client cannot match to the request it is waiting on is no better than silence --
-   it would wait out its own timeout instead, which is the thing the deadline exists to prevent."
-  | sess resp |
+serveRouted: body id: anIdOrNil progressToken: aTokenOrNil sessionId: sid on: conn
+  "Route a non-initialize request to the client's worker by session id (required), and answer it in
+   whichever of the two shapes the request asked for.
+   The session gates come FIRST and are the same for both shapes -- 400 without an id, 404 for one
+   this server does not know -- which is why they live here rather than in either of the two methods
+   below. They have to: a stream cannot be opened before it is known there is a session to serve, or
+   the refusal would have to be written into a response already committed to being a stream.
+   aTokenOrNil decides the framing (#progressTokenFor:accepting:): nil is the ordinary JSON answer
+   this server has always given, non-nil an SSE stream carrying the answer as a frame.
+   anIdOrNil is the JSON-RPC id the request arrived with, carried in for one case: a call this server
+   ENDED (McpSession>>endOverrunningCall) is answered here rather than by the worker, and the answer
+   has to bear the id the client is waiting on."
+  | sess |
   sid isNil ifTrue: [^self writeSessionError: 'Missing MCP-Session-Id header (call initialize first)' code: 400 reason: 'Bad Request' on: conn].
   sess := self sessionAt: sid.
   sess isNil ifTrue: [^self writeSessionError: 'Unknown or expired session: ' , sid code: 404 reason: 'Not Found' on: conn].
-  resp := [sess forward: body lifetimeBounds: (self lifetimeBoundsFor: sess)]
-    on: McpError
-    do: [:ex |
-      ex kind = #timeout
-        ifTrue: [^self writeTimeoutError: ex forSession: sess id: anIdOrNil on: conn]
-        ifFalse: [ex pass]].
-  resp isEmpty
-    ifTrue: [conn writeStatus: 202 reason: 'Accepted' body: '']
-    ifFalse: [conn writeJson: resp]
+  ^aTokenOrNil isNil
+    ifTrue: [self serveCall: body id: anIdOrNil forSession: sess on: conn]
+    ifFalse: [self serveStreamedCall: body id: anIdOrNil forSession: sess on: conn]
 %
 category: 'worker identity'
 method: McpRouter
@@ -1584,6 +1697,45 @@ category: 'worker identity'
 method: McpRouter
 serverVersion: aStringOrNil
   serverVersion := aStringOrNil
+%
+category: 'routing'
+method: McpRouter
+serveStreamedCall: body id: anIdOrNil forSession: sess on: conn
+  "Answer one tools/call as an SSE stream instead of a single JSON object, because the client put a
+   progressToken in the request and so asked to be kept informed while it runs.
+   The stream is REQUEST-SCOPED: it belongs to this POST, it carries only messages about this call,
+   and it ends with this call's response. That is not a stylistic choice -- progress is request-scoped
+   in every revision of the spec, and the draft bars it from the long-lived stream outright, so the
+   standalone GET stream (#serveGetStream:forSession:) is the wrong connection for it however
+   convenient its drain loop looks.
+   Nothing streams YET: the headers go out, the call runs, the response follows as one frame. What
+   this method establishes is the SHAPE -- that a tools/call can be answered on an open stream at
+   all -- which is worth having on its own, because it is the half of progress that depends on a
+   client behaving the way the spec says it must, and it can be verified without a line of cross-gem
+   code.
+   Once the headers are written there is no second HTTP response to be had, so every ending has to be
+   a frame on this stream: an ended call gets #writeTimeoutFrame:forSession:id:on:, and any other
+   error is caught HERE rather than reaching handleConnection:, whose 500 would be appended to a
+   stream as if it were a fresh response and read as garbage.
+   A nil from a write is the client having gone; nothing more is owed to it."
+  | resp |
+  (conn writeSseStreamHeaders) ifNil: [^self].
+  resp := [[sess forward: body lifetimeBounds: (self lifetimeBoundsFor: sess)]
+    on: McpError
+    do: [:ex |
+      ex kind = #timeout
+        ifTrue: [^self writeTimeoutFrame: ex forSession: sess id: anIdOrNil on: conn]
+        ifFalse: [ex pass]]]
+    on: Error
+    do: [:ex |
+      self log: 'Streamed call failed for MCP session ' , sess id printString , ': '
+        , ([ex description] on: Error do: [:x | ex class name asString]).
+      ^conn writeSseData: (self internalErrorFor: anIdOrNil)].
+  "An empty answer means a notification, which cannot reach here: only a tools/call is streamed and
+   a tools/call always carries an id. Ending the stream is still the right thing to do with one."
+  resp isEmpty ifTrue: [^self].
+  conn writeSseData: resp.
+  ^self
 %
 category: 'sessions'
 method: McpRouter
@@ -1688,6 +1840,29 @@ streamPollMilliseconds
    accept loop, the reaper and every other stream keep running while this one is held open. A
    latency/wakeup tradeoff: 100ms puts a notification on the wire promptly without spinning."
   ^100
+%
+category: 'routing'
+method: McpRouter
+timeoutErrorFor: anError id: anIdOrNil
+  "The JSON-RPC error body for a request this server ENDED, as a JSON String.
+   The code is -32001, in JSON-RPC's implementation-defined server-error range, and `data.kind`
+   carries the same machine-readable classification a worker-raised error would
+   (McpDispatcher>>kindForError:), so a client branches the same way wherever the error was produced.
+   It bears the request's own id, and that is the point: an answer the client cannot match to the
+   request it is waiting on is no better than silence -- it would wait out its own timeout instead,
+   which is the whole thing ending a call early exists to prevent.
+   Built here rather than inside either writer because the two writers differ only in FRAMING: a
+   plain call gets it as the HTTP response body, a streamed one as an SSE frame on the stream already
+   open (#writeTimeoutFrame:forSession:id:on:)."
+  | err |
+  err := Dictionary new.
+  err at: 'jsonrpc' put: '2.0'; at: 'id' put: anIdOrNil.
+  err at: 'error' put: (Dictionary new
+    at: 'code' put: -32001;
+    at: 'message' put: anError description;
+    at: 'data' put: (Dictionary new at: 'kind' put: anError kind asString; yourself);
+    yourself).
+  ^err asJson
 %
 category: 'tls'
 method: McpRouter
@@ -1954,30 +2129,26 @@ writeSessionError: aMessage code: httpCode reason: reasonString on: conn
 category: 'routing'
 method: McpRouter
 writeTimeoutError: anError forSession: sess id: anIdOrNil on: conn
-  "Answer a request this server ended on its own deadline (McpSession>>endOverrunningCall).
+  "Answer a request this server ended (McpSession>>endOverrunningCall) on a call being answered as
+   ordinary JSON.
    HTTP 200 with a JSON-RPC error, not an HTTP error status: the request was accepted, routed and
    served, and what failed is the call inside it -- a result the client should match to its request
-   rather than a transport refusal it might not read as JSON-RPC at all. The code is -32001, in
-   JSON-RPC's implementation-defined server-error range, and `data.kind` carries the same
-   machine-readable 'timeout' a worker-raised error would (McpDispatcher>>kindForError:), so a client
-   branches the same way wherever the error was produced.
-   A session whose worker could not be interrupted is finished, and is unmapped here rather than left
-   for the reaper: it can serve nothing, and the sooner it is gone the sooner the client's next
-   request gets the 404 that tells it to initialize again. Closing it is what marks its outbox
-   closing, so an open stream is drained and ended rather than dropped."
-  | err |
-  sess workerAbandoned ifTrue: [
-    mutex critical: [sessions removeKey: sess id ifAbsent: [nil]].
-    [sess close] on: Error do: [:ex | ex return: nil].
-    self log: 'Ended MCP session ' , sess id printString
-      , ' -- a request outran the deadline and its worker gem could not be interrupted, so the gem '
-      , 'was stopped.'].
-  err := Dictionary new.
-  err at: 'jsonrpc' put: '2.0'; at: 'id' put: anIdOrNil.
-  err at: 'error' put: (Dictionary new
-    at: 'code' put: -32001;
-    at: 'message' put: anError description;
-    at: 'data' put: (Dictionary new at: 'kind' put: 'timeout'; yourself);
-    yourself).
-  conn writeJson: err asJson
+   rather than a transport refusal it might not read as JSON-RPC at all. See #timeoutErrorFor:id: for
+   the body, and #releaseSessionIfAbandoned: for the one case where ending the call also ends the
+   session."
+  self releaseSessionIfAbandoned: sess.
+  conn writeJson: (self timeoutErrorFor: anError id: anIdOrNil)
+%
+category: 'routing'
+method: McpRouter
+writeTimeoutFrame: anError forSession: sess id: anIdOrNil on: conn
+  "The same answer as #writeTimeoutError:forSession:id:on:, framed for a call already being answered
+   as a stream: the SSE headers went out before the worker was ever called, so there is no second
+   HTTP response available and the error has to travel as a frame on the stream that is open.
+   Ending the stream afterwards is the caller's business (#serveStreamedCall:id:forSession:on:); what
+   matters here is that the client gets a TERMINATING message. A stream that simply stops leaves a
+   client waiting on a socket that will never say anything again, which is worse than the timeout it
+   was told about -- and the id in the body is what lets it stop waiting on the right request."
+  self releaseSessionIfAbandoned: sess.
+  ^conn writeSseData: (self timeoutErrorFor: anError id: anIdOrNil)
 %
