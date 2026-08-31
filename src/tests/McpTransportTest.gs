@@ -87,6 +87,16 @@ runRequest: rawRequest chunkSize: n
   McpRouter new handleConnection: (McpHttpConnection on: mock).
   ^mock
 %
+category: 'helpers'
+method: McpTransportTest
+runRequest: rawRequest onRouter: aRouter
+  "As runRequest:, but on a router the test configured -- and, for a McpFixtureRouter, one whose
+   #loggedLines can be read back afterwards."
+  | mock |
+  mock := McpMockSocket on: rawRequest chunkSize: 1000000.
+  aRouter handleConnection: (McpHttpConnection on: mock).
+  ^mock
+%
 category: 'running'
 method: McpTransportTest
 setUp
@@ -170,7 +180,9 @@ testConfigJsonRoundTrips
     toolsetNames: #('McpBrowsingToolset');
     serverName: 'acme-db-mcp';
     serverTitle: 'Acme Labels - production';
-    serverVersion: '2.5.0'.
+    serverVersion: '2.5.0';
+    messageTrace: true;
+    messageTraceLimit: 512.
   dst := McpRouter new applyConfigJson: src configJson.
   self assert: dst readOnly.
   self assert: dst allowedOriginHosts equals: #('example.com').
@@ -181,8 +193,13 @@ testConfigJsonRoundTrips
   self assert: dst serverVersion equals: '2.5.0'.
   self assert: dst tlsCertificateFile isNil.     "unset optional stays nil through the round-trip"
   self assert: dst tlsPrivateKeyFile isNil.
-  "an unconfigured router round-trips to its safe defaults -- read-write on, loopback origins"
-  self deny: (McpRouter new applyConfigJson: McpRouter new configJson) readOnly
+  "the message trace has to survive this or it is unreachable: forkOnPort: is how the server starts"
+  self assert: dst messageTrace.
+  self assert: dst messageTraceLimit equals: 512.
+  "an unconfigured router round-trips to its safe defaults -- read-write on, loopback origins,
+   trace off"
+  self deny: (McpRouter new applyConfigJson: McpRouter new configJson) readOnly.
+  self deny: (McpRouter new applyConfigJson: McpRouter new configJson) messageTrace
 %
 category: 'tests'
 method: McpTransportTest
@@ -266,6 +283,132 @@ testMalformedBodyReturnsParseError
   out := (self runRequest: (self postRequest: 'this is not json')) output.
   self assert: (self includesCS: 'HTTP/1.1 400 Bad Request' in: out).
   self assert: (self includesCS: '-32700' in: out)
+%
+category: 'tests - message trace'
+method: McpTransportTest
+testMessageTraceCapsLongBodies
+  "A traced body is capped (defaultMessageTraceLimit) and the trace says how much it dropped, so a
+   reader can tell a long message from a lost one. nil removes the cap."
+  | big ws r line uncapped |
+  ws := WriteStream on: String new.
+  ws nextPutAll: '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"code":"'.
+  1 to: 5000 do: [:i | ws nextPut: $x].
+  ws nextPutAll: '"}}'.
+  big := ws contents.
+  r := McpFixtureRouter new.
+  r messageTrace: true.
+  self assert: r messageTraceLimit equals: McpRouter defaultMessageTraceLimit.
+  self runRequest: (self postRequest: big) onRouter: r.
+  line := (self traceLinesOf: r) first.
+  self assert: (self includesCS: big size printString , ' chars' in: line).  "the FULL size is stated"
+  self assert: (self includesCS: '...(+' in: line).
+  self deny: (self includesCS: big in: line).
+  "with the cap off, the whole body is written"
+  uncapped := McpFixtureRouter new.
+  uncapped messageTrace: true.
+  uncapped messageTraceLimit: nil.
+  self runRequest: (self postRequest: big) onRouter: uncapped.
+  self assert: (self includesCS: big in: (self traceLinesOf: uncapped) first)
+%
+category: 'tests - message trace'
+method: McpTransportTest
+testMessageTraceIsOffByDefault
+  "Off unless an operator asks for it: a traced log holds every argument every client sent."
+  | r |
+  r := McpFixtureRouter new.
+  self deny: r messageTrace.
+  self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}') onRouter: r.
+  self assert: (self traceLinesOf: r) isEmpty
+%
+category: 'tests - message trace'
+method: McpTransportTest
+testMessageTraceKeepsOneMessageOnOneLine
+  "One message is one log line. A tools/call argument routinely carries Smalltalk source with real
+   newlines in it; left alone a single call would break into dozens of lines and take the timestamp,
+   the session id and grep with it."
+  | body r line |
+  body := '{"code":"| x |' , (String with: Character lf) , 'x := 1.' , (String with: Character lf) , 'x"}'.
+  r := McpFixtureRouter new.
+  r messageTrace: true.
+  self runRequest: (self postRequest: body) onRouter: r.
+  self assert: (self traceLinesOf: r) size equals: 1.
+  line := (self traceLinesOf: r) first.
+  self deny: (line includes: Character lf).
+  self deny: (line includes: Character cr).
+  self assert: (self includesCS: 'x := 1.' in: line)
+%
+category: 'tests - message trace'
+method: McpTransportTest
+testMessageTraceLimitRejectsNonPositive
+  "A zero or negative cap would silently trace nothing; nil is how you ask for no cap."
+  self should: [McpRouter new messageTraceLimit: 0] raise: Error.
+  self should: [McpRouter new messageTraceLimit: -1] raise: Error.
+  self assert: (McpRouter new messageTraceLimit: nil; messageTraceLimit) isNil.
+  self assert: (McpRouter new messageTraceLimit: 10; messageTraceLimit) equals: 10
+%
+category: 'tests - message trace'
+method: McpTransportTest
+testMessageTraceLogsARefusedRequest
+  "The reason the tap is in handleConnection: and not in servePost:on:. A request the Origin gate
+   turns away never reaches a verb handler, and it is exactly the one an operator is trying to see."
+  | r out |
+  r := McpFixtureRouter new.
+  r messageTrace: true.
+  out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+                              origin: 'http://evil.example.com')
+           onRouter: r) output.
+  self assert: (self includesCS: 'HTTP/1.1 403 Forbidden' in: out).
+  self assert: (self traceLinesOf: r) size equals: 1
+%
+category: 'tests - message trace'
+method: McpTransportTest
+testMessageTraceLogsTheRequestBody
+  "The whole point: the text of the message the client sent, which its own UI does not show."
+  | body r line |
+  body := '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"execute_code"}}'.
+  r := McpFixtureRouter new.
+  r messageTrace: true.
+  self runRequest: (self postRequest: body) onRouter: r.
+  self assert: (self traceLinesOf: r) size equals: 1.
+  line := (self traceLinesOf: r) first.
+  self assert: (self includesCS: body in: line).
+  self assert: (self includesCS: 'POST /mcp' in: line).
+  self assert: (self includesCS: body size printString , ' chars' in: line)
+%
+category: 'tests - message trace'
+method: McpTransportTest
+testMessageTraceOmitsHeaders
+  "Headers are never traced. One of them is the Authorization bearer token on McpAuthRouter, and a
+   trace an operator turns on to read a tool argument must not become a way to collect credentials.
+   The session id IS reported -- it is the only thing that tells two concurrent clients apart, and
+   the reaper already writes it in the clear."
+  | body raw r line crlf |
+  crlf := self crlf.
+  body := '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'.
+  raw := 'POST /mcp HTTP/1.1' , crlf , 'Host: localhost' , crlf ,
+    'Authorization: Bearer sekrit-token-value' , crlf ,
+    'MCP-Session-Id: abc123' , crlf ,
+    'Content-Type: application/json' , crlf ,
+    'Content-Length: ' , body size printString , crlf , crlf , body.
+  r := McpFixtureRouter new.
+  r messageTrace: true.
+  self runRequest: raw onRouter: r.
+  line := (self traceLinesOf: r) first.
+  self deny: (self includesCS: 'sekrit-token-value' in: line).
+  self deny: (self includesCS: 'Authorization' in: line).
+  self assert: (self includesCS: 'session abc123' in: line)
+%
+category: 'tests - message trace'
+method: McpTransportTest
+testMessageTraceRecordsAnUnreadableRequest
+  "A connection that yields no request at all -- EOF, a read timeout, an over-long head -- is itself
+   worth a line: 'my message never arrived' is one of the things this trace is turned on to answer."
+  | r |
+  r := McpFixtureRouter new.
+  r messageTrace: true.
+  self runRequest: '' onRouter: r.
+  self assert: (self traceLinesOf: r) size equals: 1.
+  self assert: (self includesCS: 'unreadable request' in: (self traceLinesOf: r) first)
 %
 category: 'tests'
 method: McpTransportTest
@@ -376,4 +519,11 @@ testWorkerConfigDefaultsAreResolvedByTheFrontEnd
   r workerClassName: 'McpFixtureServerProbe'; toolsetNames: #().
   self assert: r effectiveWorkerClassName equals: 'McpFixtureServerProbe'.
   self assert: r effectiveToolsetNames isEmpty
+%
+category: 'helpers'
+method: McpTransportTest
+traceLinesOf: aRouter
+  "The message-trace lines aRouter logged, in order. A trace line is the only kind that starts with
+   the inbound marker, so this ignores the router's lifecycle and error lines."
+  ^aRouter loggedLines select: [:each | (each findString: '-->' startingAt: 1) = 1]
 %

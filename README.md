@@ -41,6 +41,7 @@ GS_MCP_PORT=8000 ./run-server.sh    # fork a detached, independent localhost ser
 GS_MCP_READONLY=1 ./run-server.sh   # ...read-only (browse/search only; no accidental mutation)
 GS_MCP_TOOLSETS="McpBrowsingToolset McpSearchToolset" ./run-server.sh   # ...only these tools
 GS_MCP_WORKER_CLASS=MyMcpServer ./run-server.sh                        # ...a subclass as the worker
+GS_MCP_TRACE=1 ./run-server.sh      # ...logging every message a client sends (see Message trace)
 ./run-auth-server.sh                # ...the OAuth/OIDC network-facing server (McpAuthRouter)
 ```
 
@@ -623,6 +624,60 @@ lines from tool internals — which needs a worker→router channel (`InterSessi
 candidate). Elicitation and sampling need more than that: a *bidirectional* worker channel, since
 their answers have to be delivered back into a gem whose GCI call is already in flight.
 
+## Message trace
+
+An MCP client's UI generally shows you the tool **name** it called and not the text of the JSON-RPC
+message it sent, so when a call goes wrong the arguments are often recorded nowhere. Turn the trace
+on and the front end writes each message it receives to the **gem log**:
+
+```bash
+GS_MCP_TRACE=1 ./run-server.sh                        # bodies capped at 4096 chars (the default)
+GS_MCP_TRACE=1 GS_MCP_TRACE_LIMIT=none ./run-server.sh   # whole bodies, no cap
+GS_MCP_TRACE=1 GS_MCP_TRACE_LIMIT=512  ./run-server.sh   # a tighter cap
+```
+
+Both work on either launcher, and both travel to the forked front-end gem in the config
+(`McpRouter>>configDict`) — which they have to, since forking is the only way the server is started.
+In the image they are `messageTrace:` and `messageTraceLimit:` on the router instance.
+
+Then find the log and follow it. It is the front end's own gem log — one file for every client:
+
+```bash
+lsof -nP -iTCP:8000 -sTCP:LISTEN            # the front-end gem's pid
+lsof -p <pid> | grep '\.log'                # .../<datadir>/log/gemnetobject_<pid>.log
+tail -f .../log/gemnetobject_<pid>.log
+```
+
+What a line looks like — verb, path, session id, body size, body:
+
+```
+31/08/2026 10:14:42  message trace: ON -- bodies capped at 4096 chars
+31/08/2026 10:14:53  --> POST /mcp session - 107 chars: {"jsonrpc":"2.0","id":1,"method":"initialize",...}
+31/08/2026 10:14:53  --> POST /mcp session 71FF1F5C... 136 chars: {"jsonrpc":"2.0","id":2,"method":"tools/call",...}
+31/08/2026 10:15:20  --> (unreadable request: client closed, timed out, or over-long head)
+```
+
+Four things worth knowing:
+
+- The tap is in `McpRouter>>handleConnection:`, **before** the Origin, protocol-version and (on
+  `McpAuthRouter`) credential gates — so a request refused with a `403`, `400` or `401` is traced
+  too. Those are the ones you are usually looking for.
+- **Headers are never traced.** One of them is the `Authorization` bearer token. The session id *is*
+  traced: it is the only thing that tells two concurrent clients apart in one log, and the reaper
+  already writes it in the clear.
+- One message is one line: real newlines and tabs in a body become `\n` and `\t`, so a tools/call
+  carrying Smalltalk source stays greppable. A body past the cap is followed by `...(+N more)`, so a
+  long message cannot be mistaken for a lost one.
+- The startup line says the trace is on. Without it, an absence of message lines would read as an
+  absence of traffic.
+
+Off by default, and deliberately so: a traced log holds every argument every client sent — source to
+compile, code to execute. On a shared `McpAuthRouter` deployment that is other people's work.
+
+This is **inbound only** — what the client sent. What the server sends back is not traced: neither
+the JSON-RPC responses, nor the error bodies behind those `403`/`400`/`401` statuses, nor the
+server-initiated frames on the SSE stream.
+
 ## Writing your own MCP server
 
 You can ship an MCP server for **your** software on this transport — including one that exposes only
@@ -805,6 +860,10 @@ flag, so a missing suite is a skip and not an error:
   paths that spawn **no** worker gem: a session-less GET→`400`, DELETE→`400`/`404`, unknown verb→405,
   malformed→`-32700`, a session-less POST→`400`, chunked delivery, EOF, Content-Length. (initialize
   and a routed tool call spawn a real worker, so they're exercised by the integration test instead.)
+  Also the **message trace**: off by default, the body text on the line, one line per message however
+  many newlines the body holds, the cap and its `...(+N more)`, a `403`-refused request traced anyway,
+  the `Authorization` header staying out, and both settings surviving the fork-string round-trip.
+  Uses `McpFixtureRouter`, whose second seam captures `log:` into `#loggedLines`.
 - `McpOutboxTest` — `McpOutbox` on its own: FIFO, the bound and the drop-oldest policy with its
   admitted gap, the `beginClosing`/`close` handshake, and latest-GET-wins — including that detaching
   a superseded stream must *not* roll the generation back, or the stream that replaced it would look
@@ -854,12 +913,12 @@ flag, so a missing suite is a skip and not an error:
 
 Run a single suite while a server is up via the `run_test_class` tool (e.g. `run_test_class
 McpToolTest`). `./run-unit-tests.sh` runs them all and exits 0 when every test passes: the
-socket-less suites `McpToolTest` (52), `McpDispatcherTest` (14), `McpSessionTest` (9),
-`McpOutboxTest` (9), `McpStreamTest` (17), `McpLifetimeTest` (36), `McpTransportTest` (22),
-`McpContractTest` (34) and `McpExtensionTest` (9), plus `McpExternalSessionTest` (5) — **207 tests**,
+socket-less suites `McpToolTest` (52), `McpDispatcherTest` (12), `McpSessionTest` (9),
+`McpOutboxTest` (9), `McpStreamTest` (18), `McpLifetimeTest` (42), `McpTransportTest` (30),
+`McpContractTest` (34) and `McpExtensionTest` (9), plus `McpExternalSessionTest` (5) — **220 tests**,
 which is the whole suite on a base install. Where the optional groups are installed the runner picks
-their suites up automatically: plus `McpAuthTest` (34) and `McpAuthConformanceTest` (25) — **266
-tests** — and **275 with the 9 in `McpGrailToolsetTest`** on a Grail image.
+their suites up automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **276
+tests** — and **285 with the 9 in `McpGrailToolsetTest`** on a Grail image.
 
 Three suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
 `McpAuthConformanceTest` commit a throwaway JWT user and spawn real worker gems; they are in the
@@ -912,6 +971,9 @@ default stays plaintext — nothing to restore even if interrupted. Uses port `8
 - SSE resumability (`Last-Event-ID`).
 - Mapping **OAuth scopes to toolsets**, so a token's scopes select what it may *see* rather than only
   whether it may write.
+- Tracing the **outbound** half — responses, the error bodies behind a refusal, and server-initiated
+  stream frames — to complete [Message trace](#message-trace), which today records only what the
+  client sent.
 - A deadline for a forwarded request, now that a non-blocking forward makes one possible.
 - The draft `2026-07-28` protocol revision, which first needs a decision about how per-client
   worker-gem isolation survives a protocol with no session id — see

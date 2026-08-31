@@ -9,7 +9,7 @@ McpBase subclass: 'McpRouter'
                     serverName serverTitle serverVersion pendingRequests
                     pendingMutex serverRequestCounter sessionIdleTimeoutSeconds streamlessIdleTimeoutSeconds
                     livenessProbeIntervalSeconds reaperIntervalSeconds maxSessionLifetimeSeconds reapOnFailedProbe
-                    streamLossGraceSeconds)
+                    streamLossGraceSeconds messageTrace messageTraceLimit)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -78,6 +78,14 @@ to add tools write an McpToolset instead):
 TLS (serve HTTPS): give the instance a PEM cert + UNENCRYPTED private key, then run/fork:
     (McpRouter new useTlsCertificateFile: ''/path/server.crt'' privateKeyFile: ''/path/server.key'')
       forkOnPort: 8443
+Trace what clients SEND, to the gem log (off by default). An MCP client''s UI generally shows tool
+names and not the text of the JSON-RPC message it sent, so when a call goes wrong there is often no
+record of the arguments anywhere; this is that record. The tap is in handleConnection:, before the
+transport and credential gates, so a refused request is traced too. Headers are never traced -- one
+of them is a bearer token:
+    (McpRouter new messageTrace: true) forkOnPort: 8000
+    (McpRouter new messageTrace: true; messageTraceLimit: nil) forkOnPort: 8000   "no body cap"
+
 This class CANNOT be made reachable from another host: bindAddress answers loopback and has no
 setter, because a base McpRouter performs no authentication and a reachable port would be an open
 door into the repository. For a reachable port use McpAuthRouter, which requires a bearer token,
@@ -113,6 +121,17 @@ defaultLivenessProbeIntervalSeconds
    and a client that is frozen rather than gone is released after #unansweredProbesBeforeGone of
    them, which at the former five minutes meant a quarter of an hour before anyone noticed."
   ^120
+%
+category: 'message trace'
+classmethod: McpRouter
+defaultMessageTraceLimit
+  "How much of a traced message body is written, in characters. 4096: enough for every routing
+   message and for the tool calls an operator is usually chasing, and short enough that one runaway
+   client cannot fill the log volume. What it truncates is the tail of a large source argument --
+   a compile_method body, an execute_code block -- and the trace says how much it dropped, so a
+   reader can tell a long message from a lost one. nil means no cap at all; see
+   McpRouter>>messageTraceLimit:."
+  ^4096
 %
 category: 'session lifetime defaults'
 classmethod: McpRouter
@@ -232,6 +251,8 @@ applyConfig: aConfigDict
   reaperIntervalSeconds := aConfigDict at: 'reaperIntervalSeconds' ifAbsent: [reaperIntervalSeconds].
   maxSessionLifetimeSeconds := aConfigDict at: 'maxSessionLifetimeSeconds' ifAbsent: [maxSessionLifetimeSeconds].
   reapOnFailedProbe := aConfigDict at: 'reapOnFailedProbe' ifAbsent: [reapOnFailedProbe].
+  messageTrace := aConfigDict at: 'messageTrace' ifAbsent: [messageTrace].
+  messageTraceLimit := aConfigDict at: 'messageTraceLimit' ifAbsent: [messageTraceLimit].
   ^self
 %
 category: 'config'
@@ -337,6 +358,10 @@ configDict
   d at: 'reaperIntervalSeconds' put: reaperIntervalSeconds.
   d at: 'maxSessionLifetimeSeconds' put: maxSessionLifetimeSeconds.
   d at: 'reapOnFailedProbe' put: reapOnFailedProbe.
+  "Message tracing has to travel, or it is unreachable: forkOnPort: is the only way this server is
+   ever started, so a setting the fork string does not carry is one an operator cannot turn on."
+  d at: 'messageTrace' put: messageTrace.
+  d at: 'messageTraceLimit' put: messageTraceLimit.
   ^d
 %
 category: 'config'
@@ -432,6 +457,26 @@ effectiveWorkerClassName
    deciding."
   ^workerClassName ifNil: ['McpServer']
 %
+category: 'message trace'
+method: McpRouter
+escapedForTrace: aString
+  "aString with its line breaks and tabs turned into the two-character escapes \n \r \t, so one
+   traced message is one line in the gem log. Every other line this server writes is a single line,
+   and a JSON-RPC body here routinely carries Smalltalk source with real newlines in it: left
+   alone, a single tools/call would break into thirty log lines and take the timestamp, the session
+   id and grep with it."
+  | out |
+  out := WriteStream on: String new.
+  aString do: [:c |
+    c = Character lf
+      ifTrue: [out nextPutAll: '\n']
+      ifFalse: [c = Character cr
+        ifTrue: [out nextPutAll: '\r']
+        ifFalse: [c = Character tab
+          ifTrue: [out nextPutAll: '\t']
+          ifFalse: [out nextPut: c]]]].
+  ^out contents
+%
 category: 'forking'
 method: McpRouter
 forkOnPort: aPort
@@ -490,9 +535,14 @@ category: 'running'
 method: McpRouter
 handleConnection: aConnection
   "Read one HTTP/1.1 request and dispatch it (see route:on:). Runs in its own GsProcess; any error
-   is contained and answered with 500, and the connection is always closed."
+   is contained and answered with 500, and the connection is always closed.
+   The message trace is taken HERE, before #route:on:, because this is the only point that sees
+   EVERY client message: the transport gates (Origin, MCP-Protocol-Version) and, on McpAuthRouter,
+   the credential gate all refuse inside #route:on:, and a request refused there is exactly the one
+   an operator is trying to see. Tracing costs nothing when it is off (see #traceRequest:)."
   [ | req |
     req := aConnection readRequest.
+    self traceRequest: req.
     req isNil ifFalse: [self route: req on: aConnection]
   ] on: Error do: [:ex |
     self log: 'McpRouter handleConnection: error: ' , (ex messageText ifNil: [ex description]).
@@ -564,6 +614,12 @@ initialize
   reaperIntervalSeconds := self class defaultReaperIntervalSeconds.
   maxSessionLifetimeSeconds := nil.  "nil = no absolute cap beyond whatever a credential imposes"
   reapOnFailedProbe := true.
+  "Message tracing: OFF, because a traced log records every tool argument a client sent, and an
+   operator must choose that rather than discover it. The cap is not optional -- a compile_method or
+   execute_code body runs to tens of kilobytes, and an unbounded default would let a chatty session
+   fill a disk nobody is watching."
+  messageTrace := false.
+  messageTraceLimit := self class defaultMessageTraceLimit.
   ^self
 %
 category: 'running'
@@ -687,6 +743,50 @@ method: McpRouter
 maxSessionLifetimeSeconds: anIntegerOrNil
   "Cap the absolute lifetime of every session this router opens (nil removes the cap)."
   maxSessionLifetimeSeconds := anIntegerOrNil
+%
+category: 'message trace'
+method: McpRouter
+messageTrace
+  "Whether this router writes each message it receives from a client to the gem log. False by
+   default. An MCP client's UI generally shows tool NAMES and not the text of the JSON-RPC message
+   it sent, so when a call goes wrong there is often no record of the arguments anywhere; this is
+   that record. Off by default because a traced log holds every argument every client sent -- source
+   to compile, code to execute -- and that is an operator's decision to take, not a default to
+   discover."
+  ^messageTrace == true
+%
+category: 'message trace'
+method: McpRouter
+messageTrace: aBoolean
+  "Turn the message trace on or off (see #messageTrace). Travels to a forked front end in the
+   config, so ./run-server.sh GS_MCP_TRACE=1 reaches the gem that actually serves."
+  messageTrace := aBoolean
+%
+category: 'message trace'
+method: McpRouter
+messageTraceLimit
+  "Characters of each traced body written before the rest is summarized, or nil for no limit.
+   See McpRouter class>>defaultMessageTraceLimit."
+  ^messageTraceLimit
+%
+category: 'message trace'
+method: McpRouter
+messageTraceLimit: anIntegerOrNil
+  "Cap each traced body at anIntegerOrNil characters; nil removes the cap. A cap is the default
+   because an execute_code or compile_method argument runs to tens of kilobytes and the gem log is
+   a file on a volume nobody is watching."
+  (anIntegerOrNil notNil and: [anIntegerOrNil < 1])
+    ifTrue: [^self error: 'messageTraceLimit must be a positive integer, or nil for no limit'].
+  messageTraceLimit := anIntegerOrNil
+%
+category: 'message trace'
+method: McpRouter
+messageTraceSummary
+  "One phrase describing the trace settings, for the startup log line."
+  self messageTrace ifFalse: [^'off'].
+  ^messageTraceLimit isNil
+    ifTrue: ['whole bodies (no cap)']
+    ifFalse: ['bodies capped at ' , messageTraceLimit printString , ' chars']
 %
 category: 'server-initiated'
 method: McpRouter
@@ -1126,6 +1226,10 @@ runOnPort: aPort
       ifTrue: ['(none -- this router offers no tools)']
       ifFalse: [self effectiveToolsetNames inject: '' into: [:a :b | a isEmpty ifTrue: [b] ifFalse: [a , ' ' , b]]]).
   self log: 'session lifetime: ' , self lifetimeSummary.
+  "Say so when tracing is on, and say nothing when it is off. A reader of this log has to be able to
+   tell a quiet server from an untraced one -- otherwise an absence of message lines reads as an
+   absence of traffic, which is the wrong conclusion and the expensive one."
+  messageTrace == true ifTrue: [self log: 'message trace: ON -- ' , self messageTraceSummary].
   [isRunning] whileTrue: [
     "Gate the accept on readiness rather than acceptTimeoutMs:: for a GsSecureSocket listener
      acceptTimeoutMs: RAISES on an idle timeout (it treats the nil from a plain-socket timeout as a
@@ -1545,6 +1649,49 @@ toolsetNames: aCollectionOfNamesOrNil
   toolsetNames := aCollectionOfNamesOrNil isNil
     ifTrue: [nil]
     ifFalse: [(aCollectionOfNamesOrNil collect: [:n | self validatedClassName: n]) asArray]
+%
+category: 'message trace'
+method: McpRouter
+traceLineFor: req
+  "The one-line trace of an inbound request req -- verb, path, session id, body size, body -- or a
+   line saying the request could not be read when req is nil. Answers the line; writing it is
+   #traceRequest:'s job, so this stays a pure function a test can assert on without a gem log.
+   Deliberately does NOT report the headers. They carry the Authorization bearer token on
+   McpAuthRouter, and a trace an operator turns on to read a tool argument must not be a way to
+   collect other people's credentials. The session id is reported because it is the only thing that
+   tells two concurrent clients apart in one log, and it is already written in the clear by the
+   reaper's lines."
+  | body limit line shown |
+  req isNil ifTrue: [^'--> (unreadable request: client closed, timed out, or over-long head)'].
+  body := req at: 'body' ifAbsent: [''].
+  limit := self messageTraceLimit.
+  line := WriteStream on: String new.
+  line nextPutAll: '--> '; nextPutAll: (req at: 'method' ifAbsent: ['?']).
+  line nextPutAll: ' '; nextPutAll: (req at: 'path' ifAbsent: ['?']).
+  line nextPutAll: ' session '; nextPutAll: ((self sessionIdOf: req) ifNil: ['-']).
+  line nextPutAll: ' '; nextPutAll: body size printString; nextPutAll: ' chars'.
+  body isEmpty ifTrue: [^line contents].
+  line nextPutAll: ': '.
+  shown := (limit notNil and: [body size > limit])
+    ifTrue: [body copyFrom: 1 to: limit]
+    ifFalse: [body].
+  line nextPutAll: (self escapedForTrace: shown).
+  "Say how much was dropped, so a reader can tell a long message from a lost one."
+  shown size < body size ifTrue: [
+    line nextPutAll: ' ...(+'; nextPutAll: (body size - shown size) printString; nextPutAll: ' more)'].
+  ^line contents
+%
+category: 'message trace'
+method: McpRouter
+traceRequest: req
+  "Write the message trace for one inbound request, if this router is tracing (see #messageTrace).
+   Costs a single identity comparison when it is off, which is the common case and is why the tap
+   can sit on the hot path in #handleConnection:.
+   Cannot fail the caller. #log: already swallows a failed write, but BUILDING the line is real work
+   on client-supplied bytes, and a trace that turned a request into a 500 would be worse than no
+   trace at all."
+  messageTrace == true ifFalse: [^self].
+  [self log: (self traceLineFor: req)] on: Error do: [:ex | nil]
 %
 category: 'session lifetime'
 method: McpRouter
