@@ -31,6 +31,20 @@
 #                     Subclass to change BEHAVIOR; to add tools write a toolset instead.
 #   GS_MCP_TOOLSETS - space-separated McpToolset names to expose instead of the default surface,
 #                     e.g. "McpBrowsingToolset McpSearchToolset". Empty means the default.
+#   Session lifetime (how long a quiet client keeps its worker gem, whether it may keep it
+#                     indefinitely, and when it is warned) is configured with the GS_MCP_IDLE_TIMEOUT
+#                     family -- see ./session-lifetime.sh, which documents each one. The common case
+#                     for a localhost server you come back to hours later is
+#                     GS_MCP_IDLE_TIMEOUT=none, which keeps a session alive for as long as its client
+#                     keeps answering liveness pings.
+#   GS_MCP_TRACE    - 1 to write every message a client SENDS to the gem log (default 0). Turn this
+#                     on when a call is going wrong and the client's own UI shows you only the tool
+#                     name: the trace carries the JSON-RPC text, including the arguments. It is off
+#                     by default because a traced log then holds every argument every client sent.
+#                     Find the log with  lsof -nP -iTCP:$GS_MCP_PORT -sTCP:LISTEN  and tail the
+#                     gemnetobject_<pid>.log the gem has open.
+#   GS_MCP_TRACE_LIMIT - characters of each traced body written before the rest is summarized
+#                     (default 4096). "none" writes whole bodies, with no cap at all.
 #   GS_MCP_TITLE    - human-readable label for THIS INSTANCE, reported as serverInfo.title, e.g.
 #                     "GemStone - staging (gs64stone)". Empty means no title at all: the key is
 #                     omitted and clients display the server name. Use this -- not a relabeled
@@ -46,6 +60,8 @@ GS_MCP_READONLY="${GS_MCP_READONLY:-0}"
 GS_MCP_WORKER_CLASS="${GS_MCP_WORKER_CLASS:-}"
 GS_MCP_TOOLSETS="${GS_MCP_TOOLSETS:-}"
 GS_MCP_TITLE="${GS_MCP_TITLE:-}"
+GS_MCP_TRACE="${GS_MCP_TRACE:-0}"
+GS_MCP_TRACE_LIMIT="${GS_MCP_TRACE_LIMIT:-}"
 
 # Resolve the environment and confirm BOTH the stone and a netldi. The netldi requirement is real
 # and is not about how this script logs in: forkOnPort: creates a GsTsExternalSession for the front
@@ -66,6 +82,10 @@ if gs_env_locate_lsof && "$GS_LSOF" -nP -iTCP:"$GS_MCP_PORT" -sTCP:LISTEN -t >/d
   exit 1
 fi
 
+# Session-lifetime setters (GS_MCP_IDLE_TIMEOUT and friends) -> $LIFETIME_LINES; empty when none are
+# set, leaving McpRouter>>initialize's defaults in place.
+. ./session-lifetime.sh
+
 [ "$GS_MCP_READONLY" = "1" ] && RO="true" || RO="false"
 
 # Optional worker-class / toolset configuration, as extra Smalltalk setter sends on the router.
@@ -77,6 +97,24 @@ if [ -n "$GS_MCP_TOOLSETS" ]; then
   for t in $GS_MCP_TOOLSETS; do LITERALS="$LITERALS '$t'"; done
   CONFIG="$CONFIG
 r toolsetNames: #($LITERALS)."
+fi
+# Message tracing. Both settings travel to the forked gem in the config (McpRouter>>configDict);
+# nothing here is committed.
+if [ "$GS_MCP_TRACE" = "1" ]; then
+  CONFIG="$CONFIG
+r messageTrace: true."
+fi
+if [ -n "$GS_MCP_TRACE_LIMIT" ]; then
+  if [ "$GS_MCP_TRACE_LIMIT" = "none" ]; then
+    CONFIG="$CONFIG
+r messageTraceLimit: nil."
+  else
+    case "$GS_MCP_TRACE_LIMIT" in
+      ''|*[!0-9]*) echo "error: GS_MCP_TRACE_LIMIT must be a positive integer, or 'none'." >&2; exit 1 ;;
+    esac
+    CONFIG="$CONFIG
+r messageTraceLimit: $GS_MCP_TRACE_LIMIT."
+  fi
 fi
 # Free-form operator text, so double any embedded quote rather than letting it close the literal.
 if [ -n "$GS_MCP_TITLE" ]; then
@@ -93,7 +131,7 @@ iferr 1 stk
 run
 | r |
 r := McpRouter new.
-r readOnly: $RO.$CONFIG
+r readOnly: $RO.$CONFIG$LIFETIME_LINES
 r forkOnPort: $GS_MCP_PORT
 %
 logout

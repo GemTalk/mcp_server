@@ -7,15 +7,15 @@
 #
 # WHICH SUITES RUN depends on what is installed, not on a list kept here: the auth suites and the
 # Grail suite are added only if their classes resolve, because install.sh files in src/auth only on
-# an image with kernel JWT support and src/grail only on --grail. A base install runs the six core
-# suites and needs nothing but the stone.
+# an image with kernel JWT support and src/grail only on --grail. A base install runs the ten core
+# suites.
 #
-# NB: McpAuthTest is not purely in-image -- its fixtures create and commit a throwaway JWT-enabled
-# UserProfile (touching AllUsers) and it spawns a real worker gem, so a NETLDI must be running.
-# That is the ONLY reason this script ever wants one, which is why the requirement below is gated on
-# McpAuthTest actually being installed rather than asserted unconditionally. The suite is run
-# whenever it is present: it is the only coverage of the token->session path, and leaving it out
-# once let a broken parse in McpAuthRouter (every token rejected as malformed) go unnoticed.
+# NB: one suite is NOT purely in-image, and it needs a NETLDI.
+#   McpAuthTest             creates and commits a throwaway JWT-enabled UserProfile (touching
+#                           AllUsers) and spawns a real worker gem. It is run whenever present: it
+#                           is the only coverage of the token->session path, and leaving it out once
+#                           let a broken parse in McpAuthRouter (every token rejected as malformed)
+#                           go unnoticed.
 #
 # Configure (or export before running):
 #   GEMSTONE   - GemStone product directory (REQUIRED; no default can be guessed)
@@ -30,29 +30,36 @@ GS_STONE="${GS_STONE:-gs64stone}"
 GS_USER="${GS_USER:-DataCurator}"
 GS_PASS="${GS_PASS:-swordfish}"
 
-# A netldi is needed for McpAuthTest and nothing else, so ask the image whether that suite is
-# installed before insisting on one. Checking up front beats discovering it as a GciError partway
-# through a suite run -- but demanding a netldi on an image that has no auth suites to run would
-# refuse to test a perfectly good base install (3.7.2, or any --no-auth image).
-gs_mcp_require_netldi_if_auth_installed() {
-  local have
-  gs_env_image_has McpAuthTest && have=0 || have=$?
-  case "$have" in
-    0) gs_env_require_netldi ;;
-    1) return 0 ;;      # no auth suites installed: nothing here forks a gem
-    *) return 1 ;;      # gs_env_image_has has already said why
-  esac
+# One suite forks a real worker gem and so needs a NETLDI: McpAuthTest, present only where the auth
+# group could be installed. Ask the image whether it is there rather than asserting a netldi
+# unconditionally -- the check has to survive a base install (and every 3.7.2 install, where the auth
+# group cannot be filed in at all), and discovering the lack up front beats hitting it as a GciError
+# partway through a suite run.
+#
+# Everything else runs with no netldi, including the cover for kernel defect #51438: McpMockWorker
+# models the corrupting fetch in-image, so both sides of that defect are exercised without a gem.
+gs_mcp_require_netldi_if_forking_suite_installed() {
+  local nm have
+  for nm in McpAuthTest; do
+    gs_env_image_has "$nm" && have=0 || have=$?
+    case "$have" in
+      0) gs_env_require_netldi; return $? ;;
+      1) ;;               # not installed: keep looking
+      *) return 1 ;;      # gs_env_image_has has already said why
+    esac
+  done
+  return 0                # no gem-forking suite installed: nothing here needs a netldi
 }
 
 . ./gs-env.sh
 gs_env_resolve
 if [ "${1:-}" = "--check" ]; then
   gs_env_check || exit $?
-  gs_mcp_require_netldi_if_auth_installed || exit 1
+  gs_mcp_require_netldi_if_forking_suite_installed || exit 1
   exit 0
 fi
 gs_env_require_stone
-gs_mcp_require_netldi_if_auth_installed
+gs_mcp_require_netldi_if_forking_suite_installed
 
 # Stream topaz output live AND keep a copy to gate on. Do NOT wrap the heredoc in $( ... ):
 # under `set -e`, a command substitution that exits non-zero aborts the script BEFORE anything
@@ -73,8 +80,9 @@ iferr 1 stk
 run
 | s classes up optional |
 up := System myUserProfile.
-classes := #( 'McpToolTest' 'McpDispatcherTest' 'McpSessionTest' 'McpTransportTest'
-  'McpContractTest' 'McpExtensionTest' ) asOrderedCollection.
+classes := #( 'McpToolTest' 'McpDispatcherTest' 'McpSessionTest' 'McpOutboxTest'
+  'McpStreamTest' 'McpLifetimeTest' 'McpTransportTest' 'McpContractTest'
+  'McpExtensionTest' ) asOrderedCollection.
 "Suites from the optional groups, run only where their group was installed. Named as a list so
  adding one is a one-word change, and so a missing suite is a skip rather than a doesNotUnderstand."
 optional := #( 'McpAuthTest' 'McpAuthConformanceTest' 'McpGrailToolsetTest' ).

@@ -3,7 +3,8 @@ set compile_env: 0
 expectvalue /Class
 doit
 McpSession subclass: 'McpMockSession'
-  instVarNames: #( mockWorker fakeIdleSeconds mockCorrupts)
+  instVarNames: #( mockWorker fakeIdleSeconds mockCorrupts
+                    fakeQuietProbes)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -19,7 +20,10 @@ McpSession>>newWorkerSession, so startWithId:, prepareWorker, forward:, runWorke
 the SHIPPING implementations under test -- unlike McpStubSession, which stubs prepareWorker out to
 test the router''s session bookkeeping without a login.
 
-fakeIdleSeconds: makes a session look idle without waiting, so a test can drive
+fakeIdleSeconds: makes a session look idle without waiting. fakeQuietProbes: does the same for the
+measure the reaper actually uses -- liveness pings answered with no work in between -- which cannot
+simply be recorded before a call, because #runWorker: stamps the activity clock when the call ENDS
+as well as when it starts, and that legitimately resets the count. Together they let a test drive
 McpRouter>>reapIdleSessions and check that it leaves a session with a call in flight alone.
 
 startWithId:corrupting: builds a worker that returns large results the way GemStone before 3.7.4.1
@@ -51,6 +55,12 @@ fakeIdleSeconds: anIntegerOrNil
   "Report this instead of the real idle time (nil restores the clock)."
   fakeIdleSeconds := anIntegerOrNil
 %
+category: 'testing support'
+method: McpMockSession
+fakeQuietProbes: anIntegerOrNil
+  "Report this instead of the real confirmation count (nil restores the real one)."
+  fakeQuietProbes := anIntegerOrNil
+%
 category: 'activity'
 method: McpMockSession
 idleSeconds
@@ -71,6 +81,11 @@ newWorkerSession
   ^mockWorker := McpMockWorker new
     simulateResultCorruption: mockCorrupts == true;
     yourself
+%
+category: 'testing support'
+method: McpMockSession
+quietProbes
+  ^fakeQuietProbes ifNil: [super quietProbes]
 %
 category: 'testing support'
 method: McpMockSession

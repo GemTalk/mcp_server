@@ -165,6 +165,16 @@ initializeResultFor: params
   tools := Dictionary new.
   caps := Dictionary new.
   caps at: 'tools' put: tools.
+  "A server may send only what it has declared, and this server declares only its tools.
+   'logging' was declared until 2026-08-27, solely to license notifications/message as the generic
+   carrier for the front end's idle warning and session-ending notice. Both warnings are gone, the
+   draft revision prohibits an unsolicited notifications/message anyway, and declaring the
+   capability would go on promising a logging/setLevel that nothing in this server would read.
+   Deliberately NOT declared: tools listChanged (no session's tool surface changes after
+   initialize), resources, prompts, and completions -- none of which this server has.
+   Note what needs no declaration: progress. notifications/progress is a base-protocol utility a
+   client opts into per REQUEST, by putting a progressToken in the request's _meta, so there has
+   never been anything for a server to advertise -- see docs/server-to-client-messaging.md 2.2."
   info := Dictionary new.
   info at: 'name' put: self serverName.
   "title is OMITTED when nil rather than sent as null: an absent title is what tells a client to

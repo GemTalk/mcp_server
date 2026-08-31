@@ -15,7 +15,7 @@ d := System myUserProfile objectNamed: #Published.
 names := #( #McpError #McpTool #McpToolRegistry #McpToolset #McpBrowsingToolset
   #McpExecutionToolset #McpListingToolset #McpMutationToolset #McpSearchToolset
   #McpSessionToolset #McpTestingToolset #McpHttpConnection #McpDispatcher #McpBase
-  #McpServer #McpSession #McpRouter ).
+  #McpServer #McpOutbox #McpSession #McpRouter ).
 names do: [:s | (d includesKey: s) ifFalse: [ d at: s put: nil ] ].
 names size
 %
@@ -41,5 +41,8 @@ input src/core/McpHttpConnection.gs
 input src/core/McpDispatcher.gs
 input src/core/McpBase.gs
 input src/core/McpServer.gs
+! The server-to-client pathway: a per-session outbox the front end drains onto that client's SSE
+! stream. Ahead of McpSession, which builds one for every session.
+input src/core/McpOutbox.gs
 input src/core/McpSession.gs
 input src/core/McpRouter.gs

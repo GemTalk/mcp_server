@@ -151,9 +151,34 @@ gs_env_resolve() {
   return 1
 }
 
+# The gem's own version, from the product tree we are about to log in WITH. Line 2 of version.txt,
+# first field: the line 1 "GemStone/S 64 Bit" banner would otherwise yield "64".
+gs_env_gem_version() {
+  sed -n '2s/^\([0-9][0-9.]*\).*/\1/p' "$GEMSTONE/version.txt" 2>/dev/null
+}
+
 gs_env_require_stone() {
   local stone="${1:-$GS_STONE}"
-  if "$GEMSTONE/bin/gslist" -l 2>/dev/null | awk -v stone="$stone" '$NF == stone && $(NF-1) == "Stone"' | grep -q .; then
+  local row
+  row="$("$GEMSTONE/bin/gslist" -l 2>/dev/null | awk -v stone="$stone" '$NF == stone && $(NF-1) == "Stone"')"
+  if [ -n "$row" ]; then
+    # Running is necessary but not sufficient: a stone of a DIFFERENT version is running, reachable,
+    # and passes every check above, then kills the login with a fatal error 4044 ("The Gem and Stone
+    # versions are incompatible") from inside a forked child gem, where the only trace is one line
+    # buried in a config dump. On a host with several stones of several versions -- which is the
+    # normal state here -- a stale GS_STONE export is all it takes. Catch it in the shell instead.
+    local stone_v gem_v
+    stone_v="$(printf '%s' "$row" | awk '{print $2}')"
+    gem_v="$(gs_env_gem_version)"
+    if [ -n "$stone_v" ] && [ -n "$gem_v" ] && [ "$stone_v" != "$gem_v" ]; then
+      echo "error: stone '$stone' is version $stone_v, but GEMSTONE is $gem_v." >&2
+      echo "       A login would fail with 'The Gem and Stone versions are incompatible' (error 4044)." >&2
+      echo "       Either point GS_STONE at a $gem_v stone:" >&2
+      "$GEMSTONE/bin/gslist" -l 2>/dev/null \
+        | awk -v v="$gem_v" '$(NF-1) == "Stone" && $2 == v { print "         " $NF }' >&2
+      echo "       or source the setenv for $stone_v and run again." >&2
+      return 1
+    fi
     return 0
   fi
   echo "error: stone '$stone' is not running (or not registered under GEMSTONE_GLOBAL_DIR=$GEMSTONE_GLOBAL_DIR)." >&2

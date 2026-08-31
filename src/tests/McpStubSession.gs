@@ -28,12 +28,30 @@ removeallmethods McpStubSession
 removeallclassmethods McpStubSession
 ! ------------------- Class methods for McpStubSession
 ! ------------------- Instance methods for McpStubSession
+category: 'accessing'
+method: McpStubSession
+beReadOnly
+  "Make this stub a read-ONLY session. #startWithId: opens read-write, which is the mode most tests
+   want; the expiry-renewal rules differ between the two, so both have to be reachable."
+  readOnly := true.
+  ^self
+%
 category: 'initialization'
 method: McpStubSession
 prepareWorker
   "Record the call; a stub has no worker gem to prepare."
   wasPrepared := true.
   ^self
+%
+category: 'initialization'
+method: McpStubSession
+startWithId: anId
+  "Record the id and stamp the activity clock -- everything McpSession>>startWithId: does EXCEPT
+   spawn and log in a gem. That is what lets a router test register a real, findable, reapable
+   session (and drain its outbox) without a NETLDI."
+  id := anId.
+  readOnly := false.
+  ^self touch
 %
 category: 'accessing'
 method: McpStubSession

@@ -54,6 +54,21 @@
 #                         Advertised automatically so clients can request it -- an unrequestable write
 #                         scope would leave every session read-only.
 #   GS_MCP_READONLY     - 1 to force EVERY session read-only regardless of scope (default: 0)
+#   Session lifetime    - the GS_MCP_IDLE_TIMEOUT family, documented in ./session-lifetime.sh. A
+#                         hosted server usually wants a SHORTER idle timeout than the 30-minute
+#                         default, since every live session is a gem holding a transaction view. Note
+#                         that this router additionally caps each session at its access token's own
+#                         `exp`, whatever the idle policy says: the worker gem is logged in as that
+#                         token's GemStone user, so a session outliving its token would leave the
+#                         authorization it was opened with in force after the grant expired.
+#   GS_MCP_TRACE        - 1 to write every message a client SENDS to the gem log (default 0). Turn
+#                         this on when a call is going wrong and the client's own UI shows you only
+#                         the tool name: the trace carries the JSON-RPC text, arguments included.
+#                         Headers are never traced, so the bearer token stays out of the log -- but
+#                         everything a client sent does go in, which on a SHARED server is other
+#                         people's work. Off by default for that reason.
+#   GS_MCP_TRACE_LIMIT  - characters of each traced body written before the rest is summarized
+#                         (default 4096). "none" writes whole bodies, with no cap at all.
 #   GS_MCP_TITLE        - human-readable label for THIS INSTANCE, reported as serverInfo.title, e.g.
 #                         "GemStone - geode teststone 3.7.6". Empty means no title at all: the key is
 #                         omitted and clients display the server name. Use this -- not a relabeled
@@ -83,6 +98,8 @@ MCP_EXTRA_SCOPES="${MCP_EXTRA_SCOPES:-}"
 MCP_WRITE_SCOPE="${MCP_WRITE_SCOPE:-}"
 GS_MCP_READONLY="${GS_MCP_READONLY:-0}"
 GS_MCP_TITLE="${GS_MCP_TITLE:-}"
+GS_MCP_TRACE="${GS_MCP_TRACE:-0}"
+GS_MCP_TRACE_LIMIT="${GS_MCP_TRACE_LIMIT:-}"
 MCP_BIND_ADDRESS="${MCP_BIND_ADDRESS:-}"
 MCP_TLS_CERT="${MCP_TLS_CERT:-}"
 MCP_TLS_KEY="${MCP_TLS_KEY:-}"
@@ -114,6 +131,10 @@ if [ "$HAVE_ROUTER" -ne 0 ]; then
   echo "       not available at all; ./run-server.sh gives you the unauthenticated loopback one." >&2
   exit 1
 fi
+
+# Session-lifetime setters (GS_MCP_IDLE_TIMEOUT and friends) -> $LIFETIME_LINES; empty when none are
+# set, leaving McpRouter>>initialize's defaults in place.
+. ./session-lifetime.sh
 
 # Two pre-flight checks follow. Each mirrors a rule McpAuthRouter enforces on itself, so the code is
 # the real gate and neither is load-bearing: they exist only to turn "launch topaz, watch the router
@@ -163,6 +184,21 @@ RO_LINE=""
 [ "$GS_MCP_READONLY" = "1" ] && RO_LINE="r readOnly: true."
 BIND_LINE=""
 [ -n "$MCP_BIND_ADDRESS" ] && BIND_LINE="r bindAddress: '$MCP_BIND_ADDRESS'."
+# Message tracing; both settings travel to the forked gem in the config (McpRouter>>configDict).
+TRACE_LINE=""
+[ "$GS_MCP_TRACE" = "1" ] && TRACE_LINE="r messageTrace: true."
+if [ -n "$GS_MCP_TRACE_LIMIT" ]; then
+  if [ "$GS_MCP_TRACE_LIMIT" = "none" ]; then
+    TRACE_LINE="$TRACE_LINE
+r messageTraceLimit: nil."
+  else
+    case "$GS_MCP_TRACE_LIMIT" in
+      ''|*[!0-9]*) echo "error: GS_MCP_TRACE_LIMIT must be a positive integer, or 'none'." >&2; exit 1 ;;
+    esac
+    TRACE_LINE="$TRACE_LINE
+r messageTraceLimit: $GS_MCP_TRACE_LIMIT."
+  fi
+fi
 # Free-form operator text, unlike every other value here, so double any embedded quote rather than
 # letting it close the literal.
 TITLE_LINE=""
@@ -188,7 +224,8 @@ $EXTRA_LINE
 $WRITE_LINE
 $RO_LINE
 $BIND_LINE
-$TITLE_LINE
+$TRACE_LINE
+$TITLE_LINE$LIFETIME_LINES
 r forkOnPort: $GS_MCP_PORT
 %
 logout

@@ -6,7 +6,9 @@ Object subclass: 'McpSession'
   instVarNames: #( id worker workerMutex
                     lastActivitySeconds userId readOnly workerClassName
                     toolsetNames serverName serverTitle serverVersion
-                    workerPid workerStoneSession resultBufferSlot resultBuffer
+                    workerPid workerStoneSession outbox startedAtSeconds
+                    expiresAtSeconds quietProbes unansweredProbes streamlessPasses
+                    passesSinceProbe streamClosedByClient resultBufferSlot resultBuffer
                     nonceCounter)
   classVars: #()
   classInstVars: #()
@@ -30,6 +32,22 @@ current user for now; userId is reserved for later per-user auth. The worker''s 
 and OS process id are captured at login (#cacheWorkerIds): they are what correlate a session with
 a gem in ps, and fetching them there also makes the kernel''s printOn: -- which sends those same
 two remote accessors -- harmless afterwards.
+
+A session also carries the state the SERVER-INITIATED side of the transport needs, all of it held
+by the front end and none of it in the worker: an McpOutbox of messages waiting for this client''s
+SSE stream, and what the last liveness probe found. That second one is why reaping is no longer a
+single clock. #touch -- real MCP traffic -- is the only thing that resets the idle cycle. A ping the
+client ANSWERS proves it is still there (#noteAlive) and spares its gem an early reap; a ping it
+never answers proves it is gone (#noteProbeUnanswered) and frees the gem early, without waiting out
+the full timeout. What an answered ping deliberately does NOT do is stamp the activity clock: if it
+did, every well-behaved client would hold its worker gem and its transaction view forever.
+
+None of that is needed for the commonest ending of all, which is a client simply hanging up -- a
+shut editor tab. There the front end has something better than any inference: the drain loop watches
+the read side, so it SEES the connection end (#noteStreamClosedByClient). That fact is paired with
+the present state of the outbox rather than trusted alone, and #noteStreamSeen or #touch retracts it,
+so a client that reopened a stream, or that is simply working without one, is never taken for a
+client that left.
 
 Before it serves anything, a new session PROBES its worker to confirm that results larger than 1024
 bytes survive the trip back (#verifyWorkerResultFidelity). GemStone before 3.7.4.1 corrupts them,
@@ -61,6 +79,11 @@ expressionWith: anExpressionString nonce: aNonceString
    Every expression sent through #runWorker: must answer a String. All of them do: a JSON-RPC
    response, the worker bootstrap's ready line, or a fidelity probe's marker string."
   ^'[' , anExpressionString , '] value , ''' , aNonceString , ''''
+%
+category: 'instance creation'
+classmethod: McpSession
+new
+  ^super new initialize
 %
 category: 'result fidelity'
 classmethod: McpSession
@@ -178,6 +201,13 @@ startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
   ^self new startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
 %
 ! ------------------- Instance methods for McpSession
+category: 'activity'
+method: McpSession
+ageSeconds
+  "How long this session has existed, whatever it has been doing. What an absolute lifetime cap is
+   measured against, unlike #idleSeconds."
+  ^System timeGmt - startedAtSeconds
+%
 category: 'initialization'
 method: McpSession
 cacheWorkerIds
@@ -205,7 +235,11 @@ category: 'lifecycle'
 method: McpSession
 close
   "Terminate the worker gem. It is attached (the front end drives it via executeString:), so a
-   logout stops it."
+   logout stops it.
+   The outbox is only marked CLOSING, not closed: whatever is already queued is still owed to the
+   client, and the drain loop closes the outbox itself once it has written it. Closing outright here
+   would kill the stream in the same instant as the gem and drop what was in flight."
+  outbox ifNotNil: [:o | o beginClosing].
   [worker logout] on: Error do: [:e | nil].
   ^self
 %
@@ -230,6 +264,27 @@ enableResultBufferReset
   resultBufferSlot := slot.
   ^true
 %
+category: 'liveness'
+method: McpSession
+expiresAtSeconds
+  "The absolute wall-clock second at which this session must end regardless of activity, or nil when
+   nothing bounds it. Set by an authenticated front end from the access token's exp (see
+   McpAuthRouter>>openSessionForUser:jwt:readOnly:): the worker gem is logged in as that token's
+   user, so letting the session outlive the token would leave the authorization it was granted in
+   force after the grant expired."
+  ^expiresAtSeconds
+%
+category: 'liveness'
+method: McpSession
+expiresAtSeconds: aSecondOrNil
+  "Bind this session to an absolute deadline (nil removes it). Only ever moved EARLIER: a caller may
+   tighten a deadline, never extend one that is already in force, so a later, laxer policy cannot
+   hand a session more life than the credential it was opened with allowed."
+  aSecondOrNil isNil ifTrue: [^self].
+  (expiresAtSeconds isNil or: [aSecondOrNil < expiresAtSeconds])
+    ifTrue: [expiresAtSeconds := aSecondOrNil].
+  ^self
+%
 category: 'routing'
 method: McpSession
 forward: aRawJsonString
@@ -248,7 +303,31 @@ id
 category: 'activity'
 method: McpSession
 idleSeconds
+  "Wall-clock seconds since the last client REQUEST. DIAGNOSTIC ONLY -- nothing in the reaping
+   policy reads this, and nothing should. Wall clock cannot tell time this server spent serving
+   from time it spent suspended, and inferring one from the other is what #quietProbes replaced."
   ^System timeGmt - lastActivitySeconds
+%
+category: 'initialization'
+method: McpSession
+initialize
+  "Seed the front-end-side state. The outbox is built HERE rather than on demand: nothing prepares
+   it the way #prepareWorker prepares the worker before the session is registered, so two
+   GsProcesses -- an arriving GET stream and the reaper -- really could race to create it."
+  outbox := McpOutbox new.
+  startedAtSeconds := System timeGmt.
+  expiresAtSeconds := nil.   "nil = no absolute deadline; McpAuthRouter sets one from the token exp"
+  "Everything the reaper measures is a COUNT of things this front end observed, never an elapsed
+   time it inferred. A suspended host runs no maintenance passes, so none of these can advance
+   while the server is not serving -- which is why there is no suspend detector to get wrong."
+  quietProbes := 0.        "consecutive liveness pings answered with no work in between"
+  unansweredProbes := 0.   "consecutive pings sent on the current stream with no answer"
+  streamlessPasses := 0.   "consecutive passes on which there was no stream to ask down"
+  passesSinceProbe := 0.   "passes since the last ping, for the probe cadence"
+  "The one fact here that is not a count, because it is not an inference either: the client's own
+   connection ended, and the drain loop watched it happen. See #noteStreamClosedByClient."
+  streamClosedByClient := false.
+  ^self
 %
 category: 'activity'
 method: McpSession
@@ -259,6 +338,14 @@ isBusy
    not happen while forwarding blocked the whole front-end gem, because the reaper could not run
    either. Cheap: it reads the external session's own state and makes no GCI call."
   ^worker notNil and: [worker isCallInProgress]
+%
+category: 'liveness'
+method: McpSession
+isExpired
+  "Whether this session has passed the absolute deadline it was opened with (see #expiresAtSeconds).
+   Unlike idleness this is never forgiven and never probed around: the reaper frees such a session
+   whatever its client is doing."
+  ^expiresAtSeconds notNil and: [System timeGmt >= expiresAtSeconds]
 %
 category: 'accessing'
 method: McpSession
@@ -295,6 +382,93 @@ nextResultNonce
   digits := nonceCounter printString.
   [digits size < self class resultNonceDigits] whileTrue: [digits := '0' , digits].
   ^self class resultNonceMarker , digits
+%
+category: 'activity'
+method: McpSession
+noteAlive
+  "The client answered a liveness ping: it is there, and it did no work between the previous
+   confirmation and this one. That pair of facts is the whole idleness measure -- see
+   McpRouter>>confirmationsBeforeRelease -- and it is why nothing here reads a clock. A session
+   accrues idleness only from evidence it asked for and received.
+   Deliberately NOT #touch -- see the class comment. Answering a ping is not work."
+  unansweredProbes := 0.
+  quietProbes := quietProbes + 1
+%
+category: 'liveness'
+method: McpSession
+notePassWithStream: aBoolean
+  "One maintenance pass observed this session. This is the server's entire clock: it advances only
+   when the front end is actually running, which is what makes every count below immune to a host
+   suspend without anyone having to detect one."
+  passesSinceProbe := passesSinceProbe + 1.
+  aBoolean
+    ifTrue: [self noteStreamSeen]
+    ifFalse: [streamlessPasses := streamlessPasses + 1].
+  ^self
+%
+category: 'activity'
+method: McpSession
+noteProbeDiscarded
+  "This ping proved nothing -- it went down a stream the client had already replaced, so no answer
+   could ever have arrived (McpRouter>>verdictAdmissible:forSession:). Undo the count it was given
+   when it was sent, rather than letting the transport speak for the client."
+  unansweredProbes := (unansweredProbes - 1) max: 0
+%
+category: 'activity'
+method: McpSession
+noteProbeSent
+  "A liveness ping is on its way. It counts as unanswered from the moment it is sent, and stops
+   counting the instant an answer arrives (#noteAlive) or the ping is shown to have proved nothing
+   (#noteProbeDiscarded). Counting at SEND rather than at some later deadline is what removes the
+   last clock from this path: there is no moment at which a ping is declared late, only a number of
+   pings outstanding on a stream the client is still holding."
+  unansweredProbes := unansweredProbes + 1.
+  passesSinceProbe := 0
+%
+category: 'activity'
+method: McpSession
+noteProbeUnanswered
+  "Kept for symmetry with #noteProbeDiscarded and to name the outcome at the call site: a ping that
+   was admissible and went unanswered simply keeps the count it was given when it was sent, so there
+   is nothing to do here."
+  ^self
+%
+category: 'liveness'
+method: McpSession
+noteStreamClosedByClient
+  "The client's own end of the SSE stream closed -- an EOF the drain loop read, or a write that
+   failed -- rather than the stream being superseded by a newer GET or ended by this server.
+   This is the strongest evidence of departure anywhere in the transport, and unlike everything else
+   the reaper reads it is not a count: it is one observed fact, so a suspended host cannot
+   manufacture it either. It does not by itself condemn the session -- the reaper also requires that
+   no stream be open when it looks (McpRouter>>reapReasonFor:), which is what lets a client that
+   closes one stream and immediately opens another keep its worker gem."
+  streamClosedByClient := true
+%
+category: 'liveness'
+method: McpSession
+noteStreamSeen
+  "A stream is attached right now. That is the only thing that can be observed about reachability
+   without asking the client, so it resets the count of passes on which nothing could be asked --
+   and it retracts #noteStreamClosedByClient, because a client that has just opened a stream is
+   plainly not the one that went away.
+   Sent both by the maintenance pass (#notePassWithStream:) and by the arriving GET itself
+   (McpRouter>>serveGetStream:forSession:), which is what lets a reconnect land inside the grace
+   rather than a whole pass later."
+  streamlessPasses := 0.
+  streamClosedByClient := false
+%
+category: 'accessing'
+method: McpSession
+outbox
+  "This session's queue of server-initiated messages, waiting for its SSE stream. Front-end state:
+   the worker gem neither has one nor could write to it."
+  ^outbox
+%
+category: 'liveness'
+method: McpSession
+passesSinceProbe
+  ^passesSinceProbe
 %
 category: 'initialization'
 method: McpSession
@@ -338,6 +512,14 @@ probeWorkerResultsAreIntact
     and: [self probeWorkerFor: self class probeSmallBytes marker: $B]]
       on: Error do: [:ex | false]
 %
+category: 'liveness'
+method: McpSession
+quietProbes
+  "How many consecutive liveness pings this client has answered with no request in between. The
+   idleness measure: each one is a fact this server asked for and was told, not an interval it
+   inferred from a clock it cannot trust across a suspend."
+  ^quietProbes
+%
 category: 'private'
 method: McpSession
 quotedNameArrayFor: aCollectionOfNames
@@ -358,6 +540,31 @@ readOnly
   "Whether this client's worker is read-only. Recorded when the session starts and applied to the
    worker gem by prepareWorker."
   ^readOnly == true
+%
+category: 'session lifetime'
+method: McpSession
+renewExpiryTo: aSecondOrNil
+  "Move this session's existing deadline LATER, to aSecondOrNil, because its client has just proved
+   a fresh credential that runs that long. Answers whether the deadline actually moved.
+   The counterpart to #expiresAtSeconds:, and deliberately a separate selector rather than a relaxed
+   ratchet. That ratchet conflates two invariants: a session must not outlive its CURRENT grant,
+   which has to hold, and a session must not outlive its FIRST grant, which nothing requires. Access
+   tokens are short by design -- thirty minutes is a common default -- so under the ratchet alone a
+   client working steadily still loses its worker gem, and the uncommitted transaction inside it, on
+   the first maintenance pass after its opening token's exp. Refreshing cannot save it, because the
+   renewed token was never consulted about lifetime. That is silent data loss, not an inconvenience:
+   the client obtains a new token, opens a new session, and nothing looks broken.
+   Two boundaries are kept. A nil argument moves nothing, so a token with no readable exp cannot
+   turn a bounded session unbounded. And a session with no deadline at all is left alone: renewal
+   extends a deadline, it never introduces one -- that is #expiresAtSeconds:'s job. So the pair is
+   strictly complementary, one tightening and one extending, and neither can do the other's work.
+   Only the authenticated request path may send this, and only after the token's signature, subject
+   and write scope have been checked -- see McpAuthRouter>>renewSessionExpiry:from:."
+  aSecondOrNil isNil ifTrue: [^false].
+  expiresAtSeconds isNil ifTrue: [^false].
+  aSecondOrNil <= expiresAtSeconds ifTrue: [^false].
+  expiresAtSeconds := aSecondOrNil.
+  ^true
 %
 category: 'result fidelity'
 method: McpSession
@@ -423,6 +630,13 @@ runWorker: anExpressionString
     self touch.
     self resultOf: worker lastResult withoutNonce: nonce]
 %
+category: 'session lifetime'
+method: McpSession
+secondsUntilExpiry
+  "Seconds remaining before this session's absolute deadline, or nil if it has none. Negative once
+   the deadline has passed and the reaper has not yet come round."
+  ^expiresAtSeconds isNil ifTrue: [nil] ifFalse: [expiresAtSeconds - System timeGmt]
+%
 category: 'accessing'
 method: McpSession
 serverName: aStringOrNil
@@ -439,6 +653,15 @@ category: 'accessing'
 method: McpSession
 serverVersion: aStringOrNil
   serverVersion := aStringOrNil
+%
+category: 'accessing'
+method: McpSession
+startedAtSeconds
+  "When this session was opened, as a wall-clock second. Exposed so a router can tell WHICH bound is
+   about to end a session -- an absolute lifetime cap is startedAtSeconds + the cap, and comparing
+   that against #expiresAtSeconds says whether the cap or a credential is the binding one, without
+   either storing that fact or reading a clock twice to infer it."
+  ^startedAtSeconds
 %
 category: 'initialization'
 method: McpSession
@@ -492,6 +715,20 @@ startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
   self touch.
   ^self
 %
+category: 'liveness'
+method: McpSession
+streamClosedByClient
+  "Whether this client has been seen to close its event stream and has done nothing since to suggest
+   it is still there. Set by #noteStreamClosedByClient; retracted by #noteStreamSeen and by #touch."
+  ^streamClosedByClient == true
+%
+category: 'liveness'
+method: McpSession
+streamlessPasses
+  "Consecutive maintenance passes on which this session had no stream, so nothing could be asked of
+   its client at all. The only ground for releasing a session that can never be confirmed."
+  ^streamlessPasses
+%
 category: 'accessing'
 method: McpSession
 toolsetNames: aCollectionOfNamesOrNil
@@ -502,9 +739,27 @@ toolsetNames: aCollectionOfNamesOrNil
 category: 'activity'
 method: McpSession
 touch
-  "Record now (GMT seconds) as the last activity, for idle-timeout reaping."
+  "A client request arrived: the session is not idle, and everything counted about its quietness
+   starts again. Resets the confirmation count (it is no longer idle), the unanswered-ping count (a
+   request is far better evidence of life than a ping answer), and the probe cadence.
+   It also retracts everything the transport had concluded from silence: a client making tool calls
+   is alive whether or not it holds a stream, so neither the streamless count nor a stream it was
+   seen to close may go on counting against it. Without that, an actively working client whose
+   stream had dropped was released mid-conversation -- survivable while the streamless floor was
+   half an hour, fatal beside a ten-second grace."
   lastActivitySeconds := System timeGmt.
-  ^self
+  quietProbes := 0.
+  unansweredProbes := 0.
+  passesSinceProbe := 0.
+  streamlessPasses := 0.
+  streamClosedByClient := false
+%
+category: 'liveness'
+method: McpSession
+unansweredProbes
+  "How many pings are outstanding on the stream the client is still holding. Evidence of death only
+   in numbers -- see McpRouter>>unansweredProbesBeforeGone."
+  ^unansweredProbes
 %
 category: 'accessing'
 method: McpSession

@@ -244,14 +244,17 @@ category: 'tests - reaping'
 method: McpSessionTest
 testReaperLeavesASessionWithACallInFlightAlone
   "forward: stamps the activity clock when a call STARTS, so a request that outlives the idle
-   timeout would look idle while it was still running -- and the reaper would log its worker out
+   deadline would look idle while it was still running -- and the reaper would log its worker out
    from under it. That was impossible while forwarding froze the gem (the reaper could not run
    either), so the guard belongs with the non-blocking forward."
   | r sess w |
   r := McpRouter new.
   sess := r openSessionCreating: [:id | McpMockSession startWithId: id].
   w := sess mockWorker.
-  sess fakeIdleSeconds: 999999.          "far past sessionIdleTimeoutSeconds"
+  "Fully idle by this server's measure -- as many answered pings as release takes. It has to be a
+   fake: #runWorker: stamps the activity clock when a call ENDS as well as when it starts, and that
+   legitimately resets the real count, so a genuine one could not survive the call being tested."
+  sess fakeQuietProbes: r confirmationsBeforeRelease.
   w waitsBeforeDone: 10; waitMs: 20.
   [sess forward: 'SLOW-REQUEST'] fork.
   self assert: (self waitUpTo: 1000 for: [sess isBusy]).
