@@ -408,19 +408,15 @@ check "a POSTed JSON-RPC response => 202"     'HTTP/1.1 202'             "$r"
 echo "$r" | grep -q -- '-32600' && verdict='answered -32600' || verdict='no error body'
 check "...and not routed to the worker"       'no error body'            "$verdict"
 
-# --- transport: logging/setLevel ---
-# Declaring the logging capability promises this method. The front end snoops the level as it passes
-# (it generates the notifications and owns the stream); the worker answers it.
+# --- transport: logging/setLevel is NOT served ---
+# The logging capability was retired on 2026-08-27 (see McpDispatcher>>capabilities): both idle
+# warnings are gone, and the draft revision prohibits an unsolicited notifications/message anyway.
+# A server must not answer a method it does not declare, so the undeclared method is the assertion.
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":43,"method":"logging/setLevel","params":{"level":"debug"}}
 JSON
 )
-check "logging/setLevel is accepted"          '"result"'                 "$r"
-r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":44,"method":"logging/setLevel","params":{"level":"chatty"}}
-JSON
-)
-check "logging/setLevel rejects a bad level"  '-32602'                   "$r"
+check "logging/setLevel is not a method"      '-32601'                   "$r"
 
 # --- transport: a slow call must not block another client ---
 # The property the whole front end rests on: one client's long tool call does not stop the server.
