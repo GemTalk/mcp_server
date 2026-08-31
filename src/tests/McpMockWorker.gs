@@ -8,7 +8,9 @@ Object subclass: 'McpMockWorker'
                     lastResult errorOnComplete waitCount blockingExecuteCount
                     overlapDetected staleReadAttempted loginCount stoneSessionId
                     gemProcessId idFetchCount objInfoBuffers bufferContents
-                    refetchOnlyWhenGrowing probeExpressions currentIsProbe dropResultNonce)
+                    refetchOnlyWhenGrowing probeExpressions currentIsProbe dropResultNonce
+                    softBreakCount hardBreakCount breakPending resistSoftBreak
+                    resistHardBreak logoutCount)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -35,7 +37,12 @@ each verified against GemStone 3.7.5:
     violation inside a forked GsProcess cannot be swallowed;
   - the two identity accessors, stoneSessionId and gemProcessId, memoize a REMOTE call, so the
     first send of each overwrites lastResult -- the clobber McpSession>>cacheWorkerIds defuses by
-    fetching them at login, before any request can be in flight.
+    fetching them at login, before any request can be in flight;
+  - a break (softBreak/hardBreak) is taken at the pending WAIT, not at the send: the wait ends the
+    call and raises, as the real one raises `a Break occurred` (error 6003), and lastResult is left
+    holding the previous call''s value exactly as the real class leaves it. #resistSoftBreak: and
+    #resistHardBreak: model the worker that takes neither -- code that handles ControlInterrupt and
+    resumes -- which is the only case McpSession>>abandonWorker exists for.
 Its waits really do wait a few milliseconds, so a forked GsProcess gets to run during one.
 The blocking executeString: is implemented too, and counted: a test asserts it is never used.
 
@@ -147,6 +154,21 @@ gemProcessId
     lastResult := gemProcessId := 4242].
   ^gemProcessId
 %
+category: 'session protocol'
+method: McpMockWorker
+hardBreak
+  "The harder of the two breaks the real GsTsExternalSession offers (GciTsBreak with hard=1).
+   Counted, and taken unless this worker was told to resist it."
+  hardBreakCount := hardBreakCount + 1.
+  resistHardBreak ifTrue: [^self].
+  ^self takeBreak
+%
+category: 'instrumentation'
+method: McpMockWorker
+hardBreakCount
+  "How many hard breaks were sent. One only ever follows a soft break that was not taken."
+  ^hardBreakCount
+%
 category: 'instrumentation'
 method: McpMockWorker
 idFetchCount
@@ -161,6 +183,12 @@ initialize
   inProgress := false.
   waitsBeforeDone := 1.
   waitsRemaining := 0.
+  softBreakCount := 0.
+  hardBreakCount := 0.
+  breakPending := false.
+  resistSoftBreak := false.
+  resistHardBreak := false.
+  logoutCount := 0.
   waitMs := 20.
   waitCount := 0.
   blockingExecuteCount := 0.
@@ -212,8 +240,16 @@ loginCount
 category: 'session protocol'
 method: McpMockWorker
 logout
+  logoutCount := logoutCount + 1.
   inProgress := false.
   ^self
+%
+category: 'instrumentation'
+method: McpMockWorker
+logoutCount
+  "How many times this worker was logged out. It stays at zero for an ABANDONED worker: a logout is
+   a GCI call, and one sent to a gem whose call cannot end would queue behind it forever."
+  ^logoutCount
 %
 category: 'session protocol'
 method: McpMockWorker
@@ -260,6 +296,19 @@ probeExpressions
    login -- or the two more it runs to confirm a workaround took."
   ^probeExpressions
 %
+category: 'configuring'
+method: McpMockWorker
+resistHardBreak: aBoolean
+  "Make this worker ignore a hard break as well as a soft one, standing in for the gem that takes
+   neither -- the only thing McpSession>>abandonWorker is for."
+  resistHardBreak := aBoolean
+%
+category: 'configuring'
+method: McpMockWorker
+resistSoftBreak: aBoolean
+  "Make this worker ignore a soft break, so a test can drive the escalation to a hard one."
+  resistSoftBreak := aBoolean
+%
 category: 'result fetch'
 method: McpMockWorker
 resultBufferPrefix: anInteger
@@ -296,6 +345,22 @@ simulateResultCorruption: aBoolean
    GsTsExternalSession>>resolveResult:."
   refetchOnlyWhenGrowing := aBoolean
 %
+category: 'session protocol'
+method: McpMockWorker
+softBreak
+  "The break the real class sends first (GciTsBreak with hard=0). On GemStone 3.7.5 it ends both a
+   spinning Smalltalk loop and a blocked #wait, and leaves the session usable -- which is why this
+   is the step that ordinarily ends a runaway."
+  softBreakCount := softBreakCount + 1.
+  resistSoftBreak ifTrue: [^self].
+  ^self takeBreak
+%
+category: 'instrumentation'
+method: McpMockWorker
+softBreakCount
+  "How many soft breaks were sent. Zero for every call that finished on its own."
+  ^softBreakCount
+%
 category: 'instrumentation'
 method: McpMockWorker
 staleReadAttempted
@@ -318,6 +383,14 @@ stoneSessionId
     idFetchCount := idFetchCount + 1.
     lastResult := stoneSessionId := 77].
   ^stoneSessionId
+%
+category: 'private'
+method: McpMockWorker
+takeBreak
+  "Arm the break for the pending wait to find. A break sent when no call is in flight does nothing,
+   as it does on a real session."
+  inProgress ifTrue: [breakPending := true].
+  ^self
 %
 category: 'session protocol'
 method: McpMockWorker
@@ -346,6 +419,12 @@ waitForResultForSeconds: anInteger otherwise: aBlock
   | msg |
   currentIsProbe ifFalse: [waitCount := waitCount + 1].
   (Delay forMilliseconds: waitMs) wait.
+  "A break taken since the last wait ends the call HERE, raising and leaving lastResult alone -- the
+   real class surfaces it at the pending wait and leaves the previous call's value behind it."
+  breakPending ifTrue: [
+    breakPending := false.
+    inProgress := false.
+    ^self error: 'GciError: a Break occurred (error 6003), A soft break was received.'].
   waitsRemaining := waitsRemaining - 1.
   waitsRemaining > 0 ifTrue: [^aBlock value].
   inProgress := false.

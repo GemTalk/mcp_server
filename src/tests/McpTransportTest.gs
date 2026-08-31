@@ -72,6 +72,18 @@ postRequest: body protocolVersion: versionOrNil
 %
 category: 'helpers'
 method: McpTransportTest
+postRequest: body sessionId: anIdOrNil
+  "A raw HTTP POST /mcp carrying body as application/json, with an optional MCP-Session-Id header --
+   what a client sends for every request after initialize."
+  | crlf idLine |
+  crlf := self crlf.
+  idLine := anIdOrNil isNil ifTrue: [''] ifFalse: ['MCP-Session-Id: ' , anIdOrNil , crlf].
+  ^'POST /mcp HTTP/1.1' , crlf , 'Host: localhost' , crlf , idLine ,
+   'Content-Type: application/json' , crlf ,
+   'Content-Length: ' , body size printString , crlf , crlf , body
+%
+category: 'helpers'
+method: McpTransportTest
 runRequest: rawRequest
   "Drive handleConnection: with rawRequest; answer the mock (whose #output holds the
    captured response). Named runRequest: (NOT run:) to avoid shadowing TestCase>>run:."
@@ -129,6 +141,51 @@ testAbsentOriginServed
   self deny: (self includesCS: '403' in: out).
   self assert: (self includesCS: '-32600' in: out)
 %
+category: 'tests'
+method: McpTransportTest
+testARequestEndedOnTheDeadlineIsAnsweredWithItsOwnId
+  "The answer a client gets for a call the server ended on its deadline. The id is the part that
+   matters: without it the client cannot match the error to the request it is waiting on, and would
+   wait out its OWN timeout instead -- which is the thing a server-side deadline exists to prevent.
+   HTTP 200 rather than an error status, because the request was accepted, routed and served: it is
+   the call inside it that failed, and -32001 with data.kind 'timeout' is how that is said."
+  | r sess out |
+  r := McpFixtureRouter new.
+  r requestTimeoutSeconds: 1.
+  sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
+  sess mockWorker waitsBeforeDone: 1000000.
+  out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":42,"method":"tools/list"}' sessionId: sess id)
+    onRouter: r) output.
+  self assert: (self includesCS: '200 OK' in: out).
+  self assert: (self includesCS: '"id":42' in: out).
+  self assert: (self includesCS: '-32001' in: out).
+  self assert: (self includesCS: '"kind":"timeout"' in: out).
+  "the worker took the break, so the client keeps its session for the next request"
+  self assert: (r sessionAt: sess id) notNil
+%
+category: 'tests'
+method: McpTransportTest
+testASessionWhoseWorkerCannotBeInterruptedIsUnmapped
+  "A session whose gem had to be stopped can serve nothing further, so it is unmapped as the failing
+   request is answered rather than left for the reaper: the sooner it is gone, the sooner the
+   client's next request gets the 404 that tells it to initialize again -- the transport's own way of
+   saying a session has ended."
+  | r sess out |
+  r := McpFixtureRouter new.
+  r requestTimeoutSeconds: 1.
+  sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
+  sess mockWorker waitsBeforeDone: 1000000; resistSoftBreak: true; resistHardBreak: true.
+  out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":7,"method":"tools/list"}' sessionId: sess id)
+    onRouter: r) output.
+  self assert: (self includesCS: '"id":7' in: out).
+  self assert: (self includesCS: '"kind":"timeout"' in: out).
+  self assert: sess workerGemStopped.
+  self assert: (r sessionAt: sess id) isNil.
+  "and the next request on that id is refused the way the spec says"
+  out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":8,"method":"tools/list"}' sessionId: sess id)
+    onRouter: r) output.
+  self assert: (self includesCS: '404' in: out)
+%
 category: 'tests - worker config'
 method: McpTransportTest
 testBadWorkerOrToolsetNameIsRefusedAtConfigTime
@@ -175,6 +232,7 @@ testConfigJsonRoundTrips
   | src dst |
   src := McpRouter new.
   src readOnly: true;
+    requestTimeoutSeconds: 5;
     allowedOriginHosts: #('example.com');
     workerClassName: 'McpServer';
     toolsetNames: #('McpBrowsingToolset');
@@ -191,6 +249,7 @@ testConfigJsonRoundTrips
   self assert: dst serverName equals: 'acme-db-mcp'.
   self assert: dst serverTitle equals: 'Acme Labels - production'.
   self assert: dst serverVersion equals: '2.5.0'.
+  self assert: dst requestTimeoutSeconds equals: 5.
   self assert: dst tlsCertificateFile isNil.     "unset optional stays nil through the round-trip"
   self assert: dst tlsPrivateKeyFile isNil.
   "the message trace has to survive this or it is unreachable: forkOnPort: is how the server starts"

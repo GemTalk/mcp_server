@@ -9,7 +9,7 @@ Object subclass: 'McpSession'
                     workerPid workerStoneSession outbox startedAtSeconds
                     expiresAtSeconds quietProbes unansweredProbes streamlessPasses
                     passesSinceProbe streamClosedByClient resultBufferSlot resultBuffer
-                    nonceCounter)
+                    nonceCounter requestTimeoutSeconds workerAbandoned)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -27,7 +27,10 @@ WITHOUT blocking the front-end gem (see #runWorker:), so one client''s long tool
 freezes every other GsProcess in the front end -- including other clients'' requests, which is what
 makes McpRouter''s per-connection GsProcesses actually concurrent. Access to the worker is
 serialized by a mutex, since GCI allows only one call in flight per session. Idle sessions are
-reaped after a timeout, but never while a call is in flight (#isBusy). Workers log in as the
+reaped after a timeout, but never while a call is in flight (#isBusy). A single call is bounded
+too, where the router configured a deadline: one that outruns it is BROKEN rather than waited out
+(#endOverrunningCall), which costs the client that request and, almost always, nothing else -- an
+interrupted worker is usable again immediately. Workers log in as the
 current user for now; userId is reserved for later per-user auth. The worker''s stone session id
 and OS process id are captured at login (#cacheWorkerIds): they are what correlate a session with
 a gem in ps, and fetching them there also makes the kernel''s printOn: -- which sends those same
@@ -201,12 +204,67 @@ startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
   ^self new startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
 %
 ! ------------------- Instance methods for McpSession
+category: 'private'
+method: McpSession
+abandonWorker
+  "Give up on a worker gem that has taken neither break: stop it from the STONE side and mark this
+   session finished. Stopping from the stone is the only lever left -- a logout is itself a GCI call,
+   and this session already has one in flight that will not end, so anything sent through the gem
+   would queue behind it forever.
+   Marking rather than unregistering is deliberate. The id -> session map belongs to the router, and
+   a session that removed itself from it would have to reach around the mutex that guards it; the
+   router unmaps it when it answers the client (McpRouter>>writeTimeoutError:forSession:id:on:), and
+   the client's next request then gets the 404 that tells it to initialize again."
+  workerAbandoned := true.
+  self stopWorkerGem.
+  ^self
+%
 category: 'activity'
 method: McpSession
 ageSeconds
   "How long this session has existed, whatever it has been doing. What an absolute lifetime cap is
    measured against, unlike #idleSeconds."
   ^System timeGmt - startedAtSeconds
+%
+category: 'private'
+method: McpSession
+awaitWorkerResult
+  "Wait for the in-flight call to finish. Answers when it has; RAISES when it outran this session's
+   deadline (#endOverrunningCall), so no caller can mistake an ended call for a completed one and go
+   on to read #lastResult -- which would answer the previous request's response.
+   Each wait sleeps at most #workerWaitSeconds, which bounds how often the deadline is re-checked and
+   not how long a call may take: the wait answers the moment the worker does, because it is waiting on
+   the session's socket. So a call is ended within one wait of its deadline rather than exactly at it
+   -- a second of slack on a deadline measured in tens of them, and the price of keeping the check
+   somewhere a reader can find it."
+  | deadline |
+  deadline := self callDeadline.
+  [worker isCallInProgress] whileTrue: [
+    worker waitForResultForSeconds: self workerWaitSeconds otherwise: [nil].
+    (worker isCallInProgress and: [deadline notNil and: [System timeGmt >= deadline]])
+      ifTrue: [^self endOverrunningCall]].
+  ^self
+%
+category: 'private'
+method: McpSession
+breakGraceSeconds
+  "How long a break is given to take effect before the next, harder measure. Two seconds: a break
+   that is going to land lands at the worker's next send or on the wait it is blocked in -- verified
+   on 3.7.5 to arrive within one wait for both a spinning loop and a blocked #wait -- so this is not
+   a wait for the common case but a margin for a worker that is briefly busy elsewhere. Long enough
+   not to escalate on a hiccup; short enough that the whole escalation cannot add more than a few
+   seconds to a deadline the client has already been told about."
+  ^2
+%
+category: 'private'
+method: McpSession
+breakWorker: aBlock
+  "Send one break (aBlock) to the worker and answer whether the call actually ended. A failure of the
+   send itself is swallowed: a call that finished in the same instant leaves nothing to break, which
+   is not an error and not this method's answer either. What it answers is the only thing that
+   matters afterwards -- whether a call is still in flight."
+  [aBlock value] on: Error do: [:ex | ex return: nil].
+  ^self workerSettlesWithin: self breakGraceSeconds
 %
 category: 'initialization'
 method: McpSession
@@ -231,6 +289,15 @@ cacheWorkerIds
   workerStoneSession := worker stoneSessionId.
   workerPid := worker gemProcessId
 %
+category: 'private'
+method: McpSession
+callDeadline
+  "The wall-clock second by which the call now starting must be over, or nil where this session has
+   no request deadline. Read once when a call starts rather than on every wait, so a call is measured
+   from where it began even if the session is reconfigured underneath it."
+  requestTimeoutSeconds isNil ifTrue: [^nil].
+  ^System timeGmt + requestTimeoutSeconds
+%
 category: 'lifecycle'
 method: McpSession
 close
@@ -240,6 +307,9 @@ close
    client, and the drain loop closes the outbox itself once it has written it. Closing outright here
    would kill the stream in the same instant as the gem and drop what was in flight."
   outbox ifNotNil: [:o | o beginClosing].
+  "An abandoned worker's gem is already stopped, and the logout would be a GCI call queued behind
+   the very call that could not be ended -- see #abandonWorker."
+  workerAbandoned ifTrue: [^self].
   [worker logout] on: Error do: [:e | nil].
   ^self
 %
@@ -263,6 +333,27 @@ enableResultBufferReset
   resultBuffer := CByteArray gcMalloc: self class resultBufferBytes.
   resultBufferSlot := slot.
   ^true
+%
+category: 'private'
+method: McpSession
+endOverrunningCall
+  "End a call that has outrun this session's deadline, and raise so the client is told.
+   Escalates, because the measures differ in what they cost. A SOFT break ends an ordinary runaway:
+   it is taken by a Smalltalk loop between sends and by a blocked #wait alike (both verified on
+   3.7.5), and the worker is fully usable straight afterwards -- so the client loses its request and
+   not its gem, nor the uncommitted work in it. A HARD break follows if the soft one is not taken.
+   If neither is, the call is not endable from this side at all, and the gem is stopped
+   (#abandonWorker): a GsTsExternalSession whose call never ends can never be used again -- GCI
+   allows one in flight -- so every later request would fail on this call rather than on its own.
+   Code that handles ControlInterrupt and resumes is what survives both breaks. It is rare, and it is
+   also the only reason the third step exists.
+   A break reaches the pending wait as an error (`a Break occurred`, error 6003), as does a worker
+   that failed in the same instant. Neither is worth telling apart: both mean the call is over, and
+   the client is owed the same answer either way."
+  (self breakWorker: [worker softBreak]) ifTrue: [^self signalCallTimeout].
+  (self breakWorker: [worker hardBreak]) ifTrue: [^self signalCallTimeout].
+  self abandonWorker.
+  ^self signalCallTimeout
 %
 category: 'liveness'
 method: McpSession
@@ -327,6 +418,11 @@ initialize
   "The one fact here that is not a count, because it is not an inference either: the client's own
    connection ended, and the drain loop watched it happen. See #noteStreamClosedByClient."
   streamClosedByClient := false.
+  "No request deadline unless one is pushed in. The router owns that policy (McpRouter>>
+   requestTimeoutSeconds:), as it owns every other interval, so a session built by hand -- a test,
+   a script -- waits for its worker as long as it takes."
+  requestTimeoutSeconds := nil.
+  workerAbandoned := false.
   ^self
 %
 category: 'activity'
@@ -336,8 +432,11 @@ isBusy
    stamps the activity clock when a call STARTS, so a request that runs longer than the idle timeout
    would otherwise be reaped -- and its worker logged out -- while it was still running. That could
    not happen while forwarding blocked the whole front-end gem, because the reaper could not run
-   either. Cheap: it reads the external session's own state and makes no GCI call."
-  ^worker notNil and: [worker isCallInProgress]
+   either. Cheap: it reads the external session's own state and makes no GCI call.
+   An ABANDONED worker is excluded, and has to be: its call is in flight and always will be (see
+   #abandonWorker), so without this a session nothing can serve would read as the one thing the
+   reaper never touches."
+  ^workerAbandoned not and: [worker notNil and: [worker isCallInProgress]]
 %
 category: 'liveness'
 method: McpSession
@@ -566,6 +665,20 @@ renewExpiryTo: aSecondOrNil
   expiresAtSeconds := aSecondOrNil.
   ^true
 %
+category: 'session lifetime'
+method: McpSession
+requestTimeoutSeconds
+  "How long one call into this session's worker gem may run before it is ended, or nil for no limit.
+   Pushed in by the router, which owns the policy -- see McpRouter>>requestTimeoutSeconds."
+  ^requestTimeoutSeconds
+%
+category: 'session lifetime'
+method: McpSession
+requestTimeoutSeconds: anIntegerOrNil
+  "Set the deadline for a single call into this worker (nil = none). Applies from the NEXT call: a
+   call already in flight keeps the deadline it started under (#callDeadline)."
+  requestTimeoutSeconds := anIntegerOrNil
+%
 category: 'result fidelity'
 method: McpSession
 resetWorkerResultBuffer
@@ -612,21 +725,25 @@ runWorker: anExpressionString
    Two traps in that API, each able to corrupt a response silently. The result must be read with
    #lastResult, because #waitForResultForSeconds: consumes it internally and a later #nbResult then
    fails. And it must be read only once #isCallInProgress answers false, because after a wait that
-   timed out #lastResult still holds the PREVIOUS call's value. No deadline is imposed, so a worker
-   still gets as long as it takes.
+   timed out #lastResult still holds the PREVIOUS call's value.
+   A call that outruns this session's deadline is ENDED rather than waited out (#awaitWorkerResult,
+   #endOverrunningCall), where one is configured; with none, a worker still gets as long as it takes.
    The mutex is what keeps two requests from colliding in one worker -- GCI allows one call in flight
    per session, which the blocking call used to guarantee by freezing the gem. A worker-side error
-   arrives as the same GciError as before, and leaves the worker usable.
+   arrives as the same GciError as before, and leaves the worker usable; so does an ended call, which
+   raises out of the critical block and so releases the mutex on its way past.
    The buffer reset is inert on any image from 3.7.4.1 on; where it is not, it is what keeps a
    response from arriving with a stale tail -- see #resetWorkerResultBuffer. The nonce is the
    belt to that pair of braces: the worker appends it, this method requires it, and a response
-   without it is refused instead of returned -- on every image, whatever the cause."
+   without it is refused instead of returned -- on every image, whatever the cause. An ENDED call
+   never reaches that check: #awaitWorkerResult raises, so a response the break left behind is not
+   examined at all, and the client is told its call was ended rather than that the nonce was
+   missing -- which would be true and useless."
   ^self workerMutex critical: [ | nonce |
     nonce := self nextResultNonce.
     self resetWorkerResultBuffer.
     worker nbExecute: (self class expressionWith: anExpressionString nonce: nonce).
-    [worker isCallInProgress]
-      whileTrue: [worker waitForResultForSeconds: self workerWaitSeconds otherwise: [nil]].
+    self awaitWorkerResult.
     self touch.
     self resultOf: worker lastResult withoutNonce: nonce]
 %
@@ -653,6 +770,24 @@ category: 'accessing'
 method: McpSession
 serverVersion: aStringOrNil
   serverVersion := aStringOrNil
+%
+category: 'private'
+method: McpSession
+signalCallTimeout
+  "Raise the error a client is answered with for a call this session ended. The kind is #timeout,
+   the same machine-readable classification a worker-raised error carries (McpError), so a client
+   branches on the kind wherever the error was produced.
+   The message says which of the two things happened, because they are not the same news: an
+   interrupted call leaves the session and its uncommitted work intact, while a stopped gem takes
+   both with it. It also says what an interrupted call does NOT guarantee -- it was cut partway, so
+   whatever it had already done in that gem's view is still there, uncommitted."
+  ^McpError signalKind: #timeout message: 'The request exceeded this server''s '
+    , requestTimeoutSeconds printString , '-second request limit and was ended. '
+    , (workerAbandoned
+        ifTrue: ['Its worker gem could not be interrupted and has been stopped, so this session is '
+          , 'finished and its uncommitted work is gone: call initialize again to continue.']
+        ifFalse: ['The session is still usable and its uncommitted work is intact, but the call was '
+          , 'interrupted partway: anything it had already done is still there, uncommitted.'])
 %
 category: 'accessing'
 method: McpSession
@@ -713,6 +848,18 @@ startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
   self verifyWorkerResultFidelity.
   readOnly := aBoolean.
   self touch.
+  ^self
+%
+category: 'private'
+method: McpSession
+stopWorkerGem
+  "Stop this session's worker gem from the stone side, by the session id captured at login
+   (#cacheWorkerIds). Sent only from #abandonWorker, and separate from it for one reason: it is the
+   single line of this class a test cannot let run, since the id a mock holds is not a real
+   session's, and a test that stopped whatever session happened to hold that number would be a
+   memorable way to find out."
+  workerStoneSession isNil ifTrue: [^self].
+  [System stopSession: workerStoneSession] on: Error do: [:ex | ex return: nil].
   ^self
 %
 category: 'liveness'
@@ -800,6 +947,14 @@ verifyWorkerResultFidelity
     , '3.7.4.1) and resetting the fetch buffer did not repair it. Run the server on GemStone 3.7.4.1 '
     , 'or later.'
 %
+category: 'session lifetime'
+method: McpSession
+workerAbandoned
+  "Whether this session's worker gem was stopped because a call could not be ended any other way
+   (#abandonWorker). Such a session can serve nothing further, and the router unmaps it as it
+   answers the request that ended this way."
+  ^workerAbandoned
+%
 category: 'private'
 method: McpSession
 workerBootstrapExpression
@@ -854,6 +1009,20 @@ workerPid
    to a gem in ps or to its gem log. Log this instead of the worker, which cannot be printed without
    side effects."
   ^workerPid
+%
+category: 'private'
+method: McpSession
+workerSettlesWithin: aSecondCount
+  "Wait up to aSecondCount for the in-flight call to end, and answer whether it did. Errors from the
+   wait are swallowed on purpose: the break being waited on surfaces here as one, and so would a
+   worker-side error arriving in the same moment. #isCallInProgress, never the absence of an error,
+   is what says whether the call is over."
+  | limit |
+  limit := System timeGmt + aSecondCount.
+  [worker isCallInProgress and: [System timeGmt <= limit]] whileTrue: [
+    [worker waitForResultForSeconds: self workerWaitSeconds otherwise: [nil]]
+      on: Error do: [:ex | ex return: nil]].
+  ^worker isCallInProgress not
 %
 category: 'accessing'
 method: McpSession

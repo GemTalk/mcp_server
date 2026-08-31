@@ -9,7 +9,7 @@ McpBase subclass: 'McpRouter'
                     serverName serverTitle serverVersion pendingRequests
                     pendingMutex serverRequestCounter sessionIdleTimeoutSeconds streamlessIdleTimeoutSeconds
                     livenessProbeIntervalSeconds reaperIntervalSeconds maxSessionLifetimeSeconds reapOnFailedProbe
-                    streamLossGraceSeconds messageTrace messageTraceLimit)
+                    streamLossGraceSeconds messageTrace messageTraceLimit requestTimeoutSeconds)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -141,6 +141,22 @@ defaultReaperIntervalSeconds
 %
 category: 'session lifetime defaults'
 classmethod: McpRouter
+defaultRequestTimeoutSeconds
+  "How long one request may run in a client's worker gem before the server ends it and answers an
+   error. 45 seconds, chosen to sit UNDER what an MCP client will wait: the clients seen so far give
+   up around a minute, and a limit above theirs is no limit at all -- the client abandons the
+   request, and the gem goes on running it with nobody left to answer.
+   Ending a request costs the client that request and nothing else: the worker is interrupted and
+   stays usable, so the session, and the uncommitted work in it, survive (McpSession>>
+   endOverrunningCall). The reason not to make it much shorter is that some legitimate work is
+   slow -- a large fileIn, a broad search, a test suite -- and a limit that cuts those off makes the
+   server unable to do things it can do.
+   nil means no limit, which is the right setting where the clients are known and long tools are the
+   point; what it gives up is the guarantee that a runaway ever ends."
+  ^45
+%
+category: 'session lifetime defaults'
+classmethod: McpRouter
 defaultSessionIdleTimeoutSeconds
   "Idle time before a client session's worker gem is released. 30 minutes -- the historical value,
    and a defensible default for a server whose sessions each hold a gem and a transaction view."
@@ -244,6 +260,7 @@ applyConfig: aConfigDict
   serverName := aConfigDict at: 'serverName' ifAbsent: [serverName].
   serverTitle := aConfigDict at: 'serverTitle' ifAbsent: [serverTitle].
   serverVersion := aConfigDict at: 'serverVersion' ifAbsent: [serverVersion].
+  requestTimeoutSeconds := aConfigDict at: 'requestTimeoutSeconds' ifAbsent: [requestTimeoutSeconds].
   sessionIdleTimeoutSeconds := aConfigDict at: 'sessionIdleTimeoutSeconds' ifAbsent: [sessionIdleTimeoutSeconds].
   streamlessIdleTimeoutSeconds := aConfigDict at: 'streamlessIdleTimeoutSeconds' ifAbsent: [streamlessIdleTimeoutSeconds].
   streamLossGraceSeconds := aConfigDict at: 'streamLossGraceSeconds' ifAbsent: [streamLossGraceSeconds].
@@ -351,6 +368,7 @@ configDict
   d at: 'serverName' put: serverName.
   d at: 'serverTitle' put: serverTitle.
   d at: 'serverVersion' put: serverVersion.
+  d at: 'requestTimeoutSeconds' put: requestTimeoutSeconds.
   d at: 'sessionIdleTimeoutSeconds' put: sessionIdleTimeoutSeconds.
   d at: 'streamlessIdleTimeoutSeconds' put: streamlessIdleTimeoutSeconds.
   d at: 'streamLossGraceSeconds' put: streamLossGraceSeconds.
@@ -607,6 +625,7 @@ initialize
    them nil is a real setting -- no idle deadline at all -- and could not also mean 'use the
    default'. They are all expressed in seconds because that is how a deployment thinks about them;
    what the reaper actually counts is derived from them (#confirmationsBeforeRelease and friends)."
+  requestTimeoutSeconds := self class defaultRequestTimeoutSeconds.
   sessionIdleTimeoutSeconds := self class defaultSessionIdleTimeoutSeconds.
   streamlessIdleTimeoutSeconds := self class defaultStreamlessIdleTimeoutSeconds.
   streamLossGraceSeconds := self class defaultStreamLossGraceSeconds.
@@ -647,7 +666,11 @@ lifetimeSummary
    usually the one that has just been restarted to fix whatever raised it."
   | s |
   s := WriteStream on: String new.
-  s nextPutAll: 'idle '.
+  s nextPutAll: 'request-timeout '.
+  s nextPutAll: (requestTimeoutSeconds isNil
+    ifTrue: ['none']
+    ifFalse: [requestTimeoutSeconds printString , 's']).
+  s nextPutAll: ', idle '.
   s nextPutAll: (self hasSessionIdleDeadline
     ifTrue: [self sessionIdleTimeoutSeconds printString , 's']
     ifFalse: ['none']).
@@ -833,6 +856,7 @@ openSessionCreating: aOneArgBlock
     serverName: self serverName;
     serverTitle: self serverTitle;
     serverVersion: self serverVersion;
+    requestTimeoutSeconds: self requestTimeoutSeconds;
     prepareWorker.
   "An absolute lifetime cap, where one is configured, becomes an expiry the session carries. A
    subclass may tighten it further (McpAuthRouter, from the access token's exp) but never loosen it."
@@ -1145,6 +1169,21 @@ requestAuthorized: req on: conn
    response itself -- see McpAuthRouter>>requestAuthorized:on:."
   ^true
 %
+category: 'session lifetime'
+method: McpRouter
+requestTimeoutSeconds
+  "How long one request may run in a worker gem before it is ended and answered with an error, or nil
+   for no limit. Pushed into each session as it is opened (#openSessionCreating:), so a change
+   applies to sessions opened after it, not to those already running."
+  ^requestTimeoutSeconds
+%
+category: 'session lifetime'
+method: McpRouter
+requestTimeoutSeconds: anIntegerOrNil
+  "Set the per-request deadline for this router's sessions, or nil for none (see the getter).
+   Validated at startup by #validateTimerConfig."
+  requestTimeoutSeconds := anIntegerOrNil
+%
 category: 'server-initiated'
 method: McpRouter
 resolvePendingRequest: anId forSession: sess
@@ -1346,7 +1385,7 @@ category: 'routing'
 method: McpRouter
 serveDelete: req on: conn
   "MCP session end: close and unmap the worker named by the MCP-Session-Id header. Answers the same
-   status codes as the POST path (serveRouted:sessionId:on:) so a client gets one consistent signal
+   status codes as the POST path (serveRouted:id:sessionId:on:) so a client gets one consistent signal
    from either verb -- required by the Streamable HTTP spec's session-management rules: a server
    that requires a session id SHOULD answer a request without the header with 400, and once a
    session is gone it MUST answer a request carrying that id with 404 (the client's cue to
@@ -1437,7 +1476,7 @@ servePost: req on: conn
   (method isNil and: [parsed includesKey: 'id'])
     ifTrue: [^self serveClientResponse: parsed sessionId: (self sessionIdOf: req) on: conn].
   method = 'initialize' ifTrue: [^self serveInitialize: req on: conn].
-  ^self serveRouted: body sessionId: (self sessionIdOf: req) on: conn
+  ^self serveRouted: body id: (parsed at: 'id' ifAbsent: [nil]) sessionId: (self sessionIdOf: req) on: conn
 %
 category: 'worker identity'
 method: McpRouter
@@ -1454,14 +1493,23 @@ serverName: aStringOrNil
 %
 category: 'routing'
 method: McpRouter
-serveRouted: body sessionId: sid on: conn
+serveRouted: body id: anIdOrNil sessionId: sid on: conn
   "Route a non-initialize request to the client's worker by session id (required). Relay the
-   worker's JSON response, or 202 for a notification (empty response)."
+   worker's JSON response, or 202 for a notification (empty response).
+   anIdOrNil is the JSON-RPC id the request arrived with, carried in for one case: a call ended on
+   the request deadline (McpSession>>endOverrunningCall) is answered HERE rather than by the worker,
+   and an answer the client cannot match to the request it is waiting on is no better than silence --
+   it would wait out its own timeout instead, which is the thing the deadline exists to prevent."
   | sess resp |
   sid isNil ifTrue: [^self writeSessionError: 'Missing MCP-Session-Id header (call initialize first)' code: 400 reason: 'Bad Request' on: conn].
   sess := self sessionAt: sid.
   sess isNil ifTrue: [^self writeSessionError: 'Unknown or expired session: ' , sid code: 404 reason: 'Not Found' on: conn].
-  resp := sess forward: body.
+  resp := [sess forward: body]
+    on: McpError
+    do: [:ex |
+      ex kind = #timeout
+        ifTrue: [^self writeTimeoutError: ex forSession: sess id: anIdOrNil on: conn]
+        ifFalse: [ex pass]].
   resp isEmpty
     ifTrue: [conn writeStatus: 202 reason: 'Accepted' body: '']
     ifFalse: [conn writeJson: resp]
@@ -1754,6 +1802,7 @@ validateTimerConfig
    pass, which is not the number that was written down. A probe interval shorter than a pass, or an
    idle timeout shorter than a probe interval, is a configuration someone got wrong and should hear
    about rather than have silently multiplied."
+  self validateSeconds: requestTimeoutSeconds named: 'requestTimeoutSeconds' allowingNil: true.
   self validateSeconds: sessionIdleTimeoutSeconds named: 'sessionIdleTimeoutSeconds' allowingNil: true.
   self validateSeconds: maxSessionLifetimeSeconds named: 'maxSessionLifetimeSeconds' allowingNil: true.
   self validateSeconds: self streamlessIdleTimeoutSeconds named: 'streamlessIdleTimeoutSeconds' allowingNil: false.
@@ -1855,4 +1904,34 @@ writeSessionError: aMessage code: httpCode reason: reasonString on: conn
   err at: 'jsonrpc' put: '2.0'; at: 'id' put: nil.
   err at: 'error' put: (Dictionary new at: 'code' put: -32600; at: 'message' put: aMessage; yourself).
   conn writeStatus: httpCode reason: reasonString body: err asJson
+%
+category: 'routing'
+method: McpRouter
+writeTimeoutError: anError forSession: sess id: anIdOrNil on: conn
+  "Answer a request this server ended on its own deadline (McpSession>>endOverrunningCall).
+   HTTP 200 with a JSON-RPC error, not an HTTP error status: the request was accepted, routed and
+   served, and what failed is the call inside it -- a result the client should match to its request
+   rather than a transport refusal it might not read as JSON-RPC at all. The code is -32001, in
+   JSON-RPC's implementation-defined server-error range, and `data.kind` carries the same
+   machine-readable 'timeout' a worker-raised error would (McpDispatcher>>kindForError:), so a client
+   branches the same way wherever the error was produced.
+   A session whose worker could not be interrupted is finished, and is unmapped here rather than left
+   for the reaper: it can serve nothing, and the sooner it is gone the sooner the client's next
+   request gets the 404 that tells it to initialize again. Closing it is what marks its outbox
+   closing, so an open stream is drained and ended rather than dropped."
+  | err |
+  sess workerAbandoned ifTrue: [
+    mutex critical: [sessions removeKey: sess id ifAbsent: [nil]].
+    [sess close] on: Error do: [:ex | ex return: nil].
+    self log: 'Ended MCP session ' , sess id printString
+      , ' -- a request outran the deadline and its worker gem could not be interrupted, so the gem '
+      , 'was stopped.'].
+  err := Dictionary new.
+  err at: 'jsonrpc' put: '2.0'; at: 'id' put: anIdOrNil.
+  err at: 'error' put: (Dictionary new
+    at: 'code' put: -32001;
+    at: 'message' put: anError description;
+    at: 'data' put: (Dictionary new at: 'kind' put: 'timeout'; yourself);
+    yourself).
+  conn writeJson: err asJson
 %

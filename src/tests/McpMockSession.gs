@@ -4,7 +4,7 @@ expectvalue /Class
 doit
 McpSession subclass: 'McpMockSession'
   instVarNames: #( mockWorker fakeIdleSeconds mockCorrupts
-                    fakeQuietProbes)
+                    fakeQuietProbes workerGemStopped)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -15,10 +15,15 @@ McpSession subclass: 'McpMockSession'
 expectvalue /Class
 doit
 McpMockSession comment: 
-'A real McpSession whose worker gem is a McpMockWorker. It overrides nothing but the factory hook
-McpSession>>newWorkerSession, so startWithId:, prepareWorker, forward:, runWorker: and isBusy are
-the SHIPPING implementations under test -- unlike McpStubSession, which stubs prepareWorker out to
-test the router''s session bookkeeping without a login.
+'A real McpSession whose worker gem is a McpMockWorker. It overrides two things only -- the factory
+hook McpSession>>newWorkerSession and McpSession>>stopWorkerGem -- so startWithId:, prepareWorker,
+forward:, runWorker: and isBusy are the SHIPPING implementations under test, unlike McpStubSession,
+which stubs prepareWorker out to test the router''s session bookkeeping without a login.
+
+stopWorkerGem is overridden because it is the one line of McpSession a test must not run: it is
+`System stopSession:` on the id captured at login, and the id a mock holds is not a real session''s.
+It records the call instead (#workerGemStopped), which is also what a test asserts on to prove a
+worker that took neither break was stopped rather than left running.
 
 fakeIdleSeconds: makes a session look idle without waiting. fakeQuietProbes: does the same for the
 measure the reaper actually uses -- liveness pings answered with no work in between -- which cannot
@@ -93,4 +98,18 @@ simulateResultCorruption: aBoolean
   "Whether the worker this session is about to build corrupts large results (kernel bug #51438).
    Send it before startWithId:; see McpMockSession class>>startWithId:corrupting:."
   mockCorrupts := aBoolean
+%
+category: 'initialization'
+method: McpMockSession
+stopWorkerGem
+  "Record instead of stopping: the shipping method would send `System stopSession:` with the mock's
+   invented id, and stop whichever real session happened to be holding that number."
+  workerGemStopped := true.
+  ^self
+%
+category: 'testing support'
+method: McpMockSession
+workerGemStopped
+  "Whether this session gave up on its worker and stopped its gem (McpSession>>abandonWorker)."
+  ^workerGemStopped == true
 %

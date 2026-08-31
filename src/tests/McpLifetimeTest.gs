@@ -404,7 +404,8 @@ testIntervalsTravelToAForkedChild
    survive as an INSTRUCTION, and a key that is present-and-null is the only way JSON says that."
   | r child |
   r := McpRouter new.
-  r sessionIdleTimeoutSeconds: nil;
+  r requestTimeoutSeconds: nil;
+    sessionIdleTimeoutSeconds: nil;
     streamlessIdleTimeoutSeconds: 900;
     streamLossGraceSeconds: 25;
     livenessProbeIntervalSeconds: 120;
@@ -412,6 +413,8 @@ testIntervalsTravelToAForkedChild
     maxSessionLifetimeSeconds: 7200;
     reapOnFailedProbe: false.
   child := McpRouter new applyConfigJson: r configJson.
+  "'no request deadline' is an instruction too, and travels as present-and-null like the rest"
+  self assert: child requestTimeoutSeconds isNil.
   self assert: child sessionIdleTimeoutSeconds isNil.
   self deny: child hasSessionIdleDeadline.
   self assert: child streamlessIdleTimeoutSeconds equals: 900.
@@ -607,11 +610,29 @@ testTheReapNoticeSaysANumberTheOperatorCanRecognise
 %
 category: 'tests - config'
 method: McpLifetimeTest
+testTheRequestDeadlineTravelsIntoEachSessionAsItOpens
+  "The deadline is ROUTER config, and a session gets it the one way a session gets anything: pushed
+   in as it is opened, before its worker is prepared. So the bootstrap call is under the deadline
+   too -- a worker that hangs on preparation is no better than one that hangs on a request -- and a
+   session opened before the setting changed keeps the deadline it was opened with."
+  | r sess later |
+  r := McpFixtureRouter new.
+  r requestTimeoutSeconds: 90.
+  sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
+  self assert: sess requestTimeoutSeconds equals: 90.
+  r requestTimeoutSeconds: nil.
+  self assert: sess requestTimeoutSeconds equals: 90.
+  later := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
+  self assert: later requestTimeoutSeconds isNil
+%
+category: 'tests - config'
+method: McpLifetimeTest
 testTheShippingDefaultsAreTheDocumentedOnes
   "A lock on the numbers a deployment gets without asking, and on what each one MEANS once the
    reaper has divided it -- which is the half that is easy to change by accident."
   | r |
   r := McpRouter new.
+  self assert: r requestTimeoutSeconds equals: 45.
   self assert: r sessionIdleTimeoutSeconds equals: 1800.
   self assert: r streamlessIdleTimeoutSeconds equals: 60.
   self assert: r streamLossGraceSeconds equals: 10.
