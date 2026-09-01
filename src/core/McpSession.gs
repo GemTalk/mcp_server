@@ -9,7 +9,7 @@ Object subclass: 'McpSession'
                     workerPid workerStoneSession outbox startedAtSeconds
                     expiresAtSeconds quietProbes unansweredProbes streamlessPasses
                     passesSinceProbe streamClosedByClient requestTimeoutSeconds workerAbandoned
-                    inFlightRequestId cancelRequested)
+                    inFlightRequestId cancelRequested waitAction)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -29,7 +29,7 @@ makes McpRouter''s per-connection GsProcesses actually concurrent. Access to the
 serialized by a mutex, since GCI allows only one call in flight per session. Idle sessions are
 reaped after a timeout, but never while a call is in flight (#isBusy). A single call is bounded
 too, where the router configured a deadline: one that outruns it is BROKEN rather than waited out
-(#endOverrunningCall), which costs the client that request and, almost always, nothing else -- an
+(#endCallBecause:), which costs the client that request and, almost always, nothing else -- an
 interrupted worker is usable again immediately. Workers log in as the
 current user for now; userId is reserved for later per-user auth. The worker''s stone session id
 and OS process id are captured at login (#cacheWorkerIds): they are what correlate a session with
@@ -138,6 +138,7 @@ awaitWorkerResult
   deadline := self callDeadline.
   [worker isCallInProgress] whileTrue: [
     worker waitForResultForSeconds: self workerWaitSeconds otherwise: [nil].
+    self runWaitAction.
     (worker isCallInProgress and: [cancelRequested == true])
       ifTrue: [^self endCallBecause: #cancelled].
     (worker isCallInProgress and: [deadline notNil and: [System timeGmt >= deadline]])
@@ -274,6 +275,13 @@ forward: aRawJsonString lifetimeBounds: anArrayOrNil
 category: 'routing'
 method: McpSession
 forward: aRawJsonString lifetimeBounds: anArrayOrNil requestId: anIdOrNil
+  "Forward without progress -- the shape every non-streamed call takes."
+  ^self forward: aRawJsonString lifetimeBounds: anArrayOrNil requestId: anIdOrNil
+      progressCallId: nil whileWaiting: nil
+%
+category: 'routing'
+method: McpSession
+forward: aRawJsonString lifetimeBounds: anArrayOrNil requestId: anIdOrNil progressCallId: aCallIdOrNil whileWaiting: aBlockOrNil
   "Run a JSON-RPC request in this client's worker gem (an isolated session) and answer the JSON
    response string ('' for a notification). Runs WITHOUT stalling the front-end gem -- see
    #runWorker:, which is what keeps one client's long tool call from freezing every other GsProcess
@@ -289,12 +297,24 @@ forward: aRawJsonString lifetimeBounds: anArrayOrNil requestId: anIdOrNil
    runs so that a notifications/cancelled naming it can be matched to it (#requestCancel:). Cleared
    in an ensure: along with any cancellation that arrived: a flag outliving its call would end the
    NEXT one, which is the whole hazard in letting another GsProcess set it. Cleared on the way IN as
-   well, since a cancel can arrive in the instant between a call finishing and this clearing it."
+   well, since a cancel can arrive in the instant between a call finishing and this clearing it.
+
+   aCallIdOrNil names this call to the WORKER, so a tool's progress ticks can say which call they
+   belong to. It is the front end's own opaque id, never the client's progressToken -- see
+   McpProgressChannel.
+
+   aBlockOrNil runs after every wait for the worker, in this GsProcess (#awaitWorkerResult). It is how
+   a progress tick reaches the client's socket: the front end passes a block that drains the channel
+   onto the connection it is answering on. A BLOCK rather than the channel and the connection
+   themselves, deliberately -- a session's business is driving one worker gem, and it has no reason to
+   learn what an SSE frame is."
   self touch.
   ^[inFlightRequestId := anIdOrNil.
     cancelRequested := false.
-    self runWorker: (self workerExpressionFor: aRawJsonString lifetimeBounds: anArrayOrNil)]
-      ensure: [inFlightRequestId := nil. cancelRequested := false]
+    waitAction := aBlockOrNil.
+    self runWorker: (self workerExpressionFor: aRawJsonString lifetimeBounds: anArrayOrNil
+      progressCallId: aCallIdOrNil)]
+      ensure: [inFlightRequestId := nil. cancelRequested := false. waitAction := nil]
 %
 category: 'accessing'
 method: McpSession
@@ -568,6 +588,22 @@ requestTimeoutSeconds: anIntegerOrNil
 %
 category: 'private'
 method: McpSession
+runWaitAction
+  "Run whatever the caller asked to have done between waits for the worker -- draining a progress
+   tick onto the client's socket, in the only case that passes one (#forward:...whileWaiting:).
+   Runs in THIS GsProcess, which is the one answering the request, and that is the point: the socket
+   belongs to this connection and exactly one process may write to it. A forked writer would have to
+   be joined before the final response could go out, for no gain.
+   Cannot fail the call. A progress tick is a courtesy; a tool's answer is not, and an error while
+   reporting on work must not destroy the work. The failure is logged nowhere here because there is
+   nothing to log it to -- a session has no log of its own -- and the front end already notices a dead
+   socket by other means."
+  waitAction isNil ifTrue: [^self].
+  [waitAction value] on: Error do: [:ex | ex return: nil].
+  ^self
+%
+category: 'private'
+method: McpSession
 runWorker: anExpressionString
   "Run anExpressionString in this session's worker gem and answer its result -- the one place that
    drives the worker, and non-blocking on purpose. A blocking executeString: blocks in C, so while
@@ -782,6 +818,7 @@ workerBootstrapExpression
     , ' serverName: ' , (serverName isNil ifTrue: ['nil'] ifFalse: [serverName printString])
     , ' title: ' , (serverTitle isNil ifTrue: ['nil'] ifFalse: [serverTitle printString])
     , ' version: ' , (serverVersion isNil ifTrue: ['nil'] ifFalse: [serverVersion printString])
+    , ' frontEnd: ' , System session printString
 %
 category: 'accessing'
 method: McpSession
@@ -821,6 +858,21 @@ workerExpressionFor: aRawJsonString lifetimeBounds: anArrayOrNil
   anArrayOrNil do: [:e | s nextPutAll: ' with: ' , e printString].
   s nextPutAll: ')'.
   ^s contents
+%
+category: 'private'
+method: McpSession
+workerExpressionFor: aRawJsonString lifetimeBounds: anArrayOrNil progressCallId: aCallIdOrNil
+  "As #workerExpressionFor:lifetimeBounds:, with a progress reporter installed FIRST where this call
+   is being reported on.
+   Two statements in one expression, not another keyword on handleJsonString:. executeString: runs a
+   sequence and answers the last value, so the cost is a '. ' and the gain is not having four entry
+   points on the worker for two independent facts -- bounds and progress have nothing to do with each
+   other, and a client can ask for either, both or neither. The teardown is handleJsonString:'s
+   ensure:, so the reporter cannot outlive the call it was made for."
+  | base |
+  base := self workerExpressionFor: aRawJsonString lifetimeBounds: anArrayOrNil.
+  aCallIdOrNil isNil ifTrue: [^base].
+  ^self workerClassName , ' progressCallId: ' , aCallIdOrNil printString , '. ' , base
 %
 category: 'private'
 method: McpSession

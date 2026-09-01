@@ -124,15 +124,22 @@ tool_describe_test_failure: args
 category: 'tools - testing'
 method: McpTestingToolset
 tool_list_failing_tests: args
-  | names classes out |
+  | names classes out done |
   classes := OrderedCollection new.
   names := args at: 'classNames' ifAbsent: [nil].
   names isNil
     ifTrue: [classes addAll: (ClassOrganizer new allSubclassesOf: (System myUserProfile objectNamed: #TestCase))]
     ifFalse: [names do: [:n | | c | c := self resolveClass: n. c ifNotNil: [classes add: c]]].
   out := WriteStream on: String new.
+  "Progress is reported per CLASS here, not per test: this tool's unit of work is a class, and a
+   client watching it wants to know how many of the suites it named are done. Running EVERY TestCase
+   subclass is the slowest thing this server can be asked to do."
+  done := 0.
   classes do: [:cls | | res |
     res := cls suite run.
+    done := done + 1.
+    self progress: done of: classes size
+      message: done printString , '/' , classes size printString , ' test classes'.
     res failures do: [:t | out nextPutAll: 'FAIL  '; nextPutAll: t asString; nextPut: Character lf].
     res errors do: [:t | out nextPutAll: 'ERROR '; nextPutAll: t asString; nextPut: Character lf]].
   ^out contents isEmpty ifTrue: ['(no failing tests)'] ifFalse: [out contents]
@@ -149,6 +156,16 @@ tool_list_test_classes: args
 category: 'tools - testing'
 method: McpTestingToolset
 tool_run_test_class: args
+  "Deliberately NO per-test progress, though this is the tool that would benefit most.
+   Reporting per test means iterating the suite here instead of letting TestSuite>>run do it, and
+   measured on 3.7.5 that CHANGES THE COUNTS: a hand-rolled loop over `suite tests`, sending the same
+   #run: to each test into a fresh TestResult, scored one more test passed than the framework's own
+   run of the same suite and lost the selector from the failure labels. The cause was not identified.
+   Whatever it is, a tool that miscounts test results is worse than a tool that reports its progress
+   silently, so this waits for the mechanism to be understood -- probably a TestResult subclass that
+   only OBSERVES, which cannot change what is counted.
+   #tool_list_failing_tests: does report progress, per class, and needs no such change: it already
+   loops over classes and calls the framework's run on each."
   | cls |
   cls := self resolveClass: (args at: 'className').
   ^cls isNil

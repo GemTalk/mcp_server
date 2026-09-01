@@ -251,6 +251,29 @@ method: McpToolset
 objectSchema: propsDict required: requiredArray
   ^self class objectSchema: propsDict required: requiredArray
 %
+category: 'progress'
+method: McpToolset
+progress: aNumber message: aStringOrNil
+  "Report progress with no denominator -- for work whose total is genuinely unknown. Better than a
+   made-up total, which the client renders as a fraction."
+  ^self progress: aNumber of: nil message: aStringOrNil
+%
+category: 'progress'
+method: McpToolset
+progress: aNumber of: aTotalOrNil message: aStringOrNil
+  "Tell the client how far along this call is: aNumber of aTotalOrNil, with a short human line.
+   The ONE place a tool reaches the reporter, and the one place the absence of one is handled -- so a
+   tool needs no conditional, and a tool run from topaz, or by a client that asked for no progress,
+   behaves exactly as it always did. Answers whether a tick actually went out, which nothing has any
+   reason to check: progress is best-effort by design.
+   Costs one SessionTemps lookup when nobody is listening, which is why a tool may call it inside a
+   loop without thinking about it. aNumber must increase strictly -- refused otherwise, here and
+   again at the front end -- and ticks are rate-limited at the source; see McpProgressReporter."
+  | reporter |
+  reporter := SessionTemps current at: #McpProgress otherwise: nil.
+  reporter isNil ifTrue: [^false].
+  ^reporter progress: aNumber of: aTotalOrNil message: aStringOrNil
+%
 category: 'schema building'
 method: McpToolset
 propString: aDescription

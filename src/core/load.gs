@@ -15,7 +15,7 @@ d := System myUserProfile objectNamed: #Published.
 names := #( #McpError #McpTool #McpToolRegistry #McpToolset #McpBrowsingToolset
   #McpExecutionToolset #McpListingToolset #McpMutationToolset #McpSearchToolset
   #McpSessionToolset #McpTestingToolset #McpHttpConnection #McpDispatcher #McpBase
-  #McpServer #McpOutbox #McpSession #McpRouter ).
+  #McpProgressReporter #McpServer #McpOutbox #McpProgressChannel #McpSession #McpRouter ).
 names do: [:s | (d includesKey: s) ifFalse: [ d at: s put: nil ] ].
 names size
 %
@@ -40,9 +40,15 @@ input src/core/McpTestingToolset.gs
 input src/core/McpHttpConnection.gs
 input src/core/McpDispatcher.gs
 input src/core/McpBase.gs
+! The worker end of progress reporting: what a tool sends a tick to. Ahead of McpServer, which
+! installs one for the length of a call.
+input src/core/McpProgressReporter.gs
 input src/core/McpServer.gs
 ! The server-to-client pathway: a per-session outbox the front end drains onto that client's SSE
 ! stream. Ahead of McpSession, which builds one for every session.
 input src/core/McpOutbox.gs
+! The front-end end of it: one queue per in-flight call, draining onto that call's own response
+! stream rather than onto the session's. Ahead of McpRouter, which keeps the callId -> channel map.
+input src/core/McpProgressChannel.gs
 input src/core/McpSession.gs
 input src/core/McpRouter.gs

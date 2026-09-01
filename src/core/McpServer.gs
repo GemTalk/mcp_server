@@ -218,7 +218,7 @@ newWithToolsetNames: anArrayOfNames
 %
 category: 'worker'
 classmethod: McpServer
-prepareWorkerWithToolsets: anArrayOfNames readOnly: aBoolean serverName: aNameOrNil title: aTitleOrNil version: aVersionOrNil
+prepareWorkerWithToolsets: anArrayOfNames readOnly: aBoolean serverName: aNameOrNil title: aTitleOrNil version: aVersionOrNil frontEnd: aFrontEndSessionOrNil
   "Prepare THIS worker gem for one client, in the single call the front end makes at session open
    (McpSession>>prepareWorker). Sent to the class the front end NAMED, so `self` is the server class to
    build -- a worker never chooses.
@@ -226,14 +226,40 @@ prepareWorkerWithToolsets: anArrayOfNames readOnly: aBoolean serverName: aNameOr
    registry entirely (McpServer>>registerToolsets). Then the instance is built with the given toolsets
    and identity and cached where handleJsonString: looks for it, which moves tool registration off the
    client's first request and makes an unresolvable toolset fail here, at session open, rather than
-   mid-conversation. Answers a short line for the log."
+   mid-conversation. Answers a short line for the log.
+   aFrontEndSessionOrNil is the value System session answers IN THE ROUTER'S GEM -- where to ring the
+   doorbell when a tool reports progress. It is constant for this worker's whole life, so it is pushed
+   once here rather than repeated on every request; only the per-call id travels with the request
+   (class>>progressCallId:). nil means no front end is listening, which is what a worker driven
+   directly from topaz or a test gets."
   | srv |
   self sessionReadOnly: aBoolean.
+  SessionTemps current at: #McpFrontEndSession put: aFrontEndSessionOrNil.
   srv := self newWithToolsetNames: anArrayOfNames.
   srv serverName: aNameOrNil; serverTitle: aTitleOrNil; serverVersion: aVersionOrNil.
   SessionTemps current at: #McpServer put: srv.
   ^self name asString , ' ready: ' , srv toolRegistry descriptors size printString , ' tool(s)'
     , (aBoolean ifTrue: [' (read-only)'] ifFalse: [''])
+%
+category: 'progress'
+classmethod: McpServer
+progressCallId: aCallIdOrNil
+  "Install a progress reporter for the call about to run, or clear any left over when there is none.
+   Sent by the front end as the FIRST statement of the expression that runs a request
+   (McpSession>>workerExpressionFor:lifetimeBounds:progressCallId:), so it is set up before the tool
+   it serves and torn down by the handleJsonString: that follows it.
+   Two statements rather than another keyword on handleJsonString: deliberately -- bounds and progress
+   are independent, and folding both in would mean four entry points to keep in step for no gain.
+   The front-end session came down at session open and is read from SessionTemps rather than passed
+   again, because it cannot change while this gem lives. With none there is nobody to signal, so no
+   reporter is made and every tick a tool sends becomes a no-op."
+  | st |
+  st := SessionTemps current.
+  (aCallIdOrNil isNil or: [(st at: #McpFrontEndSession otherwise: nil) isNil])
+    ifTrue: [^st removeKey: #McpProgress otherwise: nil].
+  ^st at: #McpProgress put: (McpProgressReporter
+    frontEndSession: (st at: #McpFrontEndSession otherwise: nil)
+    callId: aCallIdOrNil)
 %
 category: 'read-only'
 classmethod: McpServer
@@ -326,12 +352,43 @@ method: McpServer
 handleJsonString: aRawJsonString lifetimeBounds: anArrayOrNil
   "As handleJsonString:, recording what the front end says bounds this session before dispatching.
    ALWAYS assigns, including nil: this instance is cached for the life of the gem, so bounds left by
-   an earlier request would otherwise outlive the deadline that produced them."
-  | parsed response |
+   an earlier request would otherwise outlive the deadline that produced them.
+   A progress reporter, where the front end installed one for this call (class>>progressCallId:),
+   belongs to THIS call and to no call nested inside it. Both halves of that were learned the hard
+   way, end to end, and neither shows up in a unit test of one call.
+   This method NESTS: a tool that runs a test suite can run tests which themselves send
+   handleJsonString:, and gs-mcp''s own suites do exactly that. The first version cleared the reporter
+   on the way out, so the first nested call wiped the reporter its CALLER was still reporting
+   through and every later tick vanished. Saving and restoring fixed that and revealed the other
+   half: the nested call then reported ITS progress on the outer call''s stream -- observed as a
+   client told `1/1 test classes` by a call working through six of them, with the outer call''s own
+   ticks refused afterwards for not increasing.
+   So the depth counter. At depth 1 the reporter is the front end''s and is left alone; deeper, it is
+   taken away for the duration and given back on the way out. A nested tool call reports nothing,
+   which is right: nobody asked to be told about it.
+   What this does NOT catch, because nothing at this level can, is code that calls a TOOLSET METHOD
+   directly rather than sending a request -- no request, no depth to count. Such a call reports on
+   its caller''s stream, with its own numbers. gs-mcp''s own McpToolTest does this, which is how it
+   was found; a deployment''s tools would have to go out of their way to.
+   Restored on the way OUT, never cleared on the way in at depth 1: the front end''s expression
+   installs the reporter first and calls this second, so clearing on entry would throw away the thing
+   just installed. An ensure:, so a raising tool or a break cannot leave a reporter behind to report
+   the next call''s work under a callId nobody is listening to."
+  | parsed response outer temps depth |
   lifetimeBounds := anArrayOrNil.
-  parsed := self parseBody: aRawJsonString.
-  response := dispatcher handle: parsed.
-  ^response isNil ifTrue: [''] ifFalse: [response asJson]
+  temps := SessionTemps current.
+  depth := (temps at: #McpCallDepth otherwise: 0) + 1.
+  temps at: #McpCallDepth put: depth.
+  outer := temps at: #McpProgress otherwise: nil.
+  depth > 1 ifTrue: [temps removeKey: #McpProgress otherwise: nil].
+  ^[parsed := self parseBody: aRawJsonString.
+    response := dispatcher handle: parsed.
+    response isNil ifTrue: [''] ifFalse: [response asJson]]
+      ensure: [
+        temps at: #McpCallDepth put: depth - 1.
+        outer isNil
+          ifTrue: [temps removeKey: #McpProgress otherwise: nil]
+          ifFalse: [temps at: #McpProgress put: outer]]
 %
 category: 'initialization'
 method: McpServer

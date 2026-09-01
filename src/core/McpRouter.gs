@@ -9,7 +9,8 @@ McpBase subclass: 'McpRouter'
                     serverName serverTitle serverVersion pendingRequests
                     pendingMutex serverRequestCounter sessionIdleTimeoutSeconds streamlessIdleTimeoutSeconds
                     livenessProbeIntervalSeconds reaperIntervalSeconds maxSessionLifetimeSeconds reapOnFailedProbe
-                    streamLossGraceSeconds messageTrace messageTraceLimit requestTimeoutSeconds)
+                    streamLossGraceSeconds messageTrace messageTraceLimit requestTimeoutSeconds
+                    callChannels callMutex callCounter)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -253,6 +254,31 @@ acceptsEventStream: req
   accept isNil ifTrue: [^false].
   ^(accept asLowercase indexOfSubCollection: 'text/event-stream') > 0
 %
+category: 'progress'
+method: McpRouter
+acceptWorkerSignal: aSignal
+  "Turn one InterSessionSignal from a worker gem into a queued notifications/progress for the client
+   that asked for it. Every failure here is a DROP, never a raise: this runs in the poller's
+   GsProcess, which serves every session, so one malformed payload must not stop the others being
+   delivered.
+   Four ways a tick is dropped, and only the second is worth a log line:
+     no payload -- something signalled this gem that is not a progress tick;
+     unparseable payload -- a worker built one wrong, which is a defect and should be visible;
+     unknown callId -- the call ended while the tick was in flight. Entirely normal, and the reason
+       the channel map is the authority on what is still live rather than the worker;
+     non-increasing progress -- refused by the channel, which owes the client a conforming stream."
+  | payload parsed channel |
+  payload := self payloadOfSignal: aSignal.
+  payload isNil ifTrue: [^self].
+  parsed := self parseBody: payload.
+  parsed isNil ifTrue: [
+    ^self log: 'Discarded an unparseable progress payload from a worker gem: ' , payload].
+  channel := self channelAt: (parsed at: 'c' ifAbsent: [nil]).
+  channel isNil ifTrue: [^self].
+  (channel noteProgress: (parsed at: 'p' ifAbsent: [nil])) ifFalse: [^self].
+  channel add: (self progressNotificationFor: channel from: parsed).
+  ^self
+%
 category: 'routing'
 method: McpRouter
 acknowledgeCancelledCall: sess on: conn
@@ -339,6 +365,15 @@ buildRoutes
   d at: 'GET'    put: [:req :conn | self serveGet: req on: conn].
   d at: 'DELETE' put: [:req :conn | self serveDelete: req on: conn].
   ^d
+%
+category: 'progress'
+method: McpRouter
+channelAt: aCallIdOrNil
+  "The progress channel for a call still in flight, or nil. Its own mutex, deliberately not the
+   session map's: that one is held across reapIdleSessions, and a chatty tool must not contend with
+   another client's session opening."
+  aCallIdOrNil isNil ifTrue: [^nil].
+  ^callMutex critical: [callChannels at: aCallIdOrNil ifAbsent: [nil]]
 %
 category: 'lifecycle'
 method: McpRouter
@@ -494,21 +529,34 @@ disableTls
 %
 category: 'server-initiated'
 method: McpRouter
-drainOutbox: outbox to: conn
-  "Write everything waiting in outbox to the SSE stream, oldest first. Answers false as soon as a
-   write fails, which is how the drain loop learns the client is gone.
-   A gap is admitted rather than hidden, but to the OPERATOR now, not to the client. Announcing it
-   took a notifications/message, which was legal only while this server declared the logging
-   capability and is prohibited outright by the draft revision. The gem log is the better audience
-   anyway: an outbox overflow is a server-side fault, and there was never anything the client could
-   do about it."
+drain: aQueue to: conn
+  "Write everything waiting in aQueue to an SSE stream, oldest first. Answers false as soon as a write
+   fails, which is how a caller learns the client is gone.
+   Takes either kind of queue -- a session's McpOutbox, draining onto its standalone GET stream, or one
+   call's McpProgressChannel, draining onto the response stream of the very call that is producing the
+   ticks. The two are different things (see McpProgressChannel) but they present the same queueing
+   protocol on purpose, so this method needs to know which it has no more than a socket does.
+   A gap is admitted rather than hidden, but to the OPERATOR, not to the client. Announcing it took a
+   notifications/message, which was legal only while this server declared the logging capability and is
+   prohibited outright by the draft revision. The gem log is the better audience anyway: an overflow is
+   a server-side fault, and there was never anything the client could do about it."
   | dropped |
-  dropped := outbox takeDroppedCount.
+  dropped := aQueue takeDroppedCount.
   dropped > 0 ifTrue: [
     self log: dropped printString , ' queued message(s) for an MCP session were dropped before '
-      , 'they could be written: its outbox overflowed.'].
-  outbox drain do: [:each | (conn writeSseData: each) ifNil: [^false]].
+      , 'they could be written: its queue overflowed.'].
+  aQueue drain do: [:each | (conn writeSseData: each) ifNil: [^false]].
   ^true
+%
+category: 'progress'
+method: McpRouter
+drainWorkerSignals
+  "Drain every worker signal waiting for this gem, oldest first. Answers self.
+   Loops until the queue is empty rather than taking one per tick: a burst from several workers must
+   not be spread over several poll intervals, and the queue is only 50 deep."
+  | sig |
+  [(sig := InterSessionSignal poll) notNil] whileTrue: [self acceptWorkerSignal: sig].
+  ^self
 %
 category: 'toolsets'
 method: McpRouter
@@ -548,6 +596,16 @@ escapedForTrace: aString
           ifTrue: [out nextPutAll: '\t']
           ifFalse: [out nextPut: c]]]].
   ^out contents
+%
+category: 'progress'
+method: McpRouter
+forgetChannel: aChannel
+  "Unregister a finished call's channel. Sent from an ensure: as the call returns, so a raising tool
+   cannot leak one -- and a tick arriving afterwards is dropped by #acceptWorkerSignal: for want of a
+   channel, which is the normal end of every reported call rather than an error."
+  aChannel isNil ifTrue: [^self].
+  callMutex critical: [callChannels removeKey: aChannel callId ifAbsent: [nil]].
+  ^self
 %
 category: 'forking'
 method: McpRouter
@@ -602,6 +660,23 @@ forkReaper
      (Delay forSeconds: self reaperIntervalSeconds) wait.
      [self maintainSessions] on: Error do: [:e |
        self log: 'maintainSessions error: ' , ([e description] on: Error do: [:x | e class name asString])]]] fork
+%
+category: 'progress'
+method: McpRouter
+forkSignalPoller
+  "Fork the GsProcess that drains worker-gem signals, one per router gem and exactly one.
+   InterSessionSignal poll reads a SINGLE queue belonging to this gem, shared by every worker
+   signalling it, so two pollers would steal each other's messages -- which is why this is forked
+   here, once, beside the reaper, rather than by whatever happens to want a tick.
+   It cannot be the reaper's own pass: that runs once a minute, and a progress tick a minute late is
+   not progress. #signalPollMilliseconds is the latency of every notification this server sends.
+   The Stone's queue holds 50 messages and the 51st raises SignalBufferFull IN THE SENDER, so
+   draining promptly is what keeps the senders working; the reporters rate-limit for the same reason."
+  [[isRunning] whileTrue: [
+     [self drainWorkerSignals] on: Error do: [:e |
+       self log: 'drainWorkerSignals error: '
+         , ([e description] on: Error do: [:x | e class name asString])].
+     (Delay forMilliseconds: self signalPollMilliseconds) wait]] fork
 %
 category: 'running'
 method: McpRouter
@@ -693,6 +768,9 @@ initialize
    fill a disk nobody is watching."
   messageTrace := false.
   messageTraceLimit := self class defaultMessageTraceLimit.
+  callChannels := Dictionary new.
+  callMutex := Semaphore forMutualExclusion.
+  callCounter := 0.
   ^self
 %
 category: 'routing'
@@ -927,6 +1005,17 @@ messageTraceSummary
     ifTrue: ['whole bodies (no cap)']
     ifFalse: ['bodies capped at ' , messageTraceLimit printString , ' chars']
 %
+category: 'progress'
+method: McpRouter
+nextCallId
+  "A fresh opaque name for a call whose progress is being reported. Its own namespace ('call-N'), so
+   it cannot be confused with a session id, a server-originated request id, or -- the one that
+   matters -- the client's progressToken, which is the client's to choose and is never sent to a
+   worker."
+  ^callMutex critical: [
+    callCounter := callCounter + 1.
+    'call-' , callCounter printString]
+%
 category: 'server-initiated'
 method: McpRouter
 nextServerRequestId
@@ -993,6 +1082,24 @@ originAllowed: req
   origin isNil ifTrue: [^true].
   ^self allowedOriginHosts includes: (self hostOfOrigin: origin) asLowercase
 %
+category: 'progress'
+method: McpRouter
+payloadOfSignal: aSignal
+  "The payload a worker sent with an InterSessionSignal, or nil if there is none.
+   #messageText is a PROSE DESCRIPTION with the payload appended after a literal 'message: ' -- e.g.
+   'a InterSessionSignal occurred (notification 2711), fromSession=621 signal:1 message: {...}' -- so
+   the text has to be cut, not read. Verified on 3.7.5 and 3.7.6.
+   Do NOT send #signal to a polled signal to read the integer the sender passed: that selector is
+   Exception>>signal, so it RAISES the thing. #gsArgs raises too. The number is not needed here
+   anyway; the callId in the payload is what identifies a tick."
+  | text marker idx |
+  text := [aSignal messageText] on: Error do: [:ex | ex return: nil].
+  text isNil ifTrue: [^nil].
+  marker := 'message: '.
+  idx := text findString: marker startingAt: 1.
+  idx = 0 ifTrue: [^nil].
+  ^text copyFrom: idx + marker size to: text size
+%
 category: 'session lifetime'
 method: McpRouter
 probeDue: sess
@@ -1049,6 +1156,24 @@ probeSession: sess
   (self sendRequest: 'ping' params: nil toSession: sess) isNil ifTrue: [^false].
   sess noteProbeSent.
   ^true
+%
+category: 'progress'
+method: McpRouter
+progressNotificationFor: aChannel from: parsedPayload
+  "Build the notifications/progress the client actually receives, as a JSON String.
+   THE ROUTER builds this, not the worker, and that is the point of the compact payload: the envelope
+   needs the client's progressToken, which the worker must never hold. A worker that got its own
+   bookkeeping wrong can at worst address a tick to a callId that no longer exists; it cannot address
+   one to another client's stream.
+   `total` and `message` are omitted rather than sent as null when the tool gave none -- a client
+   renders a fraction from total, and a null would be worse than its absence."
+  | params |
+  params := Dictionary new.
+  params at: 'progressToken' put: aChannel progressToken.
+  params at: 'progress' put: (parsedPayload at: 'p' ifAbsent: [0]).
+  (parsedPayload at: 't' ifAbsent: [nil]) ifNotNil: [:t | params at: 'total' put: t].
+  (parsedPayload at: 'm' ifAbsent: [nil]) ifNotNil: [:m | params at: 'message' put: m].
+  ^(self notification: 'notifications/progress' params: params) asJson
 %
 category: 'routing'
 method: McpRouter
@@ -1237,6 +1362,18 @@ reapReasonFor: sess
       , (self phraseForSeconds: self streamlessIdleTimeoutSeconds)].
   ^nil
 %
+category: 'progress'
+method: McpRouter
+registerChannelForToken: aToken session: sess
+  "Create and register the progress channel for a call about to start, and answer it.
+   Registered BEFORE the worker is called, so a tick that arrives while the very first tool statement
+   is running already has somewhere to go; unregistered in an ensure: as the call returns
+   (#forgetChannel:)."
+  | channel |
+  channel := McpProgressChannel callId: self nextCallId progressToken: aToken sessionId: sess id.
+  callMutex critical: [callChannels at: channel callId put: channel].
+  ^channel
+%
 category: 'sessions'
 method: McpRouter
 releaseAbandonedSession: sess
@@ -1405,6 +1542,7 @@ runOnPort: aPort
   serverSocket := self makeListenerOnPort: aPort.
   isRunning := true.
   self forkReaper.
+  self forkSignalPoller.
   self log: self class name asString , ' listening on ' ,
     (self tlsEnabled ifTrue: ['https'] ifFalse: ['http']) , '://' , self bindAddress , ':' , aPort printString.
   self log: 'workers: ' , self effectiveWorkerClassName , ', toolsets: ' ,
@@ -1458,7 +1596,7 @@ runStreamLoop: conn forSession: sess generation: aGeneration
   lastKeepalive := System timeGmt.
   (conn writeSseComment: 'connected') ifNil: [^true].
   [self isRunning and: [outbox isOpen and: [outbox isCurrentStream: aGeneration]]] whileTrue: [
-    (self drainOutbox: outbox to: conn) ifFalse: [^true].
+    (self drain: outbox to: conn) ifFalse: [^true].
     "A closing outbox has just had its last messages written -- the session-ending notice among
      them -- so the stream ends here, cleanly, rather than the client being cut off with the gem."
     outbox isClosing ifTrue: [outbox close. ^false].
@@ -1721,7 +1859,8 @@ serveRouted: body id: anIdOrNil progressToken: aTokenOrNil sessionId: sid on: co
   sess isNil ifTrue: [^self writeSessionError: 'Unknown or expired session: ' , sid code: 404 reason: 'Not Found' on: conn].
   ^aTokenOrNil isNil
     ifTrue: [self serveCall: body id: anIdOrNil forSession: sess on: conn]
-    ifFalse: [self serveStreamedCall: body id: anIdOrNil forSession: sess on: conn]
+    ifFalse: [self serveStreamedCall: body id: anIdOrNil progressToken: aTokenOrNil
+                forSession: sess on: conn]
 %
 category: 'worker identity'
 method: McpRouter
@@ -1750,7 +1889,7 @@ serverVersion: aStringOrNil
 %
 category: 'routing'
 method: McpRouter
-serveStreamedCall: body id: anIdOrNil forSession: sess on: conn
+serveStreamedCall: body id: anIdOrNil progressToken: aToken forSession: sess on: conn
   "Answer one tools/call as an SSE stream instead of a single JSON object, because the client put a
    progressToken in the request and so asked to be kept informed while it runs.
    The stream is REQUEST-SCOPED: it belongs to this POST, it carries only messages about this call,
@@ -1768,9 +1907,14 @@ serveStreamedCall: body id: anIdOrNil forSession: sess on: conn
    error is caught HERE rather than reaching handleConnection:, whose 500 would be appended to a
    stream as if it were a fresh response and read as garbage.
    A nil from a write is the client having gone; nothing more is owed to it."
-  | resp gone delivered |
+  | resp gone delivered channel |
   (conn writeSseStreamHeaders) ifNil: [^self].
-  resp := [[sess forward: body lifetimeBounds: (self lifetimeBoundsFor: sess) requestId: anIdOrNil]
+  channel := self registerChannelForToken: aToken session: sess.
+  resp := [[[sess forward: body
+      lifetimeBounds: (self lifetimeBoundsFor: sess)
+      requestId: anIdOrNil
+      progressCallId: channel callId
+      whileWaiting: [self drain: channel to: conn]]
     on: McpError
     do: [:ex |
       ex kind = #cancelled ifTrue: [^self releaseSessionIfAbandoned: sess].
@@ -1781,7 +1925,12 @@ serveStreamedCall: body id: anIdOrNil forSession: sess on: conn
     do: [:ex |
       self log: 'Streamed call failed for MCP session ' , sess id printString , ': '
         , ([ex description] on: Error do: [:x | ex class name asString]).
-      ^conn writeSseData: (self internalErrorFor: anIdOrNil)].
+      ^conn writeSseData: (self internalErrorFor: anIdOrNil)]]
+    ensure: [self forgetChannel: channel].
+  "Any tick that arrived while the worker was answering, before the response goes out after it: the
+   spec requires progress to STOP at completion, so this is the last chance to write one and it must
+   come before the answer."
+  self drain: channel to: conn.
   "An empty answer means a notification, which cannot reach here: only a tools/call is streamed and
    a tools/call always carries an id. Ending the stream is still the right thing to do with one."
   resp isEmpty ifTrue: [^self].
@@ -1828,6 +1977,17 @@ method: McpRouter
 sessionIdOf: req
   "The MCP-Session-Id request header (header keys are lower-cased by parseHead:), or nil."
   ^(req at: 'headers' ifAbsent: [Dictionary new]) at: 'mcp-session-id' ifAbsent: [nil]
+%
+category: 'progress'
+method: McpRouter
+signalPollMilliseconds
+  "How long the signal poller sleeps between passes. It is a Delay, so it YIELDS -- the accept loop,
+   the reaper and every open stream keep running while it waits.
+   100ms is the latency floor for every progress notification this server sends, and it is a poll
+   rather than an interrupt on purpose: InterSessionSignal CAN be made to raise in the receiving gem
+   (enableSignalling), which would interrupt whatever the router happened to be doing at the time.
+   Polling costs a wakeup ten times a second and can interrupt nothing."
+  ^100
 %
 category: 'controlling'
 method: McpRouter

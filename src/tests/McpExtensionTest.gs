@@ -73,7 +73,7 @@ testBootstrapBuildsTheNamedSubclassWithItsNamedToolsets
   self withFreshWorkerCacheDo: [ | note out |
     note := McpFixtureServer
       prepareWorkerWithToolsets: #('McpFixtureToolset')
-      readOnly: false serverName: nil title: nil version: nil.
+      readOnly: false serverName: nil title: nil version: nil frontEnd: nil.
     self assert: (self includesCS: 'McpFixtureServer ready' in: note).
     out := McpFixtureServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'.
     self assert: (self includesCS: 'fixture_echo' in: out).
@@ -85,7 +85,8 @@ testBootstrapBuildsTheNamedSubclassWithItsNamedToolsets
   "...and a deployment that DOES name the server in config relabels it, through the same bootstrap"
   self withFreshWorkerCacheDo: [ | out |
     McpFixtureServer prepareWorkerWithToolsets: #('McpFixtureToolset')
-      readOnly: false serverName: 'billing-mcp' title: 'Billing - staging' version: '1.1.1'.
+      readOnly: false serverName: 'billing-mcp' title: 'Billing - staging' version: '1.1.1'
+      frontEnd: nil.
     out := McpFixtureServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'.
     self assert: (self includesCS: 'billing-mcp' in: out).
     self assert: (self includesCS: 'Billing - staging' in: out).

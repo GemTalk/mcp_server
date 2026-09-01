@@ -425,6 +425,34 @@ r=$(curl -s -i -m 10 "$URL" -H "MCP-Session-Id: $SID" \
   --data-binary '{"jsonrpc":"2.0","id":78,"method":"tools/call","params":{"name":"status","arguments":{}}}' 2>&1)
 check "no progressToken => application/json"  'Content-Type: application/json' "$r"
 
+# --- progress: a real tick from a real worker gem, over the wire ---
+# The whole cross-gem pathway in one check. A tool in the WORKER gem calls #progress:of:message:,
+# which rings a doorbell the front end is polling (System sendSignal:to:withMessage: ->
+# InterSessionSignal poll), and the front end turns it into a notifications/progress addressed by the
+# CLIENT's token and writes it onto the response stream of the very call producing the ticks.
+# list_failing_tests is the emitter, reporting per test class -- the slowest thing this server can be
+# asked to do, and the reason progress exists. McpToolTest is deliberately NOT in the list: it calls
+# toolset methods DIRECTLY rather than sending requests, so its own progress ticks land on this
+# call's stream (see McpServer>>handleJsonString:lifetimeBounds:). Only the count of frames varies
+# run to run -- ticks are rate-limited at 250ms, so a fast suite contributes none.
+r=$(curl -s -N -m 120 "$URL" -H "MCP-Session-Id: $SID" \
+  -H 'Accept: application/json, text/event-stream' \
+  --data-binary '{"jsonrpc":"2.0","id":80,"method":"tools/call","params":{"name":"list_failing_tests","arguments":{"classNames":["McpOutboxTest","McpProgressTest","McpStreamTest","McpLifetimeTest","McpContractTest","McpTransportTest"]},"_meta":{"progressToken":80}}}' 2>&1)
+n=$(printf '%s' "$r" | grep -c 'notifications/progress')
+[ "$n" -ge 1 ] && verdict="got $n" || verdict="got none"
+check "a worker's progress reaches the client"  "got $n"                  "$verdict"
+check "...as notifications/progress"            'notifications/progress'  "$r"
+check "...addressed by the client's token"      '"progressToken":80'      "$r"
+check "...with a real denominator"              '"total":6'               "$r"
+check "...and the callId never leaves the server" 'no callId'             "$(printf '%s' "$r" | grep -q '"call-' && echo 'leaked a callId' || echo 'no callId')"
+# progress MUST increase strictly, and MUST stop at completion: the response is the last frame.
+first=$(printf '%s' "$r" | grep -o '"progress":[0-9]*' | head -1 | cut -d: -f2)
+last=$(printf '%s' "$r" | grep -o '"progress":[0-9]*' | tail -1 | cut -d: -f2)
+[ "${last:-0}" -ge "${first:-0}" ] && verdict="increases ($first..$last)" || verdict="went backwards ($first..$last)"
+check "...increasing"                           'increases'               "$verdict"
+printf '%s' "$r" | tail -3 | grep -q '"id":80' && verdict='response is last' || verdict='response is not last'
+check "...and the answer comes after them"      'response is last'        "$verdict"
+
 # --- transport: cancelling a call in flight ---
 # Measured 2026-08-31: Claude Code sends notifications/cancelled within seconds of the user pressing
 # Esc, and does NOT close the response stream -- so this notification is how a cancellation actually
