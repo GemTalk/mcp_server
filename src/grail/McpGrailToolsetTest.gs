@@ -213,27 +213,25 @@ toolCall: toolName args: argsDict
 category: 'helpers'
 method: McpGrailToolsetTest
 withoutSessionNote: aString
-  "aString with the dispatcher's trailing [session] note removed, or unchanged when it carries none.
+  "aString up to the dispatcher's [session] note, or unchanged when it carries none.
    McpDispatcher>>annotateContent: appends that note to the first content item's text -- a newline
-   and one line opening '[session] ' -- whenever the session the tool ran in has state the model
-   must act on: uncommitted changes, a nested transaction, a failed commit.
+   and a line opening '[session] ' -- to report session state the model must act on.
 
    A test about what a TOOL answered has to take the note off rather than assert around it. The two
    cheaper-looking alternatives are both worse. Aborting in setUp (what McpContractTest and
-   McpExtensionTest do) would make this suite move the caller's transaction, which is a large price
-   for a text comparison and is exactly what these tests should not need. Relaxing the assertion to
-   a substring match would stop testing anything the day the note's own wording happens to contain
-   the expected text -- and 'None' is a word a note about session state could very plausibly use.
+   McpExtensionTest did until 2026-09-01) makes the suite move the CALLER's transaction, which is a
+   large price for a text comparison. Relaxing the assertion to a substring match stops testing
+   anything the day the note's own wording happens to contain the expected text -- and 'None' is a
+   word a note about session state could very plausibly use.
 
-   Cuts at the LAST such newline, not the first, because the note is always appended after whatever
-   the tool itself produced, and a tool's own output may run to several lines."
-  | marker idx last |
+   Cuts at the FIRST newline-plus-'[session] ' and drops everything after it. That is the durable
+   rule rather than a nicety about today's one-note format: the note is not promised to stay a
+   single line, nor to appear only in a dirty session -- a future one might report a pinned view to
+   a session with nothing pending at all -- and a cut at the LAST occurrence would leave every note
+   but the final one sitting in the text the test is comparing."
+  | marker idx |
   marker := (String with: Character lf) , '[session] '.
-  last := 0.
   idx := aString findString: marker startingAt: 1.
-  [idx = 0] whileFalse: [
-    last := idx.
-    idx := aString findString: marker startingAt: idx + 1].
-  last = 0 ifTrue: [^aString].
-  ^aString copyFrom: 1 to: last - 1
+  idx = 0 ifTrue: [^aString].
+  ^aString copyFrom: 1 to: idx - 1
 %

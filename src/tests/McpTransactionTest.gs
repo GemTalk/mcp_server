@@ -40,6 +40,15 @@ McpTransactionTest category: 'Mcp-Tests'
 removeallmethods McpTransactionTest
 removeallclassmethods McpTransactionTest
 ! ------------------- Class methods for McpTransactionTest
+category: 'session view'
+classmethod: McpTransactionTest
+movesTheSessionView
+  "Why this suite cannot be run from a session that has uncommitted work. See
+   McpTestingToolset class>>sessionViewRefusalFor:, which is what asks.
+   Irreducible here: this suite's subject IS the transaction, so there is no version of it that
+   leaves the caller's alone."
+  ^'it commits a baseline, provokes a real commit conflict against it from a second gem, and aborts to clear the jam'
+%
 ! ------------------- Instance methods for McpTransactionTest
 category: 'helpers'
 method: McpTransactionTest

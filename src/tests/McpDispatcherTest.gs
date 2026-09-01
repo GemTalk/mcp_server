@@ -19,6 +19,16 @@ McpDispatcherTest category: 'Mcp-Tests'
 removeallmethods McpDispatcherTest
 removeallclassmethods McpDispatcherTest
 ! ------------------- Class methods for McpDispatcherTest
+category: 'session view'
+classmethod: McpDispatcherTest
+movesTheSessionView
+  "Why this suite cannot be run from a session that has uncommitted work. See
+   McpTestingToolset class>>sessionViewRefusalFor:, which is what asks.
+   Most of the aborts here are removable, but not the one in
+   #testCleanSessionGetsNoTransactionNote: a test that a CLEAN session gets no note has no way to
+   run except from a clean session."
+  ^'it aborts to reach the clean session one of its tests is about, and to clear the probes the others plant'
+%
 ! ------------------- Instance methods for McpDispatcherTest
 category: 'helpers'
 method: McpDispatcherTest

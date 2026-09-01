@@ -27,6 +27,15 @@ McpAuthTest category: 'Mcp-Auth-Tests'
 removeallmethods McpAuthTest
 removeallclassmethods McpAuthTest
 ! ------------------- Class methods for McpAuthTest
+category: 'session view'
+classmethod: McpAuthTest
+movesTheSessionView
+  "Why this suite cannot be run from a session that has uncommitted work. See
+   McpTestingToolset class>>sessionViewRefusalFor:, which is what asks.
+   The commit is not incidental: a worker gem logs in as the fixture UserProfile, and one session
+   cannot see another's uncommitted AllUsers entry."
+  ^'it commits a throwaway JWT UserProfile so a real worker gem can log in as it, and a commit takes the whole session with it'
+%
 ! ------------------- Instance methods for McpAuthTest
 category: 'helpers'
 method: McpAuthTest

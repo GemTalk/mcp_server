@@ -29,6 +29,34 @@ McpTestingToolset category: 'Mcp-Core'
 removeallmethods McpTestingToolset
 removeallclassmethods McpTestingToolset
 ! ------------------- Class methods for McpTestingToolset
+category: 'session view guard'
+classmethod: McpTestingToolset
+sessionViewRefusalFor: aTestClass
+  "Why aTestClass must not be run from THIS session right now, or nil to go ahead.
+
+   Nearly every suite leaves the caller's transaction alone, but a few cannot: they commit fixtures,
+   abort to reach a clean session, or provoke a real commit conflict. Run from a gem that has
+   uncommitted work -- the normal state of a worker gem mid-task, and the whole point of being able
+   to compile, test, and only then commit -- those suites either discard that work or publish it,
+   and the caller finds out afterwards, if at all. A suite says it is one of them by answering a
+   reason from #movesTheSessionView; the absence of that method means it is safe.
+
+   Only the SESSION's state can decide this, not the suite's: the same suite is perfectly safe from
+   a clean session, which is why the guard asks #needsCommit first and stays silent when there is
+   nothing to lose.
+
+   THE GUARD IS ON THE TOOL PATH ONLY. ./run-unit-tests.sh sends #run to each suite directly, from a
+   throwaway topaz session that owns its transaction and is thrown away at logout, so it is
+   deliberately not gated -- and could not be without wrapping GsTestCase itself, which is kernel."
+  | reason |
+  System needsCommit ifFalse: [^nil].
+  (aTestClass respondsTo: #movesTheSessionView) ifFalse: [^nil].
+  reason := aTestClass movesTheSessionView.
+  reason isNil ifTrue: [^nil].
+  ^aTestClass name asString , ' moves this session''s transaction (' , reason
+    , '), and you have uncommitted changes that would go with it. Commit them or abort them '
+    , 'first, then run it.'
+%
 ! ------------------- Instance methods for McpTestingToolset
 category: 'private'
 method: McpTestingToolset
@@ -166,21 +194,26 @@ tool_run_test_class: args
    only OBSERVES, which cannot change what is counted.
    #tool_list_failing_tests: does report progress, per class, and needs no such change: it already
    loops over classes and calls the framework's run on each."
-  | cls |
+  | cls refusal |
   cls := self resolveClass: (args at: 'className').
-  ^cls isNil
-    ifTrue: ['Class not found: ' , (args at: 'className')]
-    ifFalse: [self formatTestResult: cls suite run label: cls name asString]
+  cls isNil ifTrue: [^'Class not found: ' , (args at: 'className')].
+  refusal := self class sessionViewRefusalFor: cls.
+  refusal ifNotNil: [:r | ^McpError signalKind: #refused message: r].
+  ^self formatTestResult: cls suite run label: cls name asString
 %
 category: 'tools - testing'
 method: McpTestingToolset
 tool_run_test_method: args
-  | cls |
+  "Gated at CLASS granularity like #tool_run_test_class:, and deliberately so: what moves the view
+   is usually the suite's setUp or tearDown, which runs for every one of its tests, so picking a
+   single method out of a view-moving suite is no safer than running the lot."
+  | cls refusal |
   cls := self resolveClass: (args at: 'className').
-  ^cls isNil
-    ifTrue: ['Class not found: ' , (args at: 'className')]
-    ifFalse: [self formatTestResult: (cls selector: (args at: 'selector') asSymbol) run
-      label: (args at: 'className') , '>>' , (args at: 'selector')]
+  cls isNil ifTrue: [^'Class not found: ' , (args at: 'className')].
+  refusal := self class sessionViewRefusalFor: cls.
+  refusal ifNotNil: [:r | ^McpError signalKind: #refused message: r].
+  ^self formatTestResult: (cls selector: (args at: 'selector') asSymbol) run
+    label: (args at: 'className') , '>>' , (args at: 'selector')
 %
 category: 'accessing'
 method: McpTestingToolset

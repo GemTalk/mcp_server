@@ -55,16 +55,6 @@ request: methodName params: paramsDict
   paramsDict ifNotNil: [d at: 'params' put: paramsDict].
   ^d
 %
-category: 'running'
-method: McpExtensionTest
-setUp
-  "Start every test on a clean transaction. These tests assert the EXACT text of a tools/call
-   result, and since 2026-08-28 a result carries a trailing session note whenever the session has
-   uncommitted changes (McpDispatcher>>transactionNote) -- so ambient dirt left by whatever ran
-   before would change the bytes under an equality assertion. Aborting here also makes each test
-   independent of the order the suite runs in, which nothing guaranteed before."
-  System abortTransaction
-%
 category: 'tests - worker class'
 method: McpExtensionTest
 testBootstrapBuildsTheNamedSubclassWithItsNamedToolsets
@@ -116,7 +106,8 @@ testFixtureToolsetRunsThroughTheRealEnvelope
   result := (self dispatchOn: server request: (self toolCall: 'fixture_echo'
     args: (Dictionary new at: 'text' put: 'hello'; yourself))) at: 'result'.
   self deny: (result at: 'isError').
-  self assert: ((result at: 'content') first at: 'text') equals: 'echo: hello'.
+  self assert: (self withoutSessionNote: ((result at: 'content') first at: 'text'))
+    equals: 'echo: hello'.
   "and its schema is closed like every other tool's, since it was built with the shared helper"
   self assert: ((((server toolRegistry at: 'fixture_echo') descriptor at: 'inputSchema')
     at: 'additionalProperties') == false)
@@ -248,6 +239,23 @@ withFreshWorkerCacheDo: aBlock
    server cached by one test would answer for another -- with a different class and surface."
   SessionTemps current removeKey: #McpServer ifAbsent: [nil].
   ^[aBlock value] ensure: [SessionTemps current removeKey: #McpServer ifAbsent: [nil]]
+%
+category: 'helpers'
+method: McpExtensionTest
+withoutSessionNote: aString
+  "aString up to the dispatcher's [session] note, or unchanged when it carries none -- see the twin
+   in McpGrailToolsetTest for why the cut is at the FIRST one. Written out again rather than shared
+   because these suites have no common superclass but GsTestCase, the same reason #includesCS:in:
+   appears in ten test classes here.
+
+   This is what replaced this suite's setUp abort on 2026-09-01. That abort existed to keep the note
+   out of an exact-text assertion, and it bought that by discarding the CALLER's uncommitted work --
+   a real cost, paid on every run of all nine tests, to tidy the text of one assertion in one."
+  | marker idx |
+  marker := (String with: Character lf) , '[session] '.
+  idx := aString findString: marker startingAt: 1.
+  idx = 0 ifTrue: [^aString].
+  ^aString copyFrom: 1 to: idx - 1
 %
 category: 'helpers'
 method: McpExtensionTest

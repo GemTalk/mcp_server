@@ -19,6 +19,13 @@ McpToolTest category: 'Mcp-Tests'
 removeallmethods McpToolTest
 removeallclassmethods McpToolTest
 ! ------------------- Class methods for McpToolTest
+category: 'session view'
+classmethod: McpToolTest
+movesTheSessionView
+  "Why this suite cannot be run from a session that has uncommitted work. See
+   McpTestingToolset class>>sessionViewRefusalFor:, which is what asks."
+  ^'it commits throwaway fixture classes, and a commit takes the whole session with it'
+%
 ! ------------------- Instance methods for McpToolTest
 category: 'helpers'
 method: McpToolTest
@@ -703,6 +710,32 @@ testRunTestMethod
   self assert: (self includesCS: 'FAIL' in: fail).
   self assert: (self includesCS: '#testFails' in: fail)
 %
+category: 'tools - testing'
+method: McpToolTest
+testRunTestToolsRefuseAViewMovingSuiteWhenWorkIsPending
+  "The guard, through the tools a client actually calls. Both run tools refuse a suite that declares
+   it moves the session's transaction, while this session has work that move would take with it.
+   McpTransactionTest is the subject because it is always installed and its #movesTheSessionView is
+   the irreducible case -- if the guard ever stopped firing, THAT suite running here would abort
+   this very test's transaction, which is the loss the guard exists to prevent."
+  | onClass onMethod |
+  System abortTransaction.
+  UserGlobals at: #McpGuardProbe put: 'planted'.
+  onClass := [self testingTools tool_run_test_class:
+    (self oneArg: 'className' value: 'McpTransactionTest'). nil] on: McpError do: [:ex | ex].
+  onMethod := [self testingTools tool_run_test_method: (Dictionary new
+    at: 'className' put: 'McpTransactionTest';
+    at: 'selector' put: 'testAbortIsTheWayOutAndSaysNothingElse'; yourself). nil]
+      on: McpError do: [:ex | ex].
+  self assert: onClass notNil.
+  self assert: onClass kind equals: #refused.
+  self assert: (self includesCS: 'McpTransactionTest' in: onClass description).
+  self assert: (self includesCS: 'uncommitted changes' in: onClass description).
+  self assert: onMethod notNil.
+  self assert: onMethod kind equals: #refused.
+  "and the work it protected is still here"
+  self assert: (UserGlobals at: #McpGuardProbe ifAbsent: [nil]) equals: 'planted'
+%
 category: 'tools - search'
 method: McpToolTest
 testSearchMethodSource
@@ -725,6 +758,20 @@ testSearchMethodSourceTruncated
   lines := out subStrings: (String with: Character lf).
   hitLines := lines select: [:l | self includesCS: '>>' in: l].
   self assert: hitLines size = 200
+%
+category: 'tools - testing'
+method: McpToolTest
+testSessionViewGuardFiresOnTheSessionAndNotOnTheSuite
+  "Which suite it is does not decide this -- the session does. The same suite refused above is
+   allowed the moment there is nothing to lose, and a suite that declares nothing is never gated
+   either way. Asserting on the policy directly rather than through a tool keeps this test from
+   having to run a real view-moving suite to find out."
+  System abortTransaction.
+  self assert: (McpTestingToolset sessionViewRefusalFor: McpTransactionTest) isNil.
+  self assert: (McpTestingToolset sessionViewRefusalFor: McpOutboxTest) isNil.
+  UserGlobals at: #McpGuardProbe put: 'planted'.
+  self assert: (McpTestingToolset sessionViewRefusalFor: McpTransactionTest) notNil.
+  self assert: (McpTestingToolset sessionViewRefusalFor: McpOutboxTest) isNil
 %
 category: 'tools - mutation'
 method: McpToolTest
