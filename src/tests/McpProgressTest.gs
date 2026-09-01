@@ -162,6 +162,29 @@ testASignalBecomesANotificationOnItsOwnChannel
   "the callId is the front end's own name for the call and is not sent to the client"
   self assert: (queued findString: 'call-' startingAt: 1) = 0
 %
+category: 'tests - front end'
+method: McpProgressTest
+testATickSentAsTheCallReturnsIsNotLost
+  "The last step is the one that says the work is finished, and it was the one systematically thrown
+   away. A worker sends its final tick and returns in the same breath, so that tick is still in the
+   Stone's queue when the call's ensure: unregisters the channel; the poller, up to a tenth of a
+   second later, then had nowhere to put it. Measured against a real client: nine test classes, eight
+   frames, every time.
+   So a streamed call drains once itself before letting the channel go. Simulated here by signalling
+   AFTER the worker would have returned and draining in the same order the router does."
+  | r sess ch |
+  r := McpFixtureRouter new.
+  sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
+  ch := r registerChannelForToken: 9 session: sess.
+  "the worker's parting tick, still queued in the Stone"
+  System sendSignal: 1 to: System session
+    withMessage: '{"c":"' , ch callId , '","p":9,"t":9,"m":"9/9 test classes"}'.
+  "what the call now does on its way out, in order"
+  r drainWorkerSignals.
+  self assert: ch size equals: 1.
+  self assert: ((ch drain first) findString: '9/9 test classes' startingAt: 1) > 0.
+  r forgetChannel: ch
+%
 category: 'tests - reporter'
 method: McpProgressTest
 testAToolWithNoReporterReportsNothingAndCarriesOn

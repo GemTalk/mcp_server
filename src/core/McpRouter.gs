@@ -664,10 +664,13 @@ forkReaper
 category: 'progress'
 method: McpRouter
 forkSignalPoller
-  "Fork the GsProcess that drains worker-gem signals, one per router gem and exactly one.
-   InterSessionSignal poll reads a SINGLE queue belonging to this gem, shared by every worker
-   signalling it, so two pollers would steal each other's messages -- which is why this is forked
-   here, once, beside the reaper, rather than by whatever happens to want a tick.
+  "Fork the GsProcess that drains worker-gem signals: the one thing that polls on a schedule, forked
+   here beside the reaper rather than by whatever happens to want a tick.
+   It is not the only thing that may drain, and that is safe: InterSessionSignal poll reads a SINGLE
+   queue belonging to this gem, shared by every worker signalling it, but #acceptWorkerSignal: routes
+   each payload to its own call by callId -- so whoever takes a message off the queue, it reaches the
+   same channel. A streamed call drains once itself, on the way out, to collect the tick its worker
+   sent as it returned (#serveStreamedCall:id:progressToken:forSession:on:).
    It cannot be the reaper's own pass: that runs once a minute, and a progress tick a minute late is
    not progress. #signalPollMilliseconds is the latency of every notification this server sends.
    The Stone's queue holds 50 messages and the 51st raises SignalBufferFull IN THE SENDER, so
@@ -1910,11 +1913,19 @@ serveStreamedCall: body id: anIdOrNil progressToken: aToken forSession: sess on:
   | resp gone delivered channel |
   (conn writeSseStreamHeaders) ifNil: [^self].
   channel := self registerChannelForToken: aToken session: sess.
-  resp := [[[sess forward: body
+  resp := [[[ | answer |
+    answer := sess forward: body
       lifetimeBounds: (self lifetimeBoundsFor: sess)
       requestId: anIdOrNil
       progressCallId: channel callId
-      whileWaiting: [self drain: channel to: conn]]
+      whileWaiting: [self drain: channel to: conn].
+    "Catch up on the worker's LAST tick before the channel is unregistered. The worker sends its
+     final tick and returns in the same breath, so that tick is still sitting in the Stone's queue
+     when this call's ensure: forgets the channel, and the poller -- up to #signalPollMilliseconds
+     later -- then finds nowhere to put it. Every reported call lost its last step that way, which is
+     the one saying the work is finished."
+    self drainWorkerSignals.
+    answer]
     on: McpError
     do: [:ex |
       ex kind = #cancelled ifTrue: [^self releaseSessionIfAbandoned: sess].
