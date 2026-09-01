@@ -1718,7 +1718,7 @@ serveStreamedCall: body id: anIdOrNil forSession: sess on: conn
    error is caught HERE rather than reaching handleConnection:, whose 500 would be appended to a
    stream as if it were a fresh response and read as garbage.
    A nil from a write is the client having gone; nothing more is owed to it."
-  | resp |
+  | resp gone delivered |
   (conn writeSseStreamHeaders) ifNil: [^self].
   resp := [[sess forward: body lifetimeBounds: (self lifetimeBoundsFor: sess)]
     on: McpError
@@ -1734,7 +1734,9 @@ serveStreamedCall: body id: anIdOrNil forSession: sess on: conn
   "An empty answer means a notification, which cannot reach here: only a tools/call is streamed and
    a tools/call always carries an id. Ending the stream is still the right thing to do with one."
   resp isEmpty ifTrue: [^self].
-  conn writeSseData: resp.
+  gone := conn clientHasClosed.
+  delivered := (conn writeSseData: resp) notNil.
+  self traceStreamedAnswerFor: sess goneBefore: gone delivered: delivered.
   ^self
 %
 category: 'sessions'
@@ -1961,6 +1963,26 @@ traceRequest: req
    trace at all."
   messageTrace == true ifFalse: [^self].
   [self log: (self traceLineFor: req)] on: Error do: [:ex | nil]
+%
+category: 'message trace'
+method: McpRouter
+traceStreamedAnswerFor: sess goneBefore: goneBoolean delivered: deliveredBoolean
+  "Record how a STREAMED answer ended, if this router is tracing. Outbound, unlike everything else
+   the trace covers, and here for a reason the inbound lines cannot serve.
+   Two facts, and it is the PAIR that makes them evidence: whether the client's connection was
+   already gone when the call finished, and whether the final frame reached it. Both false means the
+   client waited for its answer and got it. Both true means it stopped listening while the call ran --
+   which is the draft revision's ONLY cancellation signal, and which the current revision says a
+   server SHOULD NOT read that way, precisely because it cannot tell a client that meant it from a
+   network that dropped. Before this server acts on that signal in either direction it is worth
+   knowing whether the clients actually in use here ever send it, and a closed stream leaves no
+   inbound message to trace -- so without this line it looks exactly like nothing having happened.
+   Cannot fail the caller, for the same reason #traceRequest: cannot."
+  messageTrace == true ifFalse: [^self].
+  [self log: '<-- streamed answer, session ' , sess id printString
+    , ': client-gone=' , goneBoolean printString
+    , ' delivered=' , deliveredBoolean printString]
+      on: Error do: [:ex | nil]
 %
 category: 'session lifetime'
 method: McpRouter
