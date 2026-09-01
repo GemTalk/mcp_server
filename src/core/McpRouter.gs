@@ -253,6 +253,22 @@ acceptsEventStream: req
   accept isNil ifTrue: [^false].
   ^(accept asLowercase indexOfSubCollection: 'text/event-stream') > 0
 %
+category: 'routing'
+method: McpRouter
+acknowledgeCancelledCall: sess on: conn
+  "End the HTTP request of a call the client CANCELLED, saying nothing about it.
+   202 Accepted with no body: the spec asks a receiver of a cancellation both to stop processing the
+   request and NOT to send a response for it, and 202 is how this transport says 'taken, nothing to
+   report' -- valid HTTP, so the connection ends the way every other one does, and carrying no
+   JSON-RPC response for a request the client has told us it is no longer listening for. (It would
+   ignore one anyway: the spec tells the canceller to discard any response that arrives late.)
+   A streamed call needs no equivalent. Its stream is already open, so saying nothing IS ending it,
+   which is what the draft revision requires of a cancelled request outright.
+   The session is still released where its gem had to be stopped to get the call out of it -- that is
+   true however the call ended, and the client learns of it from the 404 on its next request."
+  self releaseSessionIfAbandoned: sess.
+  ^conn writeStatus: 202 reason: 'Accepted' body: ''
+%
 category: 'origin allowlist'
 method: McpRouter
 allowedOriginHosts
@@ -1501,15 +1517,43 @@ serveCall: body id: anIdOrNil forSession: sess on: conn
    answer is empty because a notification gets no response.
    The session gates already ran in #serveRouted:id:progressToken:sessionId:on:."
   | resp |
-  resp := [sess forward: body lifetimeBounds: (self lifetimeBoundsFor: sess)]
+  resp := [sess forward: body lifetimeBounds: (self lifetimeBoundsFor: sess) requestId: anIdOrNil]
     on: McpError
     do: [:ex |
+      ex kind = #cancelled ifTrue: [^self acknowledgeCancelledCall: sess on: conn].
       ex kind = #timeout
         ifTrue: [^self writeTimeoutError: ex forSession: sess id: anIdOrNil on: conn]
         ifFalse: [ex pass]].
   resp isEmpty
     ifTrue: [conn writeStatus: 202 reason: 'Accepted' body: '']
     ifFalse: [conn writeJson: resp]
+%
+category: 'routing'
+method: McpRouter
+serveCancellation: parsed sessionId: sid on: conn
+  "A notifications/cancelled the client POSTed: it no longer wants the request named in
+   params.requestId. Per the Streamable HTTP spec a notification the server accepts MUST be answered
+   202 Accepted with no body, and the session gates are the same as on every other verb.
+   All this does is hand the id to the session, which matches it against the call actually in flight
+   and sets a flag (McpSession>>requestCancel:). The ending itself happens in the GsProcess running
+   that call, which is the only one entitled to touch the worker.
+   Measured 2026-08-31: Claude Code sends this within seconds of the user pressing Esc, with the
+   right requestId, and does NOT close the response stream -- so this notification, not a dropped
+   connection, is how a cancellation actually arrives at this server today."
+  | sess params requestId |
+  sid isNil ifTrue: [
+    ^self writeSessionError: 'Missing MCP-Session-Id header (call initialize first)' code: 400 reason: 'Bad Request' on: conn].
+  sess := self sessionAt: sid.
+  sess isNil ifTrue: [
+    ^self writeSessionError: 'Unknown or expired session: ' , sid code: 404 reason: 'Not Found' on: conn].
+  params := parsed at: 'params' ifAbsent: [nil].
+  requestId := (params isKindOf: Dictionary)
+    ifTrue: [params at: 'requestId' ifAbsent: [nil]]
+    ifFalse: [nil].
+  (sess requestCancel: requestId) ifTrue: [
+    self log: 'MCP session ' , sess id printString , ': client cancelled request '
+      , requestId printString , '.'].
+  conn writeStatus: 202 reason: 'Accepted' body: ''
 %
 category: 'routing'
 method: McpRouter
@@ -1631,6 +1675,12 @@ servePost: req on: conn
    -32600 -- so it is correlated here and acknowledged with 202."
   (method isNil and: [parsed includesKey: 'id'])
     ifTrue: [^self serveClientResponse: parsed sessionId: (self sessionIdOf: req) on: conn].
+  "A cancellation is likewise not routable, for a sharper reason: routing it would queue it on the
+   worker mutex BEHIND the very call it is asking to stop, and it would be acted on -- if the word
+   applies -- only once that call had finished on its own. Measured at 17 seconds on a 20-second
+   call before this existed. It is handled here, where the session is reachable without the worker."
+  method = 'notifications/cancelled'
+    ifTrue: [^self serveCancellation: parsed sessionId: (self sessionIdOf: req) on: conn].
   method = 'initialize' ifTrue: [^self serveInitialize: req on: conn].
   ^self serveRouted: body
       id: (parsed at: 'id' ifAbsent: [nil])
@@ -1720,9 +1770,10 @@ serveStreamedCall: body id: anIdOrNil forSession: sess on: conn
    A nil from a write is the client having gone; nothing more is owed to it."
   | resp gone delivered |
   (conn writeSseStreamHeaders) ifNil: [^self].
-  resp := [[sess forward: body lifetimeBounds: (self lifetimeBoundsFor: sess)]
+  resp := [[sess forward: body lifetimeBounds: (self lifetimeBoundsFor: sess) requestId: anIdOrNil]
     on: McpError
     do: [:ex |
+      ex kind = #cancelled ifTrue: [^self releaseSessionIfAbandoned: sess].
       ex kind = #timeout
         ifTrue: [^self writeTimeoutFrame: ex forSession: sess id: anIdOrNil on: conn]
         ifFalse: [ex pass]]]

@@ -425,6 +425,40 @@ r=$(curl -s -i -m 10 "$URL" -H "MCP-Session-Id: $SID" \
   --data-binary '{"jsonrpc":"2.0","id":78,"method":"tools/call","params":{"name":"status","arguments":{}}}' 2>&1)
 check "no progressToken => application/json"  'Content-Type: application/json' "$r"
 
+# --- transport: cancelling a call in flight ---
+# Measured 2026-08-31: Claude Code sends notifications/cancelled within seconds of the user pressing
+# Esc, and does NOT close the response stream -- so this notification is how a cancellation actually
+# arrives. Before it was intercepted in the front end it was ROUTED, which queued it on the session's
+# worker mutex behind the very call it asked to stop: measured at 17s on a 20-second call, i.e. it
+# did nothing at all. Both halves are checked: the cancel is answered promptly, and the call ends
+# early rather than running to completion.
+CANCEL_OUT=$(mktemp)
+( curl -s -o "$CANCEL_OUT" -m 60 "$URL" -H "MCP-Session-Id: $SID" \
+    --data-binary '{"jsonrpc":"2.0","id":95,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"(Delay forSeconds: 30) wait. 555"}}}' ) &
+SLOW_CANCEL_PID=$!
+sleep 3
+t0=$(date +%s)
+code=$(curl -s -m 20 -o /dev/null -w '%{http_code}' "$URL" -H "MCP-Session-Id: $SID" \
+  --data-binary '{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":95,"reason":"test"}}')
+t1=$(date +%s)
+check "notifications/cancelled => 202"        '202'                      "$code"
+[ $((t1-t0)) -le 3 ] && verdict="prompt ($((t1-t0))s)" || verdict="queued behind the call ($((t1-t0))s)"
+check "...answered promptly, not behind the call" "prompt"               "$verdict"
+wait $SLOW_CANCEL_PID
+t2=$(date +%s)
+[ $((t2-t0)) -le 15 ] && verdict="ended early ($((t2-t0))s)" || verdict="ran to completion ($((t2-t0))s)"
+check "...and the 30s call was ended early"   'ended early'              "$verdict"
+# The spec asks a receiver not to send a response for a cancelled request.
+grep -q 'jsonrpc' "$CANCEL_OUT" && verdict='sent a JSON-RPC response' || verdict='no response body'
+check "...with no JSON-RPC response for it"   'no response body'         "$verdict"
+rm -f "$CANCEL_OUT"
+# The session survives: the client cancelled a request, not its work.
+r=$(post <<'JSON'
+{"jsonrpc":"2.0","id":96,"method":"ping"}
+JSON
+)
+check "...and the session is still usable"    '"id":96'                  "$r"
+
 # --- transport: a POSTed JSON-RPC response ---
 # How a client answers a request the SERVER sent it (today a liveness ping): a body with an id and
 # no method. The spec wants 202 Accepted and no body. This used to be forwarded to the worker, whose

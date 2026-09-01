@@ -8,7 +8,8 @@ Object subclass: 'McpSession'
                     toolsetNames serverName serverTitle serverVersion
                     workerPid workerStoneSession outbox startedAtSeconds
                     expiresAtSeconds quietProbes unansweredProbes streamlessPasses
-                    passesSinceProbe streamClosedByClient requestTimeoutSeconds workerAbandoned)
+                    passesSinceProbe streamClosedByClient requestTimeoutSeconds workerAbandoned
+                    inFlightRequestId cancelRequested)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -118,20 +119,29 @@ ageSeconds
 category: 'private'
 method: McpSession
 awaitWorkerResult
-  "Wait for the in-flight call to finish. Answers when it has; RAISES when it outran this session's
-   deadline (#endOverrunningCall), so no caller can mistake an ended call for a completed one and go
-   on to read #lastResult -- which would answer the previous request's response.
-   Each wait sleeps at most #workerWaitSeconds, which bounds how often the deadline is re-checked and
-   not how long a call may take: the wait answers the moment the worker does, because it is waiting on
-   the session's socket. So a call is ended within one wait of its deadline rather than exactly at it
-   -- a second of slack on a deadline measured in tens of them, and the price of keeping the check
-   somewhere a reader can find it."
+  "Wait for the in-flight call to finish. Answers when it has; RAISES when it was ENDED instead
+   (#endCallBecause:), so no caller can mistake an ended call for a completed one and go on to read
+   #lastResult -- which would answer the previous request's response.
+   Two things end a call, and this is the only place either is noticed. It can outrun this session's
+   deadline, where there is one. Or the CLIENT can say it no longer wants it, by a
+   notifications/cancelled the front end has turned into #requestCancel: -- which runs in a different
+   GsProcess and deliberately only sets a flag, because the worker mutex is held by THIS call and
+   sending GCI from two processes is what it exists to prevent. So the cancel is acted on here,
+   inside the process that owns the mutex, and never by the one that asked for it.
+   Cancellation is checked FIRST: a call that has been both cancelled and has outrun its deadline is
+   more usefully reported as the thing the client asked for.
+   Each wait sleeps at most #workerWaitSeconds, which bounds how often both are re-checked and not how
+   long a call may take: the wait answers the moment the worker does, because it is waiting on the
+   session's socket. So a call ends within one wait of the deadline or the cancel rather than exactly
+   at it -- and the price of that second is keeping both checks somewhere a reader can find them."
   | deadline |
   deadline := self callDeadline.
   [worker isCallInProgress] whileTrue: [
     worker waitForResultForSeconds: self workerWaitSeconds otherwise: [nil].
+    (worker isCallInProgress and: [cancelRequested == true])
+      ifTrue: [^self endCallBecause: #cancelled].
     (worker isCallInProgress and: [deadline notNil and: [System timeGmt >= deadline]])
-      ifTrue: [^self endOverrunningCall]].
+      ifTrue: [^self endCallBecause: #timeout]].
   ^self
 %
 category: 'private'
@@ -204,8 +214,11 @@ close
 %
 category: 'private'
 method: McpSession
-endOverrunningCall
-  "End a call that has outrun this session's deadline, and raise so the client is told.
+endCallBecause: aReasonSymbol
+  "End the in-flight call and raise so the client is told, for the reason named: #timeout where it
+   outran this session's deadline, #cancelled where the client said it no longer wants it. The
+   escalation is IDENTICAL for both, and that is the point -- what differs is only who decided, so a
+   cancellation needed no new mechanism, only a new trigger.
    Escalates, because the measures differ in what they cost. A SOFT break ends an ordinary runaway:
    it is taken by a Smalltalk loop between sends and by a blocked #wait alike (both verified on
    3.7.5), and the worker is fully usable straight afterwards -- so the client loses its request and
@@ -218,10 +231,10 @@ endOverrunningCall
    A break reaches the pending wait as an error (`a Break occurred`, error 6003), as does a worker
    that failed in the same instant. Neither is worth telling apart: both mean the call is over, and
    the client is owed the same answer either way."
-  (self breakWorker: [worker softBreak]) ifTrue: [^self signalCallTimeout].
-  (self breakWorker: [worker hardBreak]) ifTrue: [^self signalCallTimeout].
+  (self breakWorker: [worker softBreak]) ifTrue: [^self signalCallEnded: aReasonSymbol].
+  (self breakWorker: [worker hardBreak]) ifTrue: [^self signalCallEnded: aReasonSymbol].
   self abandonWorker.
-  ^self signalCallTimeout
+  ^self signalCallEnded: aReasonSymbol
 %
 category: 'liveness'
 method: McpSession
@@ -254,6 +267,13 @@ forward: aRawJsonString
 category: 'requests'
 method: McpSession
 forward: aRawJsonString lifetimeBounds: anArrayOrNil
+  "Forward without naming the request -- the direct form, for callers with no id to match a
+   cancellation against (the tests, and any embedder driving a session itself)."
+  ^self forward: aRawJsonString lifetimeBounds: anArrayOrNil requestId: nil
+%
+category: 'routing'
+method: McpSession
+forward: aRawJsonString lifetimeBounds: anArrayOrNil requestId: anIdOrNil
   "Run a JSON-RPC request in this client's worker gem (an isolated session) and answer the JSON
    response string ('' for a notification). Runs WITHOUT stalling the front-end gem -- see
    #runWorker:, which is what keeps one client's long tool call from freezing every other GsProcess
@@ -263,9 +283,18 @@ forward: aRawJsonString lifetimeBounds: anArrayOrNil
    carried in on the request rather than asked for by the worker, which cannot see the front end's
    configuration and must not hold a stale copy of it. Values rather than a sentence, because the
    deadline in it is an instant the worker counts down from when it ANSWERS -- see that method. The
-   worker uses them only when it has uncommitted work to warn about."
+   worker uses them only when it has uncommitted work to warn about.
+
+   anIdOrNil is the JSON-RPC id this request arrived with, remembered for exactly as long as the call
+   runs so that a notifications/cancelled naming it can be matched to it (#requestCancel:). Cleared
+   in an ensure: along with any cancellation that arrived: a flag outliving its call would end the
+   NEXT one, which is the whole hazard in letting another GsProcess set it. Cleared on the way IN as
+   well, since a cancel can arrive in the instant between a call finishing and this clearing it."
   self touch.
-  ^self runWorker: (self workerExpressionFor: aRawJsonString lifetimeBounds: anArrayOrNil)
+  ^[inFlightRequestId := anIdOrNil.
+    cancelRequested := false.
+    self runWorker: (self workerExpressionFor: aRawJsonString lifetimeBounds: anArrayOrNil)]
+      ensure: [inFlightRequestId := nil. cancelRequested := false]
 %
 category: 'accessing'
 method: McpSession
@@ -503,6 +532,26 @@ renewExpiryTo: aSecondOrNil
   expiresAtSeconds := aSecondOrNil.
   ^true
 %
+category: 'routing'
+method: McpSession
+requestCancel: anId
+  "The client has asked, by a notifications/cancelled, that the request numbered anId be stopped.
+   Answers whether it named the call actually in flight.
+   Sets a flag and NOTHING else, deliberately. This runs in the GsProcess serving the cancellation's
+   own POST, while a different GsProcess is inside #runWorker: holding the worker mutex with a GCI
+   call in progress; sending a break from here would be a second process driving one session, which
+   is exactly what that mutex exists to prevent. #awaitWorkerResult picks the flag up on its next
+   wait -- within #workerWaitSeconds -- and does the ending from the process that owns the mutex.
+   A cancel naming some other id is ignored rather than refused: the spec asks receivers to ignore a
+   cancellation whose request is unknown or already finished, and by the time one arrives the call it
+   names has very often just ended. Ignoring is also what makes the id check load-bearing -- without
+   it, a late cancel for a finished request would end whatever call happened to be running instead."
+  anId isNil ifTrue: [^false].
+  inFlightRequestId isNil ifTrue: [^false].
+  anId = inFlightRequestId ifFalse: [^false].
+  cancelRequested := true.
+  ^true
+%
 category: 'session lifetime'
 method: McpSession
 requestTimeoutSeconds
@@ -567,16 +616,21 @@ serverVersion: aStringOrNil
 %
 category: 'private'
 method: McpSession
-signalCallTimeout
-  "Raise the error a client is answered with for a call this session ended. The kind is #timeout,
-   the same machine-readable classification a worker-raised error carries (McpError), so a client
-   branches on the kind wherever the error was produced.
-   The message says which of the two things happened, because they are not the same news: an
+signalCallEnded: aReasonSymbol
+  "Raise the error a client is answered with for a call this session ended. The kind is the reason
+   itself -- #timeout or #cancelled -- and it is the same machine-readable classification a
+   worker-raised error carries (McpError), so a client branches on the kind wherever the error was
+   produced.
+   The message says which of the two ENDINGS happened, because they are not the same news: an
    interrupted call leaves the session and its uncommitted work intact, while a stopped gem takes
    both with it. It also says what an interrupted call does NOT guarantee -- it was cut partway, so
-   whatever it had already done in that gem's view is still there, uncommitted."
-  ^McpError signalKind: #timeout message: 'The request exceeded this server''s '
-    , requestTimeoutSeconds printString , '-second request limit and was ended. '
+   whatever it had already done in that gem's view is still there, uncommitted. That last sentence
+   matters more for a cancellation than for a deadline: a user who pressed a key to stop something
+   may well assume it did not happen, and it half did."
+  ^McpError signalKind: aReasonSymbol message: (aReasonSymbol == #cancelled
+      ifTrue: ['The client cancelled this request, and it was ended. ']
+      ifFalse: ['The request exceeded this server''s ' , requestTimeoutSeconds printString
+        , '-second request limit and was ended. '])
     , (workerAbandoned
         ifTrue: ['Its worker gem could not be interrupted and has been stopped, so this session is '
           , 'finished and its uncommitted work is gone: call initialize again to continue.']
