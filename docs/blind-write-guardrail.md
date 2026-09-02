@@ -250,10 +250,22 @@ abort, or the refresh — then carries one more `[session]` line, once:
 [session] The view moved: 2 of 7 earlier reads are stale and must be re-read before writing to them: Foo>>bar:, Baz:shape.
 ```
 
-Ten names at most, then *and N more*. The line is `McpDispatcher>>staleReadNote`, appended after the
-transaction-state line and consuming the keys as it reports them, so it appears on exactly one
-result. The count is the point: it tells the client the other five reads still stand, so it re-reads
-two subjects instead of all seven or — worse — discovers each stale one as a refusal.
+The line is `McpDispatcher>>staleReadNote`, appended after the transaction-state line and consuming
+the keys as it reports them, so it appears on exactly one result. The count is the point: it tells
+the client the other five reads still stand, so it re-reads two subjects instead of all seven or —
+worse — discovers each stale one as a refusal. The names are summarised by class rather than listed
+(`McpServer class>>staleReadSummaryFor:`), so the line stays one line whatever was browsed: up to
+three methods of a class are named in full (`Foo>>bar:, Foo class>>baz:`), more are counted
+(`5 methods from Foo`), the class's definition and comment appear as `Foo (definition)` and
+`Foo (comment)`, a dictionary as `UserGlobals (dictionary)`; and past four classes the whole list
+gives way to `changes to 7 classes; re-check what you depend on before writing`.
+
+**The contract, from the client's side.** Anything read in this session stays licensed until a
+`[session]` note says it is stale. A refused mutation (`kind = blindWrite`) is the backstop for the
+subject a client never read or whose note it skimmed past, and it names the one call that licenses
+the write. Clients need not know the ledger exists: read what you are about to change, act on the
+notes, and the guardrail is invisible. The server promises nothing beyond those two signals — in
+particular it does not forecast what a move would or would not keep.
 
 Both old rules are subsumed. A proof that the content did not change is weaker than looking at it,
 and looking treats every grain alike — the widening stopped at method grain because a class's shape

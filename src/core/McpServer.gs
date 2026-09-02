@@ -335,6 +335,59 @@ shapeKeyFor: aClassName
    variable names. See commentKeyFor: for why the comment is a separate key."
   ^aClassName asString , ':shape'
 %
+category: 'guardrail keys'
+classmethod: McpServer
+staleReadSummaryFor: aCollectionOfKeys
+  "The stale keys summarised BY CLASS, for the one-time [session] line (McpDispatcher>>staleReadNote)
+   -- a shape a model can act on at a glance rather than a list it has to scan.
+
+   Keys are grouped by the class they belong to: method keys of both sides under the class, the shape
+   and comment keys as that class's definition and comment, a dictionary key as a group of its own
+   named after the dictionary. Per group, up to three method keys are named in full
+   ('Foo>>bar:, Foo class>>baz:'), more are counted ('5 methods from Foo'), and the definition and
+   comment are mentioned alongside as 'Foo (definition)' and 'Foo (comment)'. More than four groups,
+   and the whole list gives way to a count -- 'changes to 7 classes; re-check what you depend on
+   before writing' -- because at that point the honest advice is to re-check everything one depends
+   on, not to tick off names. Groups are sorted by name, so the same keys always render the same way."
+  | groups names parts |
+  groups := Dictionary new.
+  aCollectionOfKeys do: [:k | | key name group |
+    key := k asString.
+    name := nil.
+    (key size > 0 and: [(key at: 1) = $#])
+      ifTrue: [name := key copyFrom: 2 to: key size]
+      ifFalse: [
+        (self scopeOfMethodKey: key) ifNotNil: [:scope |
+          name := (scope size > 6 and: [(scope copyFrom: scope size - 5 to: scope size) = ' class'])
+            ifTrue: [scope copyFrom: 1 to: scope size - 6]
+            ifFalse: [scope]].
+        (key endsWith: ':shape') ifTrue: [name := key copyFrom: 1 to: key size - ':shape' size].
+        (key endsWith: ':comment') ifTrue: [name := key copyFrom: 1 to: key size - ':comment' size]].
+    name isNil ifTrue: [name := key].
+    group := groups at: name ifAbsent: [
+      groups at: name put: (Dictionary new
+        at: #methods put: OrderedCollection new;
+        at: #definition put: false; at: #comment put: false; at: #dictionary put: false;
+        yourself)].
+    (key size > 0 and: [(key at: 1) = $#]) ifTrue: [group at: #dictionary put: true] ifFalse: [
+      (key endsWith: ':shape') ifTrue: [group at: #definition put: true] ifFalse: [
+        (key endsWith: ':comment') ifTrue: [group at: #comment put: true] ifFalse: [
+          (group at: #methods) add: key]]]].
+  names := groups keys asSortedCollection asArray.
+  names size > 4 ifTrue: [
+    ^'changes to ' , names size printString , ' classes; re-check what you depend on before writing'].
+  parts := OrderedCollection new.
+  names do: [:name | | group methods |
+    group := groups at: name.
+    methods := (group at: #methods) asSortedCollection asArray.
+    methods size > 3
+      ifTrue: [parts add: methods size printString , ' methods from ' , name]
+      ifFalse: [methods do: [:m | parts add: m]].
+    (group at: #definition) ifTrue: [parts add: name , ' (definition)'].
+    (group at: #comment) ifTrue: [parts add: name , ' (comment)'].
+    (group at: #dictionary) ifTrue: [parts add: name , ' (dictionary)']].
+  ^parts inject: '' into: [:acc :part | acc isEmpty ifTrue: [part] ifFalse: [acc , ', ' , part]]
+%
 category: 'guardrail stamps'
 classmethod: McpServer
 stampOfContent: aStringOrNil

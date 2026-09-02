@@ -139,6 +139,17 @@ recompileInKernel: aSelectorString body: aBodyString
 %
 category: 'helpers'
 method: McpBlindWriteTest
+staleNoteForKeys: aCollectionOfKeys
+  "The [session] line the dispatcher produces when exactly aCollectionOfKeys have gone stale. The
+   keys name classes and dictionaries that do not exist, so they stamp as absent; a stamp planted as
+   'moved' then fails the re-check -- the only part of the machinery this needs, since what is under
+   test is the rendering."
+  aCollectionOfKeys do: [:k | self server readLedger at: k put: 'moved'].
+  self server revalidateReadLedger.
+  ^self dispatchStatusText
+%
+category: 'helpers'
+method: McpBlindWriteTest
 server
   "ONE server for the whole test, as a worker gem has one -- the ledgers live on it, so this is what
    makes a read through one toolset license a write through another."
@@ -558,7 +569,7 @@ testTheClassDefinitionReadLicensesARedefinition
       at: 'className' put: 'McpBwFixture';
       at: 'instVarNames' put: (Array with: 'x'); yourself)))
 %
-category: 'tests - re-validation'
+category: 'tests - stale note'
 method: McpBlindWriteTest
 testTheStaleNoteIsReportedOnceAndNamesTheReads
   "What the client is told, and how often. The result of the call that moved the view carries one
@@ -579,17 +590,53 @@ testTheStaleNoteIsReportedOnceAndNamesTheReads
   second := self dispatchStatusText.
   self deny: (self includes: 'The view moved' in: second) description: second
 %
-category: 'tests - re-validation'
+category: 'tests - stale note'
 method: McpBlindWriteTest
-testTheStaleNoteCapsTheList
-  "Ten names, then a count: a client that browsed a whole class does not get a paragraph."
+testTheStaleNoteCollapsesManyClasses
+  "More than four classes and the names give way to a count: at that point the honest advice is to
+   re-check everything one depends on, not to tick off a list."
   | text |
-  1 to: 12 do: [:i | self server noteRead: 'McpBwNoSuchClass>>m' , i printString].
-  self server readLedger keysDo: [:k | self server readLedger at: k put: 'moved'].
-  self server revalidateReadLedger.
-  text := self dispatchStatusText.
-  self assert: (self includes: '12 of 12 earlier reads are stale' in: text) description: text.
-  self assert: (self includes: ', and 2 more.' in: text) description: text
+  text := self staleNoteForKeys: #( 'McpBwGhost1>>one' 'McpBwGhost2>>one' 'McpBwGhost3>>one' 'McpBwGhost4>>one' 'McpBwGhost5:shape' ).
+  self assert: (self includes: '5 of 5 earlier reads are stale and must be re-read before writing to them: changes to 5 classes; re-check what you depend on before writing.' in: text)
+    description: text.
+  self deny: (self includes: 'McpBwGhost1' in: text)
+%
+category: 'tests - stale note'
+method: McpBlindWriteTest
+testTheStaleNoteCountsManyMethodsOfOneClass
+  "More than three methods of one class are counted, not named."
+  | text |
+  text := self staleNoteForKeys: #( 'McpBwGhost>>one' 'McpBwGhost>>two' 'McpBwGhost>>three' 'McpBwGhost>>four' 'McpBwGhost class>>five' ).
+  self assert: (self includes: 'before writing to them: 5 methods from McpBwGhost.' in: text) description: text.
+  self deny: (self includes: 'McpBwGhost>>one' in: text)
+%
+category: 'tests - stale note'
+method: McpBlindWriteTest
+testTheStaleNoteGroupsByClass
+  "Up to four groups are each rendered on their own terms, in name order: a class with a few methods,
+   a class with many, a dictionary."
+  | text |
+  text := self staleNoteForKeys: #( 'McpBwGhostB>>a' 'McpBwGhostB>>b' 'McpBwGhostB>>c' 'McpBwGhostB>>d' 'McpBwGhostA>>one' '#McpBwGhostDict' ).
+  self assert: (self includes: 'before writing to them: McpBwGhostA>>one, 4 methods from McpBwGhostB, McpBwGhostDict (dictionary).' in: text)
+    description: text
+%
+category: 'tests - stale note'
+method: McpBlindWriteTest
+testTheStaleNoteNamesAFewMethods
+  "Three or fewer methods of a class are named in full, both sides under the one class."
+  | text |
+  text := self staleNoteForKeys: #( 'McpBwGhost>>one' 'McpBwGhost class>>two' ).
+  self assert: (self includes: '2 of 2 earlier reads are stale and must be re-read before writing to them: McpBwGhost class>>two, McpBwGhost>>one.' in: text)
+    description: text
+%
+category: 'tests - stale note'
+method: McpBlindWriteTest
+testTheStaleNoteNamesTheDefinitionAndComment
+  "The shape and comment keys read as the class's definition and comment, alongside its methods."
+  | text |
+  text := self staleNoteForKeys: #( 'McpBwGhost:shape' 'McpBwGhost:comment' 'McpBwGhost>>one' ).
+  self assert: (self includes: 'before writing to them: McpBwGhost>>one, McpBwGhost (definition), McpBwGhost (comment).' in: text)
+    description: text
 %
 category: 'tests - method grain'
 method: McpBlindWriteTest

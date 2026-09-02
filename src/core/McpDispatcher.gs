@@ -328,24 +328,22 @@ staleReadNote
    there is no server to ask). Appended by transactionNote.
 
    CONSUMED AS IT IS REPORTED: the keys come from McpServer>>takeStaleReadKeys, so the line lands on
-   the result of the very call that moved the view -- abort, commit or refresh -- and never again. That is the point of naming them at all: the client can redo exactly those reads in
-   one pass, instead of meeting each as a blindWrite refusal later. The count puts the names in
-   proportion ('2 of 7 earlier reads'), which is what tells the client the other five still stand.
-   Ten names at most; a bigger list says how many more, and the refusals name the rest if it
-   comes to that."
-  | keys total shown |
+   the result of the very call that moved the view -- abort, commit or refresh -- and never again.
+   That is the point of naming them at all: the client can redo exactly those reads in one pass,
+   instead of meeting each as a blindWrite refusal later. The count puts the names in proportion
+   ('2 of 7 earlier reads'), which is what tells the client the other five still stand, and the names
+   are summarised by class rather than listed (McpServer class>>staleReadSummaryFor:), so the line
+   stays one line whatever was browsed."
+  | keys total |
   server isNil ifTrue: [^nil].
   keys := server takeStaleReadKeys.
   keys isEmpty ifTrue: [^nil].
   total := keys size + server readLedger size.
-  shown := keys copyFrom: 1 to: (keys size min: 10).
   ^'[session] The view moved: ' , keys size printString , ' of ' , total printString
     , ' earlier read' , (total = 1 ifTrue: [''] ifFalse: ['s'])
     , (keys size = 1 ifTrue: [' is'] ifFalse: [' are'])
     , ' stale and must be re-read before writing to them: '
-    , (shown inject: '' into: [:acc :k | acc isEmpty ifTrue: [k asString] ifFalse: [acc , ', ' , k asString]])
-    , (keys size > 10 ifTrue: [', and ' , (keys size - 10) printString , ' more'] ifFalse: [''])
-    , '.'
+    , (server class staleReadSummaryFor: keys) , '.'
 %
 category: 'responses'
 method: McpDispatcher
