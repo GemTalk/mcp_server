@@ -249,7 +249,17 @@ JSON
 )
 # count name fields that are string values (tool names), not nested 'name' properties
 n=$(printf '%s' "$r" | grep -o '"name":"' | wc -l | tr -d ' ')
-check "tools/list reports 31 tools (got $n)"  "31"                       "$n"
+# Compare against what the SERVER's toolsets declare, not a number written here. A literal has to be
+# edited every time a tool is added or a group is loaded -- it already read 31 while a --grail image
+# served 33 -- and editing it says nothing about whether the surface is right. Asking the server how
+# many tools its toolsets declare, and checking tools/list agrees, is a real assertion (everything
+# declared is registered, and nothing else is) and it cannot go stale.
+declared=$(post <<'JSON' | sed -n 's/.*"text":"\([0-9][0-9]*\)".*/\1/p'
+{"jsonrpc":"2.0","id":19,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"(McpServer newWithToolsetNames: McpServer installedDefaultToolsetNames) allToolNames size"}}}
+JSON
+)
+check "tools/list matches the toolsets' declared count (got $n, declared $declared)" \
+                                              "$declared"                "$n"
 
 # --- session/transaction ---
 for t in abort commit refresh; do

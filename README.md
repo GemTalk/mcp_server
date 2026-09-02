@@ -217,7 +217,7 @@ GET stream, per-request `_meta`, and a mandatory `server/discover`. It is not im
 supporting it will need a decision about how per-client worker-gem isolation survives a protocol
 with no session id to key it on.
 
-## Tools (31 base + 2 optional Grail)
+## Tools (31 base + 3 optional Grail)
 
 **Execution**
 
@@ -321,10 +321,45 @@ an image without Grail. Once loaded the toolset joins the default tool surface a
 | Tool | Arguments | Result |
 |------|-----------|--------|
 | `compile_python` | `code` | transpile Python source to Smalltalk via Grail (`ModuleAst`), return the generated source |
-| `eval_python` | `code` | evaluate Python source via Grail (`ModuleAst`), return the `printString` of the result |
+| `eval_python` | `code` | evaluate Python in this session's persistent namespace; returns anything printed, then the value's `repr`, or the Python traceback on failure |
+| `get_python_source` | `name` | source of a module, class or function named dotted (`gemdb.transaction`), read from the `.py` it was loaded from |
+
+> **`eval_python` is a REPL, not a series of one-shot evaluations.** Names bound by one call are
+> visible to the next — `counter = 41`, then `counter + 1` → `42` — because the toolset keeps one
+> module scope per worker gem, and a worker gem is one client. Before that, every call was a blank
+> slate *while imports persisted* (`sys.modules` is session-local), so the surface looked stateful
+> and was not.
+>
+> It reports three things rather than one, because they answer different questions: what the code
+> **printed** (discarding it meant `print(x)` answered `None` and the output was simply gone), the
+> **value** as Python's `repr` (not a Smalltalk `printString`, which shows an `OrderedCollection`
+> where the caller asked for a list), and on failure the **traceback** — Grail computes a full
+> multi-frame one with real line numbers, and reporting only `KeyError: 'missing'` threw away the
+> part that says where.
+>
+> **`get_python_source` exists because the image loses this.** A compiled `def`'s `__doc__` reads
+> `None` and `inspect.getsource` answers an *empty string* — not an error, the wrong answer quietly.
+> What is reliable is `__code__`: its `co_filename` / `co_firstlineno` are correct, and the `.py`
+> they name is on disk under the Grail checkout, so the tool reads it and recovers both the body and
+> the docstring. It needs to know where that checkout is — see the `grailDirectory` option below.
 
 > **Requirement:** these tools call Grail's `ModuleAst` directly with no capability check, so they
 > need an image with GemStone-Python installed.
+>
+> **Configuration — `grailDirectory`.** Grail's Python lives in the image, but its `.py` stdlib and
+> its test fixtures live on **disk** under the checkout. A worker gem cannot work out where: its own
+> working directory is the *stone's*, which holds no `src/python/stdlib`, so every `.py`-backed
+> import fails. Name the checkout with the toolset option:
+>
+> ```smalltalk
+> (McpRouter new
+>    toolsetOptions: (Dictionary new
+>      at: 'McpGrailToolset' put: (Dictionary new at: 'grailDirectory' put: '/opt/Grail'; yourself);
+>      yourself))
+>   forkOnPort: 8000
+> ```
+>
+> See **Toolset options** for the general mechanism.
 >
 > **Python errors are converted, not propagated.** Grail models its exceptions *outside* the
 > Smalltalk `Error` hierarchy (`NameError` is `Exception < BaseException < Exception <
@@ -760,6 +795,53 @@ it):
 ```smalltalk
 (McpRouter new workerClassName: 'AcmeDbServer'; toolsetNames: #('AcmeDbToolset')) forkOnPort: 8000
 ```
+
+### Toolset options
+
+Sooner or later your toolset needs something the core cannot know — where your data directory is,
+which host a subsystem talks to, which tenant this deployment serves. Adding an ivar to `McpRouter`
+per vendor does not scale and puts your domain knowledge in the core, so a toolset **declares what it
+can be configured with**, alongside what it provides and what is safe read-only:
+
+```smalltalk
+AcmeDbToolset class >> declaredOptionNames
+  ^#( 'dataDirectory' 'tenant' )
+```
+
+and reads them where it needs them:
+
+```smalltalk
+^self optionNamed: 'dataDirectory' ifAbsent: ['/var/acme']
+```
+
+An operator sets them on the router, keyed by toolset name:
+
+```smalltalk
+(McpRouter new
+   toolsetNames: #('AcmeDbToolset');
+   toolsetOptions: (Dictionary new
+     at: 'AcmeDbToolset' put: (Dictionary new
+       at: 'dataDirectory' put: '/srv/acme'; at: 'tenant' put: 'eu-1'; yourself);
+     yourself))
+  forkOnPort: 8000
+```
+
+Three things are worth knowing about how this behaves:
+
+* **`declaredOptionNames` is an allow-list, checked when the option is set.** An undeclared name is
+  refused there and then, in a message naming what your toolset *does* accept. That is the same
+  choice `additionalProperties: false` makes for tool arguments, for the same reason: a mistyped
+  setting that is silently ignored costs far more to find than one that refuses to start.
+  `validateWorkerConfig` catches the other half — options configured for a toolset that is not in
+  the surface — before the port is bound.
+* **Each toolset sees only its own options.** They are keyed by toolset name and handed out at build
+  time, so two toolsets can neither read nor collide with each other's configuration.
+* **Values must be JSON-safe**, because they travel to the worker gem as JSON in the fork string.
+  Every option is optional by construction, which is why `optionNamed:ifAbsent:` has no bare variant
+  — a handler reading one has to say what it does without it, at the point it reads it.
+
+`ifAbsent:` and an empty `declaredOptionNames` are the defaults, so a toolset that needs no
+configuration says nothing and behaves exactly as it did before options existed.
 
 ### Server identity
 

@@ -14,15 +14,21 @@ GsTestCase subclass: 'McpGrailToolsetTest'
 expectvalue /Class
 doit
 McpGrailToolsetTest comment: 
-'Tests for the optional Grail-powered python tools, which live in McpGrailToolset (eval_python /
-compile_python). Its own source group (src/grail/), loaded only into a Grail-equipped image
-(src/grail/load.gs, filed in by install.sh --grail); the core suites (McpToolTest, McpDispatcherTest,
-McpTransportTest, McpContractTest, McpExtensionTest) cover the Grail-free server.
+'Tests for the optional Grail-powered python tools, which live in McpGrailToolset (eval_python,
+compile_python, get_python_source). Its own source group (src/grail/), loaded only into a
+Grail-equipped image (src/grail/load.gs, filed in by install.sh --grail); the core suites (McpToolTest,
+McpDispatcherTest, McpTransportTest, McpContractTest, McpExtensionTest) cover the Grail-free server.
 
 Covers all three Python failure paths for real: an undefined name, a runtime error and a syntax error.
 The last two were once switched-off tripwires -- Grail used to take the gem down on them -- but as of
 2026-08-18 each raises a catchable Python exception, so McpGrailToolset converts them into an McpError
 kinded #pythonError and the dispatcher reports an ordinary isError result.
+
+TESTS THAT NEED A GRAIL CHECKOUT discover it (grailCheckoutOrNil) rather than assuming a path, and
+assert what is true WITHOUT one instead of skipping silently. That is not defensiveness: Grail''s .py
+stdlib lives on disk, install.sh commits no Python module, and this suite must be runnable on a
+freshly installed extent -- so "no checkout discoverable" is a legitimate state with its own correct
+behavior, and testEvalPythonReportsTheTraceback checks both sides of it.
 
 Also the coverage for a toolset that owns its handlers and is combined with others: the tools are
 exercised both directly on the toolset and through a server built with it alongside the core seven.'
@@ -47,6 +53,30 @@ dispatch: requestDict
 %
 category: 'helpers'
 method: McpGrailToolsetTest
+grailCheckoutOrNil
+  "The Grail checkout this image was installed from, discovered rather than configured, or nil.
+
+   Discovered from a committed canonical module's __file__ (readable without importing anything),
+   because no test can know where a checkout lives on the machine running it. nil is a legitimate
+   answer -- install.sh commits no Python module, so a freshly installed extent has an empty
+   GrailCanonicalModules -- which is why the tests that need a checkout say so and skip rather than
+   fail on a machine that simply has not imported anything yet."
+  | env mods |
+  env := System gemEnvironmentVariable: 'GRAIL_DIR'.
+  (env notNil and: [self looksLikeCheckout: env]) ifTrue: [^env].
+  mods := System myUserProfile objectNamed: #GrailCanonicalModules.
+  mods isNil ifTrue: [^nil].
+  mods do: [:m | | f idx |
+    f := [m @env1:__file__] on: Error, BaseException do: [:e | nil].
+    f ifNotNil: [
+      idx := f asString findString: '/src/python/stdlib' startingAt: 1.
+      idx > 1 ifTrue: [ | cand |
+        cand := f asString copyFrom: 1 to: idx - 1.
+        (self looksLikeCheckout: cand) ifTrue: [^cand]]]].
+  ^nil
+%
+category: 'helpers'
+method: McpGrailToolsetTest
 grailServer
   "A server whose surface is the core toolsets plus McpGrailToolset -- i.e. what
    installedDefaultToolsetNames answers on a Grail-equipped image."
@@ -58,6 +88,13 @@ method: McpGrailToolsetTest
 includesCS: aSubstring in: aString
   "Case-sensitive substring test (String>>includesString: is case-INsensitive)."
   ^(aString findString: aSubstring startingAt: 1) > 0
+%
+category: 'helpers'
+method: McpGrailToolsetTest
+looksLikeCheckout: aPath
+  "Does aPath hold Grail's bundled stdlib? existsOnServer: answers nil (not false) when the probe
+   itself errors, so compare == true."
+  ^(GsFile existsOnServer: aPath , '/src/python/stdlib') == true
 %
 category: 'helpers'
 method: McpGrailToolsetTest
@@ -100,8 +137,144 @@ testCompilePython
 category: 'tests'
 method: McpGrailToolsetTest
 testEvalPython
-  "Evaluate a Python expression and get the printString of the result."
-  self assert: (self mcp tool_eval_python: (self oneArg: 'code' value: '6 * 7')) equals: '42'
+  "Evaluate a Python expression and get its value back. With nothing printed the answer is just the
+   repr on one line, so the ordinary case stays as simple as it ever was."
+  self withFreshScopeDo: [
+    self assert: (self mcp tool_eval_python: (self oneArg: 'code' value: '6 * 7')) equals: '42']
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testEvalPythonCapturesWhatWasPrinted
+  "Printed output used to be DISCARDED: eval_python answered only the last value, so `print(x)`
+   answered 'None' and the thing the caller asked to see was gone -- and most real Python prints.
+   Both channels now come back, output first and the value after a '=> ' marker."
+  | out |
+  out := self withFreshScopeDo: [
+    self mcp tool_eval_python: (self oneArg: 'code' value: 'print("one")
+print("two")')].
+  self assert: (self includesCS: 'one' in: out).
+  self assert: (self includesCS: 'two' in: out).
+  self assert: (self includesCS: '=> None' in: out).
+  "output comes before the value, so a reader meets them in the order they happened"
+  self assert: (out findString: 'one' startingAt: 1) < (out findString: '=> ' startingAt: 1)
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testEvalPythonNamespacePersistsBetweenCalls
+  "The REPL property, and the reason this toolset holds a scope at all. Before it, every call was a
+   blank slate WHILE imports persisted (sys.modules is session-local), so the surface looked stateful
+   and was not -- a model would reasonably bind a name and then find it gone."
+  self withFreshScopeDo: [ | ts |
+    ts := self mcp.
+    ts tool_eval_python: (self oneArg: 'code' value: 'counter = 41').
+    self assert: (ts tool_eval_python: (self oneArg: 'code' value: 'counter + 1')) equals: '42'.
+    "a DIFFERENT toolset instance shares it: the namespace belongs to the session, not the object"
+    self assert: (self mcp tool_eval_python: (self oneArg: 'code' value: 'counter')) equals: '41']
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testEvalPythonRendersValuesAsPythonNotSmalltalk
+  "A Python surface must answer Python's rendering. printString showed a Smalltalk
+   OrderedCollection where the caller asked for a list -- correct about the image, wrong about the
+   question."
+  | out |
+  out := self withFreshScopeDo: [
+    self mcp tool_eval_python: (self oneArg: 'code' value: '[1, "two", None]')].
+  self assert: out equals: '[1, ''two'', None]'.
+  self deny: (self includesCS: 'OrderedCollection' in: out)
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testEvalPythonReportsTheTraceback
+  "Grail computes a full multi-frame traceback with real line numbers, and the tool used to throw all
+   of it away and report one line. The frames are the part that says WHERE, which is most of the
+   value of an error.
+
+   BOTH outcomes are asserted, because the traceback is not unconditional: formatting one runs Grail's
+   own `traceback` module, which is a .py under the checkout, so an unconfigured session cannot
+   produce one. That session must still get a usable error rather than a failure -- degrading to the
+   one-line message is the designed behavior, not an accident -- and a configured session must get
+   the frames. Which of the two runs here depends on the machine, so both are checked for real."
+  | checkout ts text |
+  checkout := self grailCheckoutOrNil.
+  ts := McpGrailToolset on: nil options: (checkout isNil
+    ifTrue: [nil]
+    ifFalse: [Dictionary new at: 'grailDirectory' put: checkout; yourself]).
+  text := self withFreshScopeDo: [
+    [ts tool_eval_python: (self oneArg: 'code' value:
+'def outer():
+    return inner()
+
+def inner():
+    d = {}
+    return d["missing"]
+
+outer()').
+      nil]
+      on: McpError do: [:ex | ex messageText]].
+  self assert: text notNil.
+  "either way it names the exception and its detail -- the floor below which this must not fall"
+  self assert: (self includesCS: 'KeyError' in: text).
+  self assert: (self includesCS: 'missing' in: text).
+  checkout isNil ifTrue: [^self].
+  "configured: the frames, and the line numbers of the source AS SENT -- an off-by-one here would
+   send a reader to the wrong line"
+  self assert: (self includesCS: 'Traceback (most recent call last)' in: text).
+  self assert: (self includesCS: 'in outer' in: text).
+  self assert: (self includesCS: 'in inner' in: text).
+  self assert: (self includesCS: 'line 8' in: text).   "the outer() call"
+  self assert: (self includesCS: 'line 2' in: text).   "return inner()"
+  self assert: (self includesCS: 'line 6' in: text)    "the failing subscript"
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testGetPythonSourceReadsTheDefinitionFromDisk
+  "The end-to-end path: locate a Python object through __code__ and read its source off disk.
+   Needs a Grail CHECKOUT, which no test can know the location of, so it is discovered
+   (grailCheckoutOrNil) and the test states what it skipped rather than failing on a machine that has
+   simply never imported a .py module -- install.sh commits none, so a fresh extent has nothing to
+   discover from.
+   gemdb.transaction is the subject because it is the worked example of what this tool is FOR: its
+   __doc__ in the image reads None (the compiled-def gap) and inspect.getsource answers an empty
+   string, so the docstring asserted here is reachable no other way."
+  | checkout out |
+  checkout := self grailCheckoutOrNil.
+  checkout isNil ifTrue: [^self assert: true].
+  out := (McpGrailToolset on: nil options:
+    (Dictionary new at: 'grailDirectory' put: checkout; yourself))
+      tool_get_python_source: (self oneArg: 'name' value: 'gemdb.transaction').
+  self assert: (self includesCS: 'def transaction(' in: out).
+  self assert: (self includesCS: 'A commit boundary' in: out).
+  "the header says where it came from, so a reader can go and look"
+  self assert: (self includesCS: 'gemdb' in: out).
+  "and it stops at the definition, rather than running on into the rest of the file"
+  self deny: (self includesCS: 'class _Transaction' in: out)
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testGetPythonSourceRefusesAnUnknownName
+  "An unresolvable name is #notFound with a message that says what it might mean -- a native
+   (Smalltalk-implemented) module genuinely has no .py to read, and that is a different situation
+   from a typo. Never an empty answer: inspect.getsource returning '' for a function it cannot reach
+   is precisely the silent-wrong-answer shape this toolset exists to avoid."
+  | result |
+  result := (self dispatch: (self toolCall: 'get_python_source'
+    args: (Dictionary new at: 'name' put: 'no_such_module_xyz.nope'; yourself))) at: 'result'.
+  self assert: (result at: 'isError').
+  self assert: (((result at: 'structuredContent') at: 'error') at: 'kind') equals: 'notFound'
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testGrailDirectoryIsADeclaredOption
+  "The toolset says how it may be configured, which is what lets the router refuse a typo. Grail's
+   .py stdlib and fixtures live on DISK, and a worker gem cannot work out where -- its own working
+   directory is the stone's."
+  self assert: (McpGrailToolset declaredOptionNames includes: 'grailDirectory').
+  self assert: ((McpGrailToolset on: nil options:
+    (Dictionary new at: 'grailDirectory' put: '/somewhere/Grail'; yourself))
+      optionNamed: 'grailDirectory' ifAbsent: [nil]) equals: '/somewhere/Grail'.
+  "unconfigured, the toolset still works -- it just leaves Grail to resolve a directory itself"
+  self assert: (McpGrailToolset new optionNamed: 'grailDirectory' ifAbsent: [nil]) isNil
 %
 category: 'tests'
 method: McpGrailToolsetTest
@@ -160,6 +333,42 @@ testPythonErrorMessageNamesTheClassOnce
 %
 category: 'tests'
 method: McpGrailToolsetTest
+testPythonSourceBlockEndsAtTheNextUnindentedLine
+  "The block rule, tested against a file this test writes -- so it needs no Grail checkout and no
+   import, and can state the boundary cases exactly. A definition runs through every indented AND
+   blank line and stops at the next line with content in column zero; trailing blanks are dropped so
+   a definition does not come back padded to the one after it."
+  | path f out |
+  path := '/tmp/mcp_grail_source_probe.py'.
+  f := GsFile openWriteOnServer: path.
+  self assert: f notNil.
+  f nextPutAll: 'import os
+
+def wanted(a):
+    """Doc."""
+    if a:
+        return 1
+
+    return 0
+
+def after():
+    pass
+'; close.
+  [ out := (McpGrailToolset new) sourceFrom: path startingAt: 3 label: 'wanted'.
+    self assert: (self includesCS: 'def wanted(a):' in: out).
+    self assert: (self includesCS: '"""Doc."""' in: out).
+    "the blank line INSIDE the definition is kept"
+    self assert: (self includesCS: 'return 0' in: out).
+    "...and the next definition is not swept in"
+    self deny: (self includesCS: 'def after' in: out).
+    "nor the line before it"
+    self deny: (self includesCS: 'import os' in: out).
+    "the header names the file and the line, so the answer is traceable"
+    self assert: (self includesCS: path , ':3' in: out) ]
+      ensure: [GsFile removeServerFile: path]
+%
+category: 'tests'
+method: McpGrailToolsetTest
 testToolsCallPythonPrintReturnsNone
   "Pins current Grail behavior: Python print() succeeds and yields None. It no longer raises
    the dead-stdout ImproperOperation (2364) it once did after the dispatcher's abort. A
@@ -170,9 +379,14 @@ testToolsCallPythonPrintReturnsNone
    failed whenever it ran in a dirty session, which made it a report on what the suite before it
    left behind rather than on what print() answers."
   | result |
-  result := (self dispatch: (self toolCall: 'eval_python' args: (Dictionary new at: 'code' put: 'print(6 * 7)'; yourself))) at: 'result'.
+  result := self withFreshScopeDo: [
+    (self dispatch: (self toolCall: 'eval_python' args: (Dictionary new at: 'code' put: 'print(6 * 7)'; yourself))) at: 'result'].
   self deny: (result at: 'isError').
-  self assert: (self withoutSessionNote: ((result at: 'content') first at: 'text')) equals: 'None'
+  "Both channels: what print WROTE, then the None it answered. The value alone was all this tool
+   used to report, which is why `print` looked like it did nothing."
+  self assert: (self withoutSessionNote: ((result at: 'content') first at: 'text'))
+    equals: '42
+=> None'
 %
 category: 'tests'
 method: McpGrailToolsetTest
@@ -217,22 +431,41 @@ testToolsCallWrapsPythonSyntaxErrorAsIsError
 %
 category: 'tests'
 method: McpGrailToolsetTest
-testToolsListHasPythonToolsAnd33
-  "Composition end to end: core toolsets plus McpGrailToolset registers 33 tools -- the core 31
-   plus eval_python and compile_python -- listed alphabetically."
-  | tools names |
+testToolsListHasPythonToolsAndAgreesWithTheToolsets
+  "Composition end to end: the core toolsets plus McpGrailToolset, listed alphabetically.
+   The COUNT is derived from what the toolsets declare rather than written here as a literal. A
+   literal has to be edited every time a tool is added -- which is a change to a number, not to an
+   assertion, and says nothing about whether the surface is right. Comparing tools/list against the
+   toolsets' own toolNames does say something: that everything declared is registered and nothing
+   else is."
+  | tools names declared |
   tools := ((self dispatch: (self request: 'tools/list' params: nil)) at: 'result') at: 'tools'.
   names := (tools collect: [:d | d at: 'name']) asArray.
-  self assert: names size equals: 33.
+  declared := self grailServer allToolNames.
+  self assert: names asSortedCollection asArray equals: declared asSortedCollection asArray.
   self assert: names equals: names asSortedCollection asArray.
   self assert: (names includes: 'eval_python').
-  self assert: (names includes: 'compile_python')
+  self assert: (names includes: 'compile_python').
+  self assert: (names includes: 'get_python_source')
 %
 category: 'helpers'
 method: McpGrailToolsetTest
 toolCall: toolName args: argsDict
   ^self request: 'tools/call' params:
     (Dictionary new at: 'name' put: toolName; at: 'arguments' put: argsDict; yourself)
+%
+category: 'helpers'
+method: McpGrailToolsetTest
+withFreshScopeDo: aBlock
+  "Run aBlock with an empty Python namespace, and leave the session's own alone afterwards. A test
+   about what persists BETWEEN calls must start from nothing, or it is reading what ran before it."
+  | saved |
+  saved := SessionTemps current at: #McpGrailScope otherwise: nil.
+  SessionTemps current removeKey: #McpGrailScope ifAbsent: [nil].
+  ^[aBlock value] ensure: [
+    saved isNil
+      ifTrue: [SessionTemps current removeKey: #McpGrailScope ifAbsent: [nil]]
+      ifFalse: [SessionTemps current at: #McpGrailScope put: saved]]
 %
 category: 'helpers'
 method: McpGrailToolsetTest
