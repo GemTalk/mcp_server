@@ -81,9 +81,8 @@ guarantee by construction.
 > **A mutating tool may not touch a method, class or dictionary that has not been read in the
 > current view window.**
 
-A *view window* opens whenever the view moves — at every commit, abort and refresh — and what
-survives into the new window is decided by whether the repository validated the session's write set
-on the way through.
+A *view window* opens whenever the view moves — at every commit, abort and refresh — and a read
+survives into the new window exactly when what it read is still there ([re-validation](#re-validation)).
 
 
 ## The ledgers
@@ -122,11 +121,11 @@ to one method per grain, so what counts as the content of each kind of subject i
 | `Foo>>bar:`, `Foo class>>bar:` | the installed method's source, as `sourceCodeAt:` answers it | `stampForMethodKey:` |
 | `Foo:shape` | the definition message, `Foo definition` | `stampForShapeKey:` |
 | `Foo:comment` | the class comment | `stampForCommentKey:` |
-| `#D` | the entries as `list_dictionary_entries` shows them — key and class/global, sorted | `stampForDictionaryKey:` |
+| `#D` | the entries as `list_dictionary_entries` shows them — each key and whether it binds a class or a global, sorted. The **values are not hashed**: that tool shows none of them, and `remove_dictionary`, the write this licenses, destroys the bindings rather than the objects | `stampForDictionaryKey:` |
 
 `requireRead:` never looks at a stamp; membership is the whole test, exactly as before. The stamp
-exists for one moment, the [re-validation](#re-validation) a view move performs, and a write records
-the stamp of the content *as written* — what the session now knows.
+exists for one moment, the [re-validation](#re-validation) every view move performs, and a write
+records the stamp of the content *as written* — what the session now knows.
 
 ### What registers a read
 
@@ -196,21 +195,25 @@ outright, including ones the client has never seen, so it must have seen all of 
 
 | event | view moves? | readLedger | writeLedger |
 |---|---|---|---|
-| successful commit | yes | `:= writeLedger`, plus the widening below | cleared |
+| successful commit | yes | re-validated by stamp (below) | cleared |
 | failed commit | **no** (V) | kept | kept |
 | abort | yes | re-validated by stamp (below) | cleared |
-| `refresh` returning `true` | yes | `:= writeLedger`, plus the widening | kept |
+| `refresh` returning `true` | yes | re-validated by stamp (below) | kept |
 | `refresh` returning `false` | yes (U) | re-validated by stamp (below) | cleared |
 
 **`writeLedger ⊆ readLedger` holds in every row.** It is worth stating as an invariant because it
 is the property the guardrail rests on: every write this session is holding was licensed by a read
 that is still good.
 
-**Successful commit and successful refresh are the same case.** Both mean the repository validated
-this session's write set and found no conflict — so for everything in `writeLedger`, no other
-session has committed a change to it since the view was taken, and the current view's version is
-therefore the version the client read. That proof covers the write set and nothing else, so every
-other read is dropped. It is the only thing either event proves, and it proves it equally.
+**Every move treats the reads the same way.** Commit, abort and `refresh` in either outcome all
+re-validate the whole read ledger by stamp — there is one transition for the reads, and the stone's
+verdict does not enter into it. What the verdict decides is the *write* ledger: a successful commit
+empties it (those changes are everyone's now), a `true` refresh keeps it (still pending, still
+licensed), an abort or a `false` refresh clears it (nothing pending can ever commit). This session's
+own writes survive the re-check without a special rule: their stamps were recorded as written, a
+successful commit means nobody else changed them, and a `true` refresh leaves the uncommitted text
+in place. So the invariant reads, precisely: **a key is licensed exactly when the current text is
+what this session read or wrote.**
 
 **A failed commit does not move the view** (V). The other session's work stays invisible, so every
 read in the window is still good and both ledgers are kept untouched. The transaction is doomed and
@@ -226,36 +229,22 @@ refresh, so a read of something this session wrote still matches its stamp and s
 the abort that is the only way out re-checks it again, finds the other session's version, and drops
 it then. Nothing can be committed in between, so nothing is at risk.
 
-### The widening
-
-On a successful validation the repository proved that no other session wrote the method
-dictionaries in this session's write set. Those dictionaries are per class **and per side**, so the
-proof reaches further than the write set itself: every *unwritten* method of a class this session
-did write is also unchanged.
-
-> If `writeLedger` holds any instance-side method of `Foo`, keep every instance-side method-grain
-> `readLedger` entry for `Foo`. Separately and identically for `Foo class`.
-
-So a client may read six methods of a class, change one, commit, and then change a second without
-re-reading — soundly, because the commit proved the whole class untouched.
-
-The widening stops at method grain. `Foo:shape` and `Foo:comment` live in different objects from the
-method dictionary, so validating the dictionary proves nothing about them; they survive a view move
-only by being in `writeLedger`.
-
 ### Re-validation
 
-An abort, and a refresh that answers `false`, move the view with the stone vouching for nothing on
-the way through. Until 2026-09-02 both simply cleared `readLedger`, on the argument that nothing this
-session saw was known to survive — which made an abort after browsing twenty methods cost twenty
-re-reads even when nobody else had committed a thing.
+Until 2026-09-02 the read ledger's fate at a view move was decided by rule. A successful commit or
+`true` refresh kept the write set plus *the widening* — the unwritten methods of any class this
+session had written, proven unchanged because the stone validates at the grain of a method
+dictionary, one per class per side — and dropped every other read unexamined. An abort or a `false`
+refresh dropped everything, on the argument that nothing this session saw was *known* to survive.
+That made an abort after browsing twenty methods cost twenty re-reads even when nobody else had
+committed a thing, and a commit cost the re-read of every class but the ones written.
 
 A read is a statement about content — *`Foo>>bar:` says this* — and moving the view does not make
-it false; another session having committed a different `Foo>>bar:` does. So instead of forgetting
-the reads, `McpServer>>revalidateReadLedger` recomputes each key's stamp in the new view and compares.
-Equal, and the read is as true now as when it was made: it keeps its licence. Different, and it is
-dropped and remembered in `staleReadKeys`. The result of the call that moved the view — the abort,
-or the refused refresh — then carries one more `[session]` line, once:
+it false; another session having committed a different `Foo>>bar:` does. So at every move,
+`McpServer>>revalidateReadLedger` recomputes each key's stamp in the new view and compares. Equal,
+and the read is as true now as when it was made: it keeps its licence. Different, and it is dropped
+and remembered in `staleReadKeys`. The result of the call that moved the view — the commit, the
+abort, or the refresh — then carries one more `[session]` line, once:
 
 ```
 [session] The view moved: 2 of 7 earlier reads are stale and must be re-read before writing to them: Foo>>bar:, Baz:shape.
@@ -266,6 +255,10 @@ transaction-state line and consuming the keys as it reports them, so it appears 
 result. The count is the point: it tells the client the other five reads still stand, so it re-reads
 two subjects instead of all seven or — worse — discovers each stale one as a refusal.
 
+Both old rules are subsumed. A proof that the content did not change is weaker than looking at it,
+and looking treats every grain alike — the widening stopped at method grain because a class's shape
+and comment live outside its method dictionary, and that boundary no longer matters.
+
 Three consequences worth knowing:
 
 - **A byte-identical recompile by another session leaves the read good.** The stamp is of the text,
@@ -275,11 +268,17 @@ Three consequences worth knowing:
   recorded the stamp of the content as written; the abort restored the previous content; the stamp
   no longer matches. The client's last knowledge of that method is a version that no longer exists,
   and it is told so.
-- **Successful commit and refresh `true` are unchanged.** They keep the write set plus the widening
-  and drop everything else, and what they drop is *not* reported as stale — nothing says its content
-  changed, only that the stone did not vouch for it. Those reads could be re-validated by stamp the
-  same way; they are not yet, so a commit still costs the re-read of everything outside the classes
-  this session wrote.
+- **A `false` refresh leaves this session's own uncommitted writes in place** (measured), so a read
+  of something this session wrote still matches and survives the refresh; the abort that is the only
+  way out re-checks it again, finds the other session's version, and drops it then. Nothing can be
+  committed in between, so nothing is at risk.
+
+**Cost.** Re-validation is one `sourceCodeAt:` (or `definition`, `comment`, or entry list) and one
+SHA-256 per ledger entry per view move — tens of microseconds each, so a ledger of a few hundred
+reads costs milliseconds against a commit that costs more. If a session's ledger ever grows to where
+this shows, the fallback is a lazy check in `requireRead:` — re-stamp the one key being written,
+against a recorded view generation — at the price of the one-time note, which can only be produced
+by checking everything.
 
 
 ## Where it is enforced
@@ -290,9 +289,10 @@ the refresh rules above make `writeLedger ⊆ readLedger` true by construction, 
 re-check could never fire.
 
 `writeLedger` is written **on the branch that actually performed the write**, never on entry to the
-tool. This is load-bearing rather than fastidious, because `readLedger := writeLedger` turns every
-ledger entry into a licence at the next commit: an entry recorded for something that was never
-written would manufacture a licence the repository never validated. Re-compiling byte-identical
+tool. This is load-bearing rather than fastidious: a write ledger entry is also a read ledger entry,
+so an entry recorded for something that was never written would license a change to it on the
+strength of nothing shown to the client, and `conflictingSubjects` decodes the stone's conflict
+report through the write ledger, so a phantom entry could misname a conflict. Re-compiling byte-identical
 method source does dirty the session and does install a new method object (P, R), so
 `compile_method` always records. Re-evaluating an identical *class definition* is a true no-op —
 same class object, `needsCommit` still false (S) — so that branch must not.
@@ -334,7 +334,9 @@ from the source goes with it.
    mechanism that would close this — the `StrongReadSet`, an ordinary-user-writable hidden set
    whose members fail a commit when another session has changed them — but using it means arming
    the repository's conflict check with every class a session browses, which makes a long-browsing
-   session progressively unable to commit. That trade was declined; this is the cost.
+   session progressively unable to commit. That trade was declined; this is the cost. Re-validation
+   softens it: the commit's own result names `Foo>>a` as stale, so the client learns of it — but
+   after the write, not instead of it.
 2. **`execute_code` bypasses everything**, including by committing on its own.
 3. **The grains differ.** The guardrail is per method; the repository's conflicts are per class. A
    commit can still be refused over a method the client never touched.

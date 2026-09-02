@@ -328,8 +328,7 @@ staleReadNote
    there is no server to ask). Appended by transactionNote.
 
    CONSUMED AS IT IS REPORTED: the keys come from McpServer>>takeStaleReadKeys, so the line lands on
-   the result of the very call that moved the view -- abort, or a refresh that answered false -- and
-   never again. That is the point of naming them at all: the client can redo exactly those reads in
+   the result of the very call that moved the view -- abort, commit or refresh -- and never again. That is the point of naming them at all: the client can redo exactly those reads in
    one pass, instead of meeting each as a blindWrite refusal later. The count puts the names in
    proportion ('2 of 7 earlier reads'), which is what tells the client the other five still stand.
    Ten names at most; a bigger list says how many more, and the refusals name the rest if it
@@ -406,8 +405,8 @@ transactionNote
    subsumes pending changes, since nothing can be committed out of one either.
 
    One addition since 2026-09-02, kept as a SECOND line rather than a fourth state: on the result of
-   a call that moved the view without the stone vouching for the reads (abort, a refresh answering
-   false), the reads the move invalidated are named once (staleReadNote). It is a different subject
+   a call that moved the view (abort, commit, refresh), the reads the move invalidated are named once
+   (staleReadNote). It is a different subject
    from the transaction's state -- what to RE-READ, not what to commit or abort -- it can coincide
    with any of the three states above, and it appears exactly once, so it is appended rather than
    ranked."

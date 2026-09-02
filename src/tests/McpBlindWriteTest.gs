@@ -34,9 +34,9 @@ The transition tests drive McpServer''s ledger protocol directly rather than thr
 because what they are pinning is the RULE -- what survives a view move and why -- and driving it
 directly says so in one line instead of staging a transaction to imply it.
 
-THE STAMPS. Since 2026-09-02 a read is recorded with a digest of what was read, and a view move the
-stone did not validate across (abort, a refresh answering false) RE-CHECKS each read against the new
-view instead of forgetting it. The tests of that here stand in for the other session with the kernel
+THE STAMPS. Since 2026-09-02 a read is recorded with a digest of what was read, and EVERY view move
+-- abort, commit, refresh either way -- RE-CHECKS each read against the new view instead of deciding
+its fate by rule. The tests of that here stand in for the other session with the kernel
 itself -- recompiling a fixture method past every tool and ledger, in this gem, uncommitted -- because
 the rule under test is ''the content moved'', and where the new content came from is not part of it.
 McpConcurrentEditTest stages the same thing with a genuine second gem and a genuine abort.'
@@ -157,6 +157,54 @@ tearDown
   UserGlobals removeKey: #McpBwProbeGlobal ifAbsent: [nil].
   System commitTransaction
 %
+category: 'tests - re-validation'
+method: McpBlindWriteTest
+testACommitDropsAReadThatChangedUnderneath
+  "Read alpha and beta; alpha's content moves (the kernel standing in for another session's commit);
+   commit. Alpha's read is dropped and named, beta's stays, and a write to alpha is refused."
+  | alpha |
+  self fixtureClass.
+  self readMethod: 'alpha'. self readMethod: 'beta'.
+  self recompileInKernel: 'alpha' body: '^#changed'.
+  System commitTransaction.
+  self server noteCommitted.
+  alpha := McpServer methodKeyFor: 'McpBwFixture' selector: 'alpha' meta: false.
+  self deny: (self server hasRead: alpha).
+  self assert: (self server hasRead: 'McpBwFixture>>beta').
+  self assert: self server staleReadKeys equals: (Array with: alpha).
+  self assertBlindWrite: [self writeMethod: 'alpha' body: '^99'] about: 'McpBwFixture>>alpha'
+%
+category: 'tests - re-validation'
+method: McpBlindWriteTest
+testACommitKeepsEveryUnchangedGrain
+  "There is no per-grain rule at a commit any more (the widening stopped at method grain): shape,
+   comment and methods all survive on the same terms -- the content is what it was when read or
+   written."
+  self fixtureClass.
+  self browsingTools tool_describe_class: (Dictionary new at: 'className' put: 'McpBwFixture'; yourself).
+  self readMethod: 'alpha'. self readMethod: 'beta'.
+  self writeMethod: 'beta' body: '^99'.
+  System commitTransaction.
+  self server noteCommitted.
+  #( 'McpBwFixture:shape' 'McpBwFixture:comment' 'McpBwFixture>>alpha' 'McpBwFixture>>beta' ) do: [:k |
+    self assert: (self server hasRead: k) description: k , ' was dropped by a commit that changed nothing about it'].
+  self assert: self server staleReadKeys isEmpty
+%
+category: 'tests - re-validation'
+method: McpBlindWriteTest
+testACommitKeepsThisSessionsOwnWrites
+  "Having written something and committed it, this session knows its content better than a read
+   would: the stamp was recorded as written and the commit proved nobody else changed it, so the
+   next change needs no re-read."
+  self fixtureClass.
+  self readMethod: 'alpha'.
+  self writeMethod: 'alpha' body: '^99'.
+  System commitTransaction.
+  self server noteCommitted.
+  self assert: (self server hasRead: 'McpBwFixture>>alpha').
+  self assert: self server writeLedger isEmpty.
+  self assert: (self includes: 'Compiled' in: (self writeMethod: 'alpha' body: '^100'))
+%
 category: 'tests - view moves'
 method: McpBlindWriteTest
 testAbortClearsTheWritesAndReChecksTheReads
@@ -237,25 +285,33 @@ testAnAbortedWriteNeedsAFreshRead
 %
 category: 'tests - view moves'
 method: McpBlindWriteTest
-testASuccessfulCommitKeepsWhatItValidated
-  "A successful commit proves the write set was unconflicted, and that is ALL it proves: what was
-   written survives, and an unrelated read does not."
-  self server noteRead: 'Unrelated>>x'; noteWrite: 'A>>y'.
+testASuccessfulCommitReChecksTheReads
+  "A successful commit moves the view, and the reads get the same re-check every move gives them:
+   what this session read and nobody changed stays, what it wrote stays -- the stamp was recorded as
+   written, and a successful commit means nobody else touched it -- and the write ledger empties,
+   because those changes are now everyone's."
+  self fixtureClass.
+  self readMethod: 'alpha'. self readMethod: 'beta'.
+  self writeMethod: 'beta' body: '^99'.
+  System commitTransaction.
   self server noteCommitted.
-  self assert: (self server hasRead: 'A>>y').
-  self deny: (self server hasRead: 'Unrelated>>x').
-  self assert: self server writeLedger isEmpty
+  self assert: (self server hasRead: 'McpBwFixture>>alpha').
+  self assert: (self server hasRead: 'McpBwFixture>>beta').
+  self assert: self server writeLedger isEmpty.
+  self assert: self server staleReadKeys isEmpty
 %
 category: 'tests - view moves'
 method: McpBlindWriteTest
 testASuccessfulRefreshKeepsTheWritesPending
-  "Same proof as a commit, and so the same read transition -- but the writes are still uncommitted,
-   so they stay in the write ledger."
-  self server noteRead: 'Unrelated>>x'; noteWrite: 'A>>y'.
+  "Same re-check as a commit -- but the writes are still uncommitted, so they stay in the write
+   ledger, and they pass the re-check because the uncommitted text is still in place."
+  self fixtureClass.
+  self readMethod: 'alpha'. self readMethod: 'beta'.
+  self writeMethod: 'beta' body: '^99'.
   self server noteRefreshed: true.
-  self assert: (self server hasRead: 'A>>y').
-  self deny: (self server hasRead: 'Unrelated>>x').
-  self assert: (self server writeLedger includes: 'A>>y')
+  self assert: (self server hasRead: 'McpBwFixture>>alpha').
+  self assert: (self server hasRead: 'McpBwFixture>>beta').
+  self assert: (self server writeLedger includes: 'McpBwFixture>>beta')
 %
 category: 'tests - class grain'
 method: McpBlindWriteTest
@@ -551,47 +607,20 @@ testTheTwoSidesAreSeparate
         yourself)]
     about: 'McpBwFixture class>>gamma'
 %
-category: 'tests - widening'
+category: 'tests - re-validation'
 method: McpBlindWriteTest
-testTheWideningDoesNotCrossSides
-  "Instance and class side have separate method dictionaries, so validating one proves nothing
-   about the other."
-  self server noteRead: 'A class>>other'; noteWrite: 'A>>y'.
-  self server noteCommitted.
-  self deny: (self server hasRead: 'A class>>other')
-%
-category: 'tests - widening'
-method: McpBlindWriteTest
-testTheWideningDoesNotReachShapeOrComment
-  "A class's shape and comment live in different objects from its method dictionary, so validating
-   the dictionary says nothing about them."
-  self server noteRead: 'A:shape'; noteRead: 'A:comment'; noteWrite: 'A>>y'.
-  self server noteCommitted.
-  self deny: (self server hasRead: 'A:shape').
-  self deny: (self server hasRead: 'A:comment')
-%
-category: 'tests - widening'
-method: McpBlindWriteTest
-testTheWideningKeepsUnwrittenMethodsOfAWrittenClass
-  "The stone validates at the grain of a method dictionary -- one per class per side -- so a
-   successful commit proves an UNWRITTEN method of a class this session did write is also unchanged.
-   That is what lets a client read several methods of a class, change one, commit, and then change
-   another without re-reading."
-  self server noteRead: 'A>>x'; noteWrite: 'A>>y'.
-  self server noteCommitted.
-  self assert: (self server hasRead: 'A>>x')
-%
-category: 'tests - widening'
-method: McpBlindWriteTest
-testTheWideningSurvivesIntoARealWrite
-  "The widening through the real tools, not just the ledger protocol: read two methods, change one,
-   commit, and the other is still licensed."
+testTrueRefreshReChecksTheReadsLikeACommit
+  "A refresh answering true is the same move for the reads as a commit: alpha's content moved
+   underneath (the kernel standing in for another session), beta's did not."
+  | alpha |
   self fixtureClass.
-  self readMethod: 'alpha'.
-  self readMethod: 'beta'.
-  self writeMethod: 'alpha' body: '^99'.
-  self server noteCommitted.
-  self assert: (self includes: 'Compiled' in: (self writeMethod: 'beta' body: '^98'))
+  self readMethod: 'alpha'. self readMethod: 'beta'.
+  self recompileInKernel: 'alpha' body: '^#changed'.
+  self server noteRefreshed: true.
+  alpha := McpServer methodKeyFor: 'McpBwFixture' selector: 'alpha' meta: false.
+  self deny: (self server hasRead: alpha).
+  self assert: (self server hasRead: 'McpBwFixture>>beta').
+  self assert: self server staleReadKeys equals: (Array with: alpha)
 %
 category: 'tests - method grain'
 method: McpBlindWriteTest

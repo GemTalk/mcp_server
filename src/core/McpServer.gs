@@ -228,9 +228,9 @@ category: 'guardrail keys'
 classmethod: McpServer
 methodKeyFor: aClassName selector: aSelector meta: aBoolean
   "The readLedger key for one method. The class-side form embeds ' class' before the '>>', so the key
-   also names the SIDE -- which scopeOfMethodKey: reads back, and which the widening in
-   noteViewValidated depends on, because instance and class side have separate method dictionaries
-   and so are validated separately by the stone."
+   also names the SIDE -- which scopeOfMethodKey: reads back for conflictingSubjects, because
+   instance and class side have separate method dictionaries and so conflict separately in the
+   stone."
   ^aClassName asString , (aBoolean == true ifTrue: [' class>>'] ifFalse: ['>>']) , aSelector asString
 %
 category: 'instance creation'
@@ -509,7 +509,7 @@ method: McpServer
 hasRead: aKey
   "Whether aKey is in the read ledger -- the whole test requireRead:... makes. The stamp stored
    against it is not consulted here: a key is present exactly as long as its read still holds,
-   because every view move re-checks or drops it (revalidateReadLedger, noteViewValidated)."
+   because every view move re-checks or drops it (revalidateReadLedger)."
   ^self readLedger includesKey: aKey
 %
 category: 'initialization'
@@ -609,10 +609,15 @@ lifetimeNote
 category: 'blind-write guardrail'
 method: McpServer
 noteAborted
-  "An abort took a new view AND discarded every uncommitted change. Nothing this session WROTE
-   survives; what it READ is re-checked against the new view rather than forgotten -- see
-   noteViewMovedWithoutProof."
-  ^self noteViewMovedWithoutProof
+  "An abort took a new view AND discarded every uncommitted change. No pending write is licensed any
+   more, so the write ledger empties -- which also keeps writeLedger subseteq readLedger
+   unconditional. The reads are re-checked against the new view rather than forgotten
+   (revalidateReadLedger): a write this session had made and just discarded fails that check, since
+   its stamp is of the text as written and the abort restored the old text, so it must be re-read
+   before it is retried. Until 2026-09-02 both ledgers were cleared here, so an abort after browsing
+   twenty methods cost twenty re-reads even when nobody else had committed anything."
+  self revalidateReadLedger.
+  writeLedger := Set new
 %
 category: 'blind-write guardrail'
 method: McpServer
@@ -627,10 +632,12 @@ noteCommitFailed
 category: 'blind-write guardrail'
 method: McpServer
 noteCommitted
-  "A commit succeeded: the stone validated this session's write set, which is the whole of what a
-   successful commit proves. noteViewValidated keeps exactly what that proof covers; the write
-   ledger then empties, because those changes are now everyone's."
-  self noteViewValidated.
+  "A commit succeeded, and the view moved. The reads get the same re-check every view move gives
+   them (revalidateReadLedger); the write ledger then empties, because those changes are now
+   everyone's. This session's own writes need no special case to survive the re-check: their stamps
+   were recorded as written, and a successful commit means nobody else changed them, so the text in
+   the new view is the text this session wrote."
+  self revalidateReadLedger.
   writeLedger := Set new
 %
 category: 'blind-write guardrail'
@@ -655,78 +662,29 @@ category: 'blind-write guardrail'
 method: McpServer
 noteRefreshed: aBoolean
   "A refresh took a new view and KEPT this session's uncommitted work. aBoolean is what
-   System continueTransaction answered.
-   true means the stone validated the write set and found no conflict -- the same proof a successful
-   commit gives, so the same transition, except that the writes are still pending and so still
-   licensed.
+   System continueTransaction answered. Either way the view moved, so either way the reads are
+   re-checked against it (revalidateReadLedger); what the Boolean decides is the write ledger.
+   true means the stone validated the write set and found no conflict: the writes are still pending
+   and still licensed, so the write ledger is kept -- and each of them passes the re-check too, since
+   the uncommitted text is still in place and is what its stamp records.
    false is the one genuinely bad state in the system: the view moved ANYWAY (measured; see
    docs/blind-write-guardrail.md, U) and the pending writes cannot commit. No licensed writes remain,
-   so the write ledger is cleared -- which keeps writeLedger subseteq readLedger unconditional -- and
-   the reads are re-validated against the new view, the same transition an abort makes
-   (noteViewMovedWithoutProof). The caller captures the conflicting classes first, for the message
-   that tells the client to abort, because that message is decoded from the write ledger."
-  aBoolean ifTrue: [^self noteViewValidated].
-  ^self noteViewMovedWithoutProof
-%
-category: 'blind-write guardrail'
-method: McpServer
-noteViewValidated
-  "The transition shared by a successful commit and a refresh that answered true. Both mean the same
-   thing and prove the same thing: no other session has committed a change to anything in THIS
-   session's write set since the view was taken.
-
-   What survives is exactly what that proof covers. Every write ledger entry does, so all of them
-   stay. The proof also reaches further than the write set itself, because the stone validates at the
-   grain of a METHOD DICTIONARY -- one per class per side -- so an unwritten method of a class this
-   session did write is also proven unchanged, and its read survives too. That is the widening, and
-   it is what lets a client read six methods of a class, change one, commit, and then change a second
-   without re-reading.
-
-   It stops at method grain. A class's shape and its comment live in different objects from its
-   method dictionary, so validating the dictionary proves nothing about them; those keys survive only
-   by being in the write ledger. Everything else read in the old window is dropped.
-
-   Every kept entry is re-stamped from the new view. By the proof above its content has not moved,
-   so this changes nothing for a read; for a WRITE it records the committed text in place of the
-   text recorded at write time, which is the same text -- but the ledger is then true by inspection
-   rather than by argument, and a stamp is never carried across a view move unrechecked.
-
-   Dropped entries are NOT reported as stale: nothing here says their content changed, only that the
-   stone did not vouch for it. staleReadKeys is for reads a re-validation found changed
-   (revalidateReadLedger)."
-  | scopes kept |
-  scopes := Set new.
-  self writeLedger do: [:k |
-    (self class scopeOfMethodKey: k) ifNotNil: [:s | scopes add: s]].
-  kept := Dictionary new.
-  self readLedger keysDo: [:k |
-    (self class scopeOfMethodKey: k) ifNotNil: [:s |
-      (scopes includes: s) ifTrue: [kept at: k put: (self stampFor: k)]]].
-  self writeLedger do: [:k | kept at: k put: (self stampFor: k)].
-  readLedger := kept
-%
-category: 'blind-write guardrail'
-method: McpServer
-noteViewMovedWithoutProof
-  "The transition shared by an abort and a refresh that answered false: the view moved and the stone
-   validated nothing on the way through. No pending write is licensed any more -- an abort discarded
-   them, a false refresh left them doomed -- so the write ledger empties. The reads are
-   RE-VALIDATED rather than dropped (revalidateReadLedger): a view move does not by itself make a
-   read false, another session having changed the subject does, and the stamps tell the two apart.
-   Until 2026-09-02 both ledgers were cleared here, so an abort after browsing twenty methods cost
-   twenty re-reads even when nobody else had committed anything."
+   so the write ledger is cleared, which keeps writeLedger subseteq readLedger unconditional. The
+   caller captures the conflicting classes first, for the message that tells the client to abort,
+   because that message is decoded from the write ledger."
   self revalidateReadLedger.
-  writeLedger := Set new
+  aBoolean ifFalse: [writeLedger := Set new]
 %
 category: 'blind-write guardrail'
 method: McpServer
 noteWrite: aKey
   "Record that this session has CHANGED aKey and not yet committed it.
    Callers must send this on the branch that actually performed the write, never on entry to the
-   tool. noteCommitted turns every write ledger entry into a licence, so an entry recorded for
-   something that was never written would manufacture a licence the stone never validated -- which is
-   a live case, not a hypothetical: re-evaluating an identical class definition is a true no-op
-   (measured; see docs/blind-write-guardrail.md, S).
+   tool. A write ledger entry is also a read ledger entry, so an entry recorded for something that
+   was never written would license a change to it on the strength of nothing shown to the client,
+   and conflictingSubjects would decode the stone's conflict report through a scope this session
+   never touched -- which is a live case, not a hypothetical: re-evaluating an identical class
+   definition is a true no-op (measured; see docs/blind-write-guardrail.md, S).
 
    A WRITE IMPLIES A READ, so this records both. Having just written something is knowing its
    current content -- better than having read it -- so it licenses a follow-up change without a
@@ -819,8 +777,9 @@ resolveClass: aName
 category: 'blind-write guardrail'
 method: McpServer
 revalidateReadLedger
-  "Re-check every read against the CURRENT view and drop the ones that no longer hold. Called after
-   a view move the stone validated nothing across (noteViewMovedWithoutProof).
+  "Re-check every read against the CURRENT view and drop the ones that no longer hold. Called at
+   EVERY view move -- abort, commit, and refresh whichever way it answered (noteAborted,
+   noteCommitted, noteRefreshed:) -- and the only transition the read ledger has.
 
    A read is a statement about content -- 'Foo>>bar: says this' -- and moving the view does not make
    it false; another session having committed a different Foo>>bar: does. So each key's stamp is
@@ -830,9 +789,23 @@ revalidateReadLedger
    (McpDispatcher>>staleReadNote) -- so the client learns WHICH reads to redo in one pass, instead
    of discovering them one blindWrite refusal at a time. Answers the keys dropped this time, sorted.
 
-   What 'the same content' means per grain is stampFor:'s business. One consequence worth knowing:
-   a byte-identical recompile by another session leaves the stamp unchanged and the read licensed,
-   which is right -- what the client read IS what is there."
+   There is no special case for what this session wrote. A write's stamp is of the text as written;
+   after a successful commit nobody else changed it, and after a true refresh the uncommitted text
+   is still in place, so it matches. After an abort it does not, and that is right: the text the
+   client last knew is gone. So the invariant the guardrail rests on holds by construction -- a key
+   is licensed exactly when the current text is what this session read or wrote.
+
+   Until 2026-09-02 a commit or a true refresh kept only the write set plus 'the widening' (the
+   unwritten methods of a written class, proven unchanged at the stone's method-dictionary grain)
+   and dropped every other read unexamined; an abort or a false refresh dropped everything. Both
+   rules are subsumed: a proof that the content did not change is weaker than looking at it.
+
+   COST. One sourceCodeAt: (or definition, comment, or entry list) and one SHA-256 per ledger entry
+   per view move -- tens of microseconds each, so a ledger of a few hundred reads costs milliseconds
+   against a commit that costs more. If a session's ledger ever grows to where this shows, the
+   fallback is to check lazily in requireRead:, re-stamping the one key being written against a
+   recorded view generation, at the price of the one-time note, which can only come from checking
+   everything. What 'the same content' means per grain is stampFor:'s business."
   | kept stale |
   kept := Dictionary new.
   stale := SortedCollection new.

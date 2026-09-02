@@ -172,9 +172,59 @@ tearDown
   (up objectNamed: #McpCeFixture) ifNotNil: [:cls |
     (up dictionaryAndSymbolOf: cls) ifNotNil: [:arr | (arr at: 1) removeKey: (arr at: 2) ifAbsent: [nil]]].
   UserGlobals removeKey: #McpCeFixture ifAbsent: [nil].
+  UserGlobals removeKey: #McpCeProbe ifAbsent: [nil].
   System commitTransaction.
   other ifNotNil: [:s | [s close] on: Error do: [:e | nil]].
   other := nil
+%
+category: 'tests - re-validation'
+method: McpConcurrentEditTest
+testACommitDropsAReadTheOtherSessionChangedAndSaysSo
+  "Read alpha and beta; the other session commits a different alpha; this session commits something
+   of its own in another object (so the commit is real and succeeds -- the conflict grain is the
+   class, E). The commit's own result names alpha as stale; alpha may not be written, beta may; and
+   the next result says nothing more about it."
+  | text err |
+  self fixtureClass.
+  self readAlpha. self readBeta.
+  self otherSessionCompiles: 'alpha' body: '^#theirs'.
+  UserGlobals at: #McpCeProbe put: 'mine'.
+  text := self dispatchTool: 'commit'.
+  self assert: (self includes: 'Transaction committed' in: text) description: text.
+  self assert: (self includes: '[session] The view moved: 1 of 2 earlier reads is stale' in: text)
+    description: text.
+  self assert: (self includes: 'McpCeFixture>>alpha' in: text).
+  self deny: (self includes: 'McpCeFixture>>beta' in: text).
+  err := self refusalFrom: [self compileAlpha: '^#mine'].
+  self assert: err notNil description: 'a write over the other session''s alpha was allowed after a commit'.
+  self assert: err kind equals: #blindWrite.
+  self assert: (self includes: 'Compiled' in: (self compileBeta: '^#mine')).
+  self deny: (self includes: 'The view moved' in: (self dispatchTool: 'status'))
+%
+category: 'tests - re-validation'
+method: McpConcurrentEditTest
+testACommitKeepsTheReadsNobodyChanged
+  "A commit nobody else committed across costs no re-reads: both reads still hold, both writes are
+   allowed, nothing is reported stale."
+  self fixtureClass.
+  self readAlpha. self readBeta.
+  self assert: (self includes: 'committed' in: (self sessionTools tool_commit: Dictionary new)).
+  self assert: self server staleReadKeys isEmpty.
+  self assert: (self includes: 'Compiled' in: (self compileAlpha: '^#mine')).
+  self assert: (self includes: 'Compiled' in: (self compileBeta: '^#mine'))
+%
+category: 'tests - re-validation'
+method: McpConcurrentEditTest
+testACommitKeepsThisSessionsOwnWritesLicensed
+  "Read alpha, change it, commit: the committed text is the text this session wrote, so the next
+   change to alpha needs no re-read."
+  self fixtureClass.
+  self readAlpha.
+  self compileAlpha: '^#mine'.
+  self assert: (self includes: 'committed' in: (self sessionTools tool_commit: Dictionary new)).
+  self assert: self server staleReadKeys isEmpty.
+  self assert: self server writeLedger isEmpty.
+  self assert: (self includes: 'Compiled' in: (self compileAlpha: '^#again'))
 %
 category: 'tests'
 method: McpConcurrentEditTest
@@ -275,7 +325,8 @@ testARefreshLaundersAStaleReadAndTheGuardrailCatchesIt
   "Measurement N: this session reads alpha, the other session commits over it, and a refresh
    absorbs that change without a word -- after which the stone has nothing left to object to. The
    guardrail is the only thing standing between the client and a silent overwrite, and it refuses,
-   because the refresh emptied the read ledger."
+   because the refresh re-checked the read of alpha against the view it brought in, found the other
+   session's alpha there, and dropped it."
   | err |
   self fixtureClass.
   self readAlpha.
@@ -284,6 +335,40 @@ testARefreshLaundersAStaleReadAndTheGuardrailCatchesIt
   err := self refusalFrom: [self compileAlpha: '^#mine'].
   self assert: err notNil description: 'the guardrail allowed a write on a laundered read'.
   self assert: err kind equals: #blindWrite
+%
+category: 'tests - re-validation'
+method: McpConcurrentEditTest
+testATrueRefreshKeepsThisSessionsPendingWrite
+  "Read alpha, change it, refresh with nobody else involved: continueTransaction answers true, the
+   uncommitted alpha is still in place and still licensed, and the write ledger still holds it."
+  | alpha |
+  self fixtureClass.
+  self readAlpha.
+  self compileAlpha: '^#mine'.
+  self assert: (self includes: 'refreshed' in: (self sessionTools tool_refresh: Dictionary new)).
+  alpha := McpServer methodKeyFor: 'McpCeFixture' selector: 'alpha' meta: false.
+  self assert: (self server hasRead: alpha).
+  self assert: (self server writeLedger includes: alpha).
+  self assert: self server staleReadKeys isEmpty.
+  self assert: (self includes: 'Compiled' in: (self compileAlpha: '^#again'))
+%
+category: 'tests - re-validation'
+method: McpConcurrentEditTest
+testATrueRefreshReChecksTheReadsLikeACommit
+  "Read alpha and beta; the other session commits a different alpha; refresh (nothing pending, so
+   it answers true). The refresh brought their alpha into view: that read is dropped and named,
+   beta's still holds."
+  | alpha beta |
+  self fixtureClass.
+  self readAlpha. self readBeta.
+  self otherSessionCompiles: 'alpha' body: '^#theirs'.
+  self assert: (self includes: 'refreshed' in: (self sessionTools tool_refresh: Dictionary new)).
+  alpha := McpServer methodKeyFor: 'McpCeFixture' selector: 'alpha' meta: false.
+  beta := McpServer methodKeyFor: 'McpCeFixture' selector: 'beta' meta: false.
+  self deny: (self server hasRead: alpha).
+  self assert: (self server hasRead: beta).
+  self assert: self server staleReadKeys equals: (Array with: alpha).
+  self assert: (self includes: 'theirs' in: self readAlpha)
 %
 category: 'tests'
 method: McpConcurrentEditTest
