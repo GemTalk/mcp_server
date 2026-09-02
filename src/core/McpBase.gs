@@ -71,13 +71,24 @@ notification: aMethodString params: aDictOrNil
 category: 'private'
 method: McpBase
 parseBody: aString
-  "Parse a JSON-RPC request body to its Dictionary, or nil if empty/malformed.
-   Cross-version: GS 3.7.x's JsonParser raises on bad input, but 3.6.2's (PetitParser-based)
-   returns a PPFailure instead of raising -- so reject any non-Dictionary result, not just
-   exceptions. A valid JSON-RPC request is always an object, so nil here -> a -32700 Parse error."
+  "Parse a JSON-RPC request body to its Dictionary, or nil if empty/malformed. A valid JSON-RPC
+   request is always an object, so nil here -> a -32700 Parse error.
+   aString is WIRE BYTES, straight off the socket, which is why this is #parseWire: and not #parse:
+   -- it decodes UTF-8 before parsing. Without that a client sending raw UTF-8 (which is every real
+   one; only an escaping encoder like Python's json.dumps avoids it) had each byte read as one
+   Latin-1 character, so text arrived corrupted and was stored corrupted.
+   This is the ONLY parse on the request path, and it serves both sides of the worker boundary: the
+   front end parses the body to classify it (McpRouter>>servePost:) and then forwards the SAME RAW
+   BYTES to the worker gem, which parses them again here. Nothing re-encodes in between, so the two
+   decodes cannot disagree.
+   McpJson replaces kernel JsonParser, which mishandled Unicode three ways and differed by version
+   while doing it -- see the McpJson class comment, and docs/kernel-json-unicode.md for the
+   measurements. The result-shape check and the catch-all stay: the check because a JSON-RPC request
+   that parses to anything but an object is still not a request, and the catch-all because turning
+   every rejection into one -32700 is this method's job."
   (aString isNil or: [aString isEmpty]) ifTrue: [^nil].
   ^[ | parsed |
-     parsed := JsonParser parse: aString.
+     parsed := McpJson parseWire: aString.
      (parsed isKindOf: Dictionary) ifTrue: [parsed] ifFalse: [nil] ]
    on: Error do: [:ex | nil]
 %
