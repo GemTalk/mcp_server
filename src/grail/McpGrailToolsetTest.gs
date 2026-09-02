@@ -279,18 +279,24 @@ testGrailDirectoryIsADeclaredOption
 category: 'tests'
 method: McpGrailToolsetTest
 testGrailToolsetIsGatedInReadOnlySession
-  "Running arbitrary Python can persist anything, so the toolset declares nothing read-only-safe and
-   a read-only worker drops it whole -- while still reporting the tools as forbidden rather than
-   unknown."
+  "A read-only worker keeps exactly ONE of these tools -- run_python_tests, which runs in a fresh gem
+   that is thrown away and never committed in, so it can persist nothing. Every other one is dropped:
+   running arbitrary Python can persist anything, and get_python_source imports the module it is
+   asked about, which in Grail is a database write.
+
+   The gated ones must still be reported as FORBIDDEN rather than unknown -- 'you may not' and 'no
+   such tool' are different answers and only one of them is worth showing a user as a permissions
+   problem."
   | ts |
   ts := McpGrailToolset on: McpServer new.
-  self assert: ts readOnlySafeToolNames isEmpty.
+  self assert: ts readOnlySafeToolNames asSortedCollection asArray
+    equals: (Array with: 'run_python_tests').
   SessionTemps current removeKey: #McpReadOnly ifAbsent: [nil].
   [ | names err |
     McpServer sessionReadOnly: true.
     names := (McpServer newWithToolsetNames: (Array with: 'McpGrailToolset'))
       toolRegistry descriptors collect: [:d | d at: 'name'].
-    self assert: names isEmpty.
+    self assert: names asArray equals: (Array with: 'run_python_tests').
     err := (self dispatch: (self toolCall: 'eval_python'
       args: (Dictionary new at: 'code' put: '1'; yourself))) at: 'error'.
     self assert: (err at: 'code') equals: -32601.
@@ -366,6 +372,85 @@ def after():
     "the header names the file and the line, so the answer is traceable"
     self assert: (self includesCS: path , ':3' in: out) ]
       ensure: [GsFile removeServerFile: path]
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testRunPythonTestsIsTheOnlyReadOnlySafeTool
+  "run_python_tests is safe in a read-only session because of WHERE it runs -- a fresh gem that is
+   thrown away and never committed in -- so it can persist nothing and the caller's transaction is
+   not even reachable from it. The others stay gated: eval_python runs arbitrary Python, and
+   get_python_source IMPORTS the module it is asked about, which in Grail is a database write."
+  | safe |
+  safe := McpGrailToolset new readOnlySafeToolNames.
+  self assert: (safe includes: 'run_python_tests').
+  self deny: (safe includes: 'eval_python').
+  self deny: (safe includes: 'get_python_source').
+  self deny: (safe includes: 'compile_python')
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testRunPythonTestsRefusesWithoutAGrailDirectory
+  "Refusing beats running: Grail's tests import .py modules and load fixtures from disk, so with no
+   configured checkout every one of them errors -- which reports on the session, not on Grail, and
+   reads exactly like a catastrophically broken Python subsystem. That is the wrong answer this whole
+   toolset exists to stop being given, so the tool declines and says what to configure."
+  | ok |
+  ok := [(McpGrailToolset new) tool_run_python_tests: Dictionary new. false]
+    on: McpError do: [:ex |
+      (ex kind == #refused) and: [self includesCS: 'grailDirectory' in: ex messageText]].
+  self assert: ok
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testRunPythonTestsRunsFreshAndLeavesTheCallerAlone
+  "The load-bearing claim, checked end to end against a real forked gem.
+
+   Measured 2026-09-01: the same Grail test classes produce defects in a long-lived worker session
+   and none at all in a fresh one, because Grail's suite isolates by evicting modules from
+   sys.modules and re-importing a COMMITTED module raises. So this tool has to run somewhere with no
+   history, and ShutilTestCase -- the class whose `import shutil` in setUp is the documented casualty
+   of a misconfigured session -- is the honest subject.
+
+   Also asserts the transaction is untouched, which is the other half of running elsewhere: in-session
+   the same 7 tests dirtied the caller with 31 modified persistent objects, because a cold Grail
+   import IS a database write. Only ONE gem is spawned here on purpose -- this stone has few session
+   slots, and every extra one is a flaky suite later.
+   Needs a checkout, discovered rather than assumed; see grailCheckoutOrNil."
+  | checkout out before |
+  checkout := self grailCheckoutOrNil.
+  checkout isNil ifTrue: [^self assert: true].
+  before := System needsCommit.
+  out := (McpGrailToolset on: nil options:
+    (Dictionary new at: 'grailDirectory' put: checkout; yourself))
+      tool_run_python_tests: (Dictionary new
+        at: 'classNames' put: #('ShutilTestCase' 'NoSuchTestCaseXyz'); yourself).
+  "it ran the real class, and clean -- which it is not, run in a session with history"
+  self assert: (self includesCS: '7 run, 7 passed, 0 failed, 0 errors' in: out).
+  "a name that does not resolve is REPORTED: 'ran nothing' and 'you misspelled it' must not look alike"
+  self assert: (self includesCS: 'NOT FOUND: NoSuchTestCaseXyz' in: out).
+  self assert: (self includesCS: '1 class(es)' in: out).
+  "and the caller's transaction is exactly where it was"
+  self assert: System needsCommit equals: before
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testTestRunnerExpressionQuotesNamesRatherThanCompilingThem
+  "Class names come from the client and are interpolated into an expression run in another gem, so
+   they must travel as STRING LITERALS resolved there by objectNamed: -- never as code. printString
+   doubles an embedded quote, so a name containing one closes nothing.
+   Checked on the built expression rather than by running it: what matters is what would be sent."
+  | expr |
+  expr := (McpGrailToolset new)
+    testRunnerExpressionFor: (Array with: 'FooTest' with: 'It''s')
+    directory: '/tmp/grail'.
+  self assert: (self includesCS: '''FooTest''' in: expr).
+  "the apostrophe is doubled, so the literal still closes where it should"
+  self assert: (self includesCS: '''It''''s''' in: expr).
+  self assert: (self includesCS: 'objectNamed:' in: expr).
+  "the directory travels the same way"
+  self assert: (self includesCS: '''/tmp/grail''' in: expr).
+  "and it is $GRAIL_DIR that is set -- see the method comment for why, and the Grail defect behind it"
+  self assert: (self includesCS: 'GRAIL_DIR' in: expr)
 %
 category: 'tests'
 method: McpGrailToolsetTest

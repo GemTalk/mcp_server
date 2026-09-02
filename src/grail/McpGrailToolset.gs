@@ -14,7 +14,8 @@ McpToolset subclass: 'McpGrailToolset'
 expectvalue /Class
 doit
 McpGrailToolset comment: 
-'The optional GemStone-Python (Grail) tools: eval_python, compile_python and get_python_source. Its
+'The optional GemStone-Python (Grail) tools: eval_python, compile_python, get_python_source and
+run_python_tests. Its
 own source group (src/grail/) because it loads ONLY into a Grail-equipped image -- a method
 referencing ModuleAst cannot be compiled without Grail present -- so it is an opt-in group
 (src/grail/load.gs, filed in by install.sh --grail) rather than part of the base load.
@@ -42,9 +43,16 @@ router''s toolsetNames.
 Like every toolset it owns its handlers (see McpToolset), and needing no server-level policy it never
 touches `server` at all -- so it also serves as the worked example for a third-party toolset, now
 including how a toolset takes DEPLOYMENT CONFIGURATION (class>>declaredOptionNames -- grailDirectory).
-NOT read-only-safe: readOnlySafeToolNames is inherited (empty), so a read-only session drops every one
-of these tools. Running arbitrary Python can persist anything, and even get_python_source imports the
-module it is asked about, which in Grail is a database write.
+Read-only-safe: run_python_tests ONLY, and because of where it runs rather than what it does -- a
+fresh gem, thrown away, never committed in. Every other tool is dropped in a read-only session:
+running arbitrary Python can persist anything, and even get_python_source imports the module it is
+asked about, which in Grail is a database write.
+
+RUNNING GRAIL''S TESTS NEEDS A SESSION WITH NO HISTORY, which is why run_python_tests forks a gem
+rather than running where it was called. Grail''s suite isolates tests by evicting framework modules
+from sys.modules, and re-importing a COMMITTED module raises -- so a long-lived worker, which is
+exactly the session that accumulates that state, cannot report the truth about it. Measured on the
+same three classes: 132 defects in a worker session, 386/386 clean in a fresh one.
 
 The handlers DO catch Python exceptions, unlike every core tool, and they have to: Grail models them
 outside the Smalltalk Error hierarchy (NameError is Exception < BaseException < Exception <
@@ -154,6 +162,23 @@ headed: aPath line: aLineNumber body: lineCollection
 %
 category: 'private'
 method: McpGrailToolset
+newGrailTestSession
+  "A fresh, logged-in gem to run Grail's tests in. Built exactly as McpSession builds a worker --
+   newDefault plus an explicit localhost NRS rather than newDefaultForGemHost:, which does not exist
+   on 3.7.2 -- and logged in as the current user with a one-time password, so it needs no credentials
+   and inherits this session's permissions and nothing else.
+   The caller logs it out in an ensure:. Nothing is ever committed in it, so a run leaves the
+   repository as it found it whether it ends well or badly."
+  | sess |
+  sess := GsTsExternalSession newDefault
+    gemNRS: (GsNetworkResourceString defaultGemNRSFromCurrent node: 'localhost'; yourself);
+    yourself.
+  sess onetimePassword: (GsCurrentSession currentSession createOnetimePasswordValidForSeconds: 300).
+  sess login.
+  ^sess
+%
+category: 'private'
+method: McpGrailToolset
 pythonMessageFor: anException
   "The one-line 'Class: detail' for a Python exception -- the fallback when no traceback could be
    built, and what withPythonErrorsAsMcpError: reports.
@@ -218,6 +243,19 @@ pythonTracebackFor: anException
 "".join(traceback.format_exception(_mcp_exc))']
     on: Error, BaseException do: [:ex | nil]
 %
+category: 'read-only'
+method: McpGrailToolset
+readOnlySafeToolNames
+  "Only run_python_tests, and only because of WHERE it runs: a fresh gem that is thrown away, never
+   committed in, and cannot touch the caller's transaction. So a read-only session running it can
+   persist nothing, and the tests it runs are already-committed code -- the same argument
+   McpTestingToolset makes for the Smalltalk SUnit tools.
+
+   Everything else here stays gated, deliberately. eval_python runs arbitrary Python. compile_python
+   looks pure but shares that path. get_python_source IMPORTS the module it is asked about, and in
+   Grail a cold import is a database write."
+  ^#( 'run_python_tests' )
+%
 category: 'registration'
 method: McpGrailToolset
 registerOn: aToolRegistry
@@ -233,6 +271,15 @@ registerOn: aToolRegistry
   aToolRegistry name: 'eval_python'
     description: 'Evaluate Python source via Grail. Names bound here persist for the rest of this session, as in a REPL. Returns anything printed, then the repr of the value; on failure, the Python traceback.'
     inputSchema: codeArg do: [:args | self tool_eval_python: args].
+  aToolRegistry name: 'run_python_tests'
+    description: 'Run Grail''s Python SUnit classes (PythonTestCase subclasses) in a FRESH gem and report the result structurally. Give classNames to run a subset; omit it to run them all (slow).'
+    inputSchema: (self objectSchema:
+      (Dictionary new at: 'classNames' put:
+        (self stringArrayProperty:
+          'Optional: PythonTestCase subclass names to run (default: all of them)');
+        yourself)
+      required: #())
+    do: [:args | self tool_run_python_tests: args].
   aToolRegistry name: 'get_python_source'
     description: 'Source of a Python module, class or function in the image, named dotted (e.g. "gemdb.transaction"). Reads the .py the object was loaded from, so it answers the docstring and body even where the image itself has lost them.'
     inputSchema: (self objectSchema:
@@ -307,6 +354,74 @@ startsABlockAfter: aLine
    as many GemStone versions as the rest of the server does and #withoutTrailingSeparators is not
    present in all of them (measured missing on 3.7.5)."
   ^(self firstContentIndexIn: aLine) = 1
+%
+category: 'private'
+method: McpGrailToolset
+testRunnerExpressionFor: aNamesCollectionOrNil directory: aDirectory
+  "The one expression run_python_tests runs in the child gem: configure Grail, run the classes, and
+   answer a formatted report as a String.
+
+   $GRAIL_DIR rather than `importlib grailDir:` because PythonTestCase class>>suite -- which is what
+   `c suite` sends -- calls initGrail, and initGrail ASSIGNS grailDir from $GRAIL_DIR or the gem's
+   working directory. So a grailDir set here would be overwritten by the very next send, and the
+   directory would come out as the stone's. That is a Grail defect (reported; a patch is proposed),
+   not a shape to design around: the env var is what Grail's own runner scripts export and what its
+   Python-side importlib reads, so it is the right thing to set either way, and it also happens to
+   survive.
+
+   Names are embedded via printString and resolved in the CHILD by objectNamed:, so nothing a client
+   sends is ever compiled as code -- the same rule the worker bootstrap follows. A name that does not
+   resolve is reported rather than skipped: 'ran 0 classes' and 'you misspelled it' must not look
+   alike.
+
+   GrailTestResult, not the stock TestResult, because stock SUnit keeps only the failing TestCase --
+   its message and stack are discarded in the handler -- so a report could say no more than
+   `Cls debug: #sel`. Looked up rather than named directly, so this still runs on a Grail old enough
+   not to have it."
+  | s |
+  s := WriteStream on: String new.
+  s nextPutAll: '| classes result ws missing resultClass |'; nextPut: Character lf.
+  s nextPutAll: 'System gemEnvironmentVariable: ''GRAIL_DIR'' put: ';
+    nextPutAll: aDirectory printString; nextPutAll: '.'; nextPut: Character lf.
+  s nextPutAll: 'missing := OrderedCollection new.'; nextPut: Character lf.
+  aNamesCollectionOrNil isNil
+    ifTrue: [s nextPutAll: 'classes := (PythonTestCase allSubclasses reject: [:c | c isAbstract]) asArray.']
+    ifFalse: [
+      s nextPutAll: 'classes := OrderedCollection new. #('.
+      aNamesCollectionOrNil do: [:n |
+        s nextPutAll: n asString printString; nextPut: Character space].
+      s nextPutAll: ') do: [:n | | c | c := System myUserProfile objectNamed: n asSymbol.'.
+      s nextPutAll: ' ((c isKindOf: Behavior) and: [c inheritsFrom: PythonTestCase])'.
+      s nextPutAll: ' ifTrue: [classes add: c] ifFalse: [missing add: n]].'].
+  s nextPut: Character lf.
+  s nextPutAll: 'classes := (classes asSortedCollection: [:a :b | a name <= b name]) asArray.';
+    nextPut: Character lf.
+  s nextPutAll: 'resultClass := (System myUserProfile objectNamed: #GrailTestResult) ifNil: [TestResult].';
+    nextPut: Character lf.
+  s nextPutAll: 'result := resultClass new.'; nextPut: Character lf.
+  "One shared result across per-class suites, exactly as Grail's own runTestsShard.gs does -- NOT a
+   hand-rolled loop over `suite tests`, which measured differently on 3.7.5 (see
+   McpTestingToolset>>tool_run_test_class:)."
+  s nextPutAll: 'classes do: [:c | c suite run: result].'; nextPut: Character lf.
+  s nextPutAll: 'ws := WriteStream on: String new.'; nextPut: Character lf.
+  s nextPutAll: 'ws nextPutAll: classes size printString, '' class(es), '',';
+    nextPut: Character lf.
+  s nextPutAll: '  result runCount printString, '' run, '', result passedCount printString,';
+    nextPut: Character lf.
+  s nextPutAll: '  '' passed, '', result failureCount printString, '' failed, '',';
+    nextPut: Character lf.
+  s nextPutAll: '  result errorCount printString, '' errors''.'; nextPut: Character lf.
+  s nextPutAll: 'missing isEmpty ifFalse: [ws nextPut: Character lf; nextPutAll: ''NOT FOUND: ''.';
+    nextPut: Character lf.
+  s nextPutAll: '  missing do: [:n | ws nextPutAll: n; nextPut: Character space]].';
+    nextPut: Character lf.
+  s nextPutAll: '(result respondsTo: #reportOn:prefix:) ifTrue: [';
+    nextPut: Character lf.
+  s nextPutAll: '  result details isEmpty ifFalse: [ws nextPut: Character lf.';
+    nextPut: Character lf.
+  s nextPutAll: '    result reportOn: ws prefix: '''']].'; nextPut: Character lf.
+  s nextPutAll: 'ws contents'.
+  ^s contents
 %
 category: 'tools - python'
 method: McpGrailToolset
@@ -411,10 +526,58 @@ _mcp_locate(_mcp_name)'.
     firstLine := (located @env1:__getitem__: 1).
     self capResult: (self sourceFrom: path startingAt: firstLine label: name)]
 %
+category: 'tools - python'
+method: McpGrailToolset
+tool_run_python_tests: args
+  "Run Grail's Python SUnit classes and report what happened.
+
+   IN A FRESH GEM, which is the whole design and not a precaution. Measured 2026-09-01: the same
+   three test classes produced 132 defects run in a long-lived worker session and 386 run / 386
+   passed / 0 failed / 0 errors run fresh -- so every one of those defects was an artifact of the
+   session. Grail's suite isolates tests by evicting framework modules from sys.modules, and against
+   a stone where those modules are committed, re-importing raises (the canonical-module rule in
+   docs/Persistent_Modules_and_Classes.md). A long-lived MCP worker is exactly the session that
+   accumulates the state this collides with, so running the suite in the CALLER's session cannot be
+   made to report the truth -- it has to be a session with no history.
+
+   Running it elsewhere settles three other things at once. The caller's transaction is untouched,
+   where running in-session dirties it silently (a cold Grail import IS a database write: measured 31
+   modified objects for a 7-test class). The child's writes are never committed, so a run leaves the
+   repository exactly as it found it. And that is what makes this tool read-only-safe.
+
+   The cost is that every run is fully cold, so the framework-heavy classes recompile each time
+   (FlaskScaffoldingTestCase alone: 262s). Hence the classNames argument, and hence progress
+   reporting -- an unbounded wait with no word is worse than a slow one that says so."
+  | dir names sess expr ticks |
+  dir := self grailDirectory.
+  dir isNil ifTrue: [
+    ^McpError signalKind: #refused message:
+      'run_python_tests needs to know where the Grail checkout is: its tests import .py modules and '
+        , 'load fixtures from disk. Configure the toolset option grailDirectory on the router '
+        , '(McpRouter>>toolsetOptions:). Without it Grail falls back to this gem''s working directory, '
+        , 'which is the stone''s and holds no src/python/stdlib -- every test would report an error '
+        , 'that says more about the session than about Grail.'].
+  names := args at: 'classNames' ifAbsent: [nil].
+  expr := self testRunnerExpressionFor: names directory: dir.
+  sess := self newGrailTestSession.
+  ticks := 0.
+  ^[sess nbExecute: expr.
+    [sess isCallInProgress] whileTrue: [
+      sess waitForResultForSeconds: 5 otherwise: [nil].
+      sess isCallInProgress ifTrue: [
+        ticks := ticks + 1.
+        self progress: ticks message:
+          'running Grail tests in a fresh gem (' , (ticks * 5) printString , 's)']].
+    "lastResult, not nbResult: waitForResultForSeconds: consumes the result internally. And only once
+     isCallInProgress is false, or it still holds the PREVIOUS call's value -- both traps are the
+     ones McpSession>>runWorker: documents."
+    self capResult: sess lastResult asString]
+      ensure: [[sess logout] on: Error do: [:ex | nil]]
+%
 category: 'accessing'
 method: McpGrailToolset
 toolNames
-  ^#( 'compile_python' 'eval_python' 'get_python_source' )
+  ^#( 'compile_python' 'eval_python' 'get_python_source' 'run_python_tests' )
 %
 category: 'private'
 method: McpGrailToolset

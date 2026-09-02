@@ -217,7 +217,7 @@ GET stream, per-request `_meta`, and a mandatory `server/discover`. It is not im
 supporting it will need a decision about how per-client worker-gem isolation survives a protocol
 with no session id to key it on.
 
-## Tools (31 base + 3 optional Grail)
+## Tools (31 base + 4 optional Grail)
 
 **Execution**
 
@@ -323,6 +323,27 @@ an image without Grail. Once loaded the toolset joins the default tool surface a
 | `compile_python` | `code` | transpile Python source to Smalltalk via Grail (`ModuleAst`), return the generated source |
 | `eval_python` | `code` | evaluate Python in this session's persistent namespace; returns anything printed, then the value's `repr`, or the Python traceback on failure |
 | `get_python_source` | `name` | source of a module, class or function named dotted (`gemdb.transaction`), read from the `.py` it was loaded from |
+| `run_python_tests` | `classNames` *(optional)* | run Grail's `PythonTestCase` classes **in a fresh gem** and report the result structurally |
+
+> **`run_python_tests` runs somewhere else on purpose.** Pointing the generic `run_test_class` at
+> Grail's SUnit classes reported roughly **3,410 errors**, and not one of them was a defect in Grail.
+> Two causes, both about the *session* rather than the code: a worker gem's working directory is the
+> stone's, so Grail could not find its `.py` stdlib; and Grail's suite isolates tests by evicting
+> framework modules from `sys.modules`, which *raises* when the module is committed. Measured on the
+> same three classes: **132 defects** in a long-lived worker session, **386 run / 386 passed / 0
+> failed / 0 errors** in a fresh one.
+>
+> So this tool logs in a new gem, runs there, and throws it away. That also settles three other
+> things: the caller's transaction is untouched (running in-session dirtied it with 31 modified
+> objects for a *seven-test* class, because a cold Grail import **is** a database write), nothing is
+> ever committed, and it is therefore the one tool here that is **read-only-safe**. The price is that
+> every run is fully cold — `FlaskScaffoldingTestCase` alone takes ~262s — which is why `classNames`
+> exists and why the tool reports progress.
+>
+> Defects come back with their **message and stack**, via Grail's own `GrailTestResult`; stock SUnit
+> keeps only the failing `TestCase`, so a report could otherwise say no more than
+> `SomeTest debug: #testThing`. A class name that does not resolve is listed as `NOT FOUND` rather
+> than skipped — "ran nothing" and "you misspelled it" must not look alike.
 
 > **`eval_python` is a REPL, not a series of one-shot evaluations.** Names bound by one call are
 > visible to the next — `counter = 41`, then `counter + 1` → `42` — because the toolset keeps one
@@ -472,7 +493,7 @@ forbidden here" from "no such tool". A tool absent because its toolset was never
 | `McpServer` | per-client worker: the single-client MCP server that runs inside each worker gem — registry, dispatcher, the kernel guards, read-only gating, identity. The tools themselves belong to its toolsets, and which of those it registers is not fixed by the class. No socket |
 | `McpToolset` | abstract tool pack: `registerOn:` (its tools + schemas), its `tool_*` handlers, `toolNames`, `readOnlySafeToolNames` (empty by default — fail closed), plus the shared schema builders, image-lookup helpers, and the kernel guards (which forward to the server's policy). **Subclass this to add tools**; a deployment picks the list |
 | `McpBrowsingToolset`, `McpExecutionToolset`, `McpListingToolset`, `McpMutationToolset`, `McpSearchToolset`, `McpSessionToolset`, `McpTestingToolset` | the seven core toolsets, one per tool family. A deployment can expose any subset — or none of them, alongside its own |
-| `McpGrailToolset` | optional Python toolset (`eval_python`, `compile_python`), filed in only on a Grail image. Needs nothing from the server, so it doubles as the worked example for a third-party toolset |
+| `McpGrailToolset` | optional Python toolset (`eval_python`, `compile_python`, `get_python_source`, `run_python_tests`), filed in only on a Grail image. Needs nothing from the server, so it doubles as the worked example for a third-party toolset |
 | `McpSession` | one client's isolated worker handle: a `GsTsExternalSession` gem + session id + last-activity + the worker class/toolsets/identity the front end resolved, plus the front-end-side outbox, log level and liveness state. `prepareWorker` sets the gem up in one call; `forward:` runs a request in it (`<workerClass> handleJsonString: …`) without blocking the front end (`runWorker:`); `close` stops it |
 | `McpOutbox` | one session's queue of server-initiated messages waiting for its SSE stream. Front-end-only and never committed; owns the bound/overflow policy, the closing handshake, and the latest-GET-wins rule |
 | `McpHttpConnection` | reads one HTTP/1.1 request, writes one JSON response (incl. `MCP-Session-Id`), and writes the SSE stream — every frame gated on the socket being writable, plus a non-blocking read-side disconnect check |
