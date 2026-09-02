@@ -169,8 +169,10 @@ category: 'tools - mutation'
 method: McpToolTest
 testCompileClassDefinition
   | out |
-  out := self mutationTools tool_compile_class_definition: (self oneArg: 'source' value:
-    'Object subclass: ''McpTestFixture'' instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()').
+  "A class that does not exist yet: creation is never blind, so no read is needed."
+  out := self mutationTools tool_compile_class_definition: (Dictionary new
+    at: 'className' put: 'McpTestFixture';
+    at: 'dictionary' put: 'UserGlobals'; yourself).
   self assert: (self includesCS: 'Compiled class: McpTestFixture' in: out).
   self assert: (System myUserProfile objectNamed: #McpTestFixture) notNil
 %
@@ -182,8 +184,10 @@ testCompileClassDefinitionPreservesMethods
   cls := Object subclass: 'McpTestFixture' instVarNames: #(a) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #().
   cls compileMethod: 'getA ^a' dictionaries: System myUserProfile symbolList category: 'acc'.
   System commitTransaction.
-  out := self mutationTools tool_compile_class_definition: (self oneArg: 'source' value:
-    'Object subclass: ''McpTestFixture'' instVarNames: #(a b) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()').
+  self browsingTools tool_get_class_definition: (self oneArg: 'className' value: 'McpTestFixture').
+  out := self mutationTools tool_compile_class_definition: (Dictionary new
+    at: 'className' put: 'McpTestFixture';
+    at: 'instVarNames' put: (Array with: 'a' with: 'b'); yourself).
   self assert: (self includesCS: 'recompiled 1/1' in: out).
   self assert: ((System myUserProfile objectNamed: #McpTestFixture) canUnderstand: #getA).
   self assert: ((System myUserProfile objectNamed: #McpTestFixture) instVarNames includes: #b)
@@ -196,8 +200,11 @@ testCompileClassDefinitionRawWhenFlagFalse
   cls := Object subclass: 'McpTestFixture' instVarNames: #(a) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #().
   cls compileMethod: 'getA ^a' dictionaries: System myUserProfile symbolList category: 'acc'.
   System commitTransaction.
+  "recompileMethods=false discards every method, so the licence is the whole class."
+  self browsingTools tool_export_class_source: (self oneArg: 'className' value: 'McpTestFixture').
   out := self mutationTools tool_compile_class_definition: (Dictionary new
-    at: 'source' put: 'Object subclass: ''McpTestFixture'' instVarNames: #(a b) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()';
+    at: 'className' put: 'McpTestFixture';
+    at: 'instVarNames' put: (Array with: 'a' with: 'b');
     at: 'recompileMethods' put: false; yourself).
   self deny: ((System myUserProfile objectNamed: #McpTestFixture) canUnderstand: #getA)
 %
@@ -209,21 +216,26 @@ testCompileClassDefinitionRefusesWithSubclasses
   cls := Object subclass: 'McpTestFixture' instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #().
   cls subclass: 'McpTestSub' instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #().
   System commitTransaction.
-  out := self mutationTools tool_compile_class_definition: (self oneArg: 'source' value:
-    'Object subclass: ''McpTestFixture'' instVarNames: #(a) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()').
+  self browsingTools tool_get_class_definition: (self oneArg: 'className' value: 'McpTestFixture').
+  out := self mutationTools tool_compile_class_definition: (Dictionary new
+    at: 'className' put: 'McpTestFixture';
+    at: 'instVarNames' put: (Array with: 'a'); yourself).
   self assert: (self includesCS: 'Refused' in: out).
   self assert: (self includesCS: 'McpTestSub' in: out)
 %
 category: 'tools - mutation'
 method: McpToolTest
-testCompileClassDefinitionRejectsNonClass
-  "A source that evaluates to something other than a class is rejected and directed to
-   execute_code, and nothing is committed."
+testCompileClassDefinitionRejectsUnknownSuperclass
+  "Replaces an older test that fed this tool '3 + 4' and expected 'did not evaluate to a class'.
+   There is no longer a source string to evaluate -- the definition is built from named arguments --
+   so the way to get this wrong is to name a superclass that does not resolve, and that is reported
+   rather than raised."
   | out |
-  out := self mutationTools tool_compile_class_definition: (self oneArg: 'source' value: '3 + 4').
-  self assert: (self includesCS: 'did not evaluate to a class' in: out).
-  self assert: (self includesCS: 'execute_code' in: out).
-  self deny: (self includesCS: 'committed' in: out)
+  out := self mutationTools tool_compile_class_definition: (Dictionary new
+    at: 'className' put: 'McpTestFixture';
+    at: 'superclassName' put: 'NoSuchSuperclassZZZ'; yourself).
+  self assert: (self includesCS: 'Superclass not found' in: out).
+  self assert: (System myUserProfile objectNamed: #McpTestFixture) isNil
 %
 category: 'tools - mutation'
 method: McpToolTest
@@ -236,8 +248,10 @@ testCompileClassDefinitionReportsRecompileFailure
   cls compileMethod: 'withLocal | tmp | tmp := 5. ^tmp' dictionaries: System myUserProfile symbolList category: 'acc'.
   System commitTransaction.
   "adding ivar 'tmp' collides with withLocal's temporary -> that one fails to recompile"
-  out := self mutationTools tool_compile_class_definition: (self oneArg: 'source' value:
-    'Object subclass: ''McpTestFixture'' instVarNames: #(a tmp) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()').
+  self browsingTools tool_get_class_definition: (self oneArg: 'className' value: 'McpTestFixture').
+  out := self mutationTools tool_compile_class_definition: (Dictionary new
+    at: 'className' put: 'McpTestFixture';
+    at: 'instVarNames' put: (Array with: 'a' with: 'tmp'); yourself).
   self assert: (self includesCS: 'recompiled 1/2' in: out).
   self assert: (self includesCS: 'failed' in: out).
   self assert: (self includesCS: 'withLocal' in: out).

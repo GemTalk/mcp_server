@@ -47,14 +47,16 @@ removeallclassmethods McpMutationToolset
 ! ------------------- Instance methods for McpMutationToolset
 category: 'private'
 method: McpMutationToolset
-classNameFromDefinition: source
-  "The class name in a 'Super subclass: ''Name'' ...' definition: the substring between the
-   first two single quotes, as a Symbol. Returns nil if the source has no quoted literal
-   (e.g. a symbol-form name) -- callers then treat it as a plain redefine."
-  | q1 q2 |
-  q1 := source indexOf: $' ifAbsent: [^nil].
-  q2 := source indexOf: $' startingAt: q1 + 1 ifAbsent: [^nil].
-  ^(source copyFrom: q1 + 1 to: q2 - 1) asSymbol
+dictionaryForClassNamed: aName requested: aDictionaryNameOrNil
+  "Where to define the class: the dictionary the client named, else the one the class already lives
+   in (so a redefinition does not silently move it), else UserGlobals."
+  | existing arr |
+  aDictionaryNameOrNil ifNotNil: [:n | ^self dictNamed: n asString].
+  existing := self resolveClass: aName.
+  existing ifNotNil: [:c |
+    arr := System myUserProfile dictionaryAndSymbolOf: c.
+    arr ifNotNil: [^arr at: 1]].
+  ^self dictNamed: 'UserGlobals'
 %
 category: 'private'
 method: McpMutationToolset
@@ -106,13 +108,20 @@ registerOn: aToolRegistry
     description: 'Create a new symbol dictionary and append it to the user symbol list. Not committed: call commit to persist, abort to discard.'
     inputSchema: dictArg do: [:args | self tool_add_dictionary: args].
   aToolRegistry name: 'compile_class_definition'
-    description: 'Evaluate a class-definition expression (e.g. Object subclass: ... inDictionary: ...). Not committed: call commit to persist, abort to discard (which restores the previous class and its methods intact). The source must evaluate to a class; other expressions are rejected (use execute_code for those). On a shape-changing redefinition of an existing class, by default recompiles its existing methods onto the new version (a raw redefine drops them) and reports any that fail; refused if the class has subclasses.'
+    description: 'Define or redefine a class from named parts (superclass, instance variables, class variables, ...). Not committed: call commit to persist, abort to discard (which restores the previous class and its methods intact). On a shape-changing redefinition of an existing class, by default recompiles its existing methods onto the new version and reports any that fail; refused if the class has subclasses. Redefining a class this session has not read is refused: call get_class_definition first, or export_class_source when recompileMethods is false, which drops every method.'
     inputSchema: (self objectSchema:
       (Dictionary new
-        at: 'source' put: (self propString: 'Full class-definition Smalltalk expression including the subclass: send and inDictionary:');
+        at: 'className' put: (self propString: 'Name of the class to define or redefine');
+        at: 'superclassName' put: (self propString: 'Name of the superclass (default Object)');
+        at: 'instVarNames' put: (self stringArrayProperty: 'Instance variable names');
+        at: 'classVars' put: (self stringArrayProperty: 'Class variable names');
+        at: 'classInstVars' put: (self stringArrayProperty: 'Class-side instance variable names');
+        at: 'poolDictionaries' put: (self stringArrayProperty: 'Names of pool dictionaries in the symbol list');
+        at: 'dictionary' put: (self propString: 'Dictionary to define the class in (default: where it already lives, else UserGlobals)');
+        at: 'options' put: (self stringArrayProperty: 'Class options, e.g. subclassesDisallowed');
         at: 'recompileMethods' put: (self boolProperty: 'Default true: after a shape change, recompile the class existing methods onto the new version and report failures (refused if the class has subclasses). False: redefine raw, dropping all methods.');
         yourself)
-      required: (Array with: 'source'))
+      required: (Array with: 'className'))
     do: [:args | self tool_compile_class_definition: args].
   aToolRegistry name: 'compile_method'
     description: 'Compile (add or update) a method on a class. Not committed: call commit to persist, abort to discard. The method is usable in this session immediately, so tests can be run against it before deciding to commit. Set meta=true for class-side. Category defaults to "mcp".'
@@ -152,6 +161,25 @@ registerOn: aToolRegistry
     do: [:args | self tool_set_class_comment: args].
   ^self
 %
+category: 'private'
+method: McpMutationToolset
+resolvePoolDictionaryNames: aCollectionOfNames
+  "The SymbolDictionaries those names bind, or nil if any of them does not resolve -- the caller
+   reports that rather than defining a class with a silently short pool list."
+  | out d |
+  out := OrderedCollection new.
+  aCollectionOfNames do: [:n |
+    d := self dictNamed: n asString.
+    d isNil ifTrue: [^nil].
+    out add: d].
+  ^out asArray
+%
+category: 'private'
+method: McpMutationToolset
+symbolNamesFrom: aCollectionOfNames
+  "Names as Symbols, which is what the subclass: family expects for variables and options."
+  ^(aCollectionOfNames collect: [:n | n asString asSymbol]) asArray
+%
 category: 'tools - mutation'
 method: McpMutationToolset
 tool_add_dictionary: args
@@ -170,32 +198,72 @@ tool_add_dictionary: args
 category: 'tools - mutation'
 method: McpMutationToolset
 tool_compile_class_definition: args
-  "Evaluate a class-definition expression. Does NOT commit (see the class comment). If recompileMethods is true (default)
-   and this is a shape-changing redefinition of an existing class (which would otherwise drop
-   all its methods), recompile the prior version's methods onto the new version and report any
-   that fail. Refused when the class has subclasses (handle the hierarchy manually, or pass
-   recompileMethods=false to redefine raw)."
-  | source recompile name existing oldClass newClass |
-  source := args at: 'source'.
+  "Define or redefine a class from STRUCTURED arguments. Does NOT commit (see the class comment).
+
+   WHY NOT A SOURCE STRING. Until now this took the definition as Smalltalk and ran `source
+   evaluate`, checking only afterwards that the result was a Behavior -- by which point any side
+   effect had already happened. A source of 'System commitTransaction. Object' passed that check
+   with the commit already done, so this was execute_code with a return-type assertion, and a
+   deployment that left McpExecutionToolset out to close the escape hatch had not actually closed
+   it. Building the definition here from named arguments cannot evaluate anything, and the string
+   parser that used to recover the class name goes with it.
+
+   The superclass may be any class that resolves, kernel classes included: subclassing Object is
+   the normal case, and nothing about it modifies the superclass. The kernel guard applies to the
+   class being REDEFINED, which is where the damage would be.
+
+   On a shape-changing redefinition of an existing class -- which drops every method -- the prior
+   version's methods are recompiled onto the new one by default, read from the old class AS RESOLVED
+   IN THE CURRENT VIEW, so what lands is other sessions' latest work rather than anything this
+   client remembered. That is why the guardrail asks only for the shape to have been read on this
+   path, while a raw redefinition, which discards those methods for good, asks for the whole class."
+  | name recompile existing superclass dict opts poolDicts newClass beforeDef |
+  name := (args at: 'className') asString.
   recompile := (args at: 'recompileMethods' ifAbsent: [true]) ~~ false.
-  name := self classNameFromDefinition: source.
-  existing := name notNil ifTrue: [self resolveClass: name] ifFalse: [nil].
-  existing ifNotNil: [:c | self assertMutableClass: c].  "refuse redefining a kernel class (any recompile setting)"
-  oldClass := recompile ifTrue: [existing] ifFalse: [nil].
-  (recompile and: [oldClass notNil and: [oldClass subclasses isEmpty not]]) ifTrue: [
-    ^'Refused: ' , name asString , ' has subclasses '
-      , (oldClass subclasses collect: [:c | c name asString]) asArray printString
+  existing := self resolveClass: name.
+  existing ifNotNil: [:c | self assertMutableClass: c].
+  superclass := self resolveClass: (args at: 'superclassName' ifAbsent: ['Object']).
+  superclass isNil ifTrue: [
+    ^'Superclass not found: ' , (args at: 'superclassName' ifAbsent: ['Object']) asString].
+  "Creation is never blind. Redefining is: on the default path the shape is what is being replaced,
+   and on a raw redefine every method goes too, seen or not."
+  existing ifNotNil: [:c |
+    recompile
+      ifTrue: [self requireRead: (self shapeKeyFor: c name)
+        subject: 'the definition of ' , c name asString
+        tool: 'compile_class_definition'
+        hint: 'Call get_class_definition(' , c name asString , ') first.']
+      ifFalse: [self requireWholeClassRead: c tool: 'compile_class_definition'
+        because: 'redefining with recompileMethods=false drops every method the class has.']].
+  (recompile and: [existing notNil and: [existing subclasses isEmpty not]]) ifTrue: [
+    ^'Refused: ' , name , ' has subclasses '
+      , (existing subclasses collect: [:c | c name asString]) asArray printString
       , '. Recompiling methods across a subclass hierarchy is unsupported; pass recompileMethods=false to redefine without preserving methods, or update the hierarchy manually.'].
-  newClass := source evaluate.
-  "NB no abort here. Evaluating the source may well have changed something, but aborting would
-   also destroy every unrelated uncommitted change the caller had staged -- a failure of THIS call
-   must not discard work from earlier ones. Report it and let the client decide (abort or commit)."
-  (newClass isKindOf: Behavior) ifFalse: [
-    ^'Source did not evaluate to a class (got ' , newClass class name asString
-      , '). Use execute_code to evaluate arbitrary expressions.'].
-  (recompile not or: [oldClass isNil or: [oldClass == newClass]]) ifTrue: [
+  dict := self dictionaryForClassNamed: name requested: (args at: 'dictionary' ifAbsent: [nil]).
+  dict isNil ifTrue: [^'Dictionary not found: ' , (args at: 'dictionary' ifAbsent: ['']) asString].
+  poolDicts := self resolvePoolDictionaryNames: (args at: 'poolDictionaries' ifAbsent: [Array new]).
+  poolDicts isNil ifTrue: [^'One or more pool dictionaries not found: '
+    , (args at: 'poolDictionaries' ifAbsent: [Array new]) printString].
+  opts := self symbolNamesFrom: (args at: 'options' ifAbsent: [Array new]).
+  beforeDef := existing ifNotNil: [:c | c definition].
+  newClass := superclass
+    subclass: name
+    instVarNames: (self symbolNamesFrom: (args at: 'instVarNames' ifAbsent: [Array new]))
+    classVars: (self symbolNamesFrom: (args at: 'classVars' ifAbsent: [Array new]))
+    classInstVars: (self symbolNamesFrom: (args at: 'classInstVars' ifAbsent: [Array new]))
+    poolDictionaries: poolDicts
+    inDictionary: dict
+    options: opts.
+  "Recorded only where something actually changed. Re-sending an identical definition answers the
+   SAME class object and does not dirty the transaction at all (measured; see
+   docs/blind-write-guardrail.md, S), and a write ledger entry for a write that never happened would
+   manufacture a licence the stone never validated -- see McpServer>>noteWrite:."
+  (existing == newClass and: [beforeDef = newClass definition])
+    ifTrue: [^'Class definition unchanged: ' , newClass name asString].
+  self noteWrite: (self shapeKeyFor: newClass name).
+  (recompile not or: [existing isNil or: [existing == newClass]]) ifTrue: [
     ^'Compiled class: ' , newClass name asString].
-  ^self recompileMethodsFrom: oldClass into: newClass named: name
+  ^self recompileMethodsFrom: existing into: newClass named: name asSymbol
 %
 category: 'tools - mutation'
 method: McpMutationToolset

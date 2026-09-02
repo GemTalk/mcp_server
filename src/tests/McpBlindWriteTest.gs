@@ -136,6 +136,21 @@ testAFailedCommitKeepsBoth
   self assert: (self server readLedger includes: 'A>>x').
   self assert: (self server writeLedger includes: 'A>>y')
 %
+category: 'tests - class definition'
+method: McpBlindWriteTest
+testARawRedefineNeedsTheWholeClass
+  "recompileMethods=false drops every method, including ones never named, so the shape alone is not
+   enough -- this is the one place the two compile_class_definition paths differ."
+  self fixtureClass.
+  self browsingTools tool_get_class_definition:
+    (Dictionary new at: 'className' put: 'McpBwFixture'; yourself).
+  self assertBlindWrite: [
+    self mutationTools tool_compile_class_definition: (Dictionary new
+      at: 'className' put: 'McpBwFixture';
+      at: 'instVarNames' put: (Array with: 'x');
+      at: 'recompileMethods' put: false; yourself)]
+    about: 'McpBwFixture>>alpha'
+%
 category: 'tests - view moves'
 method: McpBlindWriteTest
 testARefreshThatFailsClearsBoth
@@ -180,6 +195,18 @@ testClassDefinitionDoesNotLicenseTheComment
     self mutationTools tool_set_class_comment:
       (Dictionary new at: 'className' put: 'McpBwFixture'; at: 'comment' put: 'new'; yourself)]
     about: 'class comment'
+%
+category: 'tests - class definition'
+method: McpBlindWriteTest
+testCompileClassDefinitionAcceptsNoSourceString
+  "The tool used to take a Smalltalk string and run `source evaluate`, checking only afterwards that
+   the result was a class -- so it could run anything, and leaving McpExecutionToolset out did not
+   actually close the escape hatch. The schema is closed (additionalProperties false), so a client
+   still sending source is told, rather than having it silently ignored."
+  | tool err |
+  tool := self server toolRegistry at: 'compile_class_definition'.
+  err := tool validationErrorFor: (Dictionary new at: 'source' put: 'System commitTransaction. Object'; yourself).
+  self assert: err notNil description: 'a source argument should no longer validate'
 %
 category: 'tests - method grain'
 method: McpBlindWriteTest
@@ -257,6 +284,17 @@ testExportLicensesEveryMethod
     (Dictionary new at: 'className' put: 'McpBwFixture'; yourself).
   self assert: (self includes: 'Compiled' in: (self writeMethod: 'beta' body: '^99'))
 %
+category: 'tests - class definition'
+method: McpBlindWriteTest
+testKernelClassesMayBeSubclassed
+  "The kernel guard is about the class being REDEFINED, not what it inherits from: subclassing
+   Object is the normal case and every Mcp class does it."
+  self assert: (self includes: 'Compiled class' in:
+    (self mutationTools tool_compile_class_definition: (Dictionary new
+      at: 'className' put: 'McpBwFixture';
+      at: 'superclassName' put: 'Object';
+      at: 'dictionary' put: 'UserGlobals'; yourself)))
+%
 category: 'tests - method grain'
 method: McpBlindWriteTest
 testReadingLicensesTheWrite
@@ -271,6 +309,42 @@ testReadingOneMethodDoesNotLicenseAnother
   self fixtureClass.
   self readMethod: 'alpha'.
   self assertBlindWrite: [self writeMethod: 'beta' body: '^99'] about: 'McpBwFixture>>beta'
+%
+category: 'tests - class definition'
+method: McpBlindWriteTest
+testRedefiningAnUnreadClassIsRefused
+  self fixtureClass.
+  self assertBlindWrite: [
+    self mutationTools tool_compile_class_definition: (Dictionary new
+      at: 'className' put: 'McpBwFixture';
+      at: 'instVarNames' put: (Array with: 'x'); yourself)]
+    about: 'the definition of McpBwFixture'
+%
+category: 'tests - class definition'
+method: McpBlindWriteTest
+testRedefiningIdenticallyRecordsNoWrite
+  "Re-sending the same definition is a true no-op in the image, so it must not leave a write ledger
+   entry -- which a later commit would turn into a licence the stone never validated."
+  self fixtureClass.
+  self browsingTools tool_get_class_definition:
+    (Dictionary new at: 'className' put: 'McpBwFixture'; yourself).
+  self assert: (self includes: 'unchanged' in:
+    (self mutationTools tool_compile_class_definition:
+      (Dictionary new at: 'className' put: 'McpBwFixture'; yourself))).
+  self deny: (self server writeLedger includes: (McpServer shapeKeyFor: 'McpBwFixture'))
+%
+category: 'tests - class definition'
+method: McpBlindWriteTest
+testTheClassDefinitionReadLicensesARedefinition
+  "The default path recompiles the old methods from the class AS RESOLVED NOW, so what it needs
+   seen is the shape it is replacing -- not every method."
+  self fixtureClass.
+  self browsingTools tool_get_class_definition:
+    (Dictionary new at: 'className' put: 'McpBwFixture'; yourself).
+  self assert: (self includes: 'recompiled' in:
+    (self mutationTools tool_compile_class_definition: (Dictionary new
+      at: 'className' put: 'McpBwFixture';
+      at: 'instVarNames' put: (Array with: 'x'); yourself)))
 %
 category: 'tests - method grain'
 method: McpBlindWriteTest

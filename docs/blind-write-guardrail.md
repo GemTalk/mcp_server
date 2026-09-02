@@ -146,7 +146,22 @@ licenses a redefinition but not a comment replacement.
 
 **Creation is never blind.** If the selector, class or dictionary does not exist in the current view
 there was nothing to read, so the write is allowed. A concurrent creation by another session
-collides on write-write in the ordinary way.
+collides on write-write in the ordinary way. `set_class_comment` counts a class with no comment yet
+as creation for the same reason.
+
+**A write implies a read.** `noteWrite:` records into both ledgers. Having just written something is
+knowing its content -- better than having read it -- so it licenses a follow-up change without a
+re-read: creating a dictionary licenses removing it, compiling a method licenses recompiling it.
+Nothing is put at risk, because another session's change to the same thing is still caught by the
+stone. It also makes `writeLedger` a subset of `readLedger` true at every instant rather than only
+across a view move.
+
+**How `compile_method` knows which method it is about to replace.** The tool takes source, not a
+selector, so the guardrail has to name the method before it can decide -- and without any side
+effect, since a refused call must leave the image untouched. `McpToolset>>selectorOfSource:for:`
+asks the kernel's own compiler, using the `intoMethodDict:` variant against a throwaway dictionary:
+it answers the real `GsNMethod`, and so the authoritative selector for unary, binary and keyword
+patterns alike, while leaving the class's selectors unchanged and `needsCommit` false (X).
 
 **Why the two `compile_class_definition` rows differ.** A shape-changing redefinition produces a new
 class with no methods at all, leaving the old class object holding them (T). With `recompileMethods`

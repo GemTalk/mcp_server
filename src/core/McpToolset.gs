@@ -201,6 +201,18 @@ resolveClass: aName
   obj := System myUserProfile objectNamed: aName asSymbol.
   ^(obj isKindOf: Behavior) ifTrue: [obj] ifFalse: [nil]
 %
+category: 'schema building'
+classmethod: McpToolset
+stringArrayProperty: aDescription
+  | d items |
+  items := Dictionary new.
+  items at: 'type' put: 'string'.
+  d := Dictionary new.
+  d at: 'type' put: 'array'.
+  d at: 'items' put: items.
+  d at: 'description' put: aDescription.
+  ^d
+%
 ! ------------------- Instance methods for McpToolset
 category: 'guards'
 method: McpToolset
@@ -503,6 +515,11 @@ category: 'blind-write guardrail'
 method: McpToolset
 shapeKeyFor: aClassName
   ^McpServer shapeKeyFor: aClassName
+%
+category: 'schema building'
+method: McpToolset
+stringArrayProperty: aDescription
+  ^self class stringArrayProperty: aDescription
 %
 category: 'accessing'
 method: McpToolset
