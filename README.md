@@ -217,7 +217,7 @@ GET stream, per-request `_meta`, and a mandatory `server/discover`. It is not im
 supporting it will need a decision about how per-client worker-gem isolation survives a protocol
 with no session id to key it on.
 
-## Tools (31 base + 4 optional Grail)
+## Tools (31 base + 7 optional Grail)
 
 **Execution**
 
@@ -324,6 +324,37 @@ an image without Grail. Once loaded the toolset joins the default tool surface a
 | `eval_python` | `code` | evaluate Python in this session's persistent namespace; returns anything printed, then the value's `repr`, or the Python traceback on failure |
 | `get_python_source` | `name` | source of a module, class or function named dotted (`gemdb.transaction`), read from the `.py` it was loaded from |
 | `run_python_tests` | `classNames` *(optional)* | run Grail's `PythonTestCase` classes **in a fresh gem** and report the result structurally |
+| `describe_python_class` | `name` | a Python class: backing Smalltalk class, storage base, `__bases__`/`__mro__`, `__slots__`, class attributes, method names |
+| `list_python_methods` | `name` | its methods with real signatures (parameter names *and* defaults) and the `.py` line each was defined at, in source order |
+| `python_module_state` | `name` | what a module **is** here — native or `.py`, canonical, committed, current or stale, in `sys.modules` — and what the next import would do |
+
+> **Why a Python class needs its own describe tool.** Grail creates every user Python class
+> **anonymously** (`inDictionary: nil`), so nothing in any symbol dictionary names it: `list_classes`
+> cannot see it and `describe_class` cannot be pointed at it. It has to be asked for by its *Python*
+> name, and the answer has to say which Smalltalk class is underneath — because that is the one every
+> other tool here takes. The **storage base** is the line to read closely: a Python class does not
+> wrap its data, it *is* a GemStone object, so `class X(str)` is backed by `Unicode32` and
+> `class Y(list)` by `OrderedCollection`, and that is what decides which env-0 protocol its instances
+> already answer. Names resolve through Python (importing as needed) rather than through the
+> `GrailCanonicalClasses` registry, which records module-scope classes only and is emptied wholesale
+> by the generation guard after a Grail install.
+>
+> **`list_python_methods` carries what a selector cannot.** `pop(key, default=None)` compiles to the
+> Smalltalk selector `_pop:kw:`, and `__setitem__(key, value)` to `__setitem__:_:` — arity survives,
+> names and defaults do not. So signatures come from the class's own signature table, and the
+> selector is only a fallback (the tool says so when it had to use one). Reading a name *off* a
+> selector is done by recognising the whole encoding: truncating at the first colon is a documented
+> way to invent attributes that do not exist — it manufactured `perform`, `value` and `with` on 40 of
+> 42 subjects in Grail's own `dir()` census.
+>
+> **`python_module_state` answers a question CPython has no vocabulary for.** A Grail module is a
+> compiled artifact in the *database*. It can be committed (deployed) or merely session-built; its
+> committed compile can be current or **stale** against the `.py`; and it can be absent from this
+> session's `sys.modules` *having once been in it* — a state in which the next import **raises**
+> rather than rebuilding. The tool reports each fact and then the line that matters: what
+> `import <name>` would actually do from here. It only reads — it deliberately does not import the
+> module it describes, which is what makes it safe to ask about one you have not decided to import,
+> and read-only-safe.
 
 > **`run_python_tests` runs somewhere else on purpose.** Pointing the generic `run_test_class` at
 > Grail's SUnit classes reported roughly **3,410 errors**, and not one of them was a defect in Grail.
@@ -504,7 +535,7 @@ forbidden here" from "no such tool". A tool absent because its toolset was never
 | `McpServer` | per-client worker: the single-client MCP server that runs inside each worker gem — registry, dispatcher, the kernel guards, read-only gating, identity. The tools themselves belong to its toolsets, and which of those it registers is not fixed by the class. No socket |
 | `McpToolset` | abstract tool pack: `registerOn:` (its tools + schemas), its `tool_*` handlers, `toolNames`, `readOnlySafeToolNames` (empty by default — fail closed), plus the shared schema builders, image-lookup helpers, and the kernel guards (which forward to the server's policy). **Subclass this to add tools**; a deployment picks the list |
 | `McpBrowsingToolset`, `McpExecutionToolset`, `McpListingToolset`, `McpMutationToolset`, `McpSearchToolset`, `McpSessionToolset`, `McpTestingToolset` | the seven core toolsets, one per tool family. A deployment can expose any subset — or none of them, alongside its own |
-| `McpGrailToolset` | optional Python toolset (`eval_python`, `compile_python`, `get_python_source`, `run_python_tests`), filed in only on a Grail image. Needs nothing from the server, so it doubles as the worked example for a third-party toolset |
+| `McpGrailToolset` | optional Python toolset (7 tools: eval, transpile, source, class + method browsing, module state, tests), filed in only on a Grail image. Needs nothing from the server, so it doubles as the worked example for a third-party toolset |
 | `McpSession` | one client's isolated worker handle: a `GsTsExternalSession` gem + session id + last-activity + the worker class/toolsets/identity the front end resolved, plus the front-end-side outbox, log level and liveness state. `prepareWorker` sets the gem up in one call; `forward:` runs a request in it (`<workerClass> handleJsonString: …`) without blocking the front end (`runWorker:`); `close` stops it |
 | `McpOutbox` | one session's queue of server-initiated messages waiting for its SSE stream. Front-end-only and never committed; owns the bound/overflow policy, the closing handshake, and the latest-GET-wins rule |
 | `McpHttpConnection` | reads one HTTP/1.1 request, writes one JSON response (incl. `MCP-Session-Id`), and writes the SSE stream — every frame gated on the socket being writable, plus a non-blocking read-side disconnect check |

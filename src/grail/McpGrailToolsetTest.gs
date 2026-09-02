@@ -14,9 +14,9 @@ GsTestCase subclass: 'McpGrailToolsetTest'
 expectvalue /Class
 doit
 McpGrailToolsetTest comment: 
-'Tests for the optional Grail-powered python tools, which live in McpGrailToolset (eval_python,
-compile_python, get_python_source). Its own source group (src/grail/), loaded only into a
-Grail-equipped image (src/grail/load.gs, filed in by install.sh --grail); the core suites (McpToolTest,
+'Tests for the optional Grail-powered python tools, which live in McpGrailToolset (the eval,
+transpile, source, class- and method-browsing, module-state and test-running tools). Its own source
+group (src/grail/), loaded only into a Grail-equipped image (src/grail/load.gs, filed in by install.sh --grail); the core suites (McpToolTest,
 McpDispatcherTest, McpTransportTest, McpContractTest, McpExtensionTest) cover the Grail-free server.
 
 Covers all three Python failure paths for real: an undefined name, a runtime error and a syntax error.
@@ -85,6 +85,13 @@ grailServer
 %
 category: 'helpers'
 method: McpGrailToolsetTest
+grailToolsetOn: aCheckout
+  "A Grail toolset configured with aCheckout, which is what every tool that touches disk needs."
+  ^McpGrailToolset on: nil options:
+    (Dictionary new at: 'grailDirectory' put: aCheckout; yourself)
+%
+category: 'helpers'
+method: McpGrailToolsetTest
 includesCS: aSubstring in: aString
   "Case-sensitive substring test (String>>includesString: is case-INsensitive)."
   ^(aString findString: aSubstring startingAt: 1) > 0
@@ -133,6 +140,43 @@ testCompilePython
   src := self mcp tool_compile_python: (self oneArg: 'code' value: 'x = 6 * 7').
   self assert: (self includesCS: '___binOpMul___:' in: src).
   self assert: (self includesCS: 'x :=' in: src)
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testDescribePythonClassNamesTheSmalltalkClassAndStorageBase
+  "The questions no Smalltalk browsing tool can answer, because a Grail Python class is created
+   ANONYMOUSLY -- in no symbol dictionary, so list_classes cannot see it and it has to be asked for
+   by its Python name.
+
+   Storage base is the one to check hardest: a Python class does not wrap its data, it IS a GemStone
+   object, so the base is what decides which env-0 protocol its instances already answer.
+   Needs a checkout; discovered, see grailCheckoutOrNil."
+  | checkout out |
+  checkout := self grailCheckoutOrNil.
+  checkout isNil ifTrue: [^self assert: true].
+  out := self withFreshScopeDo: [
+    (self grailToolsetOn: checkout) tool_describe_python_class:
+      (self oneArg: 'name' value: '_grail_session.SessionDict')].
+  self assert: (self includesCS: 'smalltalk class: SessionDict' in: out).
+  self assert: (self includesCS: 'anonymous' in: out).
+  self assert: (self includesCS: 'storage base:' in: out).
+  "__slots__ are real named instVars under a mangled name -- worth saying, since nothing else does"
+  self assert: (self includesCS: '__slots__' in: out).
+  self assert: (self includesCS: '_name' in: out).
+  "and it points at the tool that answers the Smalltalk half, rather than pretending to"
+  self assert: (self includesCS: 'list_methods' in: out)
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testDescribePythonClassRefusesAnUnknownName
+  "A name that resolves to nothing is #notFound with a hint, never an empty description -- the
+   silent-wrong-answer shape this toolset exists to avoid."
+  | result |
+  result := self withFreshScopeDo: [
+    (self dispatch: (self toolCall: 'describe_python_class'
+      args: (Dictionary new at: 'name' put: 'no_such_module_xyz.Nope'; yourself))) at: 'result'].
+  self assert: (result at: 'isError').
+  self assert: (((result at: 'structuredContent') at: 'error') at: 'kind') equals: 'notFound'
 %
 category: 'tests'
 method: McpGrailToolsetTest
@@ -290,13 +334,14 @@ testGrailToolsetIsGatedInReadOnlySession
   | ts |
   ts := McpGrailToolset on: McpServer new.
   self assert: ts readOnlySafeToolNames asSortedCollection asArray
-    equals: (Array with: 'run_python_tests').
+    equals: (Array with: 'python_module_state' with: 'run_python_tests').
   SessionTemps current removeKey: #McpReadOnly ifAbsent: [nil].
   [ | names err |
     McpServer sessionReadOnly: true.
     names := (McpServer newWithToolsetNames: (Array with: 'McpGrailToolset'))
       toolRegistry descriptors collect: [:d | d at: 'name'].
-    self assert: names asArray equals: (Array with: 'run_python_tests').
+    self assert: names asSortedCollection asArray
+      equals: (Array with: 'python_module_state' with: 'run_python_tests').
     err := (self dispatch: (self toolCall: 'eval_python'
       args: (Dictionary new at: 'code' put: '1'; yourself))) at: 'error'.
     self assert: (err at: 'code') equals: -32601.
@@ -312,6 +357,30 @@ testGrailToolsetJoinsTheInstalledDefaultSurface
    'build the most capable installed server class' probe."
   self assert: (McpServer installedDefaultToolsetNames includes: 'McpGrailToolset').
   self deny: (McpServer defaultToolsetNames includes: 'McpGrailToolset')
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testListPythonMethodsGivesRealSignaturesAndLines
+  "The reason this is not just `dir(cls)`: the answer carries parameter NAMES and DEFAULTS, which the
+   Smalltalk selector cannot express -- `pop(key, default=None)` compiles to `_pop:kw:` -- and the
+   .py line each method was defined at.
+   Order is the class body's, not alphabetical, so `__init__` comes before `keys`."
+  | checkout out initAt keysAt |
+  checkout := self grailCheckoutOrNil.
+  checkout isNil ifTrue: [^self assert: true].
+  out := self withFreshScopeDo: [
+    (self grailToolsetOn: checkout) tool_list_python_methods:
+      (self oneArg: 'name' value: '_grail_session.SessionDict')].
+  self assert: (self includesCS: 'pop(key, default=None)' in: out).
+  self assert: (self includesCS: '__setitem__(key, value)' in: out).
+  self assert: (self includesCS: 'keys()' in: out).
+  "a line number for a method, and the file named once rather than per method"
+  self assert: (self includesCS: '_grail_session.py' in: out).
+  self assert: (self includesCS: 'line ' in: out).
+  "source order, not alphabetical"
+  initAt := out findString: '__init__(' startingAt: 1.
+  keysAt := out findString: 'keys()' startingAt: 1.
+  self assert: (initAt > 0 and: [keysAt > initAt])
 %
 category: 'tests'
 method: McpGrailToolsetTest
@@ -336,6 +405,49 @@ testPythonErrorMessageNamesTheClassOnce
     idx := idx + 1].
   self assert: count equals: 1.
   self assert: (self includesCS: 'boom' in: text)
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testPythonModuleStateTellsNativeFromPyAndUnknown
+  "The three kinds of answer a module can have, none of which CPython tooling has a question for.
+   Reads only -- nothing here imports, compiles or writes, which is what makes it safe to ask about
+   a module you have not decided to import yet."
+  | ts native unknown |
+  ts := McpGrailToolset new.
+  native := ts tool_python_module_state: (self oneArg: 'name' value: 'os').
+  "os is hand-written Smalltalk: no .py exists, so the canonical/source lines are omitted rather
+   than reported as a string of noes"
+  self assert: (self includesCS: 'native' in: native).
+  self deny: (self includesCS: 'canonical:' in: native).
+  unknown := ts tool_python_module_state: (self oneArg: 'name' value: 'no_such_module_xyz').
+  self assert: (self includesCS: 'next import:' in: unknown).
+  self assert: (self includesCS: 'FAILS' in: unknown)
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testPythonNameOfSelectorDecodesTheWholeEncoding
+  "The selector encoding, pinned. Grail generates `name:` plus `_:` per further argument for a fixed
+   call, and `_name:kw:` -- one underscore ADDED -- for one taking *args/**kwargs.
+
+   The last two assertions are the ones that matter. Truncating a selector at its first colon is a
+   documented way to invent Python attributes that do not exist (it manufactured `perform`, `value`
+   and `with` on 40 of 42 subjects in Grail's own dir() census), and `_x:kw:` must decode as varargs
+   `x` while `_x:_:` stays the two-argument `_x` -- the `kw:` keyword is the only thing telling them
+   apart."
+  | ts |
+  ts := McpGrailToolset new.
+  self assert: (ts pythonNameOfSelector: #keys) equals: 'keys'.
+  self assert: (ts pythonNameOfSelector: #abs:) equals: 'abs'.
+  self assert: (ts pythonNameOfSelector: #max:_:) equals: 'max'.
+  self assert: (ts pythonNameOfSelector: #'__setitem__:_:') equals: '__setitem__'.
+  "varargs: the added underscore comes back off"
+  self assert: (ts pythonNameOfSelector: #'_pop:kw:') equals: 'pop'.
+  self assert: (ts pythonNameOfSelector: #'___getitem__:kw:') equals: '__getitem__'.
+  "...but a fixed-arity selector that merely starts with _ keeps its name"
+  self assert: (ts pythonNameOfSelector: #'_dict:_:') equals: '_dict'.
+  "and a Grail-internal ___name___ is recognised as such, while a Python dunder is not"
+  self assert: (ts isGrailInternalName: '___methodCodeTable___').
+  self deny: (ts isGrailInternalName: '__init__')
 %
 category: 'tests'
 method: McpGrailToolsetTest
