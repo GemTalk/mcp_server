@@ -59,7 +59,8 @@ log: aString
 category: 'json-rpc'
 method: McpBase
 notification: aMethodString params: aDictOrNil
-  "A JSON-RPC notification (no id, so no answer is expected) as a Dictionary, ready for #asJson.
+  "A JSON-RPC notification (no id, so no answer is expected) as a Dictionary, ready for
+   McpJson>>write:.
    A nil params is left OUT rather than sent as null."
   | d |
   d := Dictionary new.
@@ -96,7 +97,7 @@ category: 'json-rpc'
 method: McpBase
 request: aMethodString params: aDictOrNil id: anId
   "A JSON-RPC request (it carries an id, so the receiver MUST answer) as a Dictionary, ready for
-   #asJson. The answer does NOT come back on the stream: a client replies by POSTing a JSON-RPC
+   McpJson>>write:. The answer does NOT come back on the stream: a client replies by POSTing a JSON-RPC
    response to /mcp, which is why McpRouter keeps a pending-request table and why servePost: has
    to recognize a body with an id and no method."
   | d |
