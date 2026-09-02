@@ -93,7 +93,8 @@ share one instance: no class-side state, no `SessionTemps`, and both are visible
 builds a server by hand.
 
 ```
-readLedger    Set of keys — what this session has seen in the current view window
+readLedger    Dictionary, key → stamp — what this session has seen in the current view window,
+              and a digest of what it saw
 writeLedger   Set of keys — what this session has changed and not yet committed
 ```
 
@@ -108,6 +109,24 @@ Keys come at four grains:
 
 Nothing here touches `GsBitmap`, hidden sets, or any repository state. The stone's own guardrail is
 left exactly as it ships.
+
+### The stamp
+
+A read is recorded together with a **stamp** of what was read: the SHA-256 of the subject's
+canonical text as the current view has it (`String>>asSha256String`, in the kernel since 3.7.5), or a
+fixed marker for a subject that does not exist. `McpServer>>stampFor:` dispatches on the key's shape
+to one method per grain, so what counts as the content of each kind of subject is stated once:
+
+| key | text that is hashed | method |
+|---|---|---|
+| `Foo>>bar:`, `Foo class>>bar:` | the installed method's source, as `sourceCodeAt:` answers it | `stampForMethodKey:` |
+| `Foo:shape` | the definition message, `Foo definition` | `stampForShapeKey:` |
+| `Foo:comment` | the class comment | `stampForCommentKey:` |
+| `#D` | the entries as `list_dictionary_entries` shows them — key and class/global, sorted | `stampForDictionaryKey:` |
+
+`requireRead:` never looks at a stamp; membership is the whole test, exactly as before. The stamp
+exists for one moment, the [re-validation](#re-validation) a view move performs, and a write records
+the stamp of the content *as written* — what the session now knows.
 
 ### What registers a read
 
@@ -179,9 +198,9 @@ outright, including ones the client has never seen, so it must have seen all of 
 |---|---|---|---|
 | successful commit | yes | `:= writeLedger`, plus the widening below | cleared |
 | failed commit | **no** (V) | kept | kept |
-| abort | yes | cleared | cleared |
+| abort | yes | re-validated by stamp (below) | cleared |
 | `refresh` returning `true` | yes | `:= writeLedger`, plus the widening | kept |
-| `refresh` returning `false` | yes (U) | cleared | cleared |
+| `refresh` returning `false` | yes (U) | re-validated by stamp (below) | cleared |
 
 **`writeLedger ⊆ readLedger` holds in every row.** It is worth stating as an invariant because it
 is the property the guardrail rests on: every write this session is holding was licensed by a read
@@ -198,10 +217,14 @@ read in the window is still good and both ledgers are kept untouched. The transa
 must be aborted, but that is a separate fact from whether the reads are stale — and they are not.
 
 **A refresh that returns `false` moves the view anyway** (U), which is the one genuinely bad state
-in the system: the reads are invalidated *and* the pending writes cannot commit. Both ledgers are
-cleared. Clearing `writeLedger` is not a fiction — no licensed writes remain — and it keeps the
-invariant unconditional. The conflicting class names are captured at that moment, while the ledger
-still exists, for the message that tells the client to abort.
+in the system: the view has moved under the reads *and* the pending writes cannot commit.
+`writeLedger` is cleared — not a fiction, no licensed writes remain, and it keeps the invariant
+unconditional — and the reads are re-validated exactly as after an abort. The conflicting class
+names are captured first, while the write ledger still exists, for the message that tells the client
+to abort. One measured nuance: the session's *own* uncommitted writes stay in place across a false
+refresh, so a read of something this session wrote still matches its stamp and survives the refresh;
+the abort that is the only way out re-checks it again, finds the other session's version, and drops
+it then. Nothing can be committed in between, so nothing is at risk.
 
 ### The widening
 
@@ -219,6 +242,44 @@ re-reading — soundly, because the commit proved the whole class untouched.
 The widening stops at method grain. `Foo:shape` and `Foo:comment` live in different objects from the
 method dictionary, so validating the dictionary proves nothing about them; they survive a view move
 only by being in `writeLedger`.
+
+### Re-validation
+
+An abort, and a refresh that answers `false`, move the view with the stone vouching for nothing on
+the way through. Until 2026-09-02 both simply cleared `readLedger`, on the argument that nothing this
+session saw was known to survive — which made an abort after browsing twenty methods cost twenty
+re-reads even when nobody else had committed a thing.
+
+A read is a statement about content — *`Foo>>bar:` says this* — and moving the view does not make
+it false; another session having committed a different `Foo>>bar:` does. So instead of forgetting
+the reads, `McpServer>>revalidateReadLedger` recomputes each key's stamp in the new view and compares.
+Equal, and the read is as true now as when it was made: it keeps its licence. Different, and it is
+dropped and remembered in `staleReadKeys`. The result of the call that moved the view — the abort,
+or the refused refresh — then carries one more `[session]` line, once:
+
+```
+[session] The view moved: 2 of 7 earlier reads are stale and must be re-read before writing to them: Foo>>bar:, Baz:shape.
+```
+
+Ten names at most, then *and N more*. The line is `McpDispatcher>>staleReadNote`, appended after the
+transaction-state line and consuming the keys as it reports them, so it appears on exactly one
+result. The count is the point: it tells the client the other five reads still stand, so it re-reads
+two subjects instead of all seven or — worse — discovers each stale one as a refusal.
+
+Three consequences worth knowing:
+
+- **A byte-identical recompile by another session leaves the read good.** The stamp is of the text,
+  not the method object (P installs a new `GsNMethod` for the same source). What the client read *is*
+  what is there, so nothing it writes on that basis discards anything.
+- **An aborted write needs a fresh read**, even when nobody else touched the subject. The write
+  recorded the stamp of the content as written; the abort restored the previous content; the stamp
+  no longer matches. The client's last knowledge of that method is a version that no longer exists,
+  and it is told so.
+- **Successful commit and refresh `true` are unchanged.** They keep the write set plus the widening
+  and drop everything else, and what they drop is *not* reported as stale — nothing says its content
+  changed, only that the stone did not vouch for it. Those reads could be re-validated by stamp the
+  same way; they are not yet, so a commit still costs the re-read of everything outside the classes
+  this session wrote.
 
 
 ## Where it is enforced
@@ -282,7 +343,9 @@ from the source goes with it.
 ## Keeping the measurements honest
 
 Two suites, deliberately different in kind. `McpBlindWriteTest` drives the ledger protocol directly
-and pins the RULES. `McpConcurrentEditTest` stages genuine conflicts from a real second gem and pins
+and pins the RULES — for re-validation, with the kernel standing in for the other session by
+recompiling the fixture in the same gem, since the rule is *the content moved* and not where the new
+content came from. `McpConcurrentEditTest` stages genuine conflicts from a real second gem and pins
 that the rules still match the DATABASE -- because every rule here was derived from something
 measured below, and a suite that never touches the stone cannot notice if a measurement stops
 holding. A kernel change that made a failed commit move the view, or made a refresh stop laundering
