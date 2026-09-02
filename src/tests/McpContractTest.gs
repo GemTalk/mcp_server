@@ -33,6 +33,16 @@ removeallclassmethods McpContractTest
 ! ------------------- Instance methods for McpContractTest
 category: 'helpers'
 method: McpContractTest
+bytesOf: anArrayOfByteValues
+  "A byte String holding exactly these byte values -- how this suite spells a raw-UTF-8 request body
+   without putting a non-ASCII character in the source."
+  | out |
+  out := String new.
+  anArrayOfByteValues do: [:each | out add: (Character codePoint: each)].
+  ^out
+%
+category: 'helpers'
+method: McpContractTest
 dispatch: requestDict
   "Route requestDict through a fresh dispatcher wired to its owning server, so read-only gating is
    exercised through the real path."
@@ -510,6 +520,27 @@ testValidArgumentsAccepted
   result := (self dispatch: (self toolCall: 'describe_class' args:
     (Dictionary new at: 'className' put: 'Object'; yourself))) at: 'result'.
   self deny: (result at: 'isError')
+%
+category: 'tests - transport'
+method: McpContractTest
+testWorkerDecodesUtf8AndAnswersAscii
+  "The worker entry's Unicode contract, at the boundary a client's bytes actually cross.
+   Two properties, and they are the two halves of the round trip. INBOUND: the body arrives as raw
+   UTF-8 -- what every real client sends, since only an escaping encoder avoids it -- and must be
+   decoded, so 'Cafe' with an e-acute is five characters and not six. Before McpJson it was read one
+   Latin-1 character per byte, and the corruption went on to be stored.
+   OUTBOUND: whatever the tool answers, the rendered response holds nothing outside 0x20-0x7E.
+   Content-Length elsewhere is computed as `body size` and is the byte count only while that is true.
+   describe_class is used because it echoes the name it was given straight back and changes nothing."
+  | body out text |
+  body := '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"describe_class",'
+    , '"arguments":{"className":"Caf' , (self bytesOf: #(16rC3 16rA9)) , '"}}}'.
+  out := McpServer new handleJsonString: body.
+  1 to: out size do: [:i | self assert: (out at: i) codePoint < 128].
+  text := ((McpJson parse: out) at: 'result') at: 'content'.
+  text := (text at: 1) at: 'text'.
+  self assert: text equals: 'Class not found: Caf' , (String with: (Character codePoint: 16rE9)).
+  self assert: (self includesCS: 'Caf' , (String with: (Character codePoint: 92)) , 'u00E9' in: out)
 %
 category: 'helpers'
 method: McpContractTest

@@ -31,6 +31,28 @@ bodyOf: response
 %
 category: 'helpers'
 method: McpTransportTest
+bytesOf: anArrayOfByteValues
+  "A byte String holding exactly these byte values -- how this suite spells raw UTF-8 on the wire
+   without putting a non-ASCII character in the source."
+  | out |
+  out := String new.
+  anArrayOfByteValues do: [:each | out add: (Character codePoint: each)].
+  ^out
+%
+category: 'helpers'
+method: McpTransportTest
+contentLengthOf: response
+  "The Content-Length header's value as an Integer, or nil when the response carries no such header."
+  | label start lineEnd |
+  label := 'Content-Length: '.
+  start := response findString: label startingAt: 1.
+  start = 0 ifTrue: [^nil].
+  start := start + label size.
+  lineEnd := response findString: self crlf startingAt: start.
+  ^(response copyFrom: start to: lineEnd - 1) asInteger
+%
+category: 'helpers'
+method: McpTransportTest
 crlf
   ^String with: Character cr with: Character lf
 %
@@ -525,6 +547,42 @@ testTlsEnabledWhenConfigured
   self assert: r tlsEnabled.
   r disableTls.
   self deny: r tlsEnabled
+%
+category: 'tests'
+method: McpTransportTest
+testUnicodeResponseIsAsciiWithByteAccurateContentLength
+  "THE TRANSPORT'S UNICODE CONTRACT, and the test whose absence let three defects ship.
+   Content-Length is written as `body size`, which is the byte count ONLY while the body holds
+   nothing outside 0x20-0x7E. So the two assertions belong together: a response carrying non-ASCII
+   text must still leave as pure ASCII, and the length must be one a client can trust. If the
+   escaping policy is ever changed to put real UTF-8 on the wire, this fails -- which is the point.
+   The request carries RAW UTF-8, the way every real client sends it, and the body is forwarded to
+   the worker BYTE FOR BYTE: the worker decodes it (McpBase>>parseBody:), the front end does not, so
+   what the transport must not do is alter it in passing."
+  | r sess text response out body raw |
+  text := 'caf' , (String with: (Character codePoint: 16rE9)) , ' '
+    , (String with: (Character codePoint: 16r2603))
+    , (String with: (Character codePoint: 16r1F600)).
+  response := Dictionary new.
+  response at: 'jsonrpc' put: '2.0'.
+  response at: 'id' put: 1.
+  response at: 'result' put: (Dictionary new at: 'text' put: text; yourself).
+  raw := '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"x","arguments":'
+    , '{"code":"' , (self bytesOf: #(16rC3 16rA9 16rE2 16r98 16r83)) , '"}}}'.
+  r := McpFixtureRouter new.
+  sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
+  sess mockWorker nextResult: (McpJson write: response).
+  out := (self runRequest: (self postRequest: raw sessionId: sess id) onRouter: r) output.
+  "Pure ASCII on the wire, header and body alike."
+  1 to: out size do: [:i | self assert: (out at: i) codePoint < 128].
+  "Content-Length is the byte count of exactly what followed it."
+  body := self bodyOf: out.
+  self assert: (self contentLengthOf: out) equals: body size.
+  "And the text survived the trip intact, astral character included."
+  self assert: (((McpJson parse: body) at: 'result') at: 'text') equals: text.
+  "The raw request body reached the worker unaltered -- five bytes, not decoded and not mangled."
+  self assert: ((sess mockWorker expressions last)
+    findString: (self bytesOf: #(16rC3 16rA9 16rE2 16r98 16r83)) startingAt: 1) > 0
 %
 category: 'tests'
 method: McpTransportTest
