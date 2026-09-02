@@ -5,11 +5,11 @@ doit
 Object subclass: 'McpSession'
   instVarNames: #( id worker workerMutex
                     lastActivitySeconds userId readOnly workerClassName
-                    toolsetNames serverName serverTitle serverVersion
-                    workerPid workerStoneSession outbox startedAtSeconds
-                    expiresAtSeconds quietProbes unansweredProbes streamlessPasses
-                    passesSinceProbe streamClosedByClient requestTimeoutSeconds workerAbandoned
-                    inFlightRequestId cancelRequested waitAction)
+                    toolsetNames toolsetOptions serverName serverTitle
+                    serverVersion workerPid workerStoneSession outbox
+                    startedAtSeconds expiresAtSeconds quietProbes unansweredProbes
+                    streamlessPasses passesSinceProbe streamClosedByClient requestTimeoutSeconds
+                    workerAbandoned inFlightRequestId cancelRequested waitAction)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -765,6 +765,14 @@ toolsetNames: aCollectionOfNamesOrNil
    (McpRouter>>effectiveToolsetNames)."
   toolsetNames := aCollectionOfNamesOrNil
 %
+category: 'accessing'
+method: McpSession
+toolsetOptions: aDictOrNil
+  "The deployment's options for those toolsets, keyed by toolset name, as resolved and VALIDATED by
+   the front end (McpRouter>>effectiveToolsetOptions). nil when nothing is configured, which is the
+   ordinary case."
+  toolsetOptions := aDictOrNil
+%
 category: 'activity'
 method: McpSession
 touch
@@ -811,9 +819,18 @@ workerBootstrapExpression
    identifiers (McpRouter validated them when the router was configured) and the strings are embedded
    via printString, so this cannot smuggle anything into the worker's compiler. That printString is
    load-bearing for the title in particular: unlike a name or a version it is free-form operator prose,
-   so quotes in it must be doubled rather than closing the literal."
+   so quotes in it must be doubled rather than closing the literal.
+
+   The toolset options travel as ONE printString-quoted JSON string, which the worker parses
+   (McpServer class>>prepareWorkerWithToolsets:options:...). They are the only argument here whose
+   shape the core does not know -- a nested map a vendor defines -- so encoding them as JSON rather
+   than building a Smalltalk literal keeps this method free of that shape entirely, and gives them
+   the same one-quoted-literal safety property every other argument has."
   ^self workerClassName
     , ' prepareWorkerWithToolsets: ' , (self quotedNameArrayFor: toolsetNames)
+    , ' options: ' , ((toolsetOptions isNil or: [toolsetOptions isEmpty])
+        ifTrue: ['nil']
+        ifFalse: [toolsetOptions asJson printString])
     , ' readOnly: ' , self readOnly printString
     , ' serverName: ' , (serverName isNil ifTrue: ['nil'] ifFalse: [serverName printString])
     , ' title: ' , (serverTitle isNil ifTrue: ['nil'] ifFalse: [serverTitle printString])

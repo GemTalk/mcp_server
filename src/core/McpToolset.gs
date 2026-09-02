@@ -3,7 +3,7 @@ set compile_env: 0
 expectvalue /Class
 doit
 Object subclass: 'McpToolset'
-  instVarNames: #( server)
+  instVarNames: #( server options)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -31,6 +31,20 @@ NONE, so a tool is gated in a read-only session until it is deliberately listed 
 a change. Then name your class in the router''s toolsetNames config. Your class must be visible in the
 WORKER gem''s symbol list (Published, not the operator''s UserGlobals), because the worker may log in
 as a different user.
+
+DEPLOYMENT OPTIONS. A toolset may also need configuration the core cannot know -- where a vendor''s
+data directory is, which host a subsystem talks to. Declare the names you accept in
+class>>declaredOptionNames and read them with optionNamed:ifAbsent:; an operator sets them on the
+ROUTER (McpRouter>>toolsetOptions:), keyed by toolset name, and they are carried into the worker with
+the rest of the session config. This completes what a toolset declares about itself -- its tools
+(toolNames), which of them are safe read-only (readOnlySafeToolNames), and now how it may be
+configured -- rather than growing the core a new ivar per vendor.
+
+declaredOptionNames is an ALLOW-LIST, checked by the router when the option is set: an undeclared
+name is refused at configuration time, naming what this toolset does declare. That is the same
+choice objectSchema:required: makes for tool arguments (additionalProperties: false) and for the
+same reason -- a mistyped setting that is silently ignored is far more expensive to find than one
+that refuses to start. Values must be JSON-safe: they travel to the worker as JSON.
 
 The schema builders and the image-lookup helpers every toolset needs (resolveClass:, dictNamed:,
 linesFrom:, capResult:) are BOTH class- and instance-side: the class-side methods are the single
@@ -119,6 +133,15 @@ commitConflictReport
       any := true]].
   ^any ifTrue: [s contents] ifFalse: ['(no conflict category reported)']
 %
+category: 'options'
+classmethod: McpToolset
+declaredOptionNames
+  "The deployment-option names I accept, as Strings. Empty by default, so a toolset that needs no
+   configuration says nothing and an operator who configures one anyway is told so.
+   The router checks a configured name against this list when it is SET (McpRouter>>toolsetOptions:)
+   and refuses an undeclared one -- see the class comment on why refusing beats ignoring."
+  ^#()
+%
 category: 'private'
 classmethod: McpToolset
 dictNamed: aName
@@ -155,8 +178,17 @@ category: 'instance creation'
 classmethod: McpToolset
 on: aServer
   "A toolset for aServer, the McpServer whose registry it registers on (and whose server-level policy
-   -- the kernel guards -- its handlers consult; see the class comment)."
-  ^self new setServer: aServer
+   -- the kernel guards -- its handlers consult; see the class comment). No deployment options; see
+   on:options:."
+  ^self on: aServer options: nil
+%
+category: 'instance creation'
+classmethod: McpToolset
+on: aServer options: aDictOrNil
+  "As on:, plus this deployment's options for me -- the entry the server builds a configured toolset
+   through (McpServer>>initializeWithToolsetNames:toolsetOptions:). aDictOrNil is keyed by option
+   name; nil and empty mean the same thing, which is what a toolset that declares none always gets."
+  ^self new setServer: aServer; setOptions: aDictOrNil; yourself
 %
 category: 'schema building'
 classmethod: McpToolset
@@ -382,6 +414,25 @@ method: McpToolset
 objectSchema: propsDict required: requiredArray
   ^self class objectSchema: propsDict required: requiredArray
 %
+category: 'options'
+method: McpToolset
+optionNamed: aName ifAbsent: aBlock
+  "This deployment's value for option aName, or aBlock's value when it was not configured.
+   ifAbsent: is mandatory rather than there being a bare optionNamed:, because every option is
+   optional by construction -- an operator need not set one -- so a handler that reads one has to say
+   what it does without it, at the point it reads it."
+  options isNil ifTrue: [^aBlock value].
+  ^options at: aName asString ifAbsent: aBlock
+%
+category: 'options'
+method: McpToolset
+options
+  "This deployment's options for me, keyed by option name. Never nil -- an unconfigured toolset
+   answers an empty Dictionary -- so a caller may enumerate without a guard. Read-only in practice:
+   the answer when nothing was configured is a fresh empty Dictionary, so mutating it changes
+   nothing."
+  ^options ifNil: [Dictionary new]
+%
 category: 'progress'
 method: McpToolset
 progress: aNumber message: aStringOrNil
@@ -504,6 +555,14 @@ server
   "The McpServer this toolset registers on, and the home of the server-level policy a handler must
    respect -- the kernel guards. nil for a toolset built without one (see the class comment)."
   ^server
+%
+category: 'initialization'
+method: McpToolset
+setOptions: aDictOrNil
+  "Install this deployment's options for me. Kept as given (nil included -- see #options), so nothing
+   here has to decide what an unconfigured toolset's options 'are'."
+  options := aDictOrNil.
+  ^self
 %
 category: 'initialization'
 method: McpToolset

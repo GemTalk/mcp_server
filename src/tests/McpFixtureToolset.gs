@@ -20,7 +20,13 @@ read-only honor their own safety declaration.
 
 Written the way a real third-party toolset should be: it owns its handler, needs nothing from the
 server (echoing a string consults no server-level policy -- see McpToolset), and declares its tool
-read-only safe because echoing an argument cannot persist anything.'
+read-only safe because echoing an argument cannot persist anything.
+
+It also declares one DEPLOYMENT OPTION, echoPrefix, which is how the extension tests exercise the
+whole options chain end to end -- declared here, set on the router, validated against this
+declaration, serialized into the fork string, parsed in the worker, and read by the handler. A real
+vendor toolset''s option would name a directory or a host; a prefix is the smallest thing that makes
+the same journey and is observable in a tool result.'
 %
 expectvalue /Class
 doit
@@ -30,6 +36,12 @@ McpFixtureToolset category: 'Mcp-Tests'
 removeallmethods McpFixtureToolset
 removeallclassmethods McpFixtureToolset
 ! ------------------- Class methods for McpFixtureToolset
+category: 'options'
+classmethod: McpFixtureToolset
+declaredOptionNames
+  "echoPrefix -- what tool_fixture_echo: puts in front of the text. See the class comment."
+  ^#( 'echoPrefix' )
+%
 ! ------------------- Instance methods for McpFixtureToolset
 category: 'read-only'
 method: McpFixtureToolset
@@ -52,7 +64,10 @@ registerOn: aToolRegistry
 category: 'tools - fixture'
 method: McpFixtureToolset
 tool_fixture_echo: args
-  ^'echo: ' , (args at: 'text')
+  "The prefix comes from this deployment's echoPrefix option, defaulting to what this tool always
+   answered -- so an unconfigured toolset behaves exactly as it did before options existed, which is
+   the property every existing test here is still asserting."
+  ^(self optionNamed: 'echoPrefix' ifAbsent: ['echo: ']) , (args at: 'text')
 %
 category: 'accessing'
 method: McpFixtureToolset

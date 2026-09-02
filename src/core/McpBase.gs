@@ -42,6 +42,24 @@ McpBase category: 'Mcp-Core'
 removeallmethods McpBase
 removeallclassmethods McpBase
 ! ------------------- Class methods for McpBase
+category: 'private'
+classmethod: McpBase
+parseBody: aString
+  "Parse a JSON body to its Dictionary, or nil if empty/malformed.
+   Cross-version: GS 3.7.x's JsonParser raises on bad input, but 3.6.2's (PetitParser-based)
+   returns a PPFailure instead of raising -- so reject any non-Dictionary result, not just
+   exceptions. A valid JSON-RPC request is always an object, so nil here -> a -32700 Parse error.
+
+   BOTH class- and instance-side, with the class-side as the single implementation, because the
+   worker bootstrap that parses the deployment's toolset options
+   (McpServer class>>prepareWorkerWithToolsets:options:...) runs before any server instance exists.
+   Same arrangement, and same reason, as the shared helpers on McpToolset."
+  (aString isNil or: [aString isEmpty]) ifTrue: [^nil].
+  ^[ | parsed |
+     parsed := JsonParser parse: aString.
+     (parsed isKindOf: Dictionary) ifTrue: [parsed] ifFalse: [nil] ]
+   on: Error do: [:ex | nil]
+%
 ! ------------------- Instance methods for McpBase
 category: 'private'
 method: McpBase
@@ -71,15 +89,7 @@ notification: aMethodString params: aDictOrNil
 category: 'private'
 method: McpBase
 parseBody: aString
-  "Parse a JSON-RPC request body to its Dictionary, or nil if empty/malformed.
-   Cross-version: GS 3.7.x's JsonParser raises on bad input, but 3.6.2's (PetitParser-based)
-   returns a PPFailure instead of raising -- so reject any non-Dictionary result, not just
-   exceptions. A valid JSON-RPC request is always an object, so nil here -> a -32700 Parse error."
-  (aString isNil or: [aString isEmpty]) ifTrue: [^nil].
-  ^[ | parsed |
-     parsed := JsonParser parse: aString.
-     (parsed isKindOf: Dictionary) ifTrue: [parsed] ifFalse: [nil] ]
-   on: Error do: [:ex | nil]
+  ^self class parseBody: aString
 %
 category: 'formatting'
 method: McpBase

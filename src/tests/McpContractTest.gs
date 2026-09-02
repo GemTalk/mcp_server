@@ -218,7 +218,7 @@ testPrepareWorkerAppliesReadOnlyBeforeBuilding
   "Read-only must be set before the build, or the gated tools would already be registered."
   self withFreshWorkerCacheDo: [
     self savingReadOnlyDo: [ | out |
-      McpServer prepareWorkerWithToolsets: McpServer defaultToolsetNames
+      McpServer prepareWorkerWithToolsets: McpServer defaultToolsetNames options: nil
         readOnly: true serverName: nil title: nil version: nil frontEnd: nil.
       out := McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'.
       self deny: (self includesCS: 'execute_code' in: out).
@@ -234,7 +234,7 @@ testPrepareWorkerBuildsNamedSurfaceAndCaches
   self withFreshWorkerCacheDo: [
     self savingReadOnlyDo: [ | note listed |
       note := McpServer
-        prepareWorkerWithToolsets: #('McpBrowsingToolset')
+        prepareWorkerWithToolsets: #('McpBrowsingToolset') options: nil
         readOnly: false serverName: 'acme-db-mcp' title: 'Acme Labels - sandbox' version: '2.5.0'
         frontEnd: nil.
       self assert: (self includesCS: 'McpServer ready' in: note).

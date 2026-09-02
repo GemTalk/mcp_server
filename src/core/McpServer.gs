@@ -30,8 +30,8 @@ session routing live in McpRouter.
 Which tools a server offers is NOT fixed by its class: each server registers a list of McpToolset
 instances (see McpToolset), so a deployment -- or a vendor shipping only their own tools -- chooses the
 surface. The front end resolves both the worker class and the toolset list per session and pushes them
-into the worker gem in one call (prepareWorkerWithToolsets:readOnly:serverName:title:version:), so a
-worker
+into the worker gem in one call (prepareWorkerWithToolsets:options:readOnly:serverName:title:version:),
+so a worker
 never decides what it is. Subclass this to change BEHAVIOR (the kernel guards, the worker entry,
 dispatcher wiring, the advertised identity); write a toolset to add tools. A subclass is used only when
 it is NAMED in the router''s workerClassName config.
@@ -239,9 +239,16 @@ newWithToolsetNames: anArrayOfNames
    of the Smalltalk-development surface. Raises if a name does not resolve (toolsetClassNamed:)."
   ^super new initializeWithToolsetNames: anArrayOfNames
 %
+category: 'instance creation'
+classmethod: McpServer
+newWithToolsetNames: anArrayOfNames toolsetOptions: aDictOrNil
+  "As newWithToolsetNames:, with this deployment's options for those toolsets (keyed by toolset name;
+   see McpToolset's class comment). What the front end builds a worker through."
+  ^super new initializeWithToolsetNames: anArrayOfNames toolsetOptions: aDictOrNil
+%
 category: 'worker'
 classmethod: McpServer
-prepareWorkerWithToolsets: anArrayOfNames readOnly: aBoolean serverName: aNameOrNil title: aTitleOrNil version: aVersionOrNil frontEnd: aFrontEndSessionOrNil
+prepareWorkerWithToolsets: anArrayOfNames options: anOptionsJsonOrNil readOnly: aBoolean serverName: aNameOrNil title: aTitleOrNil version: aVersionOrNil frontEnd: aFrontEndSessionOrNil
   "Prepare THIS worker gem for one client, in the single call the front end makes at session open
    (McpSession>>prepareWorker). Sent to the class the front end NAMED, so `self` is the server class to
    build -- a worker never chooses.
@@ -254,11 +261,19 @@ prepareWorkerWithToolsets: anArrayOfNames readOnly: aBoolean serverName: aNameOr
    doorbell when a tool reports progress. It is constant for this worker's whole life, so it is pushed
    once here rather than repeated on every request; only the per-call id travels with the request
    (class>>progressCallId:). nil means no front end is listening, which is what a worker driven
-   directly from topaz or a test gets."
+   directly from topaz or a test gets.
+
+   anOptionsJsonOrNil is the deployment's toolset options (McpToolset's class comment) as a JSON
+   STRING, parsed here. JSON rather than a Smalltalk literal because the options are a nested,
+   open-ended map whose shape the core does not know, and because both ends already have
+   McpBase>>parseBody: -- so nothing new has to be written, and a value that cannot be represented
+   as JSON cannot travel, which is exactly the constraint the fork string needs anyway. nil means no
+   toolset was configured, which is the ordinary case."
   | srv |
   self sessionReadOnly: aBoolean.
   SessionTemps current at: #McpFrontEndSession put: aFrontEndSessionOrNil.
-  srv := self newWithToolsetNames: anArrayOfNames.
+  srv := self newWithToolsetNames: anArrayOfNames
+    toolsetOptions: (anOptionsJsonOrNil isNil ifTrue: [nil] ifFalse: [self parseBody: anOptionsJsonOrNil]).
   srv serverName: aNameOrNil; serverTitle: aTitleOrNil; serverVersion: aVersionOrNil.
   SessionTemps current at: #McpServer put: srv.
   ^self name asString , ' ready: ' , srv toolRegistry descriptors size printString , ' tool(s)'
@@ -483,11 +498,23 @@ initialize
 category: 'initialization'
 method: McpServer
 initializeWithToolsetNames: anArrayOfNames
+  "As initialize, but with an explicit tool surface, and no deployment options for any of them."
+  ^self initializeWithToolsetNames: anArrayOfNames toolsetOptions: nil
+%
+category: 'initialization'
+method: McpServer
+initializeWithToolsetNames: anArrayOfNames toolsetOptions: aDictOrNil
   "As initialize, but with an explicit tool surface: resolve each named toolset (raising if one is
-   missing -- see McpServer class>>toolsetClassNamed:) and register it, in the order given."
+   missing -- see McpServer class>>toolsetClassNamed:) and register it, in the order given.
+   aDictOrNil maps a TOOLSET NAME to that toolset's own options Dictionary, so each is built knowing
+   only its own configuration -- one toolset can neither read nor collide with another's. A toolset
+   with no entry is built exactly as it was before options existed."
   toolRegistry := McpToolRegistry new.
   dispatcher := McpDispatcher withToolRegistry: toolRegistry server: self.
-  toolsets := anArrayOfNames collect: [:n | (self class toolsetClassNamed: n) on: self].
+  toolsets := anArrayOfNames collect: [:n |
+    (self class toolsetClassNamed: n)
+      on: self
+      options: (aDictOrNil isNil ifTrue: [nil] ifFalse: [aDictOrNil at: n asString ifAbsent: [nil]])].
   self registerToolsets.
   ^self
 %

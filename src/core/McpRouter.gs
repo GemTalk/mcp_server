@@ -6,11 +6,11 @@ McpBase subclass: 'McpRouter'
   instVarNames: #( isRunning mutex routesTable
                     serverSocket sessions allowedOriginHosts tlsCertificateFile
                     tlsPrivateKeyFile readOnly workerClassName toolsetNames
-                    serverName serverTitle serverVersion pendingRequests
-                    pendingMutex serverRequestCounter sessionIdleTimeoutSeconds streamlessIdleTimeoutSeconds
-                    livenessProbeIntervalSeconds reaperIntervalSeconds maxSessionLifetimeSeconds reapOnFailedProbe
-                    streamLossGraceSeconds messageTrace messageTraceLimit requestTimeoutSeconds
-                    callChannels callMutex callCounter)
+                    toolsetOptions serverName serverTitle serverVersion
+                    pendingRequests pendingMutex serverRequestCounter sessionIdleTimeoutSeconds
+                    streamlessIdleTimeoutSeconds livenessProbeIntervalSeconds reaperIntervalSeconds maxSessionLifetimeSeconds
+                    reapOnFailedProbe streamLossGraceSeconds messageTrace messageTraceLimit
+                    requestTimeoutSeconds callChannels callMutex callCounter)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -323,6 +323,8 @@ applyConfig: aConfigDict
   readOnly := aConfigDict at: 'readOnly' ifAbsent: [readOnly].
   workerClassName := aConfigDict at: 'workerClassName' ifAbsent: [workerClassName].
   toolsetNames := aConfigDict at: 'toolsetNames' ifAbsent: [toolsetNames].
+  (aConfigDict includesKey: 'toolsetOptions')
+    ifTrue: [self toolsetOptions: (aConfigDict at: 'toolsetOptions')].
   serverName := aConfigDict at: 'serverName' ifAbsent: [serverName].
   serverTitle := aConfigDict at: 'serverTitle' ifAbsent: [serverTitle].
   serverVersion := aConfigDict at: 'serverVersion' ifAbsent: [serverVersion].
@@ -440,6 +442,11 @@ configDict
   d at: 'readOnly' put: readOnly.
   d at: 'workerClassName' put: workerClassName.
   d at: 'toolsetNames' put: toolsetNames.
+  "Toolset options are the one value here the core does not know the shape of. They stay inside the
+   fixed key allow-list all the same: a nested map under ONE key, whose contents were checked against
+   the toolsets' own declaredOptionNames when they were set (toolsetOptions:), so a future toolset
+   cannot start carrying something nobody declared."
+  d at: 'toolsetOptions' put: toolsetOptions.
   d at: 'serverName' put: serverName.
   d at: 'serverTitle' put: serverTitle.
   d at: 'serverVersion' put: serverVersion.
@@ -568,6 +575,23 @@ effectiveToolsetNames
    This is where scope-driven selection will hook in: an authenticated router can narrow the list per
    principal, which is only possible on this side, because this is where the token is."
   ^toolsetNames ifNil: [McpServer installedDefaultToolsetNames]
+%
+category: 'toolsets'
+method: McpRouter
+effectiveToolsetOptions
+  "The toolset options this router's NEXT worker is built with, narrowed to the toolsets actually in
+   its surface. Narrowed rather than passed whole so that a worker is never handed configuration for
+   a toolset it does not have -- which matters most where the surface is chosen PER SESSION (a
+   subclass narrowing effectiveToolsetNames by principal), because there the same router legitimately
+   serves different surfaces and the options must follow.
+   nil when nothing survives, which is what an unconfigured deployment always answers."
+  | names narrowed |
+  toolsetOptions isNil ifTrue: [^nil].
+  names := self effectiveToolsetNames collect: [:n | n asString].
+  narrowed := Dictionary new.
+  toolsetOptions keysAndValuesDo: [:k :v |
+    (names includes: k asString) ifTrue: [narrowed at: k put: v]].
+  ^narrowed isEmpty ifTrue: [nil] ifFalse: [narrowed]
 %
 category: 'worker class'
 method: McpRouter
@@ -744,6 +768,7 @@ initialize
   readOnly := false.
   workerClassName := nil.  "nil = McpServer"
   toolsetNames := nil.     "nil = the installed default surface, resolved per session"
+  toolsetOptions := nil.   "nil = no toolset needs configuring, which is the ordinary case"
   serverName := nil.       "nil = the worker's own default (McpServer class>>defaultServerName)"
   serverTitle := nil.
   serverVersion := nil.
@@ -1061,6 +1086,7 @@ openSessionCreating: aOneArgBlock
    worker) is what lets an authenticated router later narrow the tool surface per principal."
   sess workerClassName: self effectiveWorkerClassName;
     toolsetNames: self effectiveToolsetNames;
+    toolsetOptions: self effectiveToolsetOptions;
     serverName: self serverName;
     serverTitle: self serverTitle;
     serverVersion: self serverVersion;
@@ -2143,6 +2169,55 @@ toolsetNames: aCollectionOfNamesOrNil
     ifTrue: [nil]
     ifFalse: [(aCollectionOfNamesOrNil collect: [:n | self validatedClassName: n]) asArray]
 %
+category: 'toolsets'
+method: McpRouter
+toolsetOptions
+  "This deployment's options for its toolsets: a Dictionary of toolset name -> that toolset's own
+   options Dictionary, or nil when none are configured. See McpToolset's class comment for what a
+   toolset does with them, and toolsetOptions: for what is allowed here."
+  ^toolsetOptions
+%
+category: 'toolsets'
+method: McpRouter
+toolsetOptions: aDictOrNil
+  "Configure the toolsets in this router's surface -- the general answer to 'my toolset needs to know
+   something the core does not', so that a vendor's setting does not become a core ivar. Keyed by
+   toolset NAME, each value that toolset's own options:
+
+     (McpRouter new
+        toolsetOptions: (Dictionary new
+          at: 'McpGrailToolset' put: (Dictionary new at: 'grailDirectory' put: '/opt/Grail'; yourself);
+          yourself))
+       forkOnPort: 8000
+
+   VALIDATED HERE, when it is set, against each toolset's class>>declaredOptionNames -- so a mistyped
+   option name is a configuration error naming what that toolset does accept, rather than a setting
+   that is silently ignored and found much later. Same choice, and same reasoning, as
+   additionalProperties: false on every tool's input schema.
+
+   The toolset classes are resolved in the FRONT END's symbol list, which is where this router runs.
+   A worker may log in as a different user (McpAuthRouter), so the worker checks again when it builds
+   -- this catches an operator's typo, not a deployment mismatch."
+  | validated |
+  aDictOrNil isNil ifTrue: [toolsetOptions := nil. ^self].
+  validated := Dictionary new.
+  aDictOrNil keysAndValuesDo: [:toolsetName :opts | | cls declared |
+    cls := McpServer toolsetClassNamed: toolsetName.
+    declared := cls declaredOptionNames collect: [:n | n asString].
+    (opts isKindOf: Dictionary) ifFalse: [
+      ^self error: 'Toolset options for ' , toolsetName asString
+        , ' must be a Dictionary of option name -> value.'].
+    opts keysDo: [:optName |
+      (declared includes: optName asString) ifFalse: [
+        ^self error: 'Unknown option ' , optName asString printString , ' for toolset '
+          , toolsetName asString , '. It declares: '
+          , (declared isEmpty
+              ifTrue: ['(none)']
+              ifFalse: [declared inject: '' into: [:a :b |
+                a isEmpty ifTrue: [b] ifFalse: [a , ', ' , b]]]) , '.']].
+    validated at: toolsetName asString put: opts].
+  toolsetOptions := validated
+%
 category: 'message trace'
 method: McpRouter
 traceLineFor: req
@@ -2313,6 +2388,21 @@ validateWorkerConfig
       , ' must be McpServer or a subclass, installed in a symbol dictionary in the worker''s symbol '
       , 'list (e.g. Published).'].
   self effectiveToolsetNames do: [:n | McpServer toolsetClassNamed: n].
+  "Options were validated against declaredOptionNames when they were SET, but the surface can have
+   changed since (toolsetNames: after toolsetOptions:, or a default surface resolved only now), so a
+   configured toolset may no longer be in it. Say so rather than dropping it silently: an option that
+   can never reach anything is a mistake worth a startup failure, and effectiveToolsetOptions would
+   otherwise narrow it away without a word."
+  toolsetOptions ifNotNil: [:opts | | names |
+    names := self effectiveToolsetNames collect: [:n | n asString].
+    opts keysDo: [:k |
+      (names includes: k asString) ifFalse: [
+        ^self error: 'Toolset options configured for ' , k asString
+          , ', which is not in this router''s tool surface ('
+          , (names isEmpty
+              ifTrue: ['no toolsets']
+              ifFalse: [names inject: '' into: [:a :b |
+                a isEmpty ifTrue: [b] ifFalse: [a , ', ' , b]]]) , ').']]].
   ^self
 %
 category: 'server-initiated'
