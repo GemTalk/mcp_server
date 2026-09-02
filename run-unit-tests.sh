@@ -7,14 +7,17 @@
 #
 # WHICH SUITES RUN depends on what is installed, not on a list kept here: the auth suites and the
 # Grail suite are added only if their classes resolve, because install.sh files in src/auth only on
-# an image with kernel JWT support and src/grail only on --grail. A base install runs the ten core
-# suites.
+# an image with kernel JWT support and src/grail only on --grail. A base install runs the eleven
+# core suites.
 #
-# NB: two suites are NOT purely in-image, and both need a NETLDI.
+# NB: three suites are NOT purely in-image, and all three need a NETLDI.
+#   McpExternalSessionTest  drives a real worker gem to check that a result comes back with the
+#                           bytes the worker sent. It fails on any image before 3.7.4.1, which
+#                           carries kernel defect #51438 -- that failure is the suite working, not
+#                           a regression in gs-mcp. See its class comment.
 #   McpWorkerDeadlineTest   drives a real worker gem to check that a call which outruns the request
 #                           deadline is actually broken, and that the gem is usable afterwards --
 #                           the one claim the deadline rests on, and the one a mock cannot make.
-#                           It is the reason a base install on this branch needs a netldi again.
 #   McpAuthTest             creates and commits a throwaway JWT-enabled UserProfile (touching
 #                           AllUsers) and spawns a real worker gem. It is run whenever present: it
 #                           is the only coverage of the token->session path, and leaving it out once
@@ -34,19 +37,18 @@ GS_STONE="${GS_STONE:-gs64stone}"
 GS_USER="${GS_USER:-DataCurator}"
 GS_PASS="${GS_PASS:-swordfish}"
 
-# Two suites fork a real worker gem and so need a NETLDI: McpWorkerDeadlineTest, part of the base
-# install, and McpAuthTest, present only where the auth group could be installed (never on 3.7.2).
-# Ask the image which are there rather than asserting a netldi unconditionally -- the check has to
-# survive an image where neither is installed, and discovering the lack up front beats hitting it as
-# a GciError partway through a suite run.
+# Three suites fork a real worker gem and so need a NETLDI: McpExternalSessionTest and
+# McpWorkerDeadlineTest, both part of the base install, and McpAuthTest, present only where the auth
+# group could be installed. Ask the image which are there rather than asserting a netldi
+# unconditionally -- the check has to survive an image where none is installed, and discovering the
+# lack up front beats hitting it as a GciError partway through a suite run.
 #
-# That a base install needs one again is not a new burden: gs-mcp gives every client its own worker
-# gem, so it cannot serve a single request without a netldi either. The cover for kernel defect
-# #51438 still needs none -- McpMockWorker models the corrupting fetch in-image, so both sides of
-# that defect are exercised without a gem.
+# In practice the first two are always there, so a netldi is in practice always required. That is
+# not a new burden: gs-mcp gives every client its own worker gem, so it cannot serve a single
+# request without a netldi either.
 gs_mcp_require_netldi_if_forking_suite_installed() {
   local nm have
-  for nm in McpWorkerDeadlineTest McpAuthTest; do
+  for nm in McpExternalSessionTest McpWorkerDeadlineTest McpAuthTest; do
     gs_env_image_has "$nm" && have=0 || have=$?
     case "$have" in
       0) gs_env_require_netldi; return $? ;;
@@ -88,7 +90,7 @@ run
 up := System myUserProfile.
 classes := #( 'McpJsonTest' 'McpToolTest' 'McpDispatcherTest' 'McpSessionTest' 'McpOutboxTest'
   'McpStreamTest' 'McpLifetimeTest' 'McpTransportTest' 'McpContractTest'
-  'McpExtensionTest' 'McpWorkerDeadlineTest' ) asOrderedCollection.
+  'McpExtensionTest' 'McpExternalSessionTest' 'McpWorkerDeadlineTest' ) asOrderedCollection.
 "Suites from the optional groups, run only where their group was installed. Named as a list so
  adding one is a one-word change, and so a missing suite is a skip rather than a doesNotUnderstand."
 optional := #( 'McpAuthTest' 'McpAuthConformanceTest' 'McpGrailToolsetTest' ).

@@ -32,8 +32,8 @@ WHY WE DO NOT USE THE KERNEL''S. Measured identically on 3.6.2, 3.7.2, 3.7.5 and
 THE WIRE CONTRACT: #write: answers a String containing only bytes 0x20-0x7E. Everything else is
 \u-escaped. Three things depend on that and would break quietly if the policy changed:
  - McpHttpConnection Content-Length is `body size`, which equals the byte count only for ASCII;
- - the worker->front-end hop is measured in BYTES (McpSession class>>resultBufferBytes and the
-   3.7.2 kernel-#51438 stale-tail workaround), and ASCII keeps `size` and the byte count equal;
+ - the worker->front-end hop is measured in BYTES by the kernel''s result fetch, whose buffer is
+   sized in bytes (see McpExternalSessionTest), and ASCII keeps `size` and the byte count equal;
  - GS_MCP_TRACE writes bodies to the gem log through GsFile, where 16-bit strings come out garbled.
 
 THE Unicode7 TRAP, which shapes the parser. `''code'' decodeFromUTF8` answers a Unicode7, and on a

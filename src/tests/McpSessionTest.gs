@@ -246,67 +246,6 @@ testConcurrentForwardsOnOneSessionAreSerialized
   self assert: w expressions size equals: 2.   "both requests ran, neither was lost"
   self assert: w blockingExecuteCount equals: 0
 %
-category: 'tests - result fidelity'
-method: McpSessionTest
-testCorruptingWorkerIsDetectedAndRepaired
-  "A session probes its worker before serving anything: fetch a large result, then a smaller one that
-   fits inside the buffer the first one grew. On a pre-3.7.4.1 image the second comes back with a
-   stale tail, so the session installs the buffer reset -- and then probes AGAIN, and only starts once
-   that pass is clean. Four probes on a corrupting image, two on a healthy one, and none of them
-   counted as requests."
-  | sess |
-  sess := McpMockSession startWithId: 'corrupting' corrupting: true.
-  self assert: sess usesResultBufferReset.
-  self assert: sess mockWorker probeExpressions size equals: 4.
-  self assert: sess mockWorker expressions isEmpty
-%
-category: 'tests - result fidelity'
-method: McpSessionTest
-testCorruptingWorkerStillReturnsIntactResults
-  "The point of the whole exercise. Two responses in a row on one session, the second smaller than the
-   first and both over 1024 bytes -- the sequence that returns 1024 good bytes and a stale tail on
-   GemStone before 3.7.4.1. Both arrive whole, because runWorker: puts the fetch buffer back to its
-   original size before each call."
-  | sess w first second |
-  sess := McpMockSession startWithId: 'intact' corrupting: true.
-  w := sess mockWorker.
-  w waitMs: 1.
-  w nextResult: ((String new: 5000) atAllPut: $A; yourself).
-  first := sess forward: 'REQUEST-1'.
-  w nextResult: ((String new: 2000) atAllPut: $B; yourself).
-  second := sess forward: 'REQUEST-2'.
-  self assert: first size equals: 5000.
-  self assert: (first occurrencesOf: $A) equals: 5000.
-  self assert: second size equals: 2000.
-  self assert: (second occurrencesOf: $B) equals: 2000
-%
-category: 'tests - response integrity'
-method: McpSessionTest
-testEveryCallCarriesItsOwnNonce
-  "The nonce has to be per-call. With a fixed sentinel, a stale tail inherited from a previous
-   response of the SAME length would carry the sentinel at exactly the offset the check looks at, and
-   sail through. Consecutive calls must therefore never repeat one."
-  | sess first second |
-  sess := McpMockSession startWithId: 'nonces'.
-  sess mockWorker waitMs: 1.
-  sess forward: 'REQUEST-1'.
-  sess forward: 'REQUEST-2'.
-  first := McpSession resultNonceIn: (sess mockWorker expressions at: 1).
-  second := McpSession resultNonceIn: (sess mockWorker expressions at: 2).
-  self assert: first notNil.
-  self assert: second notNil.
-  self deny: first = second
-%
-category: 'tests - result fidelity'
-method: McpSessionTest
-testFaithfulWorkerNeedsNoResultBufferReset
-  "On a fixed image the probe passes first time and the session carries no workaround at all: no
-   buffer to reset, nothing stored before a call, and only the two probes it took to find that out."
-  | sess |
-  sess := McpMockSession startWithId: 'faithful'.
-  self deny: sess usesResultBufferReset.
-  self assert: sess mockWorker probeExpressions size equals: 2
-%
 category: 'tests - forwarding'
 method: McpSessionTest
 testForwardNeverAnswersAStaleResult
@@ -381,30 +320,6 @@ testNoDeadlineLetsALongCallRunToCompletion
   self assert: w softBreakCount equals: 0.
   self assert: w hardBreakCount equals: 0
 %
-category: 'tests - response integrity'
-method: McpSessionTest
-testNonceIsStrippedFromTheResponse
-  "The client sees its response and nothing else: the nonce goes on inside the worker and comes off
-   in runWorker:, so nothing downstream has to know it exists."
-  | sess out |
-  sess := McpMockSession startWithId: 'strip'.
-  sess mockWorker waitMs: 1; nextResult: '{"jsonrpc":"2.0","id":1,"result":{}}'.
-  out := sess forward: '{"jsonrpc":"2.0","id":1,"method":"ping"}'.
-  self assert: out equals: '{"jsonrpc":"2.0","id":1,"result":{}}'.
-  self deny: (self includesCS: McpSession resultNonceMarker in: out)
-%
-category: 'tests - response integrity'
-method: McpSessionTest
-testNonceRoundTripsThroughTheExpression
-  "The wrapper and the reader are inverses, and the reader is not fooled by a request body that
-   merely contains something nonce-shaped -- it reads a fixed offset from the end, not a search."
-  | nonce wrapped |
-  nonce := McpSession resultNonceMarker , '000000000042'.
-  wrapped := McpSession expressionWith: 'McpServer handleJsonString: ''{}''' nonce: nonce.
-  self assert: (McpSession resultNonceIn: wrapped) equals: nonce.
-  self assert: (McpSession resultNonceIn: 'McpServer handleJsonString: ''{}''') isNil.
-  self assert: (McpSession resultNonceIn: 'a body ending in ' , nonce) isNil
-%
 category: 'tests - forwarding'
 method: McpSessionTest
 testPrepareWorkerUsesTheSameNonBlockingPath
@@ -416,19 +331,6 @@ testPrepareWorkerUsesTheSameNonBlockingPath
   self assert: sess prepareWorker equals: 'McpServer ready'.
   self assert: w blockingExecuteCount equals: 0.
   self assert: (self includesCS: 'prepareWorkerWithToolsets:' in: w expressions last)
-%
-category: 'tests - result fidelity'
-method: McpSessionTest
-testProbeExpressionRoundTrips
-  "The probe expression and the reader that recognises it are inverses -- which is what lets
-   McpMockWorker answer a probe the way a gem would. Anything else is not a probe."
-  | expr req |
-  expr := McpSession resultFidelityProbeExpressionBytes: 2048 marker: $A.
-  req := McpSession resultFidelityProbeRequestFrom: expr.
-  self assert: req notNil.
-  self assert: (req at: 1) equals: 2048.
-  self assert: (req at: 2) equals: $A.
-  self assert: (McpSession resultFidelityProbeRequestFrom: 'McpServer handleJsonString: ''{}''') isNil
 %
 category: 'tests - reaping'
 method: McpSessionTest
@@ -453,30 +355,6 @@ testReaperLeavesASessionWithACallInFlightAlone
   self assert: (self waitUpTo: 2000 for: [sess isBusy not]).
   self assert: r reapIdleSessions equals: 1
 %
-category: 'tests - response integrity'
-method: McpSessionTest
-testResponseWithoutItsNonceIsRejected
-  "The whole point of the check: a response that lost its tail is REFUSED, not returned. It arrives
-   looking like a perfectly good answer -- right shape, plausible content -- and the only thing that
-   gives it away is the missing nonce. The error has to name the session and the nonce, because that
-   is what a report of this will be traced with."
-  | sess w raised recovered |
-  sess := McpMockSession startWithId: 'rejected'.
-  w := sess mockWorker.
-  w waitMs: 1; nextResult: '{"jsonrpc":"2.0","id":1,"result":{}}'.
-  w dropResultNonce: true.
-  raised := [sess forward: '{"id":1}'. nil]
-    on: Error
-    do: [:ex | [ex description] on: Error do: [:x | ex class name asString]].
-  self assert: raised notNil.
-  self assert: (self includesCS: 'integrity check' in: raised).
-  self assert: (self includesCS: 'rejected' in: raised).
-  self assert: (self includesCS: McpSession resultNonceMarker in: raised).
-  "and the session is still usable once the worker behaves again"
-  w dropResultNonce: false.
-  recovered := sess forward: '{"id":2}'.
-  self assert: recovered equals: '{"jsonrpc":"2.0","id":1,"result":{}}'
-%
 category: 'tests - session open'
 method: McpSessionTest
 testStartCachesTheWorkerIdsSoAPrintCannotClobberAResult
@@ -495,31 +373,6 @@ testStartCachesTheWorkerIdsSoAPrintCannotClobberAResult
   self assert: sess workerStoneSession equals: w stoneSessionId.
   self assert: sess workerPid equals: w gemProcessId.
   self assert: w idFetchCount equals: 2
-%
-category: 'tests - result fidelity'
-method: McpSessionTest
-testTheCorruptingMockWorkerReallyCorrupts
-  "Guard the premise of the tests above: a corrupting worker driven WITHOUT the workaround really does
-   reproduce kernel bug #51438. A 5000-byte result grows the fetch buffer; the 2000-byte result after
-   it comes back the right LENGTH with only its first 1024 bytes its own -- the same numbers measured
-   on GemStone 3.7.2. If this test ever passes trivially, the others prove nothing."
-  | w big small |
-  w := McpMockWorker new
-    simulateResultCorruption: true;
-    waitMs: 1;
-    yourself.
-  w nextResult: ((String new: 5000) atAllPut: $A; yourself).
-  w nbExecute: 'first'.
-  w waitForResultForSeconds: 1 otherwise: [nil].
-  big := w lastResult.
-  w nextResult: ((String new: 2000) atAllPut: $B; yourself).
-  w nbExecute: 'second'.
-  w waitForResultForSeconds: 1 otherwise: [nil].
-  small := w lastResult.
-  self assert: (big occurrencesOf: $A) equals: 5000.
-  self assert: small size equals: 2000.                      "the right length ..."
-  self assert: (small occurrencesOf: $B) equals: 1024.       "... and the wrong bytes"
-  self assert: (small occurrencesOf: $A) equals: 976         "the tail of the previous result"
 %
 category: 'tests - forwarding'
 method: McpSessionTest

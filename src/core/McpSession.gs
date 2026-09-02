@@ -8,9 +8,8 @@ Object subclass: 'McpSession'
                     toolsetNames serverName serverTitle serverVersion
                     workerPid workerStoneSession outbox startedAtSeconds
                     expiresAtSeconds quietProbes unansweredProbes streamlessPasses
-                    passesSinceProbe streamClosedByClient resultBufferSlot resultBuffer
-                    nonceCounter requestTimeoutSeconds workerAbandoned inFlightRequestId
-                    cancelRequested)
+                    passesSinceProbe streamClosedByClient requestTimeoutSeconds workerAbandoned
+                    inFlightRequestId cancelRequested)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -52,17 +51,7 @@ the read side, so it SEES the connection end (#noteStreamClosedByClient). That f
 the present state of the outbox rather than trusted alone, and #noteStreamSeen or #touch retracts it,
 so a client that reopened a stream, or that is simply working without one, is never taken for a
 client that left.
-
-Before it serves anything, a new session PROBES its worker to confirm that results larger than 1024
-bytes survive the trip back (#verifyWorkerResultFidelity). GemStone before 3.7.4.1 corrupts them,
-and every MCP response is fetched the way that bug corrupts, so the probe is what decides whether
-this image needs the workaround -- a fixed image carries none of it. The defect is GemStone kernel
-bug #51438, fixed in 3.7.4.1.
-
-Independently of that, EVERY response is checked on arrival. #runWorker: has the worker append a
-per-call nonce and refuses any response that does not end with it (#resultOf:withoutNonce:), which
-catches a truncated or stale response whatever caused it, on any version. That check is not a
-version workaround and is never switched off.'
+'
 %
 expectvalue /Class
 doit
@@ -72,109 +61,10 @@ McpSession category: 'Mcp-Core'
 removeallmethods McpSession
 removeallclassmethods McpSession
 ! ------------------- Class methods for McpSession
-category: 'response integrity'
-classmethod: McpSession
-expressionWith: anExpressionString nonce: aNonceString
-  "anExpressionString wrapped so the worker appends aNonceString to whatever it answers.
-   The block is what lets an expression that declares its own temporaries be wrapped at all, and the
-   nonce is the LAST thing in the source -- inside a string literal at a fixed offset from the end --
-   so #resultNonceIn: can recover it without parsing Smalltalk and without being confused by a client
-   request body that happens to contain quotes or brackets.
-   Every expression sent through #runWorker: must answer a String. All of them do: a JSON-RPC
-   response, the worker bootstrap's ready line, or a fidelity probe's marker string."
-  ^'[' , anExpressionString , '] value , ''' , aNonceString , ''''
-%
 category: 'instance creation'
 classmethod: McpSession
 new
   ^super new initialize
-%
-category: 'result fidelity'
-classmethod: McpSession
-probeLargeBytes
-  "The size of the first result a fidelity probe fetches. Its job is to grow the kernel's fetch
-   buffer past its original size, so anything over #resultBufferBytes would do."
-  ^2048
-%
-category: 'result fidelity'
-classmethod: McpSession
-probeSmallBytes
-  "The size of the second result a fidelity probe fetches: larger than #resultBufferBytes, so the
-   kernel's initial fetch cannot hold it, and smaller than #probeLargeBytes, so it fits inside the
-   buffer the first probe just grew. That is the band GemStone before 3.7.4.1 returns stale bytes in."
-  ^1536
-%
-category: 'result fidelity'
-classmethod: McpSession
-resultBufferBytes
-  "The size GsTsExternalSession>>_allocateBuffers gives a session's result-fetch buffer, and the size
-   McpSession>>resetWorkerResultBuffer restores. Not a tunable: resolveResult: asks for exactly this
-   many bytes in its first fetch, so a smaller buffer would be written past its end."
-  ^1024
-%
-category: 'result fidelity'
-classmethod: McpSession
-resultFidelityProbeExpressionBytes: anInteger marker: aCharacter
-  "The expression a fidelity probe runs in the worker gem: answer anInteger copies of aCharacter.
-   Deliberately trivial -- it names no Mcp class, so it runs in a worker that has not been prepared
-   yet, and uses only selectors present in every image the server supports."
-  ^'| s | s := String new: ' , anInteger printString , '. s atAllPut: $' , aCharacter asString , '. s'
-%
-category: 'result fidelity'
-classmethod: McpSession
-resultFidelityProbeRequestFrom: anExpressionString
-  "The size and marker character a probe expression asks for, as { size . marker }, or nil if this is
-   not a probe expression -- the inverse of #resultFidelityProbeExpressionBytes:marker:.
-   It exists so a stand-in worker can answer a probe the way a real gem would, which is what lets
-   McpMockSession run the SHIPPING startWithId: rather than one with the probe stubbed out.
-   Found ANYWHERE in the argument rather than at its start, because by the time a worker sees an
-   expression #expressionWith:nonce: has wrapped it. Only a stand-in worker reads this, so a request
-   body contriving to look like a probe would mislead nothing that runs in production."
-  | head tail i j |
-  head := '| s | s := String new: '.
-  tail := '. s atAllPut: $'.
-  i := anExpressionString indexOfSubCollection: head.
-  i = 0 ifTrue: [^nil].
-  j := anExpressionString indexOfSubCollection: tail.
-  (j = 0 or: [j < i]) ifTrue: [^nil].
-  ^Array
-    with: (anExpressionString copyFrom: i + head size to: j - 1) asInteger
-    with: (anExpressionString at: j + tail size)
-%
-category: 'response integrity'
-classmethod: McpSession
-resultNonceDigits
-  "How many digits of counter a nonce carries. Twelve is far more than a session can consume, and
-   fixing the width is what lets #resultNonceIn: read the nonce at a known offset."
-  ^12
-%
-category: 'response integrity'
-classmethod: McpSession
-resultNonceIn: anExpressionString
-  "The nonce #expressionWith:nonce: put at the end of anExpressionString, or nil if it has none.
-   Read at a fixed offset from the end rather than searched for, so a request body containing
-   something that looks like a nonce cannot be mistaken for one."
-  | n nonce |
-  n := self resultNonceSize.
-  anExpressionString size < (n + 1) ifTrue: [^nil].
-  anExpressionString last = $' ifFalse: [^nil].
-  nonce := anExpressionString
-    copyFrom: anExpressionString size - n to: anExpressionString size - 1.
-  ^(nonce beginsWith: self resultNonceMarker) ifTrue: [nonce] ifFalse: [nil]
-%
-category: 'response integrity'
-classmethod: McpSession
-resultNonceMarker
-  "What every nonce starts with: a short, printable tag that makes one recognisable in a log or a
-   gem trace, and keeps #resultNonceIn: from mistaking arbitrary trailing text for a nonce."
-  ^'~mcp~'
-%
-category: 'response integrity'
-classmethod: McpSession
-resultNonceSize
-  "The length of a nonce -- fixed, so it can be read at a known offset from the end of both an
-   expression and a response."
-  ^self resultNonceMarker size + self resultNonceDigits
 %
 category: 'instance creation'
 classmethod: McpSession
@@ -322,27 +212,6 @@ close
   workerAbandoned ifTrue: [^self].
   [worker logout] on: Error do: [:e | nil].
   ^self
-%
-category: 'result fidelity'
-method: McpSession
-enableResultBufferReset
-  "Arrange for #resetWorkerResultBuffer to put this worker's result-fetch buffer back to its original
-   size before every call, and answer whether that is possible in this image.
-   The buffer is the second slot of GsTsExternalSession's objInfoBuffers -- an ordinary Array, so the
-   slot can simply be stored into. The instance variable is located by NAME at runtime rather than
-   assumed to be at a fixed offset: an image that renamed it answers false here, and
-   #verifyWorkerResultFidelity then refuses to start the session rather than serving results it
-   cannot trust.
-   One CByteArray is allocated here and stored back for the session's whole life, so the per-request
-   cost is a single instance-variable store and no allocation at all."
-  | slot buffers |
-  slot := worker class allInstVarNames indexOf: #objInfoBuffers.
-  slot = 0 ifTrue: [^false].
-  buffers := worker instVarAt: slot.
-  ((buffers isKindOf: Array) and: [buffers size >= 2]) ifFalse: [^false].
-  resultBuffer := CByteArray gcMalloc: self class resultBufferBytes.
-  resultBufferSlot := slot.
-  ^true
 %
 category: 'private'
 method: McpSession
@@ -493,23 +362,6 @@ newWorkerSession
     yourself
   "^GsTsExternalSession newDefaultForGemHost: 'localhost'"
 %
-category: 'response integrity'
-method: McpSession
-nextResultNonce
-  "A nonce -- a value used once -- that no other call on this session has used or will use: the
-   marker followed by a zero-padded count. Answered inside #runWorker:'s mutex, so two GsProcesses
-   serving one client cannot be given the same one.
-   A counter is enough here, and making it unguessable would add nothing. What the check needs is
-   that a nonce cannot arrive by ACCIDENT, and the only bytes that could carry an old one are an
-   earlier response of this same session -- which necessarily carries an earlier, smaller count.
-   In particular a stale tail cannot satisfy the check even when the two responses are the same
-   length, which is exactly the case a fixed sentinel would let through."
-  | digits |
-  nonceCounter := (nonceCounter ifNil: [0]) + 1.
-  digits := nonceCounter printString.
-  [digits size < self class resultNonceDigits] whileTrue: [digits := '0' , digits].
-  ^self class resultNonceMarker , digits
-%
 category: 'activity'
 method: McpSession
 noteAlive
@@ -613,32 +465,6 @@ prepareWorker
       , ' (worker class ' , self workerClassName , '): '
       , ([ex description] on: Error do: [:x | ex class name asString])]
 %
-category: 'result fidelity'
-method: McpSession
-probeWorkerFor: anInteger marker: aCharacter
-  "Fetch a string of anInteger copies of aCharacter from the worker gem, and answer whether every
-   byte of it arrived. Deliberately routed through #runWorker:, so a probe travels exactly the path
-   a real response does -- including the buffer reset, once one is in place."
-  | s |
-  s := self runWorker: (self class resultFidelityProbeExpressionBytes: anInteger marker: aCharacter).
-  ^s isString
-    and: [s size = anInteger and: [(s occurrencesOf: aCharacter) = anInteger]]
-%
-category: 'result fidelity'
-method: McpSession
-probeWorkerResultsAreIntact
-  "Answer whether results larger than 1024 bytes survive the trip out of this worker gem.
-   Fetch a large marker string, which grows the kernel's fetch buffer, and then a smaller one that
-   fits inside it. That is the exact shape GemStone before 3.7.4.1 corrupts: the second result comes
-   back the right LENGTH, with its first 1024 bytes right and the rest left over from the first. The
-   two probes use DIFFERENT marker characters, so a stale tail can never be mistaken for the answer.
-   An error from the worker counts as not intact. The workaround is harmless on a healthy image, so
-   the pessimistic verdict is the safe one, and a worker that cannot answer this could not serve a
-   request either -- which #verifyWorkerResultFidelity reports."
-  ^[(self probeWorkerFor: self class probeLargeBytes marker: $A)
-    and: [self probeWorkerFor: self class probeSmallBytes marker: $B]]
-      on: Error do: [:ex | false]
-%
 category: 'liveness'
 method: McpSession
 quietProbes
@@ -727,41 +553,6 @@ requestTimeoutSeconds: anIntegerOrNil
    call already in flight keeps the deadline it started under (#callDeadline)."
   requestTimeoutSeconds := anIntegerOrNil
 %
-category: 'result fidelity'
-method: McpSession
-resetWorkerResultBuffer
-  "Put this worker's result-fetch buffer back to its original size before a call, on an image that
-   needs it. Does nothing anywhere else: resultBufferSlot is set only where a probe caught this image
-   corrupting results (#verifyWorkerResultFidelity), so a fixed image pays nothing.
-   Restoring the ORIGINAL size is the whole trick. GsTsExternalSession>>resolveResult: refetches a
-   large result only when its buffer has to GROW, having already conflated 'big enough' with 'already
-   full'; a buffer left at its original size makes that test true for everything the initial
-   1024-byte fetch could not hold, which is precisely when the refetch is needed.
-   Never store a smaller buffer here -- see McpSession class>>resultBufferBytes."
-  resultBufferSlot ifNotNil: [:slot |
-    (worker instVarAt: slot) at: 2 put: resultBuffer]
-%
-category: 'response integrity'
-method: McpSession
-resultOf: aResult withoutNonce: aNonceString
-  "Answer the worker's response with its nonce removed, having first confirmed the nonce is there.
-   The nonce is the last thing the worker appends, so it is the first thing a truncated or
-   overwritten response loses. A response that does not carry it is not the response this call asked
-   for, whatever went wrong -- so REJECT it rather than try to repair it: nothing here can tell how
-   much of what arrived is real, and a plausible-looking answer is the failure worth refusing.
-   This check is not tied to any version or to kernel bug #51438. It stays on everywhere, and is the
-   only part of this class that would notice a corruption nobody has characterised yet."
-  ((aResult isString and: [aResult size >= aNonceString size])
-    and: [(aResult copyFrom: aResult size - aNonceString size + 1 to: aResult size) = aNonceString])
-      ifFalse: [
-        ^self error: 'The worker gem for session ' , id printString , ' returned a response that '
-          , 'failed its integrity check: it does not end with this call''s nonce (' , aNonceString
-          , '), so it is not this call''s response. Nothing was returned to the client. On GemStone '
-          , 'before 3.7.4.1 the likely cause is kernel bug #51438 -- external-session results larger '
-          , 'than ' , self class resultBufferBytes printString , ' bytes coming back with a stale '
-          , 'tail.'].
-  ^aResult copyFrom: 1 to: aResult size - aNonceString size
-%
 category: 'private'
 method: McpSession
 runWorker: anExpressionString
@@ -781,20 +572,13 @@ runWorker: anExpressionString
    per session, which the blocking call used to guarantee by freezing the gem. A worker-side error
    arrives as the same GciError as before, and leaves the worker usable; so does an ended call, which
    raises out of the critical block and so releases the mutex on its way past.
-   The buffer reset is inert on any image from 3.7.4.1 on; where it is not, it is what keeps a
-   response from arriving with a stale tail -- see #resetWorkerResultBuffer. The nonce is the
-   belt to that pair of braces: the worker appends it, this method requires it, and a response
-   without it is refused instead of returned -- on every image, whatever the cause. An ENDED call
-   never reaches that check: #awaitWorkerResult raises, so a response the break left behind is not
-   examined at all, and the client is told its call was ended rather than that the nonce was
-   missing -- which would be true and useless."
-  ^self workerMutex critical: [ | nonce |
-    nonce := self nextResultNonce.
-    self resetWorkerResultBuffer.
-    worker nbExecute: (self class expressionWith: anExpressionString nonce: nonce).
+   An ENDED call never returns a result at all: #awaitWorkerResult raises, so a response the break
+   left behind is not examined, and the client is told its call was ended."
+  ^self workerMutex critical: [
+    worker nbExecute: anExpressionString.
     self awaitWorkerResult.
     self touch.
-    self resultOf: worker lastResult withoutNonce: nonce]
+    worker lastResult]
 %
 category: 'session lifetime'
 method: McpSession
@@ -872,7 +656,6 @@ startWithId: anId readOnly: aBoolean
   worker onetimePassword: (GsCurrentSession currentSession createOnetimePasswordValidForSeconds: 300).
   worker login.
   self cacheWorkerIds.
-  self verifyWorkerResultFidelity.
   readOnly := aBoolean.
   self touch.
   ^self
@@ -899,7 +682,6 @@ startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
   worker jwtPassword: aJwtString.
   worker login.
   self cacheWorkerIds.
-  self verifyWorkerResultFidelity.
   readOnly := aBoolean.
   self touch.
   ^self
@@ -966,40 +748,6 @@ category: 'accessing'
 method: McpSession
 userId
   ^userId
-%
-category: 'result fidelity'
-method: McpSession
-usesResultBufferReset
-  "Whether this session is working around the pre-3.7.4.1 result corruption -- false on any image
-   whose probe came back intact, which is every supported image from 3.7.4.1 on."
-  ^resultBufferSlot notNil
-%
-category: 'result fidelity'
-method: McpSession
-verifyWorkerResultFidelity
-  "Establish that what this worker returns is what it computed, before the session serves anything.
-   GemStone before 3.7.4.1 (bug #51438) refetches a large result only when the session's fetch buffer
-   must grow, so once one big result has grown it, every later result that fits comes back the right
-   LENGTH with everything past byte 1024 left over from the previous one. Every MCP response is a
-   String fetched exactly that way, so for this server that is the main path, not an edge case.
-   The image is PROBED rather than version-checked. That way the workaround switches itself off the
-   moment the server runs on a fixed image, applies itself on a version nobody has examined, and
-   cannot be wrong about a patched or unusual build -- with no version table to maintain. It costs
-   two round trips against a gem that was just forked, and on a fixed image that is all that happens.
-   A corrupting image that cannot be repaired fails the session HERE, loudly, rather than answering
-   clients with JSON of the right size and the wrong bytes."
-  self probeWorkerResultsAreIntact ifTrue: [^self].
-  self enableResultBufferReset ifFalse: [
-    ^self error: 'This GemStone image corrupts external-session results larger than '
-      , self class resultBufferBytes printString , ' bytes (kernel bug #51438, fixed in 3.7.4.1), '
-      , 'and the workaround cannot be applied here: ' , worker class name asString
-      , ' has no objInfoBuffers instance variable to reset. Run the server on GemStone 3.7.4.1 or '
-      , 'later.'].
-  self probeWorkerResultsAreIntact ifTrue: [^self].
-  ^self error: 'The worker gem for session ' , id printString , ' cannot return large results '
-    , 'intact. This GemStone image corrupts external-session results (kernel bug #51438, fixed in '
-    , '3.7.4.1) and resetting the fetch buffer did not repair it. Run the server on GemStone 3.7.4.1 '
-    , 'or later.'
 %
 category: 'session lifetime'
 method: McpSession

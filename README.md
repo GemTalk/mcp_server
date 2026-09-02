@@ -22,12 +22,10 @@ listed under [Future work](#future-work).
 `GsTsExternalSession>>jwtPassword:`), none of which exist before 3.7.5; on 3.7.2 those methods
 cannot compile at all, so `install.sh` detects the image and leaves the group out. Everything else —
 the server, all 31 base tools, per-client sessions, read-only mode, server-initiated messages — is
-unaffected. 3.7.2 also carries a separate *kernel* defect — responses over 1024 bytes can come back
-corrupted (#51438, fixed in 3.7.4.1) — and **this branch works around it**: every session probes its
-worker at startup and, where the defect is present, resets the kernel's fetch buffer before each
-call. Independently of that, every response carries a per-call nonce and one that returns without it
-is refused, on every version. See `McpSession`'s class comment for the mechanism. The 3.7.6 line is a
-separate matter: earlier releases have a bug connecting to an *external* OIDC IdP.
+unaffected. Note that 3.7.2 carries a separate *kernel* defect that this repository does not work
+around: responses over 1024 bytes can come back corrupted (#51438, fixed in 3.7.4.1).
+`McpExternalSessionTest` fails there on purpose to say so — see the testing section. The 3.7.6 line
+is a separate matter: earlier releases have a bug connecting to an *external* OIDC IdP.
 
 ## Install & run
 
@@ -114,9 +112,9 @@ by construction and points at a port nothing is listening on.
 **Which scripts need a netldi.** `install.sh` talks only to the stone, so it runs fine on a host
 with no netldi at all. The `run-*.sh` scripts need one — not because of how they log in, but
 because `McpRouter>>forkOnPort:` and every per-client worker create a `GsTsExternalSession`, and
-netldi is what forks those gems. `run-unit-tests.sh` needs one too: two of
-its suites spawn a real worker gem (`McpWorkerDeadlineTest` always, `McpAuthTest` where the auth
-group is installed, which on 3.7.2 is never). It asks the image which are present rather than
+netldi is what forks those gems. `run-unit-tests.sh` needs one too: three of
+its suites spawn a real worker gem (`McpExternalSessionTest` and `McpWorkerDeadlineTest` always,
+`McpAuthTest` where the auth group is installed). It asks the image which are present rather than
 insisting unconditionally. Each script checks for what it actually needs, and says which is missing.
 
 **Linked vs RPC.** These scripts run `topaz -l` (linked). That is deliberate, and it is not the
@@ -866,19 +864,19 @@ flag, so a missing suite is a skip and not an error:
   the idle reaper leaves a session with a call in flight alone, and the request deadline: a call that
   beats it is untouched, one that outruns it is soft-broken and the session survives, a worker that
   ignores that gets a hard break, and one that ignores both has its gem stopped and its session
-  finished. Also that a response arrives whole:
-  every call carries its own nonce and one that comes back without it is refused, and on an image
-  with the pre-3.7.4.1 result corruption the startup probe catches it and the buffer reset repairs
-  it. Driven through `McpMockWorker` / `McpMockSession`, which stand in for the
-  `GsTsExternalSession` with no gem — including a model of the kernel's own result fetch, so both
-  sides of that defect are exercised on any version.
+  finished. Driven through `McpMockWorker` / `McpMockSession`, which stand in for the
+  `GsTsExternalSession` with no gem.
 - `McpWorkerDeadlineTest` — the one thing a mock cannot show: that a call which outruns the
   request deadline is really **broken** in this image, and that the worker gem is usable again
   afterwards — the claim the whole feature rests on, since a break that did not land would mean
   answering a client while the gem computed on. Both shapes of runaway (a Smalltalk loop, a blocked
   wait) plus the gem that takes neither break and has to be stopped from the stone. `McpSessionTest`
-  covers the policy against a mock; this covers the mechanism against a gem. It is also the reason a
-  base install needs a netldi again on this branch — see the note below.
+  covers the policy against a mock; this covers the mechanism against a gem. Needs a netldi.
+- `McpExternalSessionTest` — the one thing a mock cannot show: that a result fetched out of a **real**
+  worker gem arrives with the bytes the worker sent. It drives a real `McpSession` through the same
+  `runWorker:` the forwarding path uses, so it measures the path the server runs on, and it tests the
+  *image* rather than gs-mcp — a failure means the running GemStone carries kernel defect #51438, not
+  that `src/` is wrong. Needs a netldi; see the note below.
 - `McpTransportTest` — `handleConnection:` driven over a **`McpMockSocket`** wrapped in a
   real `McpHttpConnection`, so the genuine HTTP parsing/writing runs with no TCP. Covers the
   paths that spawn **no** worker gem: a session-less GET→`400`, DELETE→`400`/`404`, unknown verb→405,
@@ -937,25 +935,36 @@ flag, so a missing suite is a skip and not an error:
 
 Run a single suite while a server is up via the `run_test_class` tool (e.g. `run_test_class
 McpToolTest`). `./run-unit-tests.sh` runs them all and exits 0 when every test passes: the
-socket-less suites `McpToolTest` (52), `McpDispatcherTest` (12), `McpSessionTest` (23),
-`McpOutboxTest` (9), `McpStreamTest` (18), `McpLifetimeTest` (43), `McpTransportTest` (32),
-`McpContractTest` (34) and `McpExtensionTest` (9), plus `McpWorkerDeadlineTest` (4) — **236 tests**,
-which is the whole suite on a base install and on 3.7.2. Where the optional groups are installed the
-runner picks their suites up automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25)
-— **292 tests** — and **301 with the 9 in `McpGrailToolsetTest`** on a Grail image.
+socket-less suites `McpJsonTest` (20), `McpToolTest` (52), `McpDispatcherTest` (12),
+`McpSessionTest` (18), `McpOutboxTest` (9), `McpStreamTest` (18), `McpLifetimeTest` (43),
+`McpTransportTest` (36), `McpContractTest` (36) and `McpExtensionTest` (9), plus
+`McpExternalSessionTest` (5) and `McpWorkerDeadlineTest` (4) — **262 tests**, which is the whole
+suite on a base install. Where the optional groups are installed the runner picks their suites up
+automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **318 tests** — and
+**345 with the 27 in `McpGrailToolsetTest`** on a Grail image.
 
-All but one of those runs with no netldi: the pre-3.7.4.1 result corruption is modelled inside
-`McpMockWorker`, so both sides of that defect are exercised on any image without forking a gem. The
-exception is `McpWorkerDeadlineTest`, which drives a real worker gem because the question it asks --
-does a break really stop a running call in THIS image -- cannot be asked of a mock. The two **auth**
+All but two of those run with no netldi. The exceptions are `McpExternalSessionTest`, which drives a
+real worker gem because it is asking about the *image* — whether a result comes back with the bytes
+the worker sent — and `McpWorkerDeadlineTest`, which drives one because the question it asks — does a
+break really stop a running call in THIS image — cannot be asked of a mock. The two **auth**
 suites need one for the same reason: `McpAuthTest` and `McpAuthConformanceTest` commit a throwaway
 JWT user and spawn real worker gems, and they are in the runner anyway, because they are the only
 cover for the token → session path. They are not installed on 3.7.2.
 
-Those three also need **spare login slots**, which is the likeliest reason for a failure that is
+Those four also need **spare login slots**, which is the likeliest reason for a failure that is
 nothing to do with the code: each spawns worker gems of its own, so a stone whose `StnMaxSessions`
 is already consumed by running servers fails them with *"the maximum number of users are already
 logged in."* Stop the servers, or raise the limit, before reading such a failure as a regression.
+
+> **On 3.7.2 two of those five tests fail, and that is the suite working.** Every GemStone before
+> 3.7.4.1 carries kernel defect #51438: `GsTsExternalSession>>resolveResult:` refetches an object
+> only when its 1024-byte fetch buffer has to *grow*, so once one large result has enlarged the
+> buffer, every later result between 1025 bytes and that size arrives as 1024 good bytes followed by
+> the tail of an earlier result — right length, plausible bytes, no error raised. gs-mcp meets this
+> on its main path, since every MCP response is a String of JSON pulled out of a worker gem. Nothing
+> in `src/` can make those two tests pass; the fix is to run on 3.7.4.1 or later. The three that do
+> pass everywhere are controls that localise the failure — see the `McpExternalSessionTest` class
+> comment for the mechanism.
 
 > Note: a test helper must never reuse a SUnit framework selector (`run:`, `setUp`, …) — doing
 > so shadows the framework method and silently breaks `suite run`. The transport helper is named
