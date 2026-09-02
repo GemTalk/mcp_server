@@ -143,17 +143,25 @@ category: 'session lifetime defaults'
 classmethod: McpRouter
 defaultRequestTimeoutSeconds
   "How long one request may run in a client's worker gem before the server ends it and answers an
-   error. 45 seconds, chosen to sit UNDER what an MCP client will wait: the clients seen so far give
-   up around a minute, and a limit above theirs is no limit at all -- the client abandons the
-   request, and the gem goes on running it with nobody left to answer.
-   Ending a request costs the client that request and nothing else: the worker is interrupted and
-   stays usable, so the session, and the uncommitted work in it, survive (McpSession>>
-   endCallBecause:). The reason not to make it much shorter is that some legitimate work is
-   slow -- a large fileIn, a broad search, a test suite -- and a limit that cuts those off makes the
-   server unable to do things it can do.
-   nil means no limit, which is the right setting where the clients are known and long tools are the
-   point; what it gives up is the guarantee that a runaway ever ends."
-  ^45
+   error. NO LIMIT by default.
+   It was 45 seconds, chosen to sit under what an MCP client will wait -- the clients seen so far
+   give up around a minute, and a limit above theirs is no limit at all. What that number really
+   was, though, is a GUESS at the moment nobody is waiting for the answer any more, made by a server
+   with no way to find out. A client that stops waiting can now SAY so, by a notifications/cancelled
+   (McpSession>>requestCancel:), which ends the call at the moment it stops being wanted. A deadline
+   approximates that; a cancel signal knows it. Prefer the signal.
+   And the guess was not even conservative in the direction it was meant to be. Measured 2026-08-31
+   against a live server: Claude Code ran a 150-second tool call to completion, with no progress
+   notifications on it, and took delivery of the answer -- so the client patience the number was
+   fitted to is not what it was taken to be, while the limit itself was real.
+   The cost of the guess fell in the wrong place, too. A 45-second limit does not cut off runaways so
+   much as legitimate slow work -- a full suite run, a large fileIn, a broad search -- and a server
+   that can do a thing but refuses to finish it is worse than one that takes a while.
+   What nil gives up is the guarantee that a runaway ever ends on its own, so set a number where the
+   clients are unknown or cannot be trusted to cancel. Ending a request costs the client that request
+   and nothing else: the worker is interrupted and stays usable, so the session, and the uncommitted
+   work in it, survive (McpSession>>endCallBecause:)."
+  ^nil
 %
 category: 'session lifetime defaults'
 classmethod: McpRouter

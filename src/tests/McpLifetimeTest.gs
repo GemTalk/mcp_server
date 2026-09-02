@@ -632,7 +632,7 @@ testTheShippingDefaultsAreTheDocumentedOnes
    reaper has divided it -- which is the half that is easy to change by accident."
   | r |
   r := McpRouter new.
-  self assert: r requestTimeoutSeconds equals: 45.
+  self assert: r requestTimeoutSeconds isNil.
   self assert: r sessionIdleTimeoutSeconds equals: 1800.
   self assert: r streamlessIdleTimeoutSeconds equals: 60.
   self assert: r streamLossGraceSeconds equals: 10.
