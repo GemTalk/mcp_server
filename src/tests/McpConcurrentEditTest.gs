@@ -27,6 +27,11 @@ under the design.
 
 The letters in the test comments are the measurement rows in the doc''s appendix.
 
+The re-validation tests (2026-09-02) are the same shape: one session reads, the second gem commits
+over some of what it read, the first aborts, and what it may then write is exactly what the second
+gem left alone. McpBlindWriteTest pins the same rule with the kernel standing in for the other gem;
+this suite pins it with the real thing, view move included.
+
 The second gem is REAL rather than mocked because what is under test is the stone''s behaviour, not
 this image''s: nothing short of another session committing a conflicting change produces any of
 these states, and a mock of them would be testing the mock. So this suite needs a NETLDI, and
@@ -70,6 +75,21 @@ compileBeta: aBodyString
     at: 'className' put: 'McpCeFixture';
     at: 'source' put: 'beta ' , aBodyString;
     at: 'category' put: 'probe'; yourself)
+%
+category: 'helpers'
+method: McpConcurrentEditTest
+dispatchTool: aName
+  "The text a client would see for a no-argument tool call on THIS server -- the tool's answer plus
+   the note the dispatcher appends -- so the tests of that note see it the way a client does."
+  | response |
+  response := (McpDispatcher withToolRegistry: self server toolRegistry server: self server) handle:
+    (Dictionary new
+      at: 'jsonrpc' put: '2.0';
+      at: 'id' put: 1;
+      at: 'method' put: 'tools/call';
+      at: 'params' put: (Dictionary new at: 'name' put: aName; at: 'arguments' put: Dictionary new; yourself);
+      yourself).
+  ^(((response at: 'result') at: 'content') at: 1) at: 'text'
 %
 category: 'helpers'
 method: McpConcurrentEditTest
@@ -170,23 +190,84 @@ testAFailedCommitLeavesTheViewAndTheLedgersAlone
   self assert: (self refusalFrom: [self sessionTools tool_commit: Dictionary new]) notNil.
   self assert: (self includes: 'baseline' in: self readBeta)
     description: 'the failed commit moved the view -- the other session''s beta is now visible'.
-  self assert: (self server readLedger includes: (McpServer methodKeyFor: 'McpCeFixture' selector: 'beta' meta: false))
+  self assert: (self server hasRead: (McpServer methodKeyFor: 'McpCeFixture' selector: 'beta' meta: false))
 %
 category: 'tests'
 method: McpConcurrentEditTest
-testAFailedRefreshClearsBothLedgers
-  "The state a refresh answering false leaves: the view moved anyway, the pending writes are
-   doomed, and nothing is licensed any more. Also pins that the session is now visibly stuck --
-   commitConflictPending detects the #failure a false refresh leaves, which it did not before."
+testAFailedRefreshClearsTheWritesAndReChecksTheReads
+  "The state a refresh answering false leaves: the view moved anyway and the pending writes are
+   doomed, so no write is licensed any more. The reads are re-checked against the moved view like an
+   abort's -- and here BOTH still hold, which is a measurement worth having: a false
+   continueTransaction advances the view for everything this session did not write (U), but its own
+   uncommitted alpha stays in place, so alpha reads as this session left it and beta as nobody
+   touched it. Nothing is stale yet, and nothing can be committed either. The abort that is the only
+   way out then brings the other session's alpha into view, and THAT re-check drops it and names it.
+   Also pins that the session is visibly stuck in between -- commitConflictPending detects the
+   #failure a false refresh leaves, which it did not before."
+  | alpha beta |
   self fixtureClass.
   self readAlpha. self readBeta.
   self compileAlpha: '^#mine'.
   self otherSessionCompiles: 'alpha' body: '^#theirs'.
   self refusalFrom: [self sessionTools tool_refresh: Dictionary new].
-  self assert: self server readLedger isEmpty.
+  alpha := McpServer methodKeyFor: 'McpCeFixture' selector: 'alpha' meta: false.
+  beta := McpServer methodKeyFor: 'McpCeFixture' selector: 'beta' meta: false.
   self assert: self server writeLedger isEmpty.
+  self assert: (self server hasRead: alpha).
+  self assert: (self server hasRead: beta).
+  self assert: self server staleReadKeys isEmpty.
   self assert: McpToolset commitConflictPending
-    description: 'a session stuck by a false refresh is not being detected'
+    description: 'a session stuck by a false refresh is not being detected'.
+  self sessionTools tool_abort: Dictionary new.
+  self deny: (self server hasRead: alpha).
+  self assert: (self server hasRead: beta).
+  self assert: self server staleReadKeys equals: (Array with: alpha)
+%
+category: 'tests - re-validation'
+method: McpConcurrentEditTest
+testAnAbortDropsAReadTheOtherSessionOverwrote
+  "Read alpha; the other session commits a different alpha; abort. The abort brought their version
+   into view, this session has never seen it, and the read that would have licensed writing over it
+   is gone: compile_method is refused."
+  | err |
+  self fixtureClass.
+  self readAlpha.
+  self otherSessionCompiles: 'alpha' body: '^#theirs'.
+  self sessionTools tool_abort: Dictionary new.
+  err := self refusalFrom: [self compileAlpha: '^#mine'].
+  self assert: err notNil description: 'a write over the other session''s alpha was allowed'.
+  self assert: err kind equals: #blindWrite
+%
+category: 'tests - re-validation'
+method: McpConcurrentEditTest
+testAnAbortKeepsTheReadsThatStillHold
+  "Read alpha and beta; the other session changes only beta; abort. Alpha is exactly what this
+   session read and may be written; beta is not and may not; and the ledger says which."
+  | err |
+  self fixtureClass.
+  self readAlpha. self readBeta.
+  self otherSessionCompiles: 'beta' body: '^#theirs'.
+  self sessionTools tool_abort: Dictionary new.
+  self assert: (self includes: 'Compiled' in: (self compileAlpha: '^#mine'))
+    description: 'alpha was unchanged by anyone, yet its read was dropped'.
+  err := self refusalFrom: [self compileBeta: '^#mine'].
+  self assert: err notNil description: 'a write over the other session''s beta was allowed'.
+  self assert: err kind equals: #blindWrite.
+  self assert: self server staleReadKeys
+    equals: (Array with: (McpServer methodKeyFor: 'McpCeFixture' selector: 'beta' meta: false))
+%
+category: 'tests - re-validation'
+method: McpConcurrentEditTest
+testAnAbortWithNothingChangedKeepsEveryRead
+  "An abort nobody else committed across costs no re-reads: both reads still hold, both writes are
+   allowed, nothing is reported stale."
+  self fixtureClass.
+  self readAlpha. self readBeta.
+  self sessionTools tool_abort: Dictionary new.
+  self assert: self server staleReadKeys isEmpty.
+  self assert: (self includes: 'Compiled' in: (self compileAlpha: '^#mine')).
+  self assert: (self includes: 'Compiled' in: (self compileBeta: '^#mine')).
+  self deny: (self includes: 'The view moved' in: (self dispatchTool: 'status'))
 %
 category: 'tests'
 method: McpConcurrentEditTest
@@ -222,6 +303,24 @@ testAWriteAlreadyMadeCannotBeLaundered
     description: 'continueTransaction answered true -- a pending write was laundered'.
   self deny: System commitTransaction
 %
+category: 'tests - re-validation'
+method: McpConcurrentEditTest
+testTheStaleNoteArrivesWithTheAbortAndThenStops
+  "Seen from the client: the abort's own result names the read the move invalidated, in proportion
+   to the reads that survived, and the next result says nothing more about it."
+  | abortText next |
+  self fixtureClass.
+  self readAlpha. self readBeta.
+  self otherSessionCompiles: 'alpha' body: '^#theirs'.
+  abortText := self dispatchTool: 'abort'.
+  self assert: (self includes: 'Transaction aborted' in: abortText).
+  self assert: (self includes: '[session] The view moved: 1 of 2 earlier reads is stale' in: abortText)
+    description: abortText.
+  self assert: (self includes: 'McpCeFixture>>alpha' in: abortText).
+  self deny: (self includes: 'McpCeFixture>>beta' in: abortText).
+  next := self dispatchTool: 'status'.
+  self deny: (self includes: 'The view moved' in: next) description: next
+%
 category: 'tests'
 method: McpConcurrentEditTest
 testTheScenarioIsRefusedWhereItUsedToClobber
@@ -232,7 +331,8 @@ testTheScenarioIsRefusedWhereItUsedToClobber
    left to conflict with -- and the next step, applying the beta change it has been carrying since
    before the abort, used to be accepted and silently discard the other session's beta.
 
-   It is now refused, because the abort emptied the read ledger and beta was never re-read."
+   It is now refused: the abort re-checked the read of beta against the view it brought in, found
+   the other session's beta there instead, and dropped it -- and beta was never re-read."
   | err |
   self fixtureClass.
   self readAlpha. self readBeta.

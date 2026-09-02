@@ -5,7 +5,7 @@ doit
 McpBase subclass: 'McpServer'
   instVarNames: #( dispatcher toolRegistry toolsets
                     serverName serverTitle serverVersion lifetimeBounds
-                    readLedger writeLedger)
+                    readLedger writeLedger staleReadKeys)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -46,6 +46,15 @@ McpServer category: 'Mcp-Core'
 removeallmethods McpServer
 removeallclassmethods McpServer
 ! ------------------- Class methods for McpServer
+category: 'guardrail stamps'
+classmethod: McpServer
+absentStamp
+  "The stamp recorded for a subject that does not exist in the current view -- a method the class
+   does not implement, a class or dictionary that does not resolve, a class with no comment. Distinct
+   from every content stamp (those are hex digests), so 'absent, then present' and 'present, then
+   absent' both read as a change in revalidateReadLedger."
+  ^'absent'
+%
 category: 'guardrail keys'
 classmethod: McpServer
 commentKeyFor: aClassName
@@ -326,6 +335,18 @@ shapeKeyFor: aClassName
    variable names. See commentKeyFor: for why the comment is a separate key."
   ^aClassName asString , ':shape'
 %
+category: 'guardrail stamps'
+classmethod: McpServer
+stampOfContent: aStringOrNil
+  "The content stamp of one subject's canonical text: its SHA-256 digest as a hex String, or
+   absentStamp for nil. The stamp is what the read ledger stores against a key (McpServer>>stampFor:)
+   and what a view move compares against (revalidateReadLedger), so it has to mean 'the same text'
+   and nothing weaker -- String>>hash is a small integer and would let a change hide behind a
+   collision. The kernel supplies the digest (String>>asSha256String, present since 3.7.5), so
+   nothing here is home-made, and the method source of an ordinary class hashes in microseconds."
+  aStringOrNil isNil ifTrue: [^self absentStamp].
+  ^aStringOrNil asString asSha256String
+%
 category: 'toolsets'
 classmethod: McpServer
 toolsetClassNamed: aName
@@ -486,7 +507,10 @@ handleJsonString: aRawJsonString lifetimeBounds: anArrayOrNil
 category: 'blind-write guardrail'
 method: McpServer
 hasRead: aKey
-  ^self readLedger includes: aKey
+  "Whether aKey is in the read ledger -- the whole test requireRead:... makes. The stamp stored
+   against it is not consulted here: a key is present exactly as long as its read still holds,
+   because every view move re-checks or drops it (revalidateReadLedger, noteViewValidated)."
+  ^self readLedger includesKey: aKey
 %
 category: 'initialization'
 method: McpServer
@@ -585,10 +609,10 @@ lifetimeNote
 category: 'blind-write guardrail'
 method: McpServer
 noteAborted
-  "An abort took a new view AND discarded every uncommitted change, so nothing this session saw or
-   wrote survives into the new window."
-  readLedger := Set new.
-  writeLedger := Set new
+  "An abort took a new view AND discarded every uncommitted change. Nothing this session WROTE
+   survives; what it READ is re-checked against the new view rather than forgotten -- see
+   noteViewMovedWithoutProof."
+  ^self noteViewMovedWithoutProof
 %
 category: 'blind-write guardrail'
 method: McpServer
@@ -612,10 +636,13 @@ noteCommitted
 category: 'blind-write guardrail'
 method: McpServer
 noteRead: aKey
-  "Record that this session has SEEN aKey in the current view window. Called by the browsing tools
-   that show a subject's current contents -- never by a listing or search tool, which show where
-   things are rather than what they say."
-  self readLedger add: aKey.
+  "Record that this session has SEEN aKey in the current view window, together with a stamp of what
+   it saw (stampFor:) -- the content of the subject as this view has it, which is what the browsing
+   tool that calls this has just shown. Called by the browsing tools that show a subject's current
+   contents -- never by a listing or search tool, which show where things are rather than what they
+   say. The stamp is what lets a later view move tell a read that still holds from one that does
+   not (revalidateReadLedger)."
+  self readLedger at: aKey put: (self stampFor: aKey).
   ^aKey
 %
 category: 'blind-write guardrail'
@@ -633,13 +660,13 @@ noteRefreshed: aBoolean
    commit gives, so the same transition, except that the writes are still pending and so still
    licensed.
    false is the one genuinely bad state in the system: the view moved ANYWAY (measured; see
-   docs/blind-write-guardrail.md, U) so every read is stale, and the pending writes cannot commit.
-   Both ledgers are cleared -- no licensed writes remain, which keeps writeLedger subseteq readLedger
-   unconditional -- and the caller captures the conflicting classes first, for the message that tells
-   the client to abort."
+   docs/blind-write-guardrail.md, U) and the pending writes cannot commit. No licensed writes remain,
+   so the write ledger is cleared -- which keeps writeLedger subseteq readLedger unconditional -- and
+   the reads are re-validated against the new view, the same transition an abort makes
+   (noteViewMovedWithoutProof). The caller captures the conflicting classes first, for the message
+   that tells the client to abort, because that message is decoded from the write ledger."
   aBoolean ifTrue: [^self noteViewValidated].
-  readLedger := Set new.
-  writeLedger := Set new
+  ^self noteViewMovedWithoutProof
 %
 category: 'blind-write guardrail'
 method: McpServer
@@ -657,17 +684,39 @@ noteViewValidated
 
    It stops at method grain. A class's shape and its comment live in different objects from its
    method dictionary, so validating the dictionary proves nothing about them; those keys survive only
-   by being in the write ledger. Everything else read in the old window is dropped."
+   by being in the write ledger. Everything else read in the old window is dropped.
+
+   Every kept entry is re-stamped from the new view. By the proof above its content has not moved,
+   so this changes nothing for a read; for a WRITE it records the committed text in place of the
+   text recorded at write time, which is the same text -- but the ledger is then true by inspection
+   rather than by argument, and a stamp is never carried across a view move unrechecked.
+
+   Dropped entries are NOT reported as stale: nothing here says their content changed, only that the
+   stone did not vouch for it. staleReadKeys is for reads a re-validation found changed
+   (revalidateReadLedger)."
   | scopes kept |
   scopes := Set new.
   self writeLedger do: [:k |
     (self class scopeOfMethodKey: k) ifNotNil: [:s | scopes add: s]].
-  kept := Set new.
-  self readLedger do: [:k |
+  kept := Dictionary new.
+  self readLedger keysDo: [:k |
     (self class scopeOfMethodKey: k) ifNotNil: [:s |
-      (scopes includes: s) ifTrue: [kept add: k]]].
-  kept addAll: self writeLedger.
+      (scopes includes: s) ifTrue: [kept at: k put: (self stampFor: k)]]].
+  self writeLedger do: [:k | kept at: k put: (self stampFor: k)].
   readLedger := kept
+%
+category: 'blind-write guardrail'
+method: McpServer
+noteViewMovedWithoutProof
+  "The transition shared by an abort and a refresh that answered false: the view moved and the stone
+   validated nothing on the way through. No pending write is licensed any more -- an abort discarded
+   them, a false refresh left them doomed -- so the write ledger empties. The reads are
+   RE-VALIDATED rather than dropped (revalidateReadLedger): a view move does not by itself make a
+   read false, another session having changed the subject does, and the stamps tell the two apart.
+   Until 2026-09-02 both ledgers were cleared here, so an abort after browsing twenty methods cost
+   twenty re-reads even when nobody else had committed anything."
+  self revalidateReadLedger.
+  writeLedger := Set new
 %
 category: 'blind-write guardrail'
 method: McpServer
@@ -684,9 +733,15 @@ noteWrite: aKey
    re-read: creating a dictionary licenses removing it, compiling a method licenses recompiling it.
    Nothing is put at risk, because another session's change to the same thing is still caught by the
    stone's own write-write check. It also makes writeLedger subseteq readLedger true at every
-   instant rather than only across a view move."
+   instant rather than only across a view move.
+
+   The read stamp recorded is of the content AS JUST WRITTEN: that is what this session now knows.
+   It follows that an abort, which restores the previous content, finds the stamp moved and drops
+   the entry -- so a write that was aborted needs a fresh read before it is retried, even when nobody
+   else touched the subject. That is the conservative answer and the honest one: what the client
+   last saw of that method is a version that no longer exists."
   self writeLedger add: aKey.
-  self readLedger add: aKey.
+  self readLedger at: aKey put: (self stampFor: aKey).
   ^aKey
 %
 category: 'guards'
@@ -700,9 +755,12 @@ protectedDictionaryNames
 category: 'blind-write guardrail'
 method: McpServer
 readLedger
-  "What this session has SEEN in the current view window: the keys a mutating tool must find before
-   it may write. See docs/blind-write-guardrail.md."
-  readLedger isNil ifTrue: [readLedger := Set new].
+  "What this session has SEEN in the current view window: a Dictionary from key (the subject a
+   mutating tool must find before it may write -- 'Foo>>bar:', 'Foo:shape', 'Foo:comment',
+   '#UserGlobals') to the stamp of its content when it was read (stampFor:). Membership is the
+   guardrail's test (hasRead:); the stamps are what a view move re-checks (revalidateReadLedger).
+   See docs/blind-write-guardrail.md."
+  readLedger isNil ifTrue: [readLedger := Dictionary new].
   ^readLedger
 %
 category: 'read-only'
@@ -757,6 +815,34 @@ resolveClass: aName
    the same reason dictNamed: is: a server-level method should not have to know it lives on the
    toolset class."
   ^McpToolset resolveClass: aName
+%
+category: 'blind-write guardrail'
+method: McpServer
+revalidateReadLedger
+  "Re-check every read against the CURRENT view and drop the ones that no longer hold. Called after
+   a view move the stone validated nothing across (noteViewMovedWithoutProof).
+
+   A read is a statement about content -- 'Foo>>bar: says this' -- and moving the view does not make
+   it false; another session having committed a different Foo>>bar: does. So each key's stamp is
+   recomputed in the new view (stampFor:). Equal, and the read is as true now as when it was made,
+   so it keeps its licence. Different, and it is dropped and remembered in staleReadKeys, for the
+   one-time line the dispatcher appends to the result of the call that moved the view
+   (McpDispatcher>>staleReadNote) -- so the client learns WHICH reads to redo in one pass, instead
+   of discovering them one blindWrite refusal at a time. Answers the keys dropped this time, sorted.
+
+   What 'the same content' means per grain is stampFor:'s business. One consequence worth knowing:
+   a byte-identical recompile by another session leaves the stamp unchanged and the read licensed,
+   which is right -- what the client read IS what is there."
+  | kept stale |
+  kept := Dictionary new.
+  stale := SortedCollection new.
+  self readLedger keysAndValuesDo: [:key :stamp |
+    (self stampFor: key) = stamp
+      ifTrue: [kept at: key put: stamp]
+      ifFalse: [stale add: key]].
+  readLedger := kept.
+  staleReadKeys := (self staleReadKeys , stale asArray) asSortedCollection asArray.
+  ^stale asArray
 %
 category: 'identity'
 method: McpServer
@@ -821,6 +907,103 @@ method: McpServer
 serverVersion: aStringOrNil
   "See serverName:."
   serverVersion := aStringOrNil
+%
+category: 'blind-write guardrail'
+method: McpServer
+staleReadKeys
+  "The keys the last re-validation dropped because their content had changed under a view move --
+   sorted, and held until the dispatcher reports them (takeStaleReadKeys). Empty when nothing is
+   pending. See revalidateReadLedger."
+  staleReadKeys isNil ifTrue: [staleReadKeys := Array new].
+  ^staleReadKeys
+%
+category: 'blind-write guardrail'
+method: McpServer
+stampFor: aKey
+  "The content stamp of whatever aKey names, AS IT STANDS IN THE CURRENT VIEW: what noteRead: and
+   noteWrite: record, and what revalidateReadLedger recomputes to see whether a read still holds.
+   Dispatches on the key's shape to one method per grain, so what counts as 'the content' of each
+   kind of subject is stated in exactly one place:
+
+     'Foo>>bar:'  'Foo class>>bar:'   the installed method's source          stampForMethodKey:
+     'Foo:shape'                      the class definition message           stampForShapeKey:
+     'Foo:comment'                    the class comment                      stampForCommentKey:
+     '#UserGlobals'                   the entries, as list_dictionary_entries shows them
+                                                                             stampForDictionaryKey:
+
+   Each answers absentStamp when the subject does not exist in this view, so appearing and
+   disappearing both count as change. A key of no known grain stamps as absent too, and so can
+   never survive a view move -- the fail-closed default."
+  | key |
+  key := aKey asString.
+  key isEmpty ifTrue: [^self class absentStamp].
+  (key at: 1) = $# ifTrue: [^self stampForDictionaryKey: key].
+  (self class scopeOfMethodKey: key) notNil ifTrue: [^self stampForMethodKey: key].
+  (key endsWith: ':shape') ifTrue: [^self stampForShapeKey: key].
+  (key endsWith: ':comment') ifTrue: [^self stampForCommentKey: key].
+  ^self class absentStamp
+%
+category: 'blind-write guardrail'
+method: McpServer
+stampForCommentKey: aKey
+  "'Foo:comment' -> the stamp of Foo's comment, the text describe_class and export_class_source show.
+   Absent when the class does not resolve or has no comment -- set_class_comment treats the latter
+   as creation, so nothing is licensed by it either way."
+  | cls |
+  cls := self resolveClass: (aKey copyFrom: 1 to: aKey size - ':comment' size).
+  cls isNil ifTrue: [^self class absentStamp].
+  ^self class stampOfContent: cls comment
+%
+category: 'blind-write guardrail'
+method: McpServer
+stampForDictionaryKey: aKey
+  "'#UserGlobals' -> the stamp of the dictionary's entries as list_dictionary_entries renders them:
+   each key with whether it binds a class or a global, sorted. The VALUES are deliberately not
+   hashed -- that tool shows none of them, and remove_dictionary, the write this licenses, destroys
+   the bindings rather than the objects. Absent when no dictionary of that name is in the symbol
+   list."
+  | dict lines |
+  dict := self dictNamed: (aKey copyFrom: 2 to: aKey size).
+  dict isNil ifTrue: [^self class absentStamp].
+  lines := OrderedCollection new.
+  dict keysAndValuesDo: [:k :v |
+    lines add: k asString , ((v isKindOf: Behavior) ifTrue: [' (class)'] ifFalse: [' (global)'])].
+  ^self class stampOfContent: (McpToolset linesFrom: lines)
+%
+category: 'blind-write guardrail'
+method: McpServer
+stampForMethodKey: aKey
+  "'Foo>>bar:' or 'Foo class>>bar:' -> the stamp of that method's source as installed on that side
+   -- read the way get_method_source reads it (sourceCodeAt:), so the stamp is of exactly the text
+   the client was shown. Absent when the class does not resolve or the side does not implement the
+   selector."
+  | idx beh src |
+  idx := aKey indexOfSubCollection: '>>'.
+  beh := self behaviorForScope: (aKey copyFrom: 1 to: idx - 1).
+  beh isNil ifTrue: [^self class absentStamp].
+  src := [beh sourceCodeAt: (aKey copyFrom: idx + 2 to: aKey size) asSymbol] on: Error do: [:ex | nil].
+  ^self class stampOfContent: src
+%
+category: 'blind-write guardrail'
+method: McpServer
+stampForShapeKey: aKey
+  "'Foo:shape' -> the stamp of Foo's definition message, the string get_class_definition answers and
+   compile_class_definition compares against (Class>>definition: superclass, variables, dictionary,
+   options). Absent when the class does not resolve."
+  | cls |
+  cls := self resolveClass: (aKey copyFrom: 1 to: aKey size - ':shape' size).
+  cls isNil ifTrue: [^self class absentStamp].
+  ^self class stampOfContent: cls definition
+%
+category: 'blind-write guardrail'
+method: McpServer
+takeStaleReadKeys
+  "Answer staleReadKeys and forget them: the dispatcher's note reports them on the result of the
+   call that moved the view and then never again."
+  | keys |
+  keys := self staleReadKeys.
+  staleReadKeys := Array new.
+  ^keys
 %
 category: 'accessing'
 method: McpServer

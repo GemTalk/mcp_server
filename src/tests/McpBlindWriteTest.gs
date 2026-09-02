@@ -32,7 +32,14 @@ whole question is what the stone does.
 
 The transition tests drive McpServer''s ledger protocol directly rather than through commit/abort,
 because what they are pinning is the RULE -- what survives a view move and why -- and driving it
-directly says so in one line instead of staging a transaction to imply it.'
+directly says so in one line instead of staging a transaction to imply it.
+
+THE STAMPS. Since 2026-09-02 a read is recorded with a digest of what was read, and a view move the
+stone did not validate across (abort, a refresh answering false) RE-CHECKS each read against the new
+view instead of forgetting it. The tests of that here stand in for the other session with the kernel
+itself -- recompiling a fixture method past every tool and ledger, in this gem, uncommitted -- because
+the rule under test is ''the content moved'', and where the new content came from is not part of it.
+McpConcurrentEditTest stages the same thing with a genuine second gem and a genuine abort.'
 %
 expectvalue /Class
 doit
@@ -76,6 +83,21 @@ browsingTools
 %
 category: 'helpers'
 method: McpBlindWriteTest
+dispatchStatusText
+  "The text a client would see for a `status` call on THIS server: the tool's answer plus whatever
+   the dispatcher appends (McpDispatcher>>transactionNote)."
+  | response |
+  response := (McpDispatcher withToolRegistry: self server toolRegistry server: self server) handle:
+    (Dictionary new
+      at: 'jsonrpc' put: '2.0';
+      at: 'id' put: 1;
+      at: 'method' put: 'tools/call';
+      at: 'params' put: (Dictionary new at: 'name' put: 'status'; at: 'arguments' put: Dictionary new; yourself);
+      yourself).
+  ^(((response at: 'result') at: 'content') at: 1) at: 'text'
+%
+category: 'helpers'
+method: McpBlindWriteTest
 fixtureClass
   "A throwaway class with two instance-side methods, one class-side method and a comment, committed
    so another session can see it. tearDown removes it."
@@ -108,6 +130,15 @@ readMethod: aSelectorString
 %
 category: 'helpers'
 method: McpBlindWriteTest
+recompileInKernel: aSelectorString body: aBodyString
+  "Change a fixture method PAST every tool and every ledger, the way another session's commit would
+   have: what re-validation sees is only that the content moved. Uncommitted; tearDown aborts it."
+  (System myUserProfile objectNamed: #McpBwFixture)
+    compileMethod: aSelectorString , ' ' , aBodyString
+    dictionaries: System myUserProfile symbolList category: 'probe'
+%
+category: 'helpers'
+method: McpBlindWriteTest
 server
   "ONE server for the whole test, as a worker gem has one -- the ledgers live on it, so this is what
    makes a read through one toolset license a write through another."
@@ -123,16 +154,33 @@ tearDown
   (up objectNamed: #McpBwFixture) ifNotNil: [:cls |
     (up dictionaryAndSymbolOf: cls) ifNotNil: [:arr | (arr at: 1) removeKey: (arr at: 2) ifAbsent: [nil]]].
   UserGlobals removeKey: #McpBwFixture ifAbsent: [nil].
+  UserGlobals removeKey: #McpBwProbeGlobal ifAbsent: [nil].
   System commitTransaction
 %
 category: 'tests - view moves'
 method: McpBlindWriteTest
-testAbortClearsBoth
-  "An abort takes a new view AND discards the work, so nothing survives it."
+testAbortClearsTheWritesAndReChecksTheReads
+  "An abort takes a new view AND discards the work, so no pending write is licensed any more. The
+   reads are not forgotten but re-checked: here nothing exists behind either key before or after, so
+   neither has changed and both stay. (Until 2026-09-02 both ledgers were simply cleared.)"
   self server noteRead: 'A>>x'; noteWrite: 'A>>y'.
   self server noteAborted.
-  self assert: self server readLedger isEmpty.
-  self assert: self server writeLedger isEmpty
+  self assert: (self server hasRead: 'A>>x').
+  self assert: self server writeLedger isEmpty.
+  self assert: self server staleReadKeys isEmpty
+%
+category: 'tests - re-validation'
+method: McpBlindWriteTest
+testAbortKeepsAReadNobodyChanged
+  "Through the real tools: read a method, abort with nothing changed underneath, and the read still
+   licenses the write -- because what was read is still exactly what is there."
+  self fixtureClass.
+  self readMethod: 'alpha'.
+  System abortTransaction.
+  self server noteAborted.
+  self assert: (self server hasRead: (McpServer methodKeyFor: 'McpBwFixture' selector: 'alpha' meta: false)).
+  self assert: self server staleReadKeys isEmpty.
+  self assert: (self includes: 'Compiled' in: (self writeMethod: 'alpha' body: '^99'))
 %
 category: 'tests - view moves'
 method: McpBlindWriteTest
@@ -142,7 +190,7 @@ testAFailedCommitKeepsBoth
    is doomed and must be aborted, but that is a different fact from whether the reads are stale."
   self server noteRead: 'A>>x'; noteWrite: 'A>>y'.
   self server noteCommitFailed.
-  self assert: (self server readLedger includes: 'A>>x').
+  self assert: (self server hasRead: 'A>>x').
   self assert: (self server writeLedger includes: 'A>>y')
 %
 category: 'tests - class definition'
@@ -162,13 +210,30 @@ testARawRedefineNeedsTheWholeClass
 %
 category: 'tests - view moves'
 method: McpBlindWriteTest
-testARefreshThatFailsClearsBoth
-  "A continueTransaction answering false moved the view anyway and left the writes doomed. Nothing
-   is licensed any more, which is also what keeps writeLedger subseteq readLedger unconditional."
+testARefreshThatFailsClearsTheWritesAndReChecksTheReads
+  "A continueTransaction answering false moved the view anyway and left the writes doomed. No write
+   is licensed any more, which is also what keeps writeLedger subseteq readLedger unconditional; the
+   reads get the same re-check an abort gives them."
   self server noteRead: 'A>>x'; noteWrite: 'A>>y'.
   self server noteRefreshed: false.
-  self assert: self server readLedger isEmpty.
+  self assert: (self server hasRead: 'A>>x').
   self assert: self server writeLedger isEmpty
+%
+category: 'tests - re-validation'
+method: McpBlindWriteTest
+testAnAbortedWriteNeedsAFreshRead
+  "Read, write, abort: the abort restored the old content, and what this session last knew of the
+   method is the version it just discarded. The read is dropped and named -- even though nobody else
+   touched anything -- because the stamp a write records is of the content as written."
+  | key |
+  self fixtureClass.
+  self readMethod: 'alpha'.
+  self writeMethod: 'alpha' body: '^99'.
+  System abortTransaction.
+  self server noteAborted.
+  key := McpServer methodKeyFor: 'McpBwFixture' selector: 'alpha' meta: false.
+  self deny: (self server hasRead: key).
+  self assert: self server staleReadKeys equals: (Array with: key)
 %
 category: 'tests - view moves'
 method: McpBlindWriteTest
@@ -177,8 +242,8 @@ testASuccessfulCommitKeepsWhatItValidated
    written survives, and an unrelated read does not."
   self server noteRead: 'Unrelated>>x'; noteWrite: 'A>>y'.
   self server noteCommitted.
-  self assert: (self server readLedger includes: 'A>>y').
-  self deny: (self server readLedger includes: 'Unrelated>>x').
+  self assert: (self server hasRead: 'A>>y').
+  self deny: (self server hasRead: 'Unrelated>>x').
   self assert: self server writeLedger isEmpty
 %
 category: 'tests - view moves'
@@ -188,8 +253,8 @@ testASuccessfulRefreshKeepsTheWritesPending
    so they stay in the write ledger."
   self server noteRead: 'Unrelated>>x'; noteWrite: 'A>>y'.
   self server noteRefreshed: true.
-  self assert: (self server readLedger includes: 'A>>y').
-  self deny: (self server readLedger includes: 'Unrelated>>x').
+  self assert: (self server hasRead: 'A>>y').
+  self deny: (self server hasRead: 'Unrelated>>x').
   self assert: (self server writeLedger includes: 'A>>y')
 %
 category: 'tests - class grain'
@@ -342,6 +407,88 @@ testRedefiningIdenticallyRecordsNoWrite
       (Dictionary new at: 'className' put: 'McpBwFixture'; yourself))).
   self deny: (self server writeLedger includes: (McpServer shapeKeyFor: 'McpBwFixture'))
 %
+category: 'tests - re-validation'
+method: McpBlindWriteTest
+testRevalidationDropsOnlyWhatChanged
+  "The rule in one line: a read stays licensed exactly as long as what it read is still there. Two
+   reads, one subject changed underneath, one re-validation -- the changed one is dropped and named,
+   the other keeps its licence."
+  | alpha beta |
+  self fixtureClass.
+  self readMethod: 'alpha'. self readMethod: 'beta'.
+  self recompileInKernel: 'alpha' body: '^#changed'.
+  self server revalidateReadLedger.
+  alpha := McpServer methodKeyFor: 'McpBwFixture' selector: 'alpha' meta: false.
+  beta := McpServer methodKeyFor: 'McpBwFixture' selector: 'beta' meta: false.
+  self deny: (self server hasRead: alpha).
+  self assert: (self server hasRead: beta).
+  self assert: self server staleReadKeys equals: (Array with: alpha).
+  self assertBlindWrite: [self writeMethod: 'alpha' body: '^99'] about: 'McpBwFixture>>alpha'.
+  self assert: (self includes: 'Compiled' in: (self writeMethod: 'beta' body: '^99'))
+%
+category: 'tests - re-validation'
+method: McpBlindWriteTest
+testRevalidationKeepsAByteIdenticalRecompile
+  "The stamp is of the TEXT, not the method object: a recompile that installs the same source is a
+   new GsNMethod (docs/blind-write-guardrail.md, P) but not a change to anything the client read, so
+   the read stays good. This is the reason for hashing content rather than remembering the oop."
+  self fixtureClass.
+  self readMethod: 'alpha'.
+  self recompileInKernel: 'alpha' body: '^1'.
+  self server revalidateReadLedger.
+  self assert: (self server hasRead: (McpServer methodKeyFor: 'McpBwFixture' selector: 'alpha' meta: false)).
+  self assert: self server staleReadKeys isEmpty
+%
+category: 'tests - re-validation'
+method: McpBlindWriteTest
+testRevalidationReachesEveryGrain
+  "Comment and dictionary are stamped too, each from the text its read tool shows: the comment, the
+   sorted entry list. Change each underneath and each read is dropped; the shape and the method read
+   alongside them, which nobody touched, are not."
+  | cls |
+  cls := self fixtureClass.
+  self browsingTools tool_describe_class: (Dictionary new at: 'className' put: 'McpBwFixture'; yourself).
+  self readMethod: 'alpha'.
+  self server noteRead: (McpServer dictionaryKeyFor: 'UserGlobals').
+  cls comment: 'changed underneath'.
+  UserGlobals at: #McpBwProbeGlobal put: 1.
+  self server revalidateReadLedger.
+  self assert: self server staleReadKeys equals: (Array with: '#UserGlobals' with: 'McpBwFixture:comment').
+  self assert: (self server hasRead: 'McpBwFixture:shape').
+  self assert: (self server hasRead: 'McpBwFixture>>alpha')
+%
+category: 'tests - re-validation'
+method: McpBlindWriteTest
+testRevalidationSeesAShapeChange
+  "A shape-changing redefinition underneath a get_class_definition read: the definition message is
+   different, so the read is dropped. (The methods go with it -- a redefinition installs a new class
+   object with no methods, docs/blind-write-guardrail.md T -- so a method read is dropped too, as
+   absent; that is the kernel's doing, and the honest answer.)"
+  self fixtureClass.
+  self browsingTools tool_get_class_definition: (Dictionary new at: 'className' put: 'McpBwFixture'; yourself).
+  Object subclass: 'McpBwFixture' instVarNames: #( 'x' ) classVars: #() classInstVars: #()
+    poolDictionaries: #() inDictionary: UserGlobals options: #().
+  self server revalidateReadLedger.
+  self deny: (self server hasRead: 'McpBwFixture:shape').
+  self assert: self server staleReadKeys equals: (Array with: 'McpBwFixture:shape')
+%
+category: 'tests - re-validation'
+method: McpBlindWriteTest
+testStampsHashTheCurrentContent
+  "What a stamp IS, pinned once: the SHA-256 of the subject's canonical text -- the method source as
+   sourceCodeAt: answers it, the class definition message -- and a fixed marker for a subject that
+   does not exist, so appearing and disappearing both count as change."
+  | cls |
+  cls := self fixtureClass.
+  self assert: (self server stampFor: 'McpBwFixture>>alpha') equals: (cls sourceCodeAt: #alpha) asSha256String.
+  self assert: (self server stampFor: 'McpBwFixture class>>gamma') equals: (cls class sourceCodeAt: #gamma) asSha256String.
+  self assert: (self server stampFor: 'McpBwFixture:shape') equals: cls definition asSha256String.
+  self assert: (self server stampFor: 'McpBwFixture:comment') equals: cls comment asSha256String.
+  self assert: (self server stampFor: 'McpBwFixture>>nope') equals: McpServer absentStamp.
+  self assert: (self server stampFor: 'McpBwNoSuchClass:shape') equals: McpServer absentStamp.
+  self assert: (self server stampFor: '#McpBwNoSuchDictionary') equals: McpServer absentStamp.
+  self assert: (self server stampFor: 'not a key') equals: McpServer absentStamp
+%
 category: 'tests - class definition'
 method: McpBlindWriteTest
 testTheClassDefinitionReadLicensesARedefinition
@@ -354,6 +501,39 @@ testTheClassDefinitionReadLicensesARedefinition
     (self mutationTools tool_compile_class_definition: (Dictionary new
       at: 'className' put: 'McpBwFixture';
       at: 'instVarNames' put: (Array with: 'x'); yourself)))
+%
+category: 'tests - re-validation'
+method: McpBlindWriteTest
+testTheStaleNoteIsReportedOnceAndNamesTheReads
+  "What the client is told, and how often. The result of the call that moved the view carries one
+   line naming the dropped reads in proportion to the whole; the next result does not carry it
+   again. Driven through the dispatcher wired to THIS server, as a worker gem's is, because the note
+   is the dispatcher's."
+  | first second |
+  self fixtureClass.
+  self readMethod: 'alpha'. self readMethod: 'beta'.
+  self recompileInKernel: 'alpha' body: '^#changed'.
+  self server revalidateReadLedger.
+  first := self dispatchStatusText.
+  self assert: (self includes: '[session] The view moved: 1 of 2 earlier reads is stale' in: first)
+    description: first.
+  self assert: (self includes: 'McpBwFixture>>alpha' in: first).
+  self assert: (self includes: '[session] You have uncommitted changes' in: first)
+    description: 'the transaction-state line must still be there, before the stale line'.
+  second := self dispatchStatusText.
+  self deny: (self includes: 'The view moved' in: second) description: second
+%
+category: 'tests - re-validation'
+method: McpBlindWriteTest
+testTheStaleNoteCapsTheList
+  "Ten names, then a count: a client that browsed a whole class does not get a paragraph."
+  | text |
+  1 to: 12 do: [:i | self server noteRead: 'McpBwNoSuchClass>>m' , i printString].
+  self server readLedger keysDo: [:k | self server readLedger at: k put: 'moved'].
+  self server revalidateReadLedger.
+  text := self dispatchStatusText.
+  self assert: (self includes: '12 of 12 earlier reads are stale' in: text) description: text.
+  self assert: (self includes: ', and 2 more.' in: text) description: text
 %
 category: 'tests - method grain'
 method: McpBlindWriteTest
@@ -378,7 +558,7 @@ testTheWideningDoesNotCrossSides
    about the other."
   self server noteRead: 'A class>>other'; noteWrite: 'A>>y'.
   self server noteCommitted.
-  self deny: (self server readLedger includes: 'A class>>other')
+  self deny: (self server hasRead: 'A class>>other')
 %
 category: 'tests - widening'
 method: McpBlindWriteTest
@@ -387,8 +567,8 @@ testTheWideningDoesNotReachShapeOrComment
    the dictionary says nothing about them."
   self server noteRead: 'A:shape'; noteRead: 'A:comment'; noteWrite: 'A>>y'.
   self server noteCommitted.
-  self deny: (self server readLedger includes: 'A:shape').
-  self deny: (self server readLedger includes: 'A:comment')
+  self deny: (self server hasRead: 'A:shape').
+  self deny: (self server hasRead: 'A:comment')
 %
 category: 'tests - widening'
 method: McpBlindWriteTest
@@ -399,7 +579,7 @@ testTheWideningKeepsUnwrittenMethodsOfAWrittenClass
    another without re-reading."
   self server noteRead: 'A>>x'; noteWrite: 'A>>y'.
   self server noteCommitted.
-  self assert: (self server readLedger includes: 'A>>x')
+  self assert: (self server hasRead: 'A>>x')
 %
 category: 'tests - widening'
 method: McpBlindWriteTest
