@@ -31,6 +31,23 @@
 #                     Subclass to change BEHAVIOR; to add tools write a toolset instead.
 #   GS_MCP_TOOLSETS - space-separated McpToolset names to expose instead of the default surface,
 #                     e.g. "McpBrowsingToolset McpSearchToolset". Empty means the default.
+#   GS_MCP_GRAIL_DIR- path to the Grail CHECKOUT, on an image that has the Grail (python) toolset.
+#                     Grail's Python lives in the image, but its .py stdlib and its test fixtures
+#                     live on DISK under the checkout, and a worker gem cannot work out where: its
+#                     own working directory is the STONE's, which holds no src/python/stdlib. Without
+#                     it run_python_tests refuses, and get_python_source and the python traceback
+#                     have nothing to read. Use the same checkout this image was installed from --
+#                     a DIFFERENT one will resolve names against source the image did not compile.
+#                     Checked here for src/python/stdlib, so a typo fails at launch rather than at
+#                     the first tool call. On an image with no Grail toolset loaded, setting this
+#                     fails with "Toolset not found: McpGrailToolset" -- which is correct: the
+#                     setting could never have reached anything.
+#   GS_MCP_TOOLSET_OPTIONS - options for any OTHER toolset that declares some, as a JSON object of
+#                     toolset name -> that toolset's options, e.g.
+#                     '{"AcmeDbToolset":{"dataDirectory":"/srv/acme"}}'. The general form of the
+#                     variable above; use one or the other, not both. Each name is validated against
+#                     that toolset's class>>declaredOptionNames when it is set, so a mistyped option
+#                     refuses to start instead of being silently ignored.
 #   Session lifetime (how long a quiet client keeps its worker gem, whether it may keep it
 #                     indefinitely, and when it is warned) is configured with the GS_MCP_IDLE_TIMEOUT
 #                     family -- see ./session-lifetime.sh, which documents each one. The common case
@@ -59,6 +76,8 @@ GS_MCP_PORT="${GS_MCP_PORT:-8000}"
 GS_MCP_READONLY="${GS_MCP_READONLY:-0}"
 GS_MCP_WORKER_CLASS="${GS_MCP_WORKER_CLASS:-}"
 GS_MCP_TOOLSETS="${GS_MCP_TOOLSETS:-}"
+GS_MCP_GRAIL_DIR="${GS_MCP_GRAIL_DIR:-}"
+GS_MCP_TOOLSET_OPTIONS="${GS_MCP_TOOLSET_OPTIONS:-}"
 GS_MCP_TITLE="${GS_MCP_TITLE:-}"
 GS_MCP_TRACE="${GS_MCP_TRACE:-0}"
 GS_MCP_TRACE_LIMIT="${GS_MCP_TRACE_LIMIT:-}"
@@ -97,6 +116,36 @@ if [ -n "$GS_MCP_TOOLSETS" ]; then
   for t in $GS_MCP_TOOLSETS; do LITERALS="$LITERALS '$t'"; done
   CONFIG="$CONFIG
 r toolsetNames: #($LITERALS)."
+fi
+# Toolset options. Both forms end at the same setter, so asking for both is an ambiguity rather than
+# a merge -- say so instead of silently letting one win.
+if [ -n "$GS_MCP_GRAIL_DIR" ] && [ -n "$GS_MCP_TOOLSET_OPTIONS" ]; then
+  echo "error: set GS_MCP_GRAIL_DIR or GS_MCP_TOOLSET_OPTIONS, not both." >&2
+  echo "       The first is shorthand for the second:" >&2
+  echo "       GS_MCP_TOOLSET_OPTIONS='{\"McpGrailToolset\":{\"grailDirectory\":\"...\"}}'" >&2
+  exit 1
+fi
+if [ -n "$GS_MCP_GRAIL_DIR" ]; then
+  # Checked HERE, not in the gem: the worker forks on this host, so this is the same filesystem it
+  # will read, and a wrong path is worth one line now rather than a wave of import errors later --
+  # which is exactly how a misconfigured session reads as a broken Python subsystem.
+  if [ ! -d "$GS_MCP_GRAIL_DIR/src/python/stdlib" ]; then
+    echo "error: GS_MCP_GRAIL_DIR=$GS_MCP_GRAIL_DIR holds no src/python/stdlib," >&2
+    echo "       so it is not a Grail checkout. Point it at the checkout this image was" >&2
+    echo "       installed from (the one whose install.sh you last ran)." >&2
+    exit 1
+  fi
+  CONFIG="$CONFIG
+r toolsetOptions: (Dictionary new at: 'McpGrailToolset' put:
+  (Dictionary new at: 'grailDirectory' put: '$(printf '%s' "$GS_MCP_GRAIL_DIR" | sed "s/'/''/g")'; yourself);
+  yourself)."
+fi
+if [ -n "$GS_MCP_TOOLSET_OPTIONS" ]; then
+  # parseBody: answers nil for anything that is not a JSON OBJECT, and toolsetOptions: nil means
+  # "no options" -- so a malformed string would quietly configure nothing. Fail instead.
+  CONFIG="$CONFIG
+r toolsetOptions: ((McpRouter parseBody: '$(printf '%s' "$GS_MCP_TOOLSET_OPTIONS" | sed "s/'/''/g")')
+  ifNil: [Error signal: 'GS_MCP_TOOLSET_OPTIONS is not a JSON object'])."
 fi
 # Message tracing. Both settings travel to the forked gem in the config (McpRouter>>configDict);
 # nothing here is committed.

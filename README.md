@@ -372,6 +372,12 @@ an image without Grail. Once loaded the toolset joins the default tool surface a
 > working directory is the *stone's*, which holds no `src/python/stdlib`, so every `.py`-backed
 > import fails. Name the checkout with the toolset option:
 >
+> ```bash
+> GS_MCP_GRAIL_DIR=/opt/Grail ./run-server.sh
+> ```
+>
+> which is shorthand for
+>
 > ```smalltalk
 > (McpRouter new
 >    toolsetOptions: (Dictionary new
@@ -380,7 +386,12 @@ an image without Grail. Once loaded the toolset joins the default tool surface a
 >   forkOnPort: 8000
 > ```
 >
-> See **Toolset options** for the general mechanism.
+> Use the **same checkout the image was installed from** — a different one resolves names against
+> source the image did not compile. `run-server.sh` checks the path holds `src/python/stdlib` before
+> forking anything, so a typo is one line at launch rather than a wave of import errors later, which
+> is exactly how a misconfigured session comes to read as a broken Python subsystem.
+> `run-auth-server.sh` takes the same variable. See **Toolset options** for the general mechanism and
+> `GS_MCP_TOOLSET_OPTIONS` for other toolsets.
 >
 > **Python errors are converted, not propagated.** Grail models its exceptions *outside* the
 > Smalltalk `Error` hierarchy (`NameError` is `Exception < BaseException < Exception <

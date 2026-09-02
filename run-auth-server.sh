@@ -204,6 +204,23 @@ fi
 TITLE_LINE=""
 [ -n "$GS_MCP_TITLE" ] && TITLE_LINE="r serverTitle: '$(printf '%s' "$GS_MCP_TITLE" | sed "s/'/''/g")'."
 
+# GS_MCP_GRAIL_DIR -- the Grail checkout, on an image carrying the Grail (python) toolset. Same
+# variable, same meaning and same launch-time check as run-server.sh; see its header for why a worker
+# gem cannot work this out for itself. Nothing else about toolsets is configurable from this script,
+# so there is deliberately no general GS_MCP_TOOLSET_OPTIONS here -- an authenticated deployment
+# choosing a bespoke tool surface should build its router rather than drive it from env vars.
+GRAIL_LINE=""
+if [ -n "${GS_MCP_GRAIL_DIR:-}" ]; then
+  if [ ! -d "$GS_MCP_GRAIL_DIR/src/python/stdlib" ]; then
+    echo "error: GS_MCP_GRAIL_DIR=$GS_MCP_GRAIL_DIR holds no src/python/stdlib," >&2
+    echo "       so it is not a Grail checkout." >&2
+    exit 1
+  fi
+  GRAIL_LINE="r toolsetOptions: (Dictionary new at: 'McpGrailToolset' put:
+  (Dictionary new at: 'grailDirectory' put: '$(printf '%s' "$GS_MCP_GRAIL_DIR" | sed "s/'/''/g")'; yourself);
+  yourself)."
+fi
+
 echo "Forking McpAuthRouter onto ${MCP_BIND_ADDRESS:-127.0.0.1}:$GS_MCP_PORT (issuer=$MCP_ISSUER; detached; this script returns)..."
 "$TOPAZ" -l <<TPZ
 set gemstone $GS_STONE
@@ -225,7 +242,8 @@ $WRITE_LINE
 $RO_LINE
 $BIND_LINE
 $TRACE_LINE
-$TITLE_LINE$LIFETIME_LINES
+$TITLE_LINE
+$GRAIL_LINE$LIFETIME_LINES
 r forkOnPort: $GS_MCP_PORT
 %
 logout
