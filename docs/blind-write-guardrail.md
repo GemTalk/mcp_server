@@ -279,6 +279,23 @@ from the source goes with it.
    commit can still be refused over a method the client never touched.
 
 
+## Keeping the measurements honest
+
+Two suites, deliberately different in kind. `McpBlindWriteTest` drives the ledger protocol directly
+and pins the RULES. `McpConcurrentEditTest` stages genuine conflicts from a real second gem and pins
+that the rules still match the DATABASE -- because every rule here was derived from something
+measured below, and a suite that never touches the stone cannot notice if a measurement stops
+holding. A kernel change that made a failed commit move the view, or made a refresh stop laundering
+a stale read, would leave the first suite green and the guardrail wrong.
+
+One of those tests is written to fail on good news: `testTheStoneAloneWouldAllowThatClobber` asserts
+that with the guardrail bypassed, GemStone still accepts the commit that discards the other
+session's work. If it ever starts failing, the stone has grown protection of its own and this
+design's scope should be revisited.
+
+Both suites commit, so both declare `movesTheSessionView` and the `run_test_class` tool refuses them
+from a session holding uncommitted work.
+
 ## Appendix: what was measured
 
 GemStone 3.7.5, `gs64stoneNoGrail`, two live sessions (a linked `topaz -l` driving a

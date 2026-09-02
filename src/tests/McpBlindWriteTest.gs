@@ -42,6 +42,15 @@ McpBlindWriteTest category: 'Mcp-Tests'
 removeallmethods McpBlindWriteTest
 removeallclassmethods McpBlindWriteTest
 ! ------------------- Class methods for McpBlindWriteTest
+category: 'testing'
+classmethod: McpBlindWriteTest
+movesTheSessionView
+  "Why this suite cannot run from a session holding uncommitted work. See
+   McpTestingToolset class>>sessionViewRefusalFor:, which is what asks.
+   Irreducible: the fixture has to be committed for the guardrail's own subject -- what another
+   session could have changed -- to mean anything, and tearDown commits its removal."
+  ^'it commits a throwaway fixture class, and aborts in tearDown'
+%
 ! ------------------- Instance methods for McpBlindWriteTest
 category: 'helpers'
 method: McpBlindWriteTest

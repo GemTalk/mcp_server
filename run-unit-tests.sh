@@ -53,7 +53,7 @@ GS_PASS="${GS_PASS:-swordfish}"
 # passing on an image the server could not actually run on.
 gs_mcp_require_netldi_if_forking_suite_installed() {
   local nm have
-  for nm in McpExternalSessionTest McpTransactionTest McpWorkerDeadlineTest McpAuthTest; do
+  for nm in McpExternalSessionTest McpTransactionTest McpWorkerDeadlineTest McpAuthTest McpConcurrentEditTest; do
     gs_env_image_has "$nm" && have=0 || have=$?
     case "$have" in
       0) gs_env_require_netldi; return $? ;;
@@ -93,7 +93,7 @@ iferr 1 stk
 run
 | s classes up optional |
 up := System myUserProfile.
-classes := #( 'McpBlindWriteTest' 'McpToolTest' 'McpDispatcherTest' 'McpSessionTest' 'McpOutboxTest' 'McpProgressTest'
+classes := #( 'McpBlindWriteTest' 'McpConcurrentEditTest' 'McpToolTest' 'McpDispatcherTest' 'McpSessionTest' 'McpOutboxTest' 'McpProgressTest'
   'McpStreamTest' 'McpLifetimeTest' 'McpTransportTest' 'McpContractTest'
   'McpExtensionTest' 'McpExternalSessionTest' 'McpTransactionTest'
   'McpWorkerDeadlineTest' ) asOrderedCollection.

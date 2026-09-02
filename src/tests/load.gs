@@ -17,7 +17,7 @@ names := #( #McpMockSocket #McpMockWorker #McpMockSession #McpStubSession #McpFi
   #McpFixtureServer #McpFixtureRouter #McpToolTest #McpDispatcherTest #McpTransportTest
   #McpContractTest #McpExtensionTest #McpSessionTest #McpOutboxTest #McpProgressTest #McpStreamTest
   #McpLifetimeTest #McpExternalSessionTest #McpTransactionTest #McpWorkerDeadlineTest
-  #McpBlindWriteTest ).
+  #McpBlindWriteTest #McpConcurrentEditTest ).
 names do: [:s | (d includesKey: s) ifFalse: [ d at: s put: nil ] ].
 names size
 %
@@ -34,6 +34,7 @@ input src/tests/McpFixtureRouter.gs
 
 ! The suites themselves.
 input src/tests/McpBlindWriteTest.gs
+input src/tests/McpConcurrentEditTest.gs
 input src/tests/McpToolTest.gs
 input src/tests/McpDispatcherTest.gs
 input src/tests/McpTransportTest.gs

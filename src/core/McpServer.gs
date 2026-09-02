@@ -378,7 +378,7 @@ behaviorForScope: aScopeString
   meta := aScopeString size > 6
     and: [(aScopeString copyFrom: aScopeString size - 5 to: aScopeString size) = ' class'].
   base := meta ifTrue: [aScopeString copyFrom: 1 to: aScopeString size - 6] ifFalse: [aScopeString].
-  cls := self class resolveClass: base.
+  cls := self resolveClass: base.
   cls isNil ifTrue: [^nil].
   ^meta ifTrue: [cls class] ifFalse: [cls]
 %
@@ -722,6 +722,14 @@ requireRead: aKey subject: aSubjectString tool: aToolName hint: aHintString
     aToolName , ' refused: this session has not read ' , aSubjectString
       , ' since its view last moved, so replacing it could silently discard another session''s work. '
       , aHintString
+%
+category: 'private'
+method: McpServer
+resolveClass: aName
+  "See McpToolset class>>resolveClass:, the single implementation both roles share. Kept here for
+   the same reason dictNamed: is: a server-level method should not have to know it lives on the
+   toolset class."
+  ^McpToolset resolveClass: aName
 %
 category: 'identity'
 method: McpServer
