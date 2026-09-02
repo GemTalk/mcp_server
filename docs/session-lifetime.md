@@ -47,6 +47,14 @@ be ended from the front end at all, so its gem is stopped from the stone side an
 finished; that is the one case where the timeout costs the client its session, and the error says
 so. Set `GS_MCP_REQUEST_TIMEOUT=none` where the clients are known and long tools are the point.
 
+All of which applies equally to a call ended by a **cancellation** — a `notifications/cancelled`
+naming a request in flight, which is what Claude Code sends when the user presses Esc. It runs the
+same escalation from a different trigger, so it costs the same thing; what differs is only who
+decided, and that the client is owed no response for a request it has stopped waiting for. The
+notification is intercepted in the front end rather than routed, because routing it would queue it
+on the session's worker mutex *behind the very call it asks to stop* — measured at 17 seconds on a
+20-second call.
+
 **A client that hangs up is released in seconds, not minutes.** Shutting an editor tab closes the
 client process, which closes its SSE socket, and the drain loop sees the EOF within one 100 ms poll —
 so the front end knows the client is gone long before any count could say so. It waits

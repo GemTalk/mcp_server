@@ -143,6 +143,13 @@ sessions** — each client gets its own isolated worker gem (see [Per-client ses
   between messages.
 - **A POSTed JSON-RPC *response*** — a body with an `id` and no `method`, which is how a client
   answers a request the server sent it — is acknowledged with **`202 Accepted`** and no body.
+- **`notifications/cancelled`** — the client saying it no longer wants a request in flight (what
+  Claude Code sends when the user presses Esc). Acknowledged with **`202 Accepted`** and no body,
+  and the call it names is **ended**: the same soft break → hard break → stop escalation a request
+  deadline uses, so it costs the client that request and not its gem. The cancelled request's own
+  connection gets `202` and no body either, since the spec asks a receiver not to answer a request
+  the client has stopped waiting for. Handled in the front end rather than routed to the worker —
+  routing it would queue it behind the very call it asks to stop.
 - **DELETE `/mcp`** — ends the session named by `MCP-Session-Id` (closes its worker). Answers the
   same codes as the POST path: missing header → **`400`**, unknown/already-ended id → **`404`**,
   live session → **`200`**.
@@ -198,6 +205,7 @@ version when supported, otherwise answers `2025-11-25`.
 | `tools/list`, `tools/call` | implemented; `tools` is the only declared capability |
 | `resources/*`, `prompts/*`, `logging/*`, `completion/*` | undeclared and answered `-32601` |
 | Notification POST | `202 Accepted`, no body |
+| `notifications/cancelled` | `202 Accepted`; the named call is ended, and gets no response of its own |
 | Invalid `Origin` | `403` |
 | Invalid/unsupported `MCP-Protocol-Version` | `400` |
 | Missing session id / unknown-expired session id | `400` / `404`, on both POST and DELETE |

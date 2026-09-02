@@ -163,6 +163,64 @@ testAbsentOriginServed
   self deny: (self includesCS: '403' in: out).
   self assert: (self includesCS: '-32600' in: out)
 %
+category: 'tests - cancellation'
+method: McpTransportTest
+testACancellationIsHandledByTheRouterAndNeverReachesTheWorker
+  "The regression that matters, and the reason this interception exists at all. Routing a
+   notifications/cancelled to the worker would queue it on that session's mutex BEHIND the very call
+   it asks to stop, and it would be answered only once that call had finished on its own -- measured
+   at 17 seconds on a 20-second call against a live server. So the assertion is not just that the
+   right answer comes back, it is that the WORKER WAS NEVER ASKED: nothing was sent to the gem."
+  | r sess out |
+  r := McpFixtureRouter new.
+  sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
+  sess mockWorker expressions size.
+  out := (self runRequest: (self postRequest:
+    '{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":4,"reason":"user"}}'
+    sessionId: sess id) onRouter: r) output.
+  self assert: (self includesCS: 'HTTP/1.1 202' in: out).
+  "no JSON-RPC body: a notification gets 202 and nothing else"
+  self deny: (self includesCS: 'jsonrpc' in: out).
+  "and the worker saw nothing -- only the bootstrap expression prepareWorker sent at session open"
+  self assert: (sess mockWorker expressions
+    detect: [:e | (e findString: 'cancelled' startingAt: 1) > 0] ifNone: [nil]) isNil
+%
+category: 'tests - cancellation'
+method: McpTransportTest
+testACancellationWithoutASessionIsRefusedLikeEveryOtherVerb
+  "Same 400/404 gates as every other verb, so a client gets one consistent signal about its session
+   whatever it happens to be sending."
+  | r out |
+  r := McpFixtureRouter new.
+  out := (self runRequest: (self postRequest:
+    '{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":1}}'
+    sessionId: nil) onRouter: r) output.
+  self assert: (self includesCS: '400' in: out).
+  out := (self runRequest: (self postRequest:
+    '{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":1}}'
+    sessionId: 'NOSUCHSESSION') onRouter: r) output.
+  self assert: (self includesCS: '404' in: out)
+%
+category: 'tests - cancellation'
+method: McpTransportTest
+testACancelledCallIsAnsweredWithNoJsonRpcResponse
+  "What the client gets back on the cancelled request's OWN connection: 202 and no body. The spec
+   asks a receiver of a cancellation both to stop processing the request and not to send a response
+   for it, and the client would discard one anyway. 202 keeps it valid HTTP rather than an abrupt
+   close, and carries no JSON-RPC response."
+  | r sess out |
+  r := McpFixtureRouter new.
+  sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
+  sess mockWorker waitsBeforeDone: 1000000.
+  [(Delay forMilliseconds: 100) wait. sess requestCancel: 11] fork.
+  out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":11,"method":"tools/list"}'
+    sessionId: sess id) onRouter: r) output.
+  self assert: (self includesCS: 'HTTP/1.1 202' in: out).
+  self deny: (self includesCS: 'jsonrpc' in: out).
+  self deny: (self includesCS: '-32001' in: out).
+  "the session survives: the client cancelled a request, not its work"
+  self assert: (r sessionAt: sess id) notNil
+%
 category: 'tests'
 method: McpTransportTest
 testARequestEndedOnTheDeadlineIsAnsweredWithItsOwnId

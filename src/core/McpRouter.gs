@@ -148,7 +148,7 @@ defaultRequestTimeoutSeconds
    request, and the gem goes on running it with nobody left to answer.
    Ending a request costs the client that request and nothing else: the worker is interrupted and
    stays usable, so the session, and the uncommitted work in it, survive (McpSession>>
-   endOverrunningCall). The reason not to make it much shorter is that some legitimate work is
+   endCallBecause:). The reason not to make it much shorter is that some legitimate work is
    slow -- a large fileIn, a broad search, a test suite -- and a limit that cuts those off makes the
    server unable to do things it can do.
    nil means no limit, which is the right setting where the clients are known and long tools are the
@@ -229,6 +229,20 @@ runOnPort: aPort configJson: aJsonString
   ^(self new applyConfigJson: aJsonString) runOnPort: aPort
 %
 ! ------------------- Instance methods for McpRouter
+category: 'routing'
+method: McpRouter
+acknowledgeCancelledCall: sess on: conn
+  "End the HTTP request of a call the client CANCELLED, saying nothing about it.
+   202 Accepted with no body: the spec asks a receiver of a cancellation both to stop processing the
+   request and NOT to send a response for it, and 202 is how this transport says 'taken, nothing to
+   report' -- valid HTTP, so the connection ends the way every other one does, and carrying no
+   JSON-RPC response for a request the client has told us it is no longer listening for. (It would
+   ignore one anyway: the spec tells the canceller to discard any response that arrives late.)
+   The session is still released where its gem had to be stopped to get the call out of it -- that is
+   true however the call ended, and the client learns of it from the 404 on its next request."
+  self releaseSessionIfAbandoned: sess.
+  ^conn writeStatus: 202 reason: 'Accepted' body: ''
+%
 category: 'origin allowlist'
 method: McpRouter
 allowedOriginHosts
@@ -1160,6 +1174,27 @@ releaseAbandonedSession: sess unlessActiveSince: aStamp
   self reapIdleSessions.
   ^self
 %
+category: 'session lifetime'
+method: McpRouter
+releaseSessionIfAbandoned: sess
+  "End a session whose worker gem had to be STOPPED to get a call out of it (McpSession>>
+   abandonWorker), which is the third and last step of ending a call and the only one that costs the
+   client its session. Unmapped here rather than left for the reaper: it can serve nothing, and the
+   sooner it is gone the sooner the client's next request gets the 404 that tells it to initialize
+   again. Closing it marks its outbox closing, so an open stream is drained and ended rather than
+   dropped.
+   Does nothing for a session whose worker took a break, which is nearly all of them: there the gem,
+   its view and its uncommitted work are all intact and the client lost only the one call.
+   Separate from the methods that answer the client (#writeTimeoutError:forSession:id:on: and
+   #acknowledgeCancelledCall:on:) because both owe the client this, and they differ only in what --
+   if anything -- they say about the call that ended."
+  sess workerAbandoned ifFalse: [^self].
+  mutex critical: [sessions removeKey: sess id ifAbsent: [nil]].
+  [sess close] on: Error do: [:ex | ex return: nil].
+  self log: 'Ended MCP session ' , sess id printString
+    , ' -- a request was ended and its worker gem could not be interrupted, so the gem was stopped.'.
+  ^self
+%
 category: 'routing'
 method: McpRouter
 requestAuthorized: req on: conn
@@ -1364,6 +1399,33 @@ serve: aClientSocket
 %
 category: 'routing'
 method: McpRouter
+serveCancellation: parsed sessionId: sid on: conn
+  "A notifications/cancelled the client POSTed: it no longer wants the request named in
+   params.requestId. Per the Streamable HTTP spec a notification the server accepts MUST be answered
+   202 Accepted with no body, and the session gates are the same as on every other verb.
+   All this does is hand the id to the session, which matches it against the call actually in flight
+   and sets a flag (McpSession>>requestCancel:). The ending itself happens in the GsProcess running
+   that call, which is the only one entitled to touch the worker.
+   Measured 2026-08-31: Claude Code sends this within seconds of the user pressing Esc, with the
+   right requestId, and does NOT close the response stream -- so this notification, not a dropped
+   connection, is how a cancellation actually arrives at this server today."
+  | sess params requestId |
+  sid isNil ifTrue: [
+    ^self writeSessionError: 'Missing MCP-Session-Id header (call initialize first)' code: 400 reason: 'Bad Request' on: conn].
+  sess := self sessionAt: sid.
+  sess isNil ifTrue: [
+    ^self writeSessionError: 'Unknown or expired session: ' , sid code: 404 reason: 'Not Found' on: conn].
+  params := parsed at: 'params' ifAbsent: [nil].
+  requestId := (params isKindOf: Dictionary)
+    ifTrue: [params at: 'requestId' ifAbsent: [nil]]
+    ifFalse: [nil].
+  (sess requestCancel: requestId) ifTrue: [
+    self log: 'MCP session ' , sess id printString , ': client cancelled request '
+      , requestId printString , '.'].
+  conn writeStatus: 202 reason: 'Accepted' body: ''
+%
+category: 'routing'
+method: McpRouter
 serveClientResponse: parsed sessionId: sid on: conn
   "A JSON-RPC RESPONSE the client POSTed: its answer to a request THIS server sent on the SSE stream
    (today only ping). It carries an id and no method, which is what tells it from a request.
@@ -1475,6 +1537,12 @@ servePost: req on: conn
    -32600 -- so it is correlated here and acknowledged with 202."
   (method isNil and: [parsed includesKey: 'id'])
     ifTrue: [^self serveClientResponse: parsed sessionId: (self sessionIdOf: req) on: conn].
+  "A cancellation is likewise not routable, for a sharper reason: routing it would queue it on the
+   worker mutex BEHIND the very call it is asking to stop, and it would be acted on -- if the word
+   applies -- only once that call had finished on its own. Measured at 17 seconds on a 20-second
+   call before this existed. It is handled here, where the session is reachable without the worker."
+  method = 'notifications/cancelled'
+    ifTrue: [^self serveCancellation: parsed sessionId: (self sessionIdOf: req) on: conn].
   method = 'initialize' ifTrue: [^self serveInitialize: req on: conn].
   ^self serveRouted: body id: (parsed at: 'id' ifAbsent: [nil]) sessionId: (self sessionIdOf: req) on: conn
 %
@@ -1496,17 +1564,22 @@ method: McpRouter
 serveRouted: body id: anIdOrNil sessionId: sid on: conn
   "Route a non-initialize request to the client's worker by session id (required). Relay the
    worker's JSON response, or 202 for a notification (empty response).
-   anIdOrNil is the JSON-RPC id the request arrived with, carried in for one case: a call ended on
-   the request deadline (McpSession>>endOverrunningCall) is answered HERE rather than by the worker,
-   and an answer the client cannot match to the request it is waiting on is no better than silence --
-   it would wait out its own timeout instead, which is the thing the deadline exists to prevent."
+   anIdOrNil does two jobs, and both need the id the request arrived with. A call this server ENDED
+   (McpSession>>endCallBecause:) is answered HERE rather than by the worker, and an answer the client
+   cannot match to the request it is waiting on is no better than silence -- it would wait out its
+   own timeout instead, which is the thing the deadline exists to prevent. And the session remembers
+   it for as long as the call runs, so that a notifications/cancelled naming it can be matched to the
+   call actually in flight (#serveCancellation:sessionId:on:).
+   The two endings are answered differently: a call that outran the deadline gets the error, a call
+   the CLIENT cancelled gets no JSON-RPC response at all."
   | sess resp |
   sid isNil ifTrue: [^self writeSessionError: 'Missing MCP-Session-Id header (call initialize first)' code: 400 reason: 'Bad Request' on: conn].
   sess := self sessionAt: sid.
   sess isNil ifTrue: [^self writeSessionError: 'Unknown or expired session: ' , sid code: 404 reason: 'Not Found' on: conn].
-  resp := [sess forward: body]
+  resp := [sess forward: body requestId: anIdOrNil]
     on: McpError
     do: [:ex |
+      ex kind = #cancelled ifTrue: [^self acknowledgeCancelledCall: sess on: conn].
       ex kind = #timeout
         ifTrue: [^self writeTimeoutError: ex forSession: sess id: anIdOrNil on: conn]
         ifFalse: [ex pass]].
@@ -1908,30 +1981,24 @@ writeSessionError: aMessage code: httpCode reason: reasonString on: conn
 category: 'routing'
 method: McpRouter
 writeTimeoutError: anError forSession: sess id: anIdOrNil on: conn
-  "Answer a request this server ended on its own deadline (McpSession>>endOverrunningCall).
+  "Answer a request this server ended on its own deadline (McpSession>>endCallBecause:).
    HTTP 200 with a JSON-RPC error, not an HTTP error status: the request was accepted, routed and
    served, and what failed is the call inside it -- a result the client should match to its request
    rather than a transport refusal it might not read as JSON-RPC at all. The code is -32001, in
    JSON-RPC's implementation-defined server-error range, and `data.kind` carries the same
    machine-readable 'timeout' a worker-raised error would (McpDispatcher>>kindForError:), so a client
-   branches the same way wherever the error was produced.
-   A session whose worker could not be interrupted is finished, and is unmapped here rather than left
-   for the reaper: it can serve nothing, and the sooner it is gone the sooner the client's next
-   request gets the 404 that tells it to initialize again. Closing it is what marks its outbox
-   closing, so an open stream is drained and ended rather than dropped."
+   branches the same way wherever the error was produced. The kind is taken FROM the error rather
+   than written in here, so this cannot drift from what actually ended the call.
+   A cancelled call does not come here: the client that asked for it is owed no response at all
+   (#acknowledgeCancelledCall:on:). What the two endings do share is #releaseSessionIfAbandoned:."
   | err |
-  sess workerAbandoned ifTrue: [
-    mutex critical: [sessions removeKey: sess id ifAbsent: [nil]].
-    [sess close] on: Error do: [:ex | ex return: nil].
-    self log: 'Ended MCP session ' , sess id printString
-      , ' -- a request outran the deadline and its worker gem could not be interrupted, so the gem '
-      , 'was stopped.'].
+  self releaseSessionIfAbandoned: sess.
   err := Dictionary new.
   err at: 'jsonrpc' put: '2.0'; at: 'id' put: anIdOrNil.
   err at: 'error' put: (Dictionary new
     at: 'code' put: -32001;
     at: 'message' put: anError description;
-    at: 'data' put: (Dictionary new at: 'kind' put: 'timeout'; yourself);
+    at: 'data' put: (Dictionary new at: 'kind' put: anError kind asString; yourself);
     yourself).
   conn writeJson: (McpJson write: err)
 %

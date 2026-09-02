@@ -60,6 +60,72 @@ testACallThatBeatsTheDeadlineIsNeverBroken
   self assert: w hardBreakCount equals: 0.
   self deny: sess workerAbandoned
 %
+category: 'tests - cancellation'
+method: McpSessionTest
+testACancelForAnotherRequestIsIgnored
+  "The id check is load-bearing, not a formality. A cancellation very often arrives just after the
+   call it names has finished -- the spec says as much and asks receivers to ignore those -- and
+   without the check a late cancel would end whatever call happened to be running instead of the one
+   the client meant. Which is the same call to the client, and a different one entirely to the gem."
+  | sess w raised |
+  sess := McpMockSession startWithId: 'wrong-id'.
+  w := sess mockWorker.
+  w waitsBeforeDone: 3; nextResult: 'FINISHED-ANYWAY'.
+  [(Delay forMilliseconds: 50) wait.
+   self deny: (sess requestCancel: 999).
+   self deny: (sess requestCancel: nil)] fork.
+  raised := nil.
+  self assert: ([sess forward: 'KEEP-GOING'] on: McpError do: [:ex | raised := ex. nil])
+    equals: 'FINISHED-ANYWAY'.
+  self assert: raised isNil.
+  self assert: w softBreakCount equals: 0
+%
+category: 'tests - cancellation'
+method: McpSessionTest
+testACancelFromAnotherProcessEndsTheCallAndLeavesTheSessionUsable
+  "A client asking to stop a call runs the SAME escalation a deadline does -- that is why
+   cancellation needed no new mechanism -- and costs the client the same thing: that request, not its
+   gem, and not the uncommitted work in it.
+   The cancel is requested from a DIFFERENT GsProcess, which is how it really arrives: the front end
+   serves the notifications/cancelled POST on its own connection while this call holds the worker
+   mutex. #requestCancel: therefore only sets a flag; the break is sent by the process that owns the
+   mutex, on its next wait."
+  | sess w raised |
+  sess := McpMockSession startWithId: 'cancel'.
+  w := sess mockWorker.
+  w waitsBeforeDone: 1000000.        "a call that never finishes on its own"
+  [(Delay forMilliseconds: 50) wait. sess requestCancel: 7] fork.
+  raised := nil.
+  [sess forward: 'LONG-RUNNING' requestId: 7] on: McpError do: [:ex | raised := ex].
+  self assert: raised notNil.
+  self assert: raised kind equals: #cancelled.
+  self assert: (raised description findString: 'cancelled' startingAt: 1) > 0.
+  self assert: w softBreakCount equals: 1.
+  self assert: w hardBreakCount equals: 0.
+  self deny: sess workerAbandoned.
+  self deny: sess isBusy.
+  "and the client keeps its session -- it cancelled a request, not its work"
+  w waitsBeforeDone: 1; nextResult: 'AFTER-CANCEL'.
+  self assert: (sess forward: 'NEXT-REQUEST') equals: 'AFTER-CANCEL'
+%
+category: 'tests - cancellation'
+method: McpSessionTest
+testACancelIsForgottenWhenItsCallEnds
+  "The hazard in letting another GsProcess set a flag: a cancellation that arrived too late, or that
+   was never acted on, must not end the NEXT call. Both ends of #forward: clear it -- on the way in
+   as well as out, because a cancel can land in the instant between one call finishing and its
+   ensure: running."
+  | sess w |
+  sess := McpMockSession startWithId: 'stale-flag'.
+  w := sess mockWorker.
+  w waitsBeforeDone: 1; nextResult: 'FIRST'.
+  self assert: (sess forward: 'FIRST-REQUEST' requestId: 1) equals: 'FIRST'.
+  "the call is over, so this names nothing and must not be remembered"
+  self deny: (sess requestCancel: 1).
+  w waitsBeforeDone: 1; nextResult: 'SECOND'.
+  self assert: (sess forward: 'SECOND-REQUEST' requestId: 2) equals: 'SECOND'.
+  self assert: w softBreakCount equals: 0
+%
 category: 'tests - deadline'
 method: McpSessionTest
 testADeadlineEndsARunawayCallAndLeavesTheSessionUsable
@@ -110,6 +176,28 @@ testAWorkerThatIgnoresBothBreaksIsStoppedAndFinishesTheSession
   self deny: sess isBusy.
   sess close.
   self assert: w logoutCount equals: 0
+%
+category: 'tests - cancellation'
+method: McpSessionTest
+testAWorkerThatIgnoresBothBreaksIsStoppedOnACancelToo
+  "The escalation is the same one, so its last resort is too: a gem that takes neither break is
+   stopped from the stone side and the session is finished. The error says #cancelled -- the client
+   asked for this -- but it also has to say the session went with it, because that is the one ending
+   where cancelling a request costs more than the request."
+  | sess w raised |
+  sess := McpMockSession startWithId: 'unbreakable-cancel'.
+  w := sess mockWorker.
+  w waitsBeforeDone: 1000000; resistSoftBreak: true; resistHardBreak: true.
+  [(Delay forMilliseconds: 50) wait. sess requestCancel: 3] fork.
+  raised := nil.
+  [sess forward: 'STUBBORN' requestId: 3] on: McpError do: [:ex | raised := ex].
+  self assert: raised notNil.
+  self assert: raised kind equals: #cancelled.
+  self assert: w softBreakCount equals: 1.
+  self assert: w hardBreakCount equals: 1.
+  self assert: sess workerAbandoned.
+  self assert: sess workerGemStopped.
+  self assert: (raised description findString: 'initialize again' startingAt: 1) > 0
 %
 category: 'tests - deadline'
 method: McpSessionTest
