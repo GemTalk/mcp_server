@@ -95,9 +95,24 @@ withPythonErrorsAsMcpError: aBlock
    Error subclasses (see the class comment), so McpDispatcher's `on: Error do:` cannot catch them and
    an uncaught one would take the worker gem down. Catches BaseException, the root of Python's own
    hierarchy -- deliberately NOT AbstractException, which would also swallow halts and interrupts,
-   and deliberately not Smalltalk Errors, which the dispatcher already classifies."
+   and deliberately not Smalltalk Errors, which the dispatcher already classifies.
+
+   The class name is prepended only when the detail does not ALREADY begin with it. Grail's
+   #description does begin with it -- measured, `ValueError` / 'ValueError: boom' -- so prefixing
+   unconditionally reported every Python error twice over ('ValueError: ValueError: boom'). The test
+   is on the detail rather than a fixed rule about Grail, because #description belongs to Grail and
+   the fallback path below produces a string with no class name at all; both must read correctly.
+   Compared with copyFrom:/= rather than includesString:, which is case-INsensitive in GemStone."
   ^[aBlock value]
     on: BaseException
-    do: [:ex | McpError signalKind: #pythonError message:
-      ex class name asString , ': ' , ([ex description] on: Error do: [:x | '(no detail available)'])]
+    do: [:ex | | name detail |
+      name := ex class name asString.
+      detail := [ex description] on: Error do: [:x | nil].
+      detail := detail isNil
+        ifTrue: ['(no detail available)']
+        ifFalse: [detail asString].
+      McpError signalKind: #pythonError message:
+        ((detail size >= name size and: [(detail copyFrom: 1 to: name size) = name])
+          ifTrue: [detail]
+          ifFalse: [name , ': ' , detail])]
 %

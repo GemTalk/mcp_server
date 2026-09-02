@@ -136,6 +136,30 @@ testGrailToolsetJoinsTheInstalledDefaultSurface
 %
 category: 'tests'
 method: McpGrailToolsetTest
+testPythonErrorMessageNamesTheClassOnce
+  "The reported message must name the exception class exactly ONCE. Grail's #description already
+   begins with the class name, and withPythonErrorsAsMcpError: used to prepend it again, so every
+   Python error reached the client as 'ValueError: ValueError: boom' -- noise in the one place a
+   model is reading closely.
+
+   Asserted by COUNTING occurrences rather than comparing the whole string: the detail after the
+   class name is Grail's wording, which is free to change, while 'how many times is the class
+   named' is the property this test exists to hold."
+  | result text count idx |
+  result := (self dispatch: (self toolCall: 'eval_python'
+    args: (Dictionary new at: 'code' put: 'raise ValueError("boom")'; yourself))) at: 'result'.
+  self assert: (result at: 'isError').
+  text := self withoutSessionNote: ((result at: 'content') first at: 'text').
+  count := 0.
+  idx := 1.
+  [idx := text findString: 'ValueError' startingAt: idx. idx = 0] whileFalse: [
+    count := count + 1.
+    idx := idx + 1].
+  self assert: count equals: 1.
+  self assert: (self includesCS: 'boom' in: text)
+%
+category: 'tests'
+method: McpGrailToolsetTest
 testToolsCallPythonPrintReturnsNone
   "Pins current Grail behavior: Python print() succeeds and yields None. It no longer raises
    the dead-stdout ImproperOperation (2364) it once did after the dispatcher's abort. A
