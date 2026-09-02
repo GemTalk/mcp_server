@@ -93,7 +93,7 @@ iferr 1 stk
 run
 | s classes up optional |
 up := System myUserProfile.
-classes := #( 'McpToolTest' 'McpDispatcherTest' 'McpSessionTest' 'McpOutboxTest' 'McpProgressTest'
+classes := #( 'McpBlindWriteTest' 'McpToolTest' 'McpDispatcherTest' 'McpSessionTest' 'McpOutboxTest' 'McpProgressTest'
   'McpStreamTest' 'McpLifetimeTest' 'McpTransportTest' 'McpContractTest'
   'McpExtensionTest' 'McpExternalSessionTest' 'McpTransactionTest'
   'McpWorkerDeadlineTest' ) asOrderedCollection.

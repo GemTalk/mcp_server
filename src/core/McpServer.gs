@@ -4,7 +4,8 @@ expectvalue /Class
 doit
 McpBase subclass: 'McpServer'
   instVarNames: #( dispatcher toolRegistry toolsets
-                    serverName serverTitle serverVersion lifetimeBounds)
+                    serverName serverTitle serverVersion lifetimeBounds
+                    readLedger writeLedger)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -45,6 +46,14 @@ McpServer category: 'Mcp-Core'
 removeallmethods McpServer
 removeallclassmethods McpServer
 ! ------------------- Class methods for McpServer
+category: 'guardrail keys'
+classmethod: McpServer
+commentKeyFor: aClassName
+  "The readLedger key standing for 'I have seen this class's COMMENT'. Separate from the shape key
+   because the two are read by different tools: get_class_definition answers the subclass: message
+   and shows no comment, so it must not license set_class_comment."
+  ^aClassName asString , ':comment'
+%
 category: 'read-only'
 classmethod: McpServer
 coreReadOnlySafeToolNames
@@ -156,6 +165,11 @@ defaultToolsetNames
   ^#( 'McpBrowsingToolset' 'McpExecutionToolset' 'McpListingToolset' 'McpMutationToolset'
       'McpSearchToolset' 'McpSessionToolset' 'McpTestingToolset' )
 %
+category: 'guardrail keys'
+classmethod: McpServer
+dictionaryKeyFor: aDictionaryName
+  ^'#' , aDictionaryName asString
+%
 category: 'worker'
 classmethod: McpServer
 handleJsonString: aRawJsonString
@@ -200,6 +214,15 @@ installedDefaultToolsetNames
   ^(System myUserProfile objectNamed: #McpGrailToolset) isNil
     ifTrue: [names]
     ifFalse: [names , (Array with: 'McpGrailToolset')]
+%
+category: 'guardrail keys'
+classmethod: McpServer
+methodKeyFor: aClassName selector: aSelector meta: aBoolean
+  "The readLedger key for one method. The class-side form embeds ' class' before the '>>', so the key
+   also names the SIDE -- which scopeOfMethodKey: reads back, and which the widening in
+   noteViewValidated depends on, because instance and class side have separate method dictionaries
+   and so are validated separately by the stone."
+  ^aClassName asString , (aBoolean == true ifTrue: [' class>>'] ifFalse: ['>>']) , aSelector asString
 %
 category: 'instance creation'
 classmethod: McpServer
@@ -261,6 +284,15 @@ progressCallId: aCallIdOrNil
     frontEndSession: (st at: #McpFrontEndSession otherwise: nil)
     callId: aCallIdOrNil)
 %
+category: 'guardrail keys'
+classmethod: McpServer
+scopeOfMethodKey: aKey
+  "The 'Class' or 'Class class' part of a method key, or nil if aKey is not a method key. One method
+   dictionary per scope, so this is exactly the grain the stone validates at."
+  | idx |
+  idx := aKey indexOfSubCollection: '>>'.
+  ^idx = 0 ifTrue: [nil] ifFalse: [aKey copyFrom: 1 to: idx - 1]
+%
 category: 'read-only'
 classmethod: McpServer
 sessionReadOnly: aBoolean
@@ -271,6 +303,13 @@ sessionReadOnly: aBoolean
    needs no commit, and is private to that gem -- which is why two routers (one read-only, one not)
    can run at once with no shared state."
   SessionTemps current at: #McpReadOnly put: aBoolean
+%
+category: 'guardrail keys'
+classmethod: McpServer
+shapeKeyFor: aClassName
+  "The readLedger key standing for 'I have seen this class's DEFINITION' -- its superclass and
+   variable names. See commentKeyFor: for why the comment is a separate key."
+  ^aClassName asString , ':shape'
 %
 category: 'toolsets'
 classmethod: McpServer
@@ -329,6 +368,45 @@ assertRemovableDictionaryNamed: aName
     ^McpError signalKind: #refused message:
       'Refused: ' , aName asString , ' is a protected system dictionary and cannot be removed.'].
   ^aName
+%
+category: 'blind-write guardrail'
+method: McpServer
+behaviorForScope: aScopeString
+  "The Behavior a method key's scope names: 'Foo' answers Foo, 'Foo class' answers Foo's metaclass.
+   nil if the name no longer resolves."
+  | meta base cls |
+  meta := aScopeString size > 6
+    and: [(aScopeString copyFrom: aScopeString size - 5 to: aScopeString size) = ' class'].
+  base := meta ifTrue: [aScopeString copyFrom: 1 to: aScopeString size - 6] ifFalse: [aScopeString].
+  cls := self class resolveClass: base.
+  cls isNil ifTrue: [^nil].
+  ^meta ifTrue: [cls class] ifFalse: [cls]
+%
+category: 'blind-write guardrail'
+method: McpServer
+conflictingSubjects
+  "The scopes ('Foo', 'Foo class') this session wrote whose method dictionary the stone named in the
+   last conflict report. An empty Array when nothing matches.
+
+   System transactionConflicts answers the conflicting OBJECTS, but for a method edit those are a
+   GsMethodDictionary and a per-class SymbolSet, which mean nothing to a client. A method dictionary
+   has no back-pointer to its class and none is needed: this session's own write ledger already
+   names every scope it touched, so matching each candidate's dictionary against the conflict set by
+   identity turns the report back into names the client can act on."
+  | conflicts objs names |
+  conflicts := [System transactionConflicts] on: Error do: [:e | nil].
+  conflicts isNil ifTrue: [^Array new].
+  objs := IdentitySet new.
+  #( #'Write-Write' #'Read-Write' #'Write-Dependency' ) do: [:k |
+    (conflicts at: k ifAbsent: [Array new]) do: [:o | objs add: o]].
+  objs isEmpty ifTrue: [^Array new].
+  names := Set new.
+  self writeLedger do: [:key |
+    (self class scopeOfMethodKey: key) ifNotNil: [:scope |
+      (self behaviorForScope: scope) ifNotNil: [:beh |
+        ([objs includes: (beh persistentMethodDictForEnv: 0)] on: Error do: [:e | false])
+          ifTrue: [names add: scope]]]].
+  ^names asSortedCollection asArray
 %
 category: 'private'
 method: McpServer
@@ -389,6 +467,11 @@ handleJsonString: aRawJsonString lifetimeBounds: anArrayOrNil
         outer isNil
           ifTrue: [temps removeKey: #McpProgress otherwise: nil]
           ifFalse: [temps at: #McpProgress put: outer]]
+%
+category: 'blind-write guardrail'
+method: McpServer
+hasRead: aKey
+  ^self readLedger includes: aKey
 %
 category: 'initialization'
 method: McpServer
@@ -472,6 +555,113 @@ lifetimeNote
     ifTrue: [deadlineClause , ', or ' , inactivityClause]
     ifFalse: [inactivityClause , ', or ' , deadlineClause]
 %
+category: 'blind-write guardrail'
+method: McpServer
+noteAborted
+  "An abort took a new view AND discarded every uncommitted change, so nothing this session saw or
+   wrote survives into the new window."
+  readLedger := Set new.
+  writeLedger := Set new
+%
+category: 'blind-write guardrail'
+method: McpServer
+noteCommitFailed
+  "A commit refused on conflict. BOTH ledgers are kept, because a failed commit does NOT move the
+   view -- measured; see docs/blind-write-guardrail.md (V). The other session's work is still
+   invisible, so every read in this window is still current and every pending write is still
+   licensed. The transaction is doomed and must be aborted, but that is a different fact from
+   whether the reads are stale, and they are not."
+  ^self
+%
+category: 'blind-write guardrail'
+method: McpServer
+noteCommitted
+  "A commit succeeded: the stone validated this session's write set, which is the whole of what a
+   successful commit proves. noteViewValidated keeps exactly what that proof covers; the write
+   ledger then empties, because those changes are now everyone's."
+  self noteViewValidated.
+  writeLedger := Set new
+%
+category: 'blind-write guardrail'
+method: McpServer
+noteRead: aKey
+  "Record that this session has SEEN aKey in the current view window. Called by the browsing tools
+   that show a subject's current contents -- never by a listing or search tool, which show where
+   things are rather than what they say."
+  self readLedger add: aKey.
+  ^aKey
+%
+category: 'blind-write guardrail'
+method: McpServer
+noteReads: aCollectionOfKeys
+  aCollectionOfKeys do: [:k | self noteRead: k].
+  ^aCollectionOfKeys
+%
+category: 'blind-write guardrail'
+method: McpServer
+noteRefreshed: aBoolean
+  "A refresh took a new view and KEPT this session's uncommitted work. aBoolean is what
+   System continueTransaction answered.
+   true means the stone validated the write set and found no conflict -- the same proof a successful
+   commit gives, so the same transition, except that the writes are still pending and so still
+   licensed.
+   false is the one genuinely bad state in the system: the view moved ANYWAY (measured; see
+   docs/blind-write-guardrail.md, U) so every read is stale, and the pending writes cannot commit.
+   Both ledgers are cleared -- no licensed writes remain, which keeps writeLedger subseteq readLedger
+   unconditional -- and the caller captures the conflicting classes first, for the message that tells
+   the client to abort."
+  aBoolean ifTrue: [^self noteViewValidated].
+  readLedger := Set new.
+  writeLedger := Set new
+%
+category: 'blind-write guardrail'
+method: McpServer
+noteViewValidated
+  "The transition shared by a successful commit and a refresh that answered true. Both mean the same
+   thing and prove the same thing: no other session has committed a change to anything in THIS
+   session's write set since the view was taken.
+
+   What survives is exactly what that proof covers. Every write ledger entry does, so all of them
+   stay. The proof also reaches further than the write set itself, because the stone validates at the
+   grain of a METHOD DICTIONARY -- one per class per side -- so an unwritten method of a class this
+   session did write is also proven unchanged, and its read survives too. That is the widening, and
+   it is what lets a client read six methods of a class, change one, commit, and then change a second
+   without re-reading.
+
+   It stops at method grain. A class's shape and its comment live in different objects from its
+   method dictionary, so validating the dictionary proves nothing about them; those keys survive only
+   by being in the write ledger. Everything else read in the old window is dropped."
+  | scopes kept |
+  scopes := Set new.
+  self writeLedger do: [:k |
+    (self class scopeOfMethodKey: k) ifNotNil: [:s | scopes add: s]].
+  kept := Set new.
+  self readLedger do: [:k |
+    (self class scopeOfMethodKey: k) ifNotNil: [:s |
+      (scopes includes: s) ifTrue: [kept add: k]]].
+  kept addAll: self writeLedger.
+  readLedger := kept
+%
+category: 'blind-write guardrail'
+method: McpServer
+noteWrite: aKey
+  "Record that this session has CHANGED aKey and not yet committed it.
+   Callers must send this on the branch that actually performed the write, never on entry to the
+   tool. noteCommitted turns every write ledger entry into a licence, so an entry recorded for
+   something that was never written would manufacture a licence the stone never validated -- which is
+   a live case, not a hypothetical: re-evaluating an identical class definition is a true no-op
+   (measured; see docs/blind-write-guardrail.md, S).
+
+   A WRITE IMPLIES A READ, so this records both. Having just written something is knowing its
+   current content -- better than having read it -- so it licenses a follow-up change without a
+   re-read: creating a dictionary licenses removing it, compiling a method licenses recompiling it.
+   Nothing is put at risk, because another session's change to the same thing is still caught by the
+   stone's own write-write check. It also makes writeLedger subseteq readLedger true at every
+   instant rather than only across a view move."
+  self writeLedger add: aKey.
+  self readLedger add: aKey.
+  ^aKey
+%
 category: 'guards'
 method: McpServer
 protectedDictionaryNames
@@ -479,6 +669,14 @@ protectedDictionaryNames
    which holds the base classes. Everything else is freely mutable -- UserGlobals (the DEFAULT home
    for new user-created classes) and any application dictionary such as Published."
   ^#('Globals')
+%
+category: 'blind-write guardrail'
+method: McpServer
+readLedger
+  "What this session has SEEN in the current view window: the keys a mutating tool must find before
+   it may write. See docs/blind-write-guardrail.md."
+  readLedger isNil ifTrue: [readLedger := Set new].
+  ^readLedger
 %
 category: 'read-only'
 method: McpServer
@@ -512,6 +710,18 @@ registerToolsets
       (ts toolNames reject: [:n | safe includes: n])
         do: [:n | toolRegistry removeToolNamed: n]]].
   ^self
+%
+category: 'blind-write guardrail'
+method: McpServer
+requireRead: aKey subject: aSubjectString tool: aToolName hint: aHintString
+  "Refuse a blind write. Raises kind 'blindWrite' unless aKey is in the read ledger, naming the
+   subject and the exact call that would license it -- the message is the whole point, because the
+   client can always satisfy it in one cheap call."
+  (self hasRead: aKey) ifTrue: [^self].
+  McpError signalKind: #blindWrite message:
+    aToolName , ' refused: this session has not read ' , aSubjectString
+      , ' since its view last moved, so replacing it could silently discard another session''s work. '
+      , aHintString
 %
 category: 'identity'
 method: McpServer
@@ -587,4 +797,11 @@ method: McpServer
 toolsets
   "My toolsets, in registration order -- this server's tool surface (see McpToolset)."
   ^toolsets
+%
+category: 'blind-write guardrail'
+method: McpServer
+writeLedger
+  "What this session has CHANGED and not yet committed. See docs/blind-write-guardrail.md."
+  writeLedger isNil ifTrue: [writeLedger := Set new].
+  ^writeLedger
 %

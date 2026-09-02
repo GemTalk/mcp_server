@@ -83,10 +83,17 @@ commitConflictPending
    TEST #retryFailure SPECIFICALLY, never 'anything but #success'. Measured on 3.7.5 and 3.7.6,
    `System transactionConflicts at: #commitResult` answers #success on a fresh session, after a
    successful commit and after an abort; #retryFailure while a failed commit is unresolved; and
-   #readOnly after a System continueTransaction, which the `refresh` tool sends. An earlier version
-   of this read 'not #success' and so reported a jammed session from the first successful refresh
-   onward. Reading it does not clear it."
-  ^[(System transactionConflicts at: #commitResult ifAbsent: [#success]) == #retryFailure]
+   #readOnly after a SUCCESSFUL System continueTransaction, which the `refresh` tool sends. An
+   earlier version of this read 'not #success' and so reported a jammed session from the first
+   successful refresh onward. Reading it does not clear it.
+
+   #failure is also tested, and was added later: a continueTransaction that answers FALSE leaves
+   #failure rather than #retryFailure (measured; see docs/blind-write-guardrail.md, W), and that
+   session is just as stuck -- its view has moved and its pending writes still cannot commit -- so
+   before this it was a must-abort state the server could not see."
+  ^[ | r |
+     r := System transactionConflicts at: #commitResult ifAbsent: [#success].
+     r == #retryFailure or: [r == #failure]]
     on: Error do: [:e | false]
 %
 category: 'transaction'
@@ -162,10 +169,17 @@ propString: aDescription
 %
 category: 'transaction'
 classmethod: McpToolset
-refreshView
+refreshViewResult
   "Take a current view of the work other sessions have committed while KEEPING this session's
-   uncommitted changes (System continueTransaction). Answers nil when the view was refreshed, or
-   the Error that stopped it -- it never raises, so a caller decides what a failure means.
+   uncommitted changes (System continueTransaction). Answers a two-element Array
+   { validatedBoolean . errorOrNil } and never raises, so a caller decides what a failure means.
+
+   THE BOOLEAN IS NOT DECORATION. It is what continueTransaction answered, and it is the whole
+   evidence the blind-write guardrail has at a refresh: true means the stone validated this
+   session's write set and found no conflict, which is the same proof a successful commit gives and
+   licenses the same ledger transition; false means the view moved ANYWAY while the pending writes
+   stay doomed, which is the one state where nothing survives. An earlier version of this discarded
+   the Boolean and answered nil-or-Error, which could not tell those apart.
 
    ATTEMPTING IT IS THE TEST. continueTransaction is illegal in two states, and an earlier version
    of this predicted them by reading `System transactionConflicts at: #commitResult`, which was
@@ -176,7 +190,8 @@ refreshView
      ImproperOperation 2717   inside a nested transaction
      TransactionError  2409   after a commit failed on conflict -- STICKY, and cleared only by an
                               abort, so it will keep answering here until one happens."
-  ^[System continueTransaction. nil] on: Error do: [:ex | ex]
+  ^[Array with: System continueTransaction with: nil]
+    on: Error do: [:ex | Array with: false with: ex]
 %
 category: 'private'
 classmethod: McpToolset
@@ -226,6 +241,11 @@ method: McpToolset
 capResult: aString
   ^self class capResult: aString
 %
+category: 'blind-write guardrail'
+method: McpToolset
+commentKeyFor: aClassName
+  ^McpServer commentKeyFor: aClassName
+%
 category: 'transaction'
 method: McpToolset
 commitConflictPending
@@ -236,15 +256,114 @@ method: McpToolset
 commitConflictReport
   ^self class commitConflictReport
 %
+category: 'blind-write guardrail'
+method: McpToolset
+conflictingSubjects
+  "The class scopes named in this session's last conflict report -- see
+   McpServer>>conflictingSubjects. Empty without a server, which only costs a less specific message."
+  server isNil ifTrue: [^Array new].
+  ^server conflictingSubjects
+%
+category: 'blind-write guardrail'
+method: McpToolset
+dictionaryKeyFor: aDictionaryName
+  ^McpServer dictionaryKeyFor: aDictionaryName
+%
 category: 'private'
 method: McpToolset
 dictNamed: aName
   ^self class dictNamed: aName
 %
+category: 'blind-write guardrail'
+method: McpToolset
+hasReadKey: aKey
+  "Whether aKey is in this session's read ledger. FAIL-CLOSED without a server: an unanswerable
+   question is answered 'no', so the caller refuses rather than proceeds."
+  server isNil ifTrue: [^false].
+  ^server hasRead: aKey
+%
 category: 'private'
 method: McpToolset
 linesFrom: aCollectionOfStrings
   ^self class linesFrom: aCollectionOfStrings
+%
+category: 'blind-write guardrail'
+method: McpToolset
+listPhraseFor: aCollectionOfStrings
+  "'Foo', 'Foo and Bar', 'Foo, Bar and Baz' -- for a message a person or a model reads."
+  | items |
+  items := aCollectionOfStrings asArray.
+  items isEmpty ifTrue: [^''].
+  items size = 1 ifTrue: [^(items at: 1) asString].
+  ^((items copyFrom: 1 to: items size - 1) inject: '' into: [:acc :m |
+      acc isEmpty ifTrue: [m asString] ifFalse: [acc , ', ' , m asString]])
+    , ' and ' , (items at: items size) asString
+%
+category: 'blind-write guardrail'
+method: McpToolset
+methodKeyFor: aClassName selector: aSelector meta: aBoolean
+  ^McpServer methodKeyFor: aClassName selector: aSelector meta: aBoolean
+%
+category: 'blind-write guardrail'
+method: McpToolset
+noteAborted
+  server ifNotNil: [:s | s noteAborted].
+  ^self
+%
+category: 'blind-write guardrail'
+method: McpToolset
+noteCommitFailed
+  server ifNotNil: [:s | s noteCommitFailed].
+  ^self
+%
+category: 'blind-write guardrail'
+method: McpToolset
+noteCommitted
+  server ifNotNil: [:s | s noteCommitted].
+  ^self
+%
+category: 'blind-write guardrail'
+method: McpToolset
+noteRead: aKey
+  "Record that this session has seen aKey. A no-op without a server: there is no ledger to write to,
+   and a toolset with no server has no guardrail either way -- what must NOT fail open is the check,
+   which is requireRead:subject:tool:hint:."
+  server ifNotNil: [:s | s noteRead: aKey].
+  ^aKey
+%
+category: 'blind-write guardrail'
+method: McpToolset
+noteReads: aCollectionOfKeys
+  server ifNotNil: [:s | s noteReads: aCollectionOfKeys].
+  ^aCollectionOfKeys
+%
+category: 'blind-write guardrail'
+method: McpToolset
+noteReadsForWholeClass: aClass
+  "Record that every part of aClass has been seen: its shape, its comment, and the source of every
+   method on BOTH sides. What export_class_source earns, and the only read that licenses an
+   operation which destroys methods the client never named (a raw redefinition, delete_class)."
+  | keys name |
+  name := aClass name.
+  keys := OrderedCollection new.
+  keys add: (self shapeKeyFor: name); add: (self commentKeyFor: name).
+  aClass selectors do: [:sel | keys add: (self methodKeyFor: name selector: sel meta: false)].
+  aClass class selectors do: [:sel | keys add: (self methodKeyFor: name selector: sel meta: true)].
+  ^self noteReads: keys
+%
+category: 'blind-write guardrail'
+method: McpToolset
+noteRefreshed: aBoolean
+  server ifNotNil: [:s | s noteRefreshed: aBoolean].
+  ^self
+%
+category: 'blind-write guardrail'
+method: McpToolset
+noteWrite: aKey
+  "Record that this session has changed aKey. Send this on the branch that actually wrote, never on
+   entry to the tool -- see McpServer>>noteWrite:."
+  server ifNotNil: [:s | s noteWrite: aKey].
+  ^aKey
 %
 category: 'schema building'
 method: McpToolset
@@ -289,8 +408,8 @@ readOnlySafeToolNames
 %
 category: 'transaction'
 method: McpToolset
-refreshView
-  ^self class refreshView
+refreshViewResult
+  ^self class refreshViewResult
 %
 category: 'registration'
 method: McpToolset
@@ -299,10 +418,73 @@ registerOn: aToolRegistry
    Subclasses implement this; it is the whole point of a toolset."
   ^self subclassResponsibility
 %
+category: 'blind-write guardrail'
+method: McpToolset
+requireRead: aKey subject: aSubjectString tool: aToolName hint: aHintString
+  "Refuse a blind write -- a change to something this session has not read since its view last moved.
+   FAIL-CLOSED when there is no server, for the same reason assertMutableClass: is: a toolset that
+   cannot consult the ledger refuses to mutate rather than assuming it may."
+  server isNil ifTrue: [
+    ^McpError signalKind: #blindWrite message:
+      aToolName , ' refused: this toolset has no server, so it cannot tell whether ' , aSubjectString
+        , ' has been read in this view window. Build it with McpToolset class>>on:.'].
+  ^server requireRead: aKey subject: aSubjectString tool: aToolName hint: aHintString
+%
+category: 'blind-write guardrail'
+method: McpToolset
+requireWholeClassRead: aClass tool: aToolName because: aReasonString
+  "Refuse unless this session has seen ALL of aClass -- shape plus every current method on both
+   sides. For the operations that discard methods the client never named, where seeing the class
+   definition is not nearly enough.
+   Reports the missing methods TOGETHER rather than one per call, because the answer to any of them
+   is the same single call, and a client told about one missing method at a time would need as many
+   round trips as the class has methods."
+  | name missing |
+  name := aClass name.
+  missing := OrderedCollection new.
+  (self hasReadKey: (self shapeKeyFor: name)) ifFalse: [missing add: name asString , ' (definition)'].
+  aClass selectors do: [:sel |
+    (self hasReadKey: (self methodKeyFor: name selector: sel meta: false))
+      ifFalse: [missing add: name asString , '>>' , sel asString]].
+  aClass class selectors do: [:sel |
+    (self hasReadKey: (self methodKeyFor: name selector: sel meta: true))
+      ifFalse: [missing add: name asString , ' class>>' , sel asString]].
+  missing isEmpty ifTrue: [^self].
+  ^McpError signalKind: #blindWrite message:
+    aToolName , ' refused: ' , aReasonString , ' This session has not read '
+      , missing size printString , ' of them since its view last moved ('
+      , ((missing copyFrom: 1 to: (missing size min: 5)) inject: '' into: [:acc :m |
+          acc isEmpty ifTrue: [m] ifFalse: [acc , ', ' , m]])
+      , (missing size > 5 ifTrue: [', and ' , (missing size - 5) printString , ' more'] ifFalse: [''])
+      , '). Call export_class_source(' , name asString , ') to see the whole class first.'
+%
 category: 'private'
 method: McpToolset
 resolveClass: aName
   ^self class resolveClass: aName
+%
+category: 'blind-write guardrail'
+method: McpToolset
+selectorOfSource: aSourceString for: aBehavior
+  "The selector aSourceString would compile to on aBehavior, WITHOUT compiling it onto aBehavior.
+   Answers nil if the source will not compile at all.
+
+   compile_method takes source, not a selector, so the guardrail has to work out which method is
+   about to be replaced before it can decide whether it may be -- and it must do that without any
+   side effect, because a refused call has to leave the image untouched.
+
+   This asks the kernel's own compiler rather than parsing a message pattern here: the
+   intoMethodDict: variant installs its result in the dictionary it is GIVEN instead of the class's,
+   so a throwaway dictionary yields the real GsNMethod, and its selector is authoritative for unary,
+   binary and keyword patterns alike. Measured: the class's selectors are unchanged afterwards and
+   System needsCommit stays false. The category argument must be a Symbol for this variant."
+  ^[(aBehavior
+      compileMethod: aSourceString
+      dictionaries: System myUserProfile symbolList
+      category: #mcpSelectorProbe
+      intoMethodDict: GsMethodDictionary new
+      intoCategories: nil
+      environmentId: 0) selector] on: Error do: [:ex | nil]
 %
 category: 'accessing'
 method: McpToolset
@@ -316,6 +498,11 @@ method: McpToolset
 setServer: aServer
   server := aServer.
   ^self
+%
+category: 'blind-write guardrail'
+method: McpToolset
+shapeKeyFor: aClassName
+  ^McpServer shapeKeyFor: aClassName
 %
 category: 'accessing'
 method: McpToolset

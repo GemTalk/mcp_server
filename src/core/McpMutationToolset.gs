@@ -162,6 +162,9 @@ tool_add_dictionary: args
     ifFalse: [up := System myUserProfile.
       d := up createDictionary: name asSymbol.
       up insertDictionary: d at: up symbolList size + 1.
+      "Creation is never blind -- there was nothing to read. Still recorded, so that a commit leaves
+       the new dictionary licensed for a follow-up change."
+      self noteWrite: (self dictionaryKeyFor: name).
       'Created dictionary: ' , name]
 %
 category: 'tools - mutation'
@@ -197,13 +200,31 @@ tool_compile_class_definition: args
 category: 'tools - mutation'
 method: McpMutationToolset
 tool_compile_method: args
-  | cls target errs |
+  | cls target errs meta sel key |
   cls := self resolveClass: (args at: 'className').
   ^cls isNil
     ifTrue: ['Class not found: ' , (args at: 'className')]
     ifFalse: [
       self assertMutableClass: cls.
-      target := ((args at: 'meta' ifAbsent: [false]) == true) ifTrue: [cls class] ifFalse: [cls].
+      meta := (args at: 'meta' ifAbsent: [false]) == true.
+      target := meta ifTrue: [cls class] ifFalse: [cls].
+      "Which method is this? The source carries the selector, and only the compiler knows for sure,
+       so ask it -- selectorOfSource:for: compiles into a throwaway dictionary, which answers the
+       real selector without touching the class or dirtying the transaction. That has to happen
+       BEFORE the guardrail check, because the check needs the name, and before any real compile,
+       because a refused call must have no side effect."
+      sel := self selectorOfSource: (args at: 'source') for: target.
+      sel isNil ifTrue: [^'Compile errors: could not parse a method pattern from the source'].
+      key := self methodKeyFor: cls name selector: sel meta: meta.
+      "CREATION IS NEVER BLIND: a selector this class does not implement in the current view has no
+       existing source to discard, so there was nothing to read. If another session created it
+       concurrently, the stone's write-write check catches the collision in the ordinary way."
+      (target selectors includes: sel) ifTrue: [
+        self requireRead: key
+          subject: (meta ifTrue: [cls name asString , ' class>>'] ifFalse: [cls name asString , '>>']) , sel asString
+          tool: 'compile_method'
+          hint: 'Call get_method_source(' , cls name asString , ', ' , sel asString
+            , (meta ifTrue: [', meta=true'] ifFalse: ['']) , ') first.'].
       errs := target
         compileMethod: (args at: 'source')
         dictionaries: System myUserProfile symbolList
@@ -211,7 +232,11 @@ tool_compile_method: args
       "A failed compileMethod: installs nothing, so there is nothing to undo -- and an abort here
        would discard the caller's unrelated uncommitted work along with it."
       errs isNil
-        ifTrue: ['Compiled ' , (args at: 'className')]
+        ifTrue: [
+          "Written -- recorded here, on the branch that actually installed a method. A failed
+           compile installs nothing and must not be recorded (McpServer>>noteWrite:)."
+          self noteWrite: key.
+          'Compiled ' , (args at: 'className')]
         ifFalse: ['Compile errors: ' , errs printString]]
 %
 category: 'tools - mutation'
@@ -227,7 +252,12 @@ tool_delete_class: args
       arr isNil
         ifTrue: ['Class is not resident in a dictionary: ' , (args at: 'className')]
         ifFalse: [dict := arr at: 1.
+          "Destroys the class AND every method on it, including any this session has never seen, so
+           the licence required is the whole class rather than its definition."
+          self requireWholeClassRead: cls tool: 'delete_class'
+            because: 'deleting a class discards every one of its methods.'.
           dict removeKey: (arr at: 2).
+          self noteWrite: (self shapeKeyFor: cls name).
           'Deleted class ' , (args at: 'className') , ' from ' , dict name asString]]
 %
 category: 'tools - mutation'
@@ -243,7 +273,17 @@ tool_delete_method: args
       sel := (args at: 'selector') asSymbol.
       (target selectors includes: sel)
         ifFalse: ['Method not found: ' , (args at: 'className') , '>>' , (args at: 'selector')]
-        ifTrue: [target removeSelector: sel.
+        ifTrue: [ | key meta |
+          meta := ((args at: 'meta' ifAbsent: [false]) == true).
+          key := self methodKeyFor: cls name selector: sel meta: meta.
+          self requireRead: key
+            subject: (meta ifTrue: [cls name asString , ' class>>'] ifFalse: [cls name asString , '>>']) , sel asString
+            tool: 'delete_method'
+            hint: 'Call get_method_source(' , cls name asString , ', ' , sel asString
+              , (meta ifTrue: [', meta=true'] ifFalse: ['']) , ') first -- deleting a method you have '
+              , 'not read can discard another session''s work.'.
+          target removeSelector: sel.
+          self noteWrite: key.
           'Deleted method ' , (args at: 'className') , '>>' , (args at: 'selector')]]
 %
 category: 'tools - mutation'
@@ -255,9 +295,14 @@ tool_remove_dictionary: args
   ^dict isNil
     ifTrue: ['Dictionary not found: ' , name]
     ifFalse: [self assertRemovableDictionaryNamed: name.
+      self requireRead: (self dictionaryKeyFor: name)
+        subject: 'the contents of dictionary ' , name asString
+        tool: 'remove_dictionary'
+        hint: 'Call list_dictionary_entries(' , name asString , ') first.'.
       up := System myUserProfile.
       up removeDictionaryAt: (up symbolList indexOf: dict).
       up symbolList do: [:d | (d at: name asSymbol ifAbsent: [nil]) == dict ifTrue: [d removeKey: name asSymbol ifAbsent: [nil]]].
+      self noteWrite: (self dictionaryKeyFor: name).
       'Removed dictionary: ' , name]
 %
 category: 'tools - mutation'
@@ -267,7 +312,14 @@ tool_set_class_comment: args
   cls := self resolveClass: (args at: 'className').
   ^cls isNil ifTrue: ['Class not found: ' , (args at: 'className')] ifFalse: [
     self assertMutableClass: cls.
+    "Creation is never blind: a class with no comment yet has nothing to discard."
+    ((cls comment ifNil: ['']) isEmpty) ifFalse: [
+      self requireRead: (self commentKeyFor: cls name)
+        subject: 'the class comment of ' , cls name asString
+        tool: 'set_class_comment'
+        hint: 'Call describe_class(' , cls name asString , ') first, which shows the current comment.'].
     cls comment: (args at: 'comment').
+    self noteWrite: (self commentKeyFor: cls name).
     'Comment set on ' , cls name asString]
 %
 category: 'accessing'

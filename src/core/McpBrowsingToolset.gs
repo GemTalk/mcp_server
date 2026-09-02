@@ -92,24 +92,42 @@ tool_describe_class: args
   ^cls isNil
     ifTrue: ['Class not found: ' , (args at: 'className')]
     ifFalse: [
+      "Seen: the shape AND the comment, which is why the comment is printed here. describe_class is
+       the cheap read that licenses set_class_comment; before the comment was in this answer, the
+       only tool that showed it was export_class_source."
+      self noteRead: (self shapeKeyFor: cls name); noteRead: (self commentKeyFor: cls name).
       'name=' , cls name , nl ,
       'superclass=' , (cls superclass isNil ifTrue: ['nil'] ifFalse: [cls superclass name]) , nl ,
       'instVarNames=' , cls instVarNames printString , nl ,
-      'selectors=' , (cls selectors asSortedCollection asArray) printString]
+      'selectors=' , (cls selectors asSortedCollection asArray) printString , nl ,
+      'comment=' , (cls comment ifNil: [''])]
 %
 category: 'tools - browsing'
 method: McpBrowsingToolset
 tool_export_class_source: args
   | cls |
   cls := self resolveClass: (args at: 'className').
-  ^cls isNil ifTrue: ['Class not found: ' , (args at: 'className')] ifFalse: [cls fileOutClass]
+  ^cls isNil
+    ifTrue: ['Class not found: ' , (args at: 'className')]
+    ifFalse: [
+      "Seen: everything. A file-out carries the definition, the comment and the source of every
+       method on both sides, so it licenses a per-method write to any of them -- which is also what
+       makes it the read that licenses a raw redefinition or a delete_class."
+      self noteReadsForWholeClass: cls.
+      cls fileOutClass]
 %
 category: 'tools - browsing'
 method: McpBrowsingToolset
 tool_get_class_definition: args
   | cls |
   cls := self resolveClass: (args at: 'className').
-  ^cls isNil ifTrue: ['Class not found: ' , (args at: 'className')] ifFalse: [cls definition]
+  ^cls isNil
+    ifTrue: ['Class not found: ' , (args at: 'className')]
+    ifFalse: [
+      "Seen: the SHAPE only. This answer is the subclass: message and carries no comment, so it
+       deliberately does not license set_class_comment -- see McpServer class>>commentKeyFor:."
+      self noteRead: (self shapeKeyFor: cls name).
+      cls definition]
 %
 category: 'tools - browsing'
 method: McpBrowsingToolset
@@ -133,16 +151,21 @@ tool_get_class_hierarchy: args
 category: 'tools - browsing'
 method: McpBrowsingToolset
 tool_get_method_source: args
-  | cls target src |
+  | cls target src meta |
   cls := self resolveClass: (args at: 'className').
   ^cls isNil
     ifTrue: ['Class not found: ' , (args at: 'className')]
     ifFalse: [
-      target := ((args at: 'meta' ifAbsent: [false]) == true) ifTrue: [cls class] ifFalse: [cls].
+      meta := (args at: 'meta' ifAbsent: [false]) == true.
+      target := meta ifTrue: [cls class] ifFalse: [cls].
       src := [target sourceCodeAt: (args at: 'selector') asSymbol] on: Error do: [:ex | nil].
       src isNil
         ifTrue: ['No such method: ' , (args at: 'className') , '>>' , (args at: 'selector')]
-        ifFalse: [src]]
+        ifFalse: [
+          "Seen: this licenses replacing exactly this method until the view next moves. Keyed off the
+           RESOLVED class name, so the key cannot differ from the one the mutation tool computes."
+          self noteRead: (self methodKeyFor: cls name selector: (args at: 'selector') meta: meta).
+          src]]
 %
 category: 'tools - browsing'
 method: McpBrowsingToolset

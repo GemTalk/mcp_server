@@ -87,7 +87,13 @@ tool_list_dictionary_entries: args
   dict := self dictNamed: (args at: 'dictionaryName').
   ^dict isNil
     ifTrue: ['Dictionary not found: ' , (args at: 'dictionaryName')]
-    ifFalse: [lines := OrderedCollection new.
+    ifFalse: [
+      "The ONE listing tool that registers a read. The split is per tool, not per toolset: this call
+       names one dictionary and shows what is in it, which is what remove_dictionary destroys.
+       list_classes names a dictionary too but shows only the classes in it -- a partial view, and
+       not enough to license destroying the whole thing."
+      self noteRead: (self dictionaryKeyFor: (args at: 'dictionaryName')).
+      lines := OrderedCollection new.
       dict keysAndValuesDo: [:k :v |
         lines add: k asString , ((v isKindOf: Behavior) ifTrue: ['  (class)'] ifFalse: ['  (global)'])].
       self linesFrom: lines]

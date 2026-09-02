@@ -3,7 +3,7 @@ set compile_env: 0
 expectvalue /Class
 doit
 GsTestCase subclass: 'McpToolTest'
-  instVarNames: #()
+  instVarNames: #( sharedServer)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -271,6 +271,9 @@ method: McpToolTest
 testDeleteClass
   | out |
   self createFixtureClass.
+  "Licence the delete: destroying a class discards every method on it, so the guardrail wants the
+   whole class seen, which is what export_class_source shows."
+  self browsingTools tool_export_class_source: (self oneArg: 'className' value: 'McpTestFixture').
   out := self mutationTools tool_delete_class: (self oneArg: 'className' value: 'McpTestFixture').
   self assert: (self includesCS: 'Deleted class' in: out).
   self assert: (System myUserProfile objectNamed: #McpTestFixture) isNil
@@ -283,6 +286,9 @@ testDeleteMethod
   (System myUserProfile objectNamed: #McpTestFixture)
     compileMethod: 'answer ^42' dictionaries: System myUserProfile symbolList category: 'tmp'.
   System commitTransaction.
+  "Licence the delete by reading the method first, as a client must."
+  self browsingTools tool_get_method_source:
+    (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'selector' put: 'answer'; yourself).
   out := self mutationTools tool_delete_method:
     (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'selector' put: 'answer'; yourself).
   self assert: (self includesCS: 'Deleted method' in: out).
@@ -296,6 +302,8 @@ testDeleteMethodMeta
   cls := self createFixtureClass.
   cls class compileMethod: 'classAnswer ^42' dictionaries: System myUserProfile symbolList category: 'tmp'.
   System commitTransaction.
+  self browsingTools tool_get_method_source:
+    (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'selector' put: 'classAnswer'; at: 'meta' put: true; yourself).
   out := self mutationTools tool_delete_method:
     (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'selector' put: 'classAnswer'; at: 'meta' put: true; yourself).
   self assert: (self includesCS: 'Deleted method' in: out).
@@ -778,6 +786,8 @@ method: McpToolTest
 testSetClassComment
   | out |
   self createFixtureClass.
+  "The fixture already has a comment, so replacing it needs the read that shows one -- describe_class."
+  self browsingTools tool_describe_class: (self oneArg: 'className' value: 'McpTestFixture').
   out := self mutationTools tool_set_class_comment:
     (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'comment' put: 'hello there'; yourself).
   self assert: (self includesCS: 'Comment set on McpTestFixture' in: out).
@@ -803,9 +813,17 @@ testTestingToolsClassNotFound
 category: 'helpers'
 method: McpToolTest
 toolsetOfClass: aToolsetClass
-  "The toolset of aToolsetClass belonging to a fresh full-surface server -- the receiver its
+  "The toolset of aToolsetClass belonging to THIS test's full-surface server -- the receiver its
    registered blocks send the tool_* handler to, so a handler test drives it exactly as a real
    tools/call does. Built through McpServer so the toolset has its server: a mutation handler asks
-   the server for the kernel guard (see McpMutationToolset)."
-  ^McpServer new toolsets detect: [:ts | ts class == aToolsetClass]
+   the server for the kernel guard (see McpMutationToolset).
+
+   ONE server per test, not one per call. A worker gem has exactly one, and its toolsets share it --
+   which is what makes `self browsingTools` read something and `self mutationTools` then be allowed
+   to change it, because the blind-write ledgers live on the server (McpServer>>readLedger). A fresh
+   server per call gave each toolset its own empty ledger and no read could ever license a write.
+   The instance variable is nil for each test, SUnit building a new test instance per test method,
+   so no ledger state leaks between tests."
+  sharedServer isNil ifTrue: [sharedServer := McpServer new].
+  ^sharedServer toolsets detect: [:ts | ts class == aToolsetClass]
 %

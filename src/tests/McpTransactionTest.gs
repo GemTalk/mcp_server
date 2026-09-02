@@ -136,7 +136,7 @@ testAbortIsTheWayOutAndSaysNothingElse
   | text |
   self jamTheSession.
   self sessionTools tool_abort: Dictionary new.
-  self assert: McpToolset refreshView isNil.
+  self assert: (McpToolset refreshViewResult at: 2) isNil.
   text := self dispatchStatus.
   self deny: (text includesString: '[session]')
 %

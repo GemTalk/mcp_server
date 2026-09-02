@@ -85,6 +85,7 @@ tool_abort: args
    work, and the only way out of a failed-commit state -- so it is deliberately unconditional:
    abortTransaction is legal in every state continueTransaction is not."
   System abortTransaction.
+  self noteAborted.
   ^'Transaction aborted; uncommitted changes discarded and the view refreshed.'
 %
 category: 'tools - session'
@@ -98,10 +99,22 @@ tool_commit: args
    which the dispatcher's post-call note then spells out -- so the message here names WHAT
    conflicted and the note supplies the recovery move, rather than both saying half of each."
   ^System commitTransaction
-    ifTrue: ['Transaction committed.']
-    ifFalse: [McpError signalKind: #commitConflict message:
-      'Commit failed on conflict: ' , self commitConflictReport
-        , '. Nothing was written and your changes are still here.']
+    ifTrue: [
+      "Validated: the stone found no conflict with this session's write set, which is what licenses
+       the read ledger to keep exactly what that proof covers (McpServer>>noteViewValidated)."
+      self noteCommitted.
+      'Transaction committed.']
+    ifFalse: [ | subjects |
+      "A failed commit does NOT move the view, so both ledgers stay as they are -- see
+       McpServer>>noteCommitFailed."
+      subjects := self conflictingSubjects.
+      self noteCommitFailed.
+      McpError signalKind: #commitConflict message:
+        'Commit failed on conflict: ' , self commitConflictReport
+          , (subjects isEmpty ifTrue: [''] ifFalse: [
+              '. Another session has changed ' , (self listPhraseFor: subjects)
+                , ' since your view was taken'])
+          , '. Nothing was written and your changes are still here.']
 %
 category: 'tools - session'
 method: McpSessionToolset
@@ -117,13 +130,25 @@ tool_refresh: args
    unexplained error, in the two states where continueTransaction is illegal -- a commit that
    failed on conflict, or a nested transaction. Which one it is comes from GemStone's own message
    for the error, so this does not have to predict either (McpToolset class>>refreshView)."
-  | err |
-  err := self refreshView.
+  | result ok err subjects |
+  result := self refreshViewResult.
+  ok := result at: 1.
+  err := result at: 2.
   err ifNotNil: [:ex |
     ^McpError signalKind: #refused message:
       'Cannot refresh the view: ' , ([ex description] on: Error do: [:e | 'reason unavailable'])
         , ' Call abort to recover -- it clears this state, at the cost of your uncommitted changes.'].
-  ^'View refreshed; uncommitted changes kept.'
+  "The view has moved either way. What that means for the guardrail's ledgers depends entirely on
+   the Boolean -- see McpServer>>noteRefreshed:. Read the conflicting classes BEFORE the transition,
+   because the false branch clears the write ledger that decodes them."
+  ok ifFalse: [subjects := self conflictingSubjects].
+  self noteRefreshed: ok.
+  ok ifTrue: [^'View refreshed; uncommitted changes kept.'].
+  ^McpError signalKind: #commitConflict message:
+    'The view was refreshed, but your uncommitted changes now conflict and can no longer be committed'
+      , (subjects isEmpty ifTrue: [''] ifFalse: [
+          ': another session has changed ' , (self listPhraseFor: subjects)])
+      , '. Call abort -- it is the only way out, at the cost of those changes.'
 %
 category: 'tools - session'
 method: McpSessionToolset
