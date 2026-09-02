@@ -512,6 +512,33 @@ testUnknownToolsetNameIsRefusedByName
   self deny: msg isNil.
   self assert: (self includesCS: 'McpNoSuchToolset' in: msg)
 %
+category: 'tests - transport'
+method: McpContractTest
+testUnrenderableResponseBecomesAReportedJsonRpcError
+  "McpJson refuses an object it has no rule for, where the kernel writer answered {} and shipped a
+   silently empty value. Refusing is the better default ONLY if the refusal is contained and
+   reported: this runs in a worker gem, so an unhandled error would reach the front end as a
+   GciError and the client would see the whole call collapse.
+   A differential run over every tool's response found nothing that McpJson cannot render, so this
+   path should never be taken. It is here because 'should never' is the reason to write the test,
+   not the reason to skip it."
+  | request out parsed |
+  request := Dictionary new.
+  request at: 'jsonrpc' put: '2.0'.
+  request at: 'id' put: 42.
+  out := McpServer new renderResponse: (Dictionary new at: 'result' put: $a; yourself) for: request.
+  "Valid JSON, and ASCII like every other body."
+  1 to: out size do: [:i | self assert: (out at: i) codePoint < 128].
+  parsed := McpJson parse: out.
+  "The client can match it to the request it is waiting on."
+  self assert: (parsed at: 'id') equals: 42.
+  self assert: ((parsed at: 'error') at: 'code') equals: -32603.
+  "And the message names the class with no rule, which is the one fact needed to add one."
+  self assert: (self includesCS: 'Character' in: ((parsed at: 'error') at: 'message')).
+  "A response that renders is passed straight through, unwrapped."
+  out := McpServer new renderResponse: (Dictionary new at: 'result' put: 'fine'; yourself) for: request.
+  self assert: ((McpJson parse: out) at: 'result') equals: 'fine'
+%
 category: 'tests - validation'
 method: McpContractTest
 testValidArgumentsAccepted
