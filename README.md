@@ -301,7 +301,7 @@ symbol list.
 | Tool | Arguments | Result |
 |------|-----------|--------|
 | `add_dictionary` | `dictionaryName` | create + append a dictionary |
-| `compile_class_definition` | `source`, `recompileMethods?` | evaluate a class-definition expression; the source must evaluate to a class (other expressions are rejected — use `execute_code`); on a shape change, by default recompiles the class's methods onto the new version and reports any that fail (refused if it has subclasses) |
+| `compile_class_definition` | `className`, `superclassName?`, `instVarNames?`, `classVars?`, `classInstVars?`, `poolDictionaries?`, `dictionary?`, `options?`, `recompileMethods?` | define or redefine a class from named parts; the server builds the definition itself and evaluates nothing, so this tool cannot run arbitrary code (use `execute_code` for that); on a shape change, by default recompiles the class's methods onto the new version and reports any that fail (refused if it has subclasses) |
 | `compile_method` | `className`, `source`, `category?`, `meta?` | compile a method |
 | `delete_class` | `className` | remove a class *(destructive)* |
 | `delete_method` | `className`, `selector`, `meta?` | remove a method *(destructive)* |
