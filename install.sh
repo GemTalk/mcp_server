@@ -144,6 +144,30 @@ echo "Filing in: $MCP_GROUPS  (auth: $AUTH_NOTE)"
 # Stream topaz's output live AND keep a copy to gate on. Do NOT wrap the heredoc in $( ... ): under
 # `set -e` a command substitution that exits non-zero aborts the script before anything is printed,
 # hiding the very output you need to diagnose the load. Tee to a temp file instead.
+#
+# WHY `set sourcestringclass String` BELOW. Topaz reads `Globals at: #StringConfiguration` at login
+# and reconfigures itself to match, announcing it in the banner:
+#
+#   successful login
+#    fileformat is now utf8
+#   sourcestringclass is now Unicode16
+#
+# On such an image EVERY string literal in every method filed in here compiles as a Unicode7 rather
+# than a byte String. That is not a version thing -- 3.7.5 with and without the setting differ, and
+# 3.7.2 with it would behave the same way. In practice it is Grail that sets it: installing Grail
+# leaves #StringConfiguration = Unicode16, so a Grail image and a stock image compile the same
+# source into different literal classes.
+#
+# We pin it because the difference is not cosmetic. See the Unicode7 trap in McpJson's class
+# comment: on a stock image comparing a Unicode7 to a String RAISES (ArgumentError, non-Unicode
+# argument disallowed in Unicode comparison) rather than answering false. Grail happens to patch
+# Unicode7>>= so its own images survive their own setting, but nothing guarantees a customer image
+# that sets Unicode16 also carries that patch -- and there every `args at: 'code'` in every toolset
+# would be comparing a decoded String key against a Unicode7 literal. Pinning the literals to
+# byte Strings makes the installed code identical on every image and keeps that pairing impossible.
+#
+# Safe to pin because every file under src/ is pure ASCII, and this leaves `fileformat utf8` alone,
+# so a non-ASCII byte in a future source file would still be read correctly.
 TMP="$(mktemp "${TMPDIR:-/tmp}/mcp-install.XXXXXX")"
 set +e
 "$TOPAZ" -l 2>&1 <<TPZ | tee "$TMP"
@@ -152,6 +176,8 @@ set username $GS_USER
 set password $GS_PASS
 login
 iferr 1 exit 1
+! Byte-String literals on every image, whatever #StringConfiguration says -- see above.
+set sourcestringclass String
 run
 "Ensure the Published dictionary exists (self-referenced + inserted into the symbol list) so
  the classes' 'inDictionary: Published' resolves during file-in. Create it only if absent --
