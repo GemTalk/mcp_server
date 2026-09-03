@@ -44,31 +44,118 @@ removeallclassmethods McpBase
 ! ------------------- Class methods for McpBase
 category: 'private'
 classmethod: McpBase
+decodeUtf8: aByteString
+  "Answer aByteString's bytes decoded from UTF-8 as characters. Answers the receiver untouched when
+   it is already all-ASCII, which is the overwhelmingly common case and the whole reason for the
+   scan in #isAllAscii:.
+   THE ONE UNICODE FIX gs-mcp CARRIES. JSON is UTF-8 on the wire (RFC 8259 8.1) and kernel
+   JsonParser takes a CHARACTER string, with nothing in its API to say which of the two it wants --
+   so a body handed straight from the socket to the parser was read one Latin-1 character per byte.
+   A pound sign or a degree sign arrived as two characters, echoed back as mojibake, and
+   compile_method wrote that into the image to stay. Every client that emits raw UTF-8 rather than
+   escapes is affected, which is JSON.stringify and therefore most of them.
+   NOT String>>decodeFromUTF8, which answers a Unicode7 for ASCII input: comparing a Unicode7 to a
+   String RAISES on a stock image rather than answering false, so a Dictionary keyed by decoded
+   strings would raise on every `args at: ''code''` in every toolset. This builds into a WriteStream
+   on String new instead, which stays a byte String while the content is ASCII and widens only when
+   it must -- to a DoubleByteString on a stock image, which compares with String correctly, or to a
+   Unicode16 on an image whose #StringConfiguration is Unicode16, which is what Grail''s installer
+   leaves behind. See section 5 of the kernel JSON Unicode report (kernel-json-unicode.md), kept
+   with the project notes rather than in this tree -- it is a report against the kernel.
+   THE MALFORMED-INPUT POLICY LIVES HERE. A byte that cannot start a well-formed sequence, a
+   truncated sequence, a bad continuation byte, an overlong encoding and an encoded surrogate all
+   become U+FFFD, and the scan resumes at the NEXT byte. The alternative -- failing the whole
+   request -- was rejected because one mis-encoded byte in a 50KB compile_method source would lose
+   the entire call with a message that cannot say where. U+FFFD is corruption too, but it is visible
+   at the exact spot, unlike the Latin-1 mojibake this method exists to end."
+  | out i size lead continuations codePoint wellFormed replacement |
+  (self isAllAscii: aByteString) ifTrue: [^aByteString].
+  replacement := Character codePoint: 16rFFFD.
+  out := WriteStream on: String new.
+  i := 1.
+  size := aByteString size.
+  [i <= size] whileTrue: [
+    lead := (aByteString at: i) codePoint.
+    lead < 128 ifTrue: [
+      out nextPut: (Character codePoint: lead).
+      i := i + 1]
+    ifFalse: [
+      continuations := nil.
+      (lead bitAnd: 16rE0) = 16rC0 ifTrue: [continuations := 1. codePoint := lead bitAnd: 16r1F].
+      (lead bitAnd: 16rF0) = 16rE0 ifTrue: [continuations := 2. codePoint := lead bitAnd: 16r0F].
+      (lead bitAnd: 16rF8) = 16rF0 ifTrue: [continuations := 3. codePoint := lead bitAnd: 16r07].
+      continuations isNil ifTrue: [
+        out nextPut: replacement.
+        i := i + 1]
+      ifFalse: [
+        wellFormed := i + continuations <= size.
+        wellFormed ifTrue: [
+          1 to: continuations do: [:k | | byte |
+            byte := (aByteString at: i + k) codePoint.
+            (byte bitAnd: 16rC0) = 16r80
+              ifTrue: [codePoint := (codePoint bitShift: 6) bitOr: (byte bitAnd: 16r3F)]
+              ifFalse: [wellFormed := false]]].
+        (wellFormed and: [self isScalar: codePoint forContinuationCount: continuations])
+          ifTrue: [
+            out nextPut: (Character codePoint: codePoint).
+            i := i + continuations + 1]
+          ifFalse: [
+            out nextPut: replacement.
+            i := i + 1]]]].
+  ^out contents
+%
+category: 'private'
+classmethod: McpBase
+isAllAscii: aString
+  "Whether every character of aString is 0x00-0x7F, so decoding has nothing to do."
+  1 to: aString size do: [:i |
+    (aString at: i) codePoint > 127 ifTrue: [^false]].
+  ^true
+%
+category: 'private'
+classmethod: McpBase
+isScalar: aCodePoint forContinuationCount: aCount
+  "Whether aCodePoint is a Unicode scalar value that was legitimately encoded in aCount+1 bytes.
+   Rejects overlong encodings (the classic UTF-8 smuggling trick: 16rC0 16rAF is a '/' that a naive
+   decoder would not see as one), encoded surrogates, and anything past U+10FFFF."
+  | minimum |
+  minimum := aCount = 1 ifTrue: [16r80] ifFalse: [aCount = 2 ifTrue: [16r800] ifFalse: [16r10000]].
+  aCodePoint < minimum ifTrue: [^false].
+  aCodePoint > 16r10FFFF ifTrue: [^false].
+  ^aCodePoint < 16rD800 or: [aCodePoint > 16rDFFF]
+%
+category: 'private'
+classmethod: McpBase
 parseBody: aString
   "Parse a JSON-RPC request body to its Dictionary, or nil if empty/malformed. A valid JSON-RPC
    request is always an object, so nil here -> a -32700 Parse error.
-   aString is WIRE BYTES, straight off the socket, which is why this goes through McpJson's
-   #parseWire: and not its #parse: -- it decodes UTF-8 before parsing. Without that a client
-   sending raw UTF-8 (which is every real one; only an escaping encoder like Python's json.dumps
-   avoids it) had each byte read as one Latin-1 character, so text arrived corrupted and was stored
-   corrupted. ASCII decodes to itself, so the callers that hand us a string gs-mcp produced -- the
-   router's own config, the worker's toolset options -- are unaffected by the decode.
+   aString is WIRE BYTES, straight off the socket, so it is decoded from UTF-8 before it is parsed
+   -- see #decodeUtf8:, which is the whole of gs-mcp''s Unicode handling and the reason this is not
+   a bare `JsonParser parse:`. ASCII decodes to itself, so the callers that hand us a string gs-mcp
+   produced -- the router''s own config, the worker''s toolset options -- are unaffected by it.
    This is the ONLY parse on the request path, and it serves both sides of the worker boundary: the
    front end parses the body to classify it (McpRouter>>servePost:) and then forwards the SAME RAW
    BYTES to the worker gem, which parses them again here. Nothing re-encodes in between, so the two
    decodes cannot disagree.
-   McpJson replaces kernel JsonParser, which mishandled Unicode three ways and differed by version
-   while doing it -- see the McpJson class comment. The result-shape check and the catch-all stay:
-   the check because a JSON-RPC request that parses to anything but an object is still not a
-   request, and the catch-all because turning every rejection into one -32700 is this method's job.
+   WHAT THE KERNEL PARSER STILL GETS WRONG, left alone on purpose. It has no surrogate-pair
+   decoding, so a client that escapes an emoji as \uD83D\uDE00 -- which Python''s json.dumps does by
+   default -- fails its whole request with a -32700; an escape it does not recognize is silently
+   dropped rather than refused; and trailing content, duplicate keys and raw control characters are
+   all accepted. Those are kernel defects, measured in the kernel JSON Unicode report and awaiting
+   a kernel fix, rather than ones gs-mcp works around: the codec that did work around them is
+   preserved on the emoji-safe branch. Only the UTF-8 decode is kept here, because that is the one
+   every real client hits and the one that silently STORES its corruption.
+   Cross-version: 3.7.x''s JsonParser raises on bad input, but 3.6.2''s (PetitParser-based) returns a
+   PPFailure instead of raising -- so reject any non-Dictionary result, not just exceptions. The
+   catch-all stays because turning every rejection into one -32700 is this method''s job.
 
    BOTH class- and instance-side, with the class-side as the single implementation, because the
-   worker bootstrap that parses the deployment's toolset options
+   worker bootstrap that parses the deployment''s toolset options
    (McpServer class>>prepareWorkerWithToolsets:options:...) runs before any server instance exists.
    Same arrangement, and same reason, as the shared helpers on McpToolset."
   (aString isNil or: [aString isEmpty]) ifTrue: [^nil].
   ^[ | parsed |
-     parsed := McpJson parseWire: aString.
+     parsed := JsonParser parse: (self decodeUtf8: aString).
      (parsed isKindOf: Dictionary) ifTrue: [parsed] ifFalse: [nil] ]
    on: Error do: [:ex | nil]
 %
@@ -89,8 +176,7 @@ log: aString
 category: 'json-rpc'
 method: McpBase
 notification: aMethodString params: aDictOrNil
-  "A JSON-RPC notification (no id, so no answer is expected) as a Dictionary, ready for
-   McpJson>>write:.
+  "A JSON-RPC notification (no id, so no answer is expected) as a Dictionary, ready for #asJson.
    A nil params is left OUT rather than sent as null."
   | d |
   d := Dictionary new.
@@ -126,7 +212,7 @@ category: 'json-rpc'
 method: McpBase
 request: aMethodString params: aDictOrNil id: anId
   "A JSON-RPC request (it carries an id, so the receiver MUST answer) as a Dictionary, ready for
-   McpJson>>write:. The answer does NOT come back on the stream: a client replies by POSTing a JSON-RPC
+   #asJson. The answer does NOT come back on the stream: a client replies by POSTing a JSON-RPC
    response to /mcp, which is why McpRouter keeps a pending-request table and why servePost: has
    to recognize a body with an id and no method."
   | d |

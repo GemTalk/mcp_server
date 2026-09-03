@@ -12,16 +12,13 @@ run
  Existing keys are left alone, so re-installing over a loaded image changes nothing."
 | d names |
 d := System myUserProfile objectNamed: #Published.
-names := #( #McpJson #McpError #McpTool #McpToolRegistry #McpToolset #McpBrowsingToolset
+names := #( #McpError #McpTool #McpToolRegistry #McpToolset #McpBrowsingToolset
   #McpExecutionToolset #McpListingToolset #McpMutationToolset #McpSearchToolset
   #McpSessionToolset #McpTestingToolset #McpHttpConnection #McpDispatcher #McpBase
   #McpProgressReporter #McpServer #McpOutbox #McpProgressChannel #McpSession #McpRouter ).
 names do: [:s | (d includesKey: s) ifFalse: [ d at: s put: nil ] ].
 names size
 %
-
-! The JSON codec everything else speaks through. Depends on nothing, so it goes first.
-input src/core/McpJson.gs
 
 ! The tool protocol: an error kind, a tool, the registry that holds them.
 input src/core/McpError.gs

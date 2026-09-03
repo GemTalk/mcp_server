@@ -242,7 +242,7 @@ jsonOf: aResponse
   "The response body parsed as JSON, or nil if it is not a JSON object."
   | body |
   body := self bodyOf: aResponse.
-  ^[ | p | p := McpJson parse: body.
+  ^[ | p | p := JsonParser parse: body.
      (p isKindOf: Dictionary) ifTrue: [p] ifFalse: [nil] ]
    on: Error do: [:e | nil]
 %
@@ -303,7 +303,7 @@ method: McpAuthConformanceTest
 testAudienceArrayContainingThisResourceAccepted
   "RFC 7519: aud may be a single string or an array of strings, and a match on any element counts.
    Asserted through a real JsonWebToken rather than a hand-built Dictionary, because the payload of
-   a parsed token is a SymbolDictionary while McpJson yields a plain Dictionary -- a claim-shape
+   a parsed token is a SymbolDictionary while JsonParser yields a plain Dictionary -- a claim-shape
    test that builds its own Dictionary is not exercising the type the router actually sees. Keycloak
    issues aud as an array, so this is the shape a real deployment presents."
   | claims |

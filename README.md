@@ -555,6 +555,16 @@ forbidden here" from "no such tool". A tool absent because its toolset was never
 Built on existing image facilities: `GsSocket` (TCP), `JsonParser parse:` and
 `Object>>asJson` (JSON), and `String>>evaluate` (the `execute_code` engine).
 
+The kernel's JSON is taken as-is with one exception, on the way in: a request body is decoded from
+UTF-8 before it is parsed (`McpBase class>>decodeUtf8:`), because `JsonParser` wants characters and
+a socket delivers bytes. Without that a `£` or a `°` arrives as two Latin-1 characters and
+`compile_method` stores it that way. Three *further* Unicode defects in the kernel's JSON are
+measured in a defect report against the kernel and deliberately left in place here, since no user
+has met one: an emoji escaped as a surrogate pair fails the whole request, an emoji written out
+becomes a single wrong escape, and an unrecognized escape is silently dropped. The codec that
+worked around all three is preserved on the `emoji-safe` branch, so adopting it again is a merge
+rather than a rewrite.
+
 ## Why a dedicated gem
 
 Forked `GsProcess`es **only run while the gem is actively executing Smalltalk**. A
@@ -1115,14 +1125,14 @@ flag, so a missing suite is a skip and not an error:
 
 Run a single suite while a server is up via the `run_test_class` tool (e.g. `run_test_class
 McpToolTest`). `./run-unit-tests.sh` runs them all and exits 0 when every test passes: the
-socket-less suites `McpJsonTest` (20), `McpBlindWriteTest` (28), `McpToolTest` (58),
+socket-less suites `McpUtf8Test` (4), `McpBlindWriteTest` (28), `McpToolTest` (58),
 `McpDispatcherTest` (18), `McpSessionTest` (19), `McpOutboxTest` (9), `McpProgressTest` (19),
-`McpStreamTest` (18), `McpLifetimeTest` (49), `McpTransportTest` (43), `McpContractTest` (36)
+`McpStreamTest` (18), `McpLifetimeTest` (49), `McpTransportTest` (43), `McpContractTest` (35)
 and `McpExtensionTest` (14), plus `McpConcurrentEditTest` (6), `McpExternalSessionTest` (5),
-`McpTransactionTest` (8) and `McpWorkerDeadlineTest` (4) — **354 tests**,
+`McpTransactionTest` (8) and `McpWorkerDeadlineTest` (4) — **337 tests**,
 which is the whole suite on a base install. Where the optional groups are installed the runner picks
-their suites up automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **410
-tests** — and **437 with the 27 in `McpGrailToolsetTest`** on a Grail image.
+their suites up automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **393
+tests** — and **420 with the 27 in `McpGrailToolsetTest`** on a Grail image.
 
 Six suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
 `McpAuthConformanceTest` commit a throwaway JWT user and spawn real worker gems; they are in the

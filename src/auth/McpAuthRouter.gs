@@ -601,7 +601,7 @@ serveProtectedResourceMetadata: req on: conn
   meta at: 'authorization_servers' put: self authorizationServers asArray.
   meta at: 'scopes_supported' put: self supportedScopes asArray.
   meta at: 'bearer_methods_supported' put: (Array with: 'header').
-  conn writeStatus: 200 reason: 'OK' body: (McpJson write: meta)
+  conn writeStatus: 200 reason: 'OK' body: meta asJson
 %
 category: 'validation'
 method: McpAuthRouter
@@ -817,7 +817,7 @@ writeAuthError: httpCode oauthError: errorCodeOrNil description: aMessage on: co
   err := Dictionary new.
   err at: 'jsonrpc' put: '2.0'; at: 'id' put: nil.
   err at: 'error' put: (Dictionary new at: 'code' put: -32600; at: 'message' put: aMessage; yourself).
-  conn writeStatus: httpCode reason: reason headers: challenge , crlf body: (McpJson write: err)
+  conn writeStatus: httpCode reason: reason headers: challenge , crlf body: err asJson
 %
 category: 'validation'
 method: McpAuthRouter

@@ -158,8 +158,9 @@ echo "Filing in: $MCP_GROUPS  (auth: $AUTH_NOTE)"
 # leaves #StringConfiguration = Unicode16, so a Grail image and a stock image compile the same
 # source into different literal classes.
 #
-# We pin it because the difference is not cosmetic. See the Unicode7 trap in McpJson's class
-# comment: on a stock image comparing a Unicode7 to a String RAISES (ArgumentError, non-Unicode
+# We pin it because the difference is not cosmetic. See the Unicode7 trap in section 5 of
+# docs/kernel-json-unicode.md, and McpBase class>>decodeUtf8:, which exists because of it: on a
+# stock image comparing a Unicode7 to a String RAISES (ArgumentError, non-Unicode
 # argument disallowed in Unicode comparison) rather than answering false. Grail happens to patch
 # Unicode7>>= so its own images survive their own setting, but nothing guarantees a customer image
 # that sets Unicode16 also carries that patch -- and there every `args at: 'code'` in every toolset

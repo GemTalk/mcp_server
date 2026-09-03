@@ -513,33 +513,6 @@ testUnknownToolsetNameIsRefusedByName
   self deny: msg isNil.
   self assert: (self includesCS: 'McpNoSuchToolset' in: msg)
 %
-category: 'tests - transport'
-method: McpContractTest
-testUnrenderableResponseBecomesAReportedJsonRpcError
-  "McpJson refuses an object it has no rule for, where the kernel writer answered {} and shipped a
-   silently empty value. Refusing is the better default ONLY if the refusal is contained and
-   reported: this runs in a worker gem, so an unhandled error would reach the front end as a
-   GciError and the client would see the whole call collapse.
-   A differential run over every tool's response found nothing that McpJson cannot render, so this
-   path should never be taken. It is here because 'should never' is the reason to write the test,
-   not the reason to skip it."
-  | request out parsed |
-  request := Dictionary new.
-  request at: 'jsonrpc' put: '2.0'.
-  request at: 'id' put: 42.
-  out := McpServer new renderResponse: (Dictionary new at: 'result' put: $a; yourself) for: request.
-  "Valid JSON, and ASCII like every other body."
-  1 to: out size do: [:i | self assert: (out at: i) codePoint < 128].
-  parsed := McpJson parse: out.
-  "The client can match it to the request it is waiting on."
-  self assert: (parsed at: 'id') equals: 42.
-  self assert: ((parsed at: 'error') at: 'code') equals: -32603.
-  "And the message names the class with no rule, which is the one fact needed to add one."
-  self assert: (self includesCS: 'Character' in: ((parsed at: 'error') at: 'message')).
-  "A response that renders is passed straight through, unwrapped."
-  out := McpServer new renderResponse: (Dictionary new at: 'result' put: 'fine'; yourself) for: request.
-  self assert: ((McpJson parse: out) at: 'result') equals: 'fine'
-%
 category: 'tests - validation'
 method: McpContractTest
 testValidArgumentsAccepted
@@ -555,11 +528,15 @@ testWorkerDecodesUtf8AndAnswersAscii
   "The worker entry's Unicode contract, at the boundary a client's bytes actually cross.
    Two properties, and they are the two halves of the round trip. INBOUND: the body arrives as raw
    UTF-8 -- what every real client sends, since only an escaping encoder avoids it -- and must be
-   decoded, so 'Cafe' with an e-acute is five characters and not six. Before McpJson it was read one
-   Latin-1 character per byte, and the corruption went on to be stored.
+   decoded, so 'Cafe' with an e-acute is five characters and not six. Without
+   McpBase class>>decodeUtf8: it is read one Latin-1 character per byte, and the corruption goes on
+   to be stored -- which is why that decode is the one Unicode fix gs-mcp still carries.
    OUTBOUND: whatever the tool answers, the rendered response holds nothing outside 0x20-0x7E.
    Content-Length elsewhere is computed as `body size` and is the byte count only while that is true.
    describe_class is used because it echoes the name it was given straight back and changes nothing.
+   BMP text only, here and in McpTransportTest: an astral character is written back as one wrong
+   escape by the kernel writer, a defect gs-mcp accepts rather than works around (the kernel JSON
+   Unicode report, defect 2).
 
    The one test here that asserts on ANNOTATED text, hence the #withoutSessionNote:. Three of this
    suite's kernel-guard tests leave the session dirty on purpose -- a tools/call would abort the
@@ -570,7 +547,7 @@ testWorkerDecodesUtf8AndAnswersAscii
     , '"arguments":{"className":"Caf' , (self bytesOf: #(16rC3 16rA9)) , '"}}}'.
   out := McpServer new handleJsonString: body.
   1 to: out size do: [:i | self assert: (out at: i) codePoint < 128].
-  text := ((McpJson parse: out) at: 'result') at: 'content'.
+  text := ((JsonParser parse: out) at: 'result') at: 'content'.
   text := self withoutSessionNote: ((text at: 1) at: 'text').
   self assert: text equals: 'Class not found: Caf' , (String with: (Character codePoint: 16rE9)).
   self assert: (self includesCS: 'Caf' , (String with: (Character codePoint: 92)) , 'u00E9' in: out)
