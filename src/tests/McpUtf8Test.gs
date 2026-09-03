@@ -95,6 +95,55 @@ testAsciiBodyCostsNothingToDecode
 %
 category: 'tests-utf8'
 method: McpUtf8Test
+testEscapedSurrogatePairIsCombined
+  "THE OTHER inbound defect, and the reason McpBase class>>combineSurrogateEscapesIn: exists. RFC
+   8259 7 gives JSON one way to write a character above U+FFFF as an escape -- the UTF-16 surrogate
+   pair -- and JsonParser sends `Character codePoint:` to each half separately, which 3.7.x refuses
+   (OutOfRange 2723). So an escaped emoji used to fail the WHOLE request with a -32700, while a BMP
+   escape from the same client worked. Python's json.dumps escapes by default, so this is a real
+   client rather than a hypothetical one.
+   Asserted on the CODEPOINT: on 3.6.2 surrogates are legal Characters, so the unrepaired parser
+   answers two of them there instead of raising, and only a codepoint tells the two apart.
+   The BMP escape is here too, to show the repair did not disturb the case that already worked."
+  | parsed |
+  parsed := McpBase parseBody: '{"k":"a\uD83D\uDE00b"}'.
+  self assert: parsed notNil description: 'an escaped surrogate pair failed the whole request'.
+  self assert: (parsed at: 'k') size equals: 3.
+  self assert: (self charAt: 2 of: (parsed at: 'k')) equals: 16r1F600.
+  parsed := McpBase parseBody: '{"k":"a\u2603b"}'.
+  self assert: (parsed at: 'k') size equals: 3.
+  self assert: (self charAt: 2 of: (parsed at: 'k')) equals: 16r2603
+%
+category: 'tests-utf8'
+method: McpUtf8Test
+testLiteralBackslashUIsNotRewritten
+  "BACKSLASH PARITY, the one way a surrogate-combining scan can do harm. A body may legitimately
+   carry the six characters of an escape AS TEXT -- a compile_method source describing this very
+   defect does -- and it arrives with the backslash doubled. A scan that just looked for a
+   backslash followed by 'u' would rewrite it and silently corrupt the source.
+   So: a JSON string whose CONTENT is the eleven characters `\uD83D\uDE00`... spelled here as a
+   doubled backslash in the body, which JSON says means one literal backslash. What must come back
+   is text, twelve characters of it, with backslashes still in it -- and no emoji anywhere.
+   Also the case just past the end: a truncated escape at the tail must not be read off the end."
+  | parsed value |
+  parsed := McpBase parseBody: '{"k":"\\uD83D\\uDE00"}'.
+  self assert: parsed notNil.
+  value := parsed at: 'k'.
+  self assert: value size equals: 12.
+  self assert: (self charAt: 1 of: value) equals: 92.
+  self assert: (self charAt: 2 of: value) equals: 117.
+  self assert: ((1 to: value size) detect: [:i | (value at: i) codePoint > 16rFFFF] ifNone: [nil]) isNil
+    description: 'a literal backslash-u was rewritten into an astral character'.
+  "A high-surrogate escape with nothing after it must not run off the end, and must not raise."
+  self assert: (McpBase parseBody: '{"k":"\uD83D"}') notNil.
+  self assert: (self charAt: 1 of: ((McpBase parseBody: '{"k":"\uD83D"}') at: 'k'))
+    equals: 16rFFFD.
+  "An unpaired LOW half is the same policy."
+  self assert: (self charAt: 1 of: ((McpBase parseBody: '{"k":"\uDE00"}') at: 'k'))
+    equals: 16rFFFD
+%
+category: 'tests-utf8'
+method: McpUtf8Test
 testMalformedUtf8RefusesTheWholeBody
   "THE POLICY, and the one behaviour here that is a choice rather than a fact about the kernel.
    #decodeFromUTF8 raises on a truncated sequence, a bad continuation byte, an overlong encoding
