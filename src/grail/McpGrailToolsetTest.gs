@@ -416,9 +416,13 @@ testPythonModuleStateTellsNativeFromPyAndUnknown
   ts := McpGrailToolset new.
   native := ts tool_python_module_state: (self oneArg: 'name' value: 'os').
   "os is hand-written Smalltalk: no .py exists, so the canonical/source lines are omitted rather
-   than reported as a string of noes"
+   than reported as a string of noes.
+   Match the EMITTED LINE, indent and padding included, not the bare word: #deploymentGenerationNote
+   is appended to this same answer on any image whose deployments are invalidated, and its prose
+   quotes the phrase `canonical: no` -- so a bare substring test passes alone and fails
+   inside the suite, for a reason that has nothing to do with the module being asked about."
   self assert: (self includesCS: 'native' in: native).
-  self deny: (self includesCS: 'canonical:' in: native).
+  self deny: (self includesCS: '  canonical:   ' in: native).
   unknown := ts tool_python_module_state: (self oneArg: 'name' value: 'no_such_module_xyz').
   self assert: (self includesCS: 'next import:' in: unknown).
   self assert: (self includesCS: 'FAILS' in: unknown)
