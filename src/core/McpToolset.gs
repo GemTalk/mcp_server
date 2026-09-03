@@ -210,7 +210,7 @@ refreshViewResult
    evidence the blind-write guardrail has at a refresh: true means the stone validated this
    session's write set and found no conflict, which is the same proof a successful commit gives and
    licenses the same ledger transition; false means the view moved ANYWAY while the pending writes
-   stay doomed, which is the one state where nothing survives. An earlier version of this discarded
+   stay doomed, which is the one state where no pending write can ever commit. An earlier version of this discarded
    the Boolean and answered nil-or-Error, which could not tell those apart.
 
    ATTEMPTING IT IS THE TEST. continueTransaction is illegal in two states, and an earlier version

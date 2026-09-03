@@ -100,8 +100,8 @@ tool_commit: args
    conflicted and the note supplies the recovery move, rather than both saying half of each."
   ^System commitTransaction
     ifTrue: [
-      "Validated: the stone found no conflict with this session's write set, which is what licenses
-       the read ledger to keep exactly what that proof covers (McpServer>>noteViewValidated)."
+      "The view moved: the read ledger is re-checked against it and the write ledger empties
+       (McpServer>>noteCommitted)."
       self noteCommitted.
       'Transaction committed.']
     ifFalse: [ | subjects |

@@ -5,7 +5,7 @@ doit
 McpBase subclass: 'McpServer'
   instVarNames: #( dispatcher toolRegistry toolsets
                     serverName serverTitle serverVersion lifetimeBounds
-                    readLedger writeLedger)
+                    readLedger writeLedger staleReadKeys)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -46,6 +46,15 @@ McpServer category: 'Mcp-Core'
 removeallmethods McpServer
 removeallclassmethods McpServer
 ! ------------------- Class methods for McpServer
+category: 'guardrail stamps'
+classmethod: McpServer
+absentStamp
+  "The stamp recorded for a subject that does not exist in the current view -- a method the class
+   does not implement, a class or dictionary that does not resolve, a class with no comment. Distinct
+   from every content stamp (those are hex digests), so 'absent, then present' and 'present, then
+   absent' both read as a change in revalidateReadLedger."
+  ^'absent'
+%
 category: 'guardrail keys'
 classmethod: McpServer
 commentKeyFor: aClassName
@@ -219,9 +228,9 @@ category: 'guardrail keys'
 classmethod: McpServer
 methodKeyFor: aClassName selector: aSelector meta: aBoolean
   "The readLedger key for one method. The class-side form embeds ' class' before the '>>', so the key
-   also names the SIDE -- which scopeOfMethodKey: reads back, and which the widening in
-   noteViewValidated depends on, because instance and class side have separate method dictionaries
-   and so are validated separately by the stone."
+   also names the SIDE -- which scopeOfMethodKey: reads back for conflictingSubjects, because
+   instance and class side have separate method dictionaries and so conflict separately in the
+   stone."
   ^aClassName asString , (aBoolean == true ifTrue: [' class>>'] ifFalse: ['>>']) , aSelector asString
 %
 category: 'instance creation'
@@ -325,6 +334,71 @@ shapeKeyFor: aClassName
   "The readLedger key standing for 'I have seen this class's DEFINITION' -- its superclass and
    variable names. See commentKeyFor: for why the comment is a separate key."
   ^aClassName asString , ':shape'
+%
+category: 'guardrail keys'
+classmethod: McpServer
+staleReadSummaryFor: aCollectionOfKeys
+  "The stale keys summarised BY CLASS, for the one-time [session] line (McpDispatcher>>staleReadNote)
+   -- a shape a model can act on at a glance rather than a list it has to scan.
+
+   Keys are grouped by the class they belong to: method keys of both sides under the class, the shape
+   and comment keys as that class's definition and comment, a dictionary key as a group of its own
+   named after the dictionary. Per group, up to three method keys are named in full
+   ('Foo>>bar:, Foo class>>baz:'), more are counted ('5 methods from Foo'), and the definition and
+   comment are mentioned alongside as 'Foo (definition)' and 'Foo (comment)'. More than four groups,
+   and the whole list gives way to a count -- 'changes to 7 classes; re-check what you depend on
+   before writing' -- because at that point the honest advice is to re-check everything one depends
+   on, not to tick off names. Groups are sorted by name, so the same keys always render the same way."
+  | groups names parts |
+  groups := Dictionary new.
+  aCollectionOfKeys do: [:k | | key name group |
+    key := k asString.
+    name := nil.
+    (key size > 0 and: [(key at: 1) = $#])
+      ifTrue: [name := key copyFrom: 2 to: key size]
+      ifFalse: [
+        (self scopeOfMethodKey: key) ifNotNil: [:scope |
+          name := (scope size > 6 and: [(scope copyFrom: scope size - 5 to: scope size) = ' class'])
+            ifTrue: [scope copyFrom: 1 to: scope size - 6]
+            ifFalse: [scope]].
+        (key endsWith: ':shape') ifTrue: [name := key copyFrom: 1 to: key size - ':shape' size].
+        (key endsWith: ':comment') ifTrue: [name := key copyFrom: 1 to: key size - ':comment' size]].
+    name isNil ifTrue: [name := key].
+    group := groups at: name ifAbsent: [
+      groups at: name put: (Dictionary new
+        at: #methods put: OrderedCollection new;
+        at: #definition put: false; at: #comment put: false; at: #dictionary put: false;
+        yourself)].
+    (key size > 0 and: [(key at: 1) = $#]) ifTrue: [group at: #dictionary put: true] ifFalse: [
+      (key endsWith: ':shape') ifTrue: [group at: #definition put: true] ifFalse: [
+        (key endsWith: ':comment') ifTrue: [group at: #comment put: true] ifFalse: [
+          (group at: #methods) add: key]]]].
+  names := groups keys asSortedCollection asArray.
+  names size > 4 ifTrue: [
+    ^'changes to ' , names size printString , ' classes; re-check what you depend on before writing'].
+  parts := OrderedCollection new.
+  names do: [:name | | group methods |
+    group := groups at: name.
+    methods := (group at: #methods) asSortedCollection asArray.
+    methods size > 3
+      ifTrue: [parts add: methods size printString , ' methods from ' , name]
+      ifFalse: [methods do: [:m | parts add: m]].
+    (group at: #definition) ifTrue: [parts add: name , ' (definition)'].
+    (group at: #comment) ifTrue: [parts add: name , ' (comment)'].
+    (group at: #dictionary) ifTrue: [parts add: name , ' (dictionary)']].
+  ^parts inject: '' into: [:acc :part | acc isEmpty ifTrue: [part] ifFalse: [acc , ', ' , part]]
+%
+category: 'guardrail stamps'
+classmethod: McpServer
+stampOfContent: aStringOrNil
+  "The content stamp of one subject's canonical text: its SHA-256 digest as a hex String, or
+   absentStamp for nil. The stamp is what the read ledger stores against a key (McpServer>>stampFor:)
+   and what a view move compares against (revalidateReadLedger), so it has to mean 'the same text'
+   and nothing weaker -- String>>hash is a small integer and would let a change hide behind a
+   collision. The kernel supplies the digest (String>>asSha256String, present since 3.7.5), so
+   nothing here is home-made, and the method source of an ordinary class hashes in microseconds."
+  aStringOrNil isNil ifTrue: [^self absentStamp].
+  ^aStringOrNil asString asSha256String
 %
 category: 'toolsets'
 classmethod: McpServer
@@ -486,7 +560,10 @@ handleJsonString: aRawJsonString lifetimeBounds: anArrayOrNil
 category: 'blind-write guardrail'
 method: McpServer
 hasRead: aKey
-  ^self readLedger includes: aKey
+  "Whether aKey is in the read ledger -- the whole test requireRead:... makes. The stamp stored
+   against it is not consulted here: a key is present exactly as long as its read still holds,
+   because every view move re-checks or drops it (revalidateReadLedger)."
+  ^self readLedger includesKey: aKey
 %
 category: 'initialization'
 method: McpServer
@@ -585,9 +662,14 @@ lifetimeNote
 category: 'blind-write guardrail'
 method: McpServer
 noteAborted
-  "An abort took a new view AND discarded every uncommitted change, so nothing this session saw or
-   wrote survives into the new window."
-  readLedger := Set new.
+  "An abort took a new view AND discarded every uncommitted change. No pending write is licensed any
+   more, so the write ledger empties -- which also keeps writeLedger subseteq readLedger
+   unconditional. The reads are re-checked against the new view rather than forgotten
+   (revalidateReadLedger): a write this session had made and just discarded fails that check, since
+   its stamp is of the text as written and the abort restored the old text, so it must be re-read
+   before it is retried. Until 2026-09-02 both ledgers were cleared here, so an abort after browsing
+   twenty methods cost twenty re-reads even when nobody else had committed anything."
+  self revalidateReadLedger.
   writeLedger := Set new
 %
 category: 'blind-write guardrail'
@@ -603,19 +685,24 @@ noteCommitFailed
 category: 'blind-write guardrail'
 method: McpServer
 noteCommitted
-  "A commit succeeded: the stone validated this session's write set, which is the whole of what a
-   successful commit proves. noteViewValidated keeps exactly what that proof covers; the write
-   ledger then empties, because those changes are now everyone's."
-  self noteViewValidated.
+  "A commit succeeded, and the view moved. The reads get the same re-check every view move gives
+   them (revalidateReadLedger); the write ledger then empties, because those changes are now
+   everyone's. This session's own writes need no special case to survive the re-check: their stamps
+   were recorded as written, and a successful commit means nobody else changed them, so the text in
+   the new view is the text this session wrote."
+  self revalidateReadLedger.
   writeLedger := Set new
 %
 category: 'blind-write guardrail'
 method: McpServer
 noteRead: aKey
-  "Record that this session has SEEN aKey in the current view window. Called by the browsing tools
-   that show a subject's current contents -- never by a listing or search tool, which show where
-   things are rather than what they say."
-  self readLedger add: aKey.
+  "Record that this session has SEEN aKey in the current view window, together with a stamp of what
+   it saw (stampFor:) -- the content of the subject as this view has it, which is what the browsing
+   tool that calls this has just shown. Called by the browsing tools that show a subject's current
+   contents -- never by a listing or search tool, which show where things are rather than what they
+   say. The stamp is what lets a later view move tell a read that still holds from one that does
+   not (revalidateReadLedger)."
+  self readLedger at: aKey put: (self stampFor: aKey).
   ^aKey
 %
 category: 'blind-write guardrail'
@@ -628,65 +715,44 @@ category: 'blind-write guardrail'
 method: McpServer
 noteRefreshed: aBoolean
   "A refresh took a new view and KEPT this session's uncommitted work. aBoolean is what
-   System continueTransaction answered.
-   true means the stone validated the write set and found no conflict -- the same proof a successful
-   commit gives, so the same transition, except that the writes are still pending and so still
-   licensed.
+   System continueTransaction answered. Either way the view moved, so either way the reads are
+   re-checked against it (revalidateReadLedger); what the Boolean decides is the write ledger.
+   true means the stone validated the write set and found no conflict: the writes are still pending
+   and still licensed, so the write ledger is kept -- and each of them passes the re-check too, since
+   the uncommitted text is still in place and is what its stamp records.
    false is the one genuinely bad state in the system: the view moved ANYWAY (measured; see
-   docs/blind-write-guardrail.md, U) so every read is stale, and the pending writes cannot commit.
-   Both ledgers are cleared -- no licensed writes remain, which keeps writeLedger subseteq readLedger
-   unconditional -- and the caller captures the conflicting classes first, for the message that tells
-   the client to abort."
-  aBoolean ifTrue: [^self noteViewValidated].
-  readLedger := Set new.
-  writeLedger := Set new
-%
-category: 'blind-write guardrail'
-method: McpServer
-noteViewValidated
-  "The transition shared by a successful commit and a refresh that answered true. Both mean the same
-   thing and prove the same thing: no other session has committed a change to anything in THIS
-   session's write set since the view was taken.
-
-   What survives is exactly what that proof covers. Every write ledger entry does, so all of them
-   stay. The proof also reaches further than the write set itself, because the stone validates at the
-   grain of a METHOD DICTIONARY -- one per class per side -- so an unwritten method of a class this
-   session did write is also proven unchanged, and its read survives too. That is the widening, and
-   it is what lets a client read six methods of a class, change one, commit, and then change a second
-   without re-reading.
-
-   It stops at method grain. A class's shape and its comment live in different objects from its
-   method dictionary, so validating the dictionary proves nothing about them; those keys survive only
-   by being in the write ledger. Everything else read in the old window is dropped."
-  | scopes kept |
-  scopes := Set new.
-  self writeLedger do: [:k |
-    (self class scopeOfMethodKey: k) ifNotNil: [:s | scopes add: s]].
-  kept := Set new.
-  self readLedger do: [:k |
-    (self class scopeOfMethodKey: k) ifNotNil: [:s |
-      (scopes includes: s) ifTrue: [kept add: k]]].
-  kept addAll: self writeLedger.
-  readLedger := kept
+   docs/blind-write-guardrail.md, U) and the pending writes cannot commit. No licensed writes remain,
+   so the write ledger is cleared, which keeps writeLedger subseteq readLedger unconditional. The
+   caller captures the conflicting classes first, for the message that tells the client to abort,
+   because that message is decoded from the write ledger."
+  self revalidateReadLedger.
+  aBoolean ifFalse: [writeLedger := Set new]
 %
 category: 'blind-write guardrail'
 method: McpServer
 noteWrite: aKey
   "Record that this session has CHANGED aKey and not yet committed it.
    Callers must send this on the branch that actually performed the write, never on entry to the
-   tool. noteCommitted turns every write ledger entry into a licence, so an entry recorded for
-   something that was never written would manufacture a licence the stone never validated -- which is
-   a live case, not a hypothetical: re-evaluating an identical class definition is a true no-op
-   (measured; see docs/blind-write-guardrail.md, S).
+   tool. A write ledger entry is also a read ledger entry, so an entry recorded for something that
+   was never written would license a change to it on the strength of nothing shown to the client,
+   and conflictingSubjects would decode the stone's conflict report through a scope this session
+   never touched -- which is a live case, not a hypothetical: re-evaluating an identical class
+   definition is a true no-op (measured; see docs/blind-write-guardrail.md, S).
 
    A WRITE IMPLIES A READ, so this records both. Having just written something is knowing its
    current content -- better than having read it -- so it licenses a follow-up change without a
    re-read: creating a dictionary licenses removing it, compiling a method licenses recompiling it.
    Nothing is put at risk, because another session's change to the same thing is still caught by the
    stone's own write-write check. It also makes writeLedger subseteq readLedger true at every
-   instant rather than only across a view move."
+   instant rather than only across a view move.
+
+   The read stamp recorded is of the content AS JUST WRITTEN: that is what this session now knows.
+   It follows that an abort, which restores the previous content, finds the stamp moved and drops
+   the entry -- so a write that was aborted needs a fresh read before it is retried, even when nobody
+   else touched the subject. That is the conservative answer and the honest one: what the client
+   last saw of that method is a version that no longer exists."
   self writeLedger add: aKey.
-  self readLedger add: aKey.
+  self readLedger at: aKey put: (self stampFor: aKey).
   ^aKey
 %
 category: 'guards'
@@ -700,9 +766,12 @@ protectedDictionaryNames
 category: 'blind-write guardrail'
 method: McpServer
 readLedger
-  "What this session has SEEN in the current view window: the keys a mutating tool must find before
-   it may write. See docs/blind-write-guardrail.md."
-  readLedger isNil ifTrue: [readLedger := Set new].
+  "What this session has SEEN in the current view window: a Dictionary from key (the subject a
+   mutating tool must find before it may write -- 'Foo>>bar:', 'Foo:shape', 'Foo:comment',
+   '#UserGlobals') to the stamp of its content when it was read (stampFor:). Membership is the
+   guardrail's test (hasRead:); the stamps are what a view move re-checks (revalidateReadLedger).
+   See docs/blind-write-guardrail.md."
+  readLedger isNil ifTrue: [readLedger := Dictionary new].
   ^readLedger
 %
 category: 'read-only'
@@ -757,6 +826,49 @@ resolveClass: aName
    the same reason dictNamed: is: a server-level method should not have to know it lives on the
    toolset class."
   ^McpToolset resolveClass: aName
+%
+category: 'blind-write guardrail'
+method: McpServer
+revalidateReadLedger
+  "Re-check every read against the CURRENT view and drop the ones that no longer hold. Called at
+   EVERY view move -- abort, commit, and refresh whichever way it answered (noteAborted,
+   noteCommitted, noteRefreshed:) -- and the only transition the read ledger has.
+
+   A read is a statement about content -- 'Foo>>bar: says this' -- and moving the view does not make
+   it false; another session having committed a different Foo>>bar: does. So each key's stamp is
+   recomputed in the new view (stampFor:). Equal, and the read is as true now as when it was made,
+   so it keeps its licence. Different, and it is dropped and remembered in staleReadKeys, for the
+   one-time line the dispatcher appends to the result of the call that moved the view
+   (McpDispatcher>>staleReadNote) -- so the client learns WHICH reads to redo in one pass, instead
+   of discovering them one blindWrite refusal at a time. Answers the keys dropped this time, sorted.
+
+   There is no special case for what this session wrote. A write's stamp is of the text as written;
+   after a successful commit nobody else changed it, and after a true refresh the uncommitted text
+   is still in place, so it matches. After an abort it does not, and that is right: the text the
+   client last knew is gone. So the invariant the guardrail rests on holds by construction -- a key
+   is licensed exactly when the current text is what this session read or wrote.
+
+   Until 2026-09-02 a commit or a true refresh kept only the write set plus 'the widening' (the
+   unwritten methods of a written class, proven unchanged at the stone's method-dictionary grain)
+   and dropped every other read unexamined; an abort or a false refresh dropped everything. Both
+   rules are subsumed: a proof that the content did not change is weaker than looking at it.
+
+   COST. One sourceCodeAt: (or definition, comment, or entry list) and one SHA-256 per ledger entry
+   per view move -- tens of microseconds each, so a ledger of a few hundred reads costs milliseconds
+   against a commit that costs more. If a session's ledger ever grows to where this shows, the
+   fallback is to check lazily in requireRead:, re-stamping the one key being written against a
+   recorded view generation, at the price of the one-time note, which can only come from checking
+   everything. What 'the same content' means per grain is stampFor:'s business."
+  | kept stale |
+  kept := Dictionary new.
+  stale := SortedCollection new.
+  self readLedger keysAndValuesDo: [:key :stamp |
+    (self stampFor: key) = stamp
+      ifTrue: [kept at: key put: stamp]
+      ifFalse: [stale add: key]].
+  readLedger := kept.
+  staleReadKeys := (self staleReadKeys , stale asArray) asSortedCollection asArray.
+  ^stale asArray
 %
 category: 'identity'
 method: McpServer
@@ -821,6 +933,103 @@ method: McpServer
 serverVersion: aStringOrNil
   "See serverName:."
   serverVersion := aStringOrNil
+%
+category: 'blind-write guardrail'
+method: McpServer
+staleReadKeys
+  "The keys the last re-validation dropped because their content had changed under a view move --
+   sorted, and held until the dispatcher reports them (takeStaleReadKeys). Empty when nothing is
+   pending. See revalidateReadLedger."
+  staleReadKeys isNil ifTrue: [staleReadKeys := Array new].
+  ^staleReadKeys
+%
+category: 'blind-write guardrail'
+method: McpServer
+stampFor: aKey
+  "The content stamp of whatever aKey names, AS IT STANDS IN THE CURRENT VIEW: what noteRead: and
+   noteWrite: record, and what revalidateReadLedger recomputes to see whether a read still holds.
+   Dispatches on the key's shape to one method per grain, so what counts as 'the content' of each
+   kind of subject is stated in exactly one place:
+
+     'Foo>>bar:'  'Foo class>>bar:'   the installed method's source          stampForMethodKey:
+     'Foo:shape'                      the class definition message           stampForShapeKey:
+     'Foo:comment'                    the class comment                      stampForCommentKey:
+     '#UserGlobals'                   the entries, as list_dictionary_entries shows them
+                                                                             stampForDictionaryKey:
+
+   Each answers absentStamp when the subject does not exist in this view, so appearing and
+   disappearing both count as change. A key of no known grain stamps as absent too, and so can
+   never survive a view move -- the fail-closed default."
+  | key |
+  key := aKey asString.
+  key isEmpty ifTrue: [^self class absentStamp].
+  (key at: 1) = $# ifTrue: [^self stampForDictionaryKey: key].
+  (self class scopeOfMethodKey: key) notNil ifTrue: [^self stampForMethodKey: key].
+  (key endsWith: ':shape') ifTrue: [^self stampForShapeKey: key].
+  (key endsWith: ':comment') ifTrue: [^self stampForCommentKey: key].
+  ^self class absentStamp
+%
+category: 'blind-write guardrail'
+method: McpServer
+stampForCommentKey: aKey
+  "'Foo:comment' -> the stamp of Foo's comment, the text describe_class and export_class_source show.
+   Absent when the class does not resolve or has no comment -- set_class_comment treats the latter
+   as creation, so nothing is licensed by it either way."
+  | cls |
+  cls := self resolveClass: (aKey copyFrom: 1 to: aKey size - ':comment' size).
+  cls isNil ifTrue: [^self class absentStamp].
+  ^self class stampOfContent: cls comment
+%
+category: 'blind-write guardrail'
+method: McpServer
+stampForDictionaryKey: aKey
+  "'#UserGlobals' -> the stamp of the dictionary's entries as list_dictionary_entries renders them:
+   each key with whether it binds a class or a global, sorted. The VALUES are deliberately not
+   hashed -- that tool shows none of them, and remove_dictionary, the write this licenses, destroys
+   the bindings rather than the objects. Absent when no dictionary of that name is in the symbol
+   list."
+  | dict lines |
+  dict := self dictNamed: (aKey copyFrom: 2 to: aKey size).
+  dict isNil ifTrue: [^self class absentStamp].
+  lines := OrderedCollection new.
+  dict keysAndValuesDo: [:k :v |
+    lines add: k asString , ((v isKindOf: Behavior) ifTrue: [' (class)'] ifFalse: [' (global)'])].
+  ^self class stampOfContent: (McpToolset linesFrom: lines)
+%
+category: 'blind-write guardrail'
+method: McpServer
+stampForMethodKey: aKey
+  "'Foo>>bar:' or 'Foo class>>bar:' -> the stamp of that method's source as installed on that side
+   -- read the way get_method_source reads it (sourceCodeAt:), so the stamp is of exactly the text
+   the client was shown. Absent when the class does not resolve or the side does not implement the
+   selector."
+  | idx beh src |
+  idx := aKey indexOfSubCollection: '>>'.
+  beh := self behaviorForScope: (aKey copyFrom: 1 to: idx - 1).
+  beh isNil ifTrue: [^self class absentStamp].
+  src := [beh sourceCodeAt: (aKey copyFrom: idx + 2 to: aKey size) asSymbol] on: Error do: [:ex | nil].
+  ^self class stampOfContent: src
+%
+category: 'blind-write guardrail'
+method: McpServer
+stampForShapeKey: aKey
+  "'Foo:shape' -> the stamp of Foo's definition message, the string get_class_definition answers and
+   compile_class_definition compares against (Class>>definition: superclass, variables, dictionary,
+   options). Absent when the class does not resolve."
+  | cls |
+  cls := self resolveClass: (aKey copyFrom: 1 to: aKey size - ':shape' size).
+  cls isNil ifTrue: [^self class absentStamp].
+  ^self class stampOfContent: cls definition
+%
+category: 'blind-write guardrail'
+method: McpServer
+takeStaleReadKeys
+  "Answer staleReadKeys and forget them: the dispatcher's note reports them on the result of the
+   call that moved the view and then never again."
+  | keys |
+  keys := self staleReadKeys.
+  staleReadKeys := Array new.
+  ^keys
 %
 category: 'accessing'
 method: McpServer

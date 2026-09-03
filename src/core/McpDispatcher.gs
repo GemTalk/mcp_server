@@ -321,6 +321,30 @@ setRegistry: aRegistry server: aServerOrNil
   server := aServerOrNil.
   ^self
 %
+category: 'transaction'
+method: McpDispatcher
+staleReadNote
+  "One line naming the reads the last view move invalidated, or nil when it invalidated none (or
+   there is no server to ask). Appended by transactionNote.
+
+   CONSUMED AS IT IS REPORTED: the keys come from McpServer>>takeStaleReadKeys, so the line lands on
+   the result of the very call that moved the view -- abort, commit or refresh -- and never again.
+   That is the point of naming them at all: the client can redo exactly those reads in one pass,
+   instead of meeting each as a blindWrite refusal later. The count puts the names in proportion
+   ('2 of 7 earlier reads'), which is what tells the client the other five still stand, and the names
+   are summarised by class rather than listed (McpServer class>>staleReadSummaryFor:), so the line
+   stays one line whatever was browsed."
+  | keys total |
+  server isNil ifTrue: [^nil].
+  keys := server takeStaleReadKeys.
+  keys isEmpty ifTrue: [^nil].
+  total := keys size + server readLedger size.
+  ^'[session] The view moved: ' , keys size printString , ' of ' , total printString
+    , ' earlier read' , (total = 1 ifTrue: [''] ifFalse: ['s'])
+    , (keys size = 1 ifTrue: [' is'] ifFalse: [' are'])
+    , ' stale and must be re-read before writing to them: '
+    , (server class staleReadSummaryFor: keys) , '.'
+%
 category: 'responses'
 method: McpDispatcher
 structuredErrorContent: aMessage kind: aKind
@@ -376,7 +400,26 @@ transactionNote
 
    Ordered most-blocking first. A failed commit subsumes everything else -- no further commit can
    succeed and the view cannot move until the transaction is aborted -- and a nested transaction
-   subsumes pending changes, since nothing can be committed out of one either."
+   subsumes pending changes, since nothing can be committed out of one either.
+
+   One addition since 2026-09-02, kept as a SECOND line rather than a fourth state: on the result of
+   a call that moved the view (abort, commit, refresh), the reads the move invalidated are named once
+   (staleReadNote). It is a different subject
+   from the transaction's state -- what to RE-READ, not what to commit or abort -- it can coincide
+   with any of the three states above, and it appears exactly once, so it is appended rather than
+   ranked."
+  | state stale |
+  state := self transactionStateNote.
+  stale := self staleReadNote.
+  stale isNil ifTrue: [^state].
+  state isNil ifTrue: [^stale].
+  ^state , (String with: Character lf) , stale
+%
+category: 'transaction'
+method: McpDispatcher
+transactionStateNote
+  "The transaction-state line of transactionNote, or nil: failed commit, nested transaction, or
+   uncommitted changes, most-blocking first. See transactionNote for why."
   self commitConflictPending ifTrue: [
     ^'[session] Your last commit FAILED: another session changed the same objects since your view '
       , 'was taken (' , McpToolset commitConflictReport , '). Nothing was written. Your changes are '
