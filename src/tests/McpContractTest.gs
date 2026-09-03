@@ -561,23 +561,18 @@ testWorkerDecodesUtf8AndAnswersAscii
    Content-Length elsewhere is computed as `body size` and is the byte count only while that is true.
    describe_class is used because it echoes the name it was given straight back and changes nothing.
 
-   The decoded text is matched as a PREFIX rather than in whole, because the tool's text is not the
-   only thing in there: McpDispatcher>>transactionNote appends a [session] line to every tool result
-   while the driving session has uncommitted changes, and three of this suite's own kernel-guard
-   tests leave it that way -- deliberately, since a tools/call would abort the transaction and undo
-   their fixtures. The prefix still pins the decode exactly. A body read one Latin-1 character per
-   byte, which is what happened before McpJson, spells the name with two characters instead of one
-   and fails here."
-  | body out text expected |
+   The one test here that asserts on ANNOTATED text, hence the #withoutSessionNote:. Three of this
+   suite's kernel-guard tests leave the session dirty on purpose -- a tools/call would abort the
+   transaction and undo the fixture each is built on -- so the note is present whenever the suite
+   runs in order, and this test passed alone and failed in the suite without it."
+  | body out text |
   body := '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"describe_class",'
     , '"arguments":{"className":"Caf' , (self bytesOf: #(16rC3 16rA9)) , '"}}}'.
   out := McpServer new handleJsonString: body.
   1 to: out size do: [:i | self assert: (out at: i) codePoint < 128].
   text := ((McpJson parse: out) at: 'result') at: 'content'.
-  text := (text at: 1) at: 'text'.
-  expected := 'Class not found: Caf' , (String with: (Character codePoint: 16rE9)).
-  self assert: text size >= expected size.
-  self assert: (text copyFrom: 1 to: expected size) equals: expected.
+  text := self withoutSessionNote: ((text at: 1) at: 'text').
+  self assert: text equals: 'Class not found: Caf' , (String with: (Character codePoint: 16rE9)).
   self assert: (self includesCS: 'Caf' , (String with: (Character codePoint: 92)) , 'u00E9' in: out)
 %
 category: 'helpers'
@@ -594,4 +589,21 @@ withFreshWorkerCacheDo: aBlock
    outlives each test -- the whole suite runs in one gem session."
   SessionTemps current removeKey: #McpServer ifAbsent: [nil].
   ^[aBlock value] ensure: [SessionTemps current removeKey: #McpServer ifAbsent: [nil]]
+%
+category: 'helpers'
+method: McpContractTest
+withoutSessionNote: aString
+  "aString up to the dispatcher's [session] note, or unchanged when it carries none -- see the twin
+   in McpGrailToolsetTest for why the cut is at the FIRST one, and why stripping the note beats
+   loosening the comparison that needs it off. Written out again rather than shared because these
+   suites have no common superclass but GsTestCase, the same reason #includesCS:in: appears in ten
+   test classes here.
+
+   This suite aborted in setUp until 2026-09-01 to keep the note out of its exact-text assertions,
+   and lost that abort once none of its tests asserted on annotated text. One does again."
+  | marker idx |
+  marker := (String with: Character lf) , '[session] '.
+  idx := aString findString: marker startingAt: 1.
+  idx = 0 ifTrue: [^aString].
+  ^aString copyFrom: 1 to: idx - 1
 %
