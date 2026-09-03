@@ -1115,26 +1115,28 @@ flag, so a missing suite is a skip and not an error:
 
 Run a single suite while a server is up via the `run_test_class` tool (e.g. `run_test_class
 McpToolTest`). `./run-unit-tests.sh` runs them all and exits 0 when every test passes: the
-socket-less suites `McpToolTest` (56), `McpDispatcherTest` (18), `McpSessionTest` (15),
-`McpOutboxTest` (9), `McpStreamTest` (18), `McpLifetimeTest` (49), `McpTransportTest` (32),
-`McpContractTest` (34) and `McpExtensionTest` (9), plus `McpExternalSessionTest` (5),
-`McpTransactionTest` (8) and `McpWorkerDeadlineTest` (4) — **257 tests**,
+socket-less suites `McpJsonTest` (20), `McpBlindWriteTest` (28), `McpToolTest` (58),
+`McpDispatcherTest` (18), `McpSessionTest` (19), `McpOutboxTest` (9), `McpProgressTest` (19),
+`McpStreamTest` (18), `McpLifetimeTest` (49), `McpTransportTest` (43), `McpContractTest` (36)
+and `McpExtensionTest` (14), plus `McpConcurrentEditTest` (6), `McpExternalSessionTest` (5),
+`McpTransactionTest` (8) and `McpWorkerDeadlineTest` (4) — **354 tests**,
 which is the whole suite on a base install. Where the optional groups are installed the runner picks
-their suites up automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **313
-tests** — and **322 with the 9 in `McpGrailToolsetTest`** on a Grail image.
+their suites up automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **410
+tests** — and **437 with the 27 in `McpGrailToolsetTest`** on a Grail image.
 
-Five suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
+Six suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
 `McpAuthConformanceTest` commit a throwaway JWT user and spawn real worker gems; they are in the
 runner anyway, because they are the only cover for the token → session path.
 `McpExternalSessionTest` checks that a result arrives out of a real worker gem carrying the bytes
 the worker sent, `McpTransactionTest` that a *second* gem committing a conflicting change leaves
 this session in the state a failed commit really produces, and `McpWorkerDeadlineTest` that a call
-which outruns the request deadline is really broken in a real one — so the runner asks for a netldi
-on any image where they are installed, which is every image, since all three are part of the base
+which outruns the request deadline is really broken in a real one, and `McpConcurrentEditTest` that
+the blind-write guardrail holds against a real second session — so the runner asks for a netldi on
+any image where they are installed, which is every image, since all four are part of the base
 install. That is no new burden in practice: gs-mcp gives every
 client its own worker gem, so it cannot serve a single request without a netldi either.
 
-Those five also need **spare login slots**, which is the likeliest reason for a failure that is
+Those six also need **spare login slots**, which is the likeliest reason for a failure that is
 nothing to do with the code: each spawns worker gems of its own, so a stone whose `StnMaxSessions`
 is already consumed by running servers fails them with *"the maximum number of users are already
 logged in."* Stop the servers, or raise the limit, before reading such a failure as a regression.

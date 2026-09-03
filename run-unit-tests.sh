@@ -40,14 +40,14 @@ GS_STONE="${GS_STONE:-gs64stone}"
 GS_USER="${GS_USER:-DataCurator}"
 GS_PASS="${GS_PASS:-swordfish}"
 
-# Four suites fork a real worker gem and so need a NETLDI: McpExternalSessionTest,
-# McpTransactionTest and McpWorkerDeadlineTest (all always installed, see below) and McpAuthTest
-# (only where the auth group could be). Ask the image which are present
+# Five suites fork a real worker gem and so need a NETLDI: McpExternalSessionTest,
+# McpTransactionTest, McpWorkerDeadlineTest and McpConcurrentEditTest (all always installed, see
+# below) and McpAuthTest (only where the auth group could be). Ask the image which are present
 # rather than asserting a netldi unconditionally -- the check still has to survive an image where
 # none is installed, and discovering the lack up front beats hitting it as a GciError partway
 # through a suite run.
 #
-# In practice the first three are always there, so a netldi is in practice always required.
+# In practice the first four are always there, so a netldi is in practice always required.
 # That is not a new burden: gs-mcp gives every client its own worker gem, so it cannot serve a
 # single request without a netldi. What changed is that the test run now says so plainly instead of
 # passing on an image the server could not actually run on.

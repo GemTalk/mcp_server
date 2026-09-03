@@ -559,15 +559,25 @@ testWorkerDecodesUtf8AndAnswersAscii
    Latin-1 character per byte, and the corruption went on to be stored.
    OUTBOUND: whatever the tool answers, the rendered response holds nothing outside 0x20-0x7E.
    Content-Length elsewhere is computed as `body size` and is the byte count only while that is true.
-   describe_class is used because it echoes the name it was given straight back and changes nothing."
-  | body out text |
+   describe_class is used because it echoes the name it was given straight back and changes nothing.
+
+   The decoded text is matched as a PREFIX rather than in whole, because the tool's text is not the
+   only thing in there: McpDispatcher>>transactionNote appends a [session] line to every tool result
+   while the driving session has uncommitted changes, and three of this suite's own kernel-guard
+   tests leave it that way -- deliberately, since a tools/call would abort the transaction and undo
+   their fixtures. The prefix still pins the decode exactly. A body read one Latin-1 character per
+   byte, which is what happened before McpJson, spells the name with two characters instead of one
+   and fails here."
+  | body out text expected |
   body := '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"describe_class",'
     , '"arguments":{"className":"Caf' , (self bytesOf: #(16rC3 16rA9)) , '"}}}'.
   out := McpServer new handleJsonString: body.
   1 to: out size do: [:i | self assert: (out at: i) codePoint < 128].
   text := ((McpJson parse: out) at: 'result') at: 'content'.
   text := (text at: 1) at: 'text'.
-  self assert: text equals: 'Class not found: Caf' , (String with: (Character codePoint: 16rE9)).
+  expected := 'Class not found: Caf' , (String with: (Character codePoint: 16rE9)).
+  self assert: text size >= expected size.
+  self assert: (text copyFrom: 1 to: expected size) equals: expected.
   self assert: (self includesCS: 'Caf' , (String with: (Character codePoint: 92)) , 'u00E9' in: out)
 %
 category: 'helpers'
