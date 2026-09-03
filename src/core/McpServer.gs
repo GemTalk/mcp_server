@@ -395,7 +395,8 @@ stampOfContent: aStringOrNil
    absentStamp for nil. The stamp is what the read ledger stores against a key (McpServer>>stampFor:)
    and what a view move compares against (revalidateReadLedger), so it has to mean 'the same text'
    and nothing weaker -- String>>hash is a small integer and would let a change hide behind a
-   collision. The kernel supplies the digest (String>>asSha256String, present since 3.7.5), so
+   collision. The kernel supplies the digest (CharacterCollection>>asSha256String, present at least
+   since 3.7.2 -- String inherits it, so looking for implementors on String alone finds none), so
    nothing here is home-made, and the method source of an ordinary class hashes in microseconds."
   aStringOrNil isNil ifTrue: [^self absentStamp].
   ^aStringOrNil asString asSha256String

@@ -112,9 +112,10 @@ left exactly as it ships.
 ### The stamp
 
 A read is recorded together with a **stamp** of what was read: the SHA-256 of the subject's
-canonical text as the current view has it (`String>>asSha256String`, in the kernel since 3.7.5), or a
-fixed marker for a subject that does not exist. `McpServer>>stampFor:` dispatches on the key's shape
-to one method per grain, so what counts as the content of each kind of subject is stated once:
+canonical text as the current view has it (`CharacterCollection>>asSha256String`, in the kernel at
+least since 3.7.2), or a fixed marker for a subject that does not exist. `McpServer>>stampFor:`
+dispatches on the key's shape to one method per grain, so what counts as the content of each kind of
+subject is stated once:
 
 | key | text that is hashed | method |
 |---|---|---|
