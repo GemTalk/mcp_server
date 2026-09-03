@@ -27,8 +27,10 @@
 #                           notifications/cancelled or by closing the response stream. A deadline
 #                           approximates that; a cancel signal knows it. The guess also cut off
 #                           legitimate slow work -- a large fileIn, a broad search, a test suite --
-#                           far more often than a runaway. Set a number of seconds where the clients
-#                           are unknown or cannot be trusted to cancel; what no limit gives up is the
+#                           far more often than a runaway -- and it was not even fitted to real
+#                           client patience: measured 2026-08-31, Claude Code ran a 150-second call
+#                           to completion and took the answer. Set a number of seconds where the
+#                           clients are unknown or cannot be trusted to cancel; what no limit gives up is the
 #                           guarantee that a runaway ever ends on its own. Ending a request costs the
 #                           client that request only: the worker is interrupted and stays usable, so
 #                           the session and its uncommitted work survive.

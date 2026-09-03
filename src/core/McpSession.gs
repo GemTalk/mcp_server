@@ -50,7 +50,8 @@ shut editor tab. There the front end has something better than any inference: th
 the read side, so it SEES the connection end (#noteStreamClosedByClient). That fact is paired with
 the present state of the outbox rather than trusted alone, and #noteStreamSeen or #touch retracts it,
 so a client that reopened a stream, or that is simply working without one, is never taken for a
-client that left.'
+client that left.
+'
 %
 expectvalue /Class
 doit
@@ -615,11 +616,14 @@ runWorker: anExpressionString
    fails. And it must be read only once #isCallInProgress answers false, because after a wait that
    timed out #lastResult still holds the PREVIOUS call's value.
    A call that outruns this session's deadline is ENDED rather than waited out (#awaitWorkerResult,
-   #endOverrunningCall), where one is configured; with none, a worker still gets as long as it takes.
+   #endCallBecause:), where one is configured; with none, a worker still gets as long as it takes.
+   A call the CLIENT cancels ends by the same path, from a different trigger (#requestCancel:).
    The mutex is what keeps two requests from colliding in one worker -- GCI allows one call in flight
    per session, which the blocking call used to guarantee by freezing the gem. A worker-side error
    arrives as the same GciError as before, and leaves the worker usable; so does an ended call, which
-   raises out of the critical block and so releases the mutex on its way past."
+   raises out of the critical block and so releases the mutex on its way past.
+   An ENDED call never returns a result at all: #awaitWorkerResult raises, so a response the break
+   left behind is not examined, and the client is told its call was ended."
   ^self workerMutex critical: [
     worker nbExecute: anExpressionString.
     self awaitWorkerResult.
@@ -830,7 +834,7 @@ workerBootstrapExpression
     , ' prepareWorkerWithToolsets: ' , (self quotedNameArrayFor: toolsetNames)
     , ' options: ' , ((toolsetOptions isNil or: [toolsetOptions isEmpty])
         ifTrue: ['nil']
-        ifFalse: [toolsetOptions asJson printString])
+        ifFalse: [(McpJson write: toolsetOptions) printString])
     , ' readOnly: ' , self readOnly printString
     , ' serverName: ' , (serverName isNil ifTrue: ['nil'] ifFalse: [serverName printString])
     , ' title: ' , (serverTitle isNil ifTrue: ['nil'] ifFalse: [serverTitle printString])

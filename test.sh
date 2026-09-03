@@ -602,7 +602,7 @@ LIFE_WRAPPER_PID=$!
 for i in $(seq 1 60); do nc -z 127.0.0.1 "$LIFE_PORT" 2>/dev/null && break; sleep 0.5; done
 if nc -z 127.0.0.1 "$LIFE_PORT" 2>/dev/null; then
   check "a router with no idle deadline starts"  'listening'   "$(cat "$LIFE_LOG")"
-  r=$(curl -s -i -m 10 "$LIFE_URL" --data-binary @- <<'"'"'JSON'"'"'
+  r=$(curl -s -i -m 10 "$LIFE_URL" --data-binary @- <<'JSON'
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}
 JSON
 )

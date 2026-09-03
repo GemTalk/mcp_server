@@ -46,7 +46,11 @@ stops being wanted. A deadline approximates that; a cancel signal knows it.
 
 The cost of the guess also fell in the wrong place: a 45-second limit cut off legitimate slow work —
 a full suite run, a large fileIn, a broad search — far more often than a runaway, and that is exactly
-the work progress notifications exist to make watchable. Set `GS_MCP_REQUEST_TIMEOUT=45` (or any
+the work progress notifications exist to make watchable. The guess was not even conservative in the
+direction it was meant to be: measured 2026-08-31, Claude Code ran a **150-second** tool call to
+completion, with no progress notifications on it, and took delivery of the answer — so the client
+patience the number was fitted to is not what it was taken to be, while the limit itself was real.
+Set `GS_MCP_REQUEST_TIMEOUT=45` (or any
 number of seconds) where the clients are unknown or cannot be trusted to cancel; what `none` gives up
 is the guarantee that a runaway ever ends on its own.
 
@@ -58,8 +62,15 @@ whatever it had already done is still there in that gem's view, uncommitted. A g
 neither the soft break nor the hard one — code that handles `ControlInterrupt` and resumes — cannot
 be ended from the front end at all, so its gem is stopped from the stone side and the session is
 finished; that is the one case where the timeout costs the client its session, and the error says
-so. All of which applies equally to a call ended by a **cancellation**, which runs the same
-escalation from a different trigger.
+so.
+
+All of which applies equally to a call ended by a **cancellation** — a `notifications/cancelled`
+naming a request in flight, which is what Claude Code sends when the user presses Esc. It runs the
+same escalation from a different trigger, so it costs the same thing; what differs is only who
+decided, and that the client is owed no response for a request it has stopped waiting for. The
+notification is intercepted in the front end rather than routed, because routing it would queue it
+on the session's worker mutex *behind the very call it asks to stop* — measured at 17 seconds on a
+20-second call.
 
 **A client that hangs up is released in seconds, not minutes.** Shutting an editor tab closes the
 client process, which closes its SSE socket, and the drain loop sees the EOF within one 100 ms poll —

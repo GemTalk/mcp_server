@@ -20,7 +20,7 @@
 #                           short of a real second session can produce it.
 #   McpWorkerDeadlineTest   drives a real worker gem to check that a call which outruns the request
 #                           deadline is actually broken, and that the gem is usable afterwards --
-#                           the one claim the deadline rests on and the one a mock cannot make.
+#                           the one claim the deadline rests on, and the one a mock cannot make.
 #   McpAuthTest             creates and commits a throwaway JWT-enabled UserProfile (touching
 #                           AllUsers) and spawns a real worker gem. It is run whenever present: it
 #                           is the only coverage of the token->session path, and leaving it out once
@@ -93,7 +93,8 @@ iferr 1 stk
 run
 | s classes up optional |
 up := System myUserProfile.
-classes := #( 'McpBlindWriteTest' 'McpConcurrentEditTest' 'McpToolTest' 'McpDispatcherTest' 'McpSessionTest' 'McpOutboxTest' 'McpProgressTest'
+classes := #( 'McpJsonTest' 'McpBlindWriteTest' 'McpConcurrentEditTest' 'McpToolTest'
+  'McpDispatcherTest' 'McpSessionTest' 'McpOutboxTest' 'McpProgressTest'
   'McpStreamTest' 'McpLifetimeTest' 'McpTransportTest' 'McpContractTest'
   'McpExtensionTest' 'McpExternalSessionTest' 'McpTransactionTest'
   'McpWorkerDeadlineTest' ) asOrderedCollection.

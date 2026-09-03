@@ -154,14 +154,18 @@ defaultRequestTimeoutSeconds
    which ends the call at the moment it stops being wanted. A deadline approximates that; a cancel
    signal knows it. Prefer the signal. (The stream is here; the progress on it and the cancel
    triggers that read it are being built on top of it.)
-   And the cost of the guess fell in the wrong place. A 45-second limit does not cut off runaways so
+   And the guess was not even conservative in the direction it was meant to be. Measured 2026-08-31
+   against a live server: Claude Code ran a 150-second tool call to completion, with no progress
+   notifications on it, and took delivery of the answer -- so the client patience the number was
+   fitted to is not what it was taken to be, while the limit itself was real.
+   The cost of the guess fell in the wrong place, too. A 45-second limit does not cut off runaways so
    much as legitimate slow work -- a full suite run, a large fileIn, a broad search -- which is
    exactly the work progress notifications exist to make watchable. A server that can do a thing but
    refuses to finish it is worse than one that takes a while.
    What nil gives up is the guarantee that a runaway ever ends on its own, so set a number where the
    clients are unknown or cannot be trusted to cancel. Ending a request costs the client that request
    and nothing else: the worker is interrupted and stays usable, so the session, and the uncommitted
-   work in it, survive (McpSession>>endOverrunningCall)."
+   work in it, survive (McpSession>>endCallBecause:)."
   ^nil
 %
 category: 'session lifetime defaults'
@@ -468,7 +472,7 @@ category: 'config'
 method: McpRouter
 configJson
   "This router's config (configDict) as a JSON string."
-  ^self configDict asJson
+  ^McpJson write: self configDict
 %
 category: 'running'
 method: McpRouter
@@ -816,7 +820,7 @@ internalErrorFor: anIdOrNil
   err at: 'jsonrpc' put: '2.0'; at: 'id' put: anIdOrNil.
   err at: 'error' put: (Dictionary new
     at: 'code' put: -32603; at: 'message' put: 'Internal error'; yourself).
-  ^err asJson
+  ^McpJson write: err
 %
 category: 'running'
 method: McpRouter
@@ -1202,7 +1206,7 @@ progressNotificationFor: aChannel from: parsedPayload
   params at: 'progress' put: (parsedPayload at: 'p' ifAbsent: [0]).
   (parsedPayload at: 't' ifAbsent: [nil]) ifNotNil: [:t | params at: 'total' put: t].
   (parsedPayload at: 'm' ifAbsent: [nil]) ifNotNil: [:m | params at: 'message' put: m].
-  ^(self notification: 'notifications/progress' params: params) asJson
+  ^McpJson write: (self notification: 'notifications/progress' params: params)
 %
 category: 'routing'
 method: McpRouter
@@ -1662,7 +1666,7 @@ sendRequest: aMethodString params: aDictOrNil toSession: sess
    bidirectional worker channel, which is why those two scenarios sit last in the plan."
   entry at: 'origin' put: 'router'.
   pendingMutex critical: [pendingRequests at: rid put: entry].
-  (sess outbox add: (self request: aMethodString params: aDictOrNil id: rid) asJson) ifFalse: [
+  (sess outbox add: (McpJson write: (self request: aMethodString params: aDictOrNil id: rid))) ifFalse: [
     pendingMutex critical: [pendingRequests removeKey: rid ifAbsent: [nil]].
     ^nil].
   ^rid
@@ -1880,7 +1884,7 @@ serveRouted: body id: anIdOrNil progressToken: aTokenOrNil sessionId: sid on: co
    aTokenOrNil decides the framing (#progressTokenFor:accepting:): nil is the ordinary JSON answer
    this server has always given, non-nil an SSE stream carrying the answer as a frame.
    anIdOrNil is the JSON-RPC id the request arrived with, carried in for one case: a call this server
-   ENDED (McpSession>>endOverrunningCall) is answered here rather than by the worker, and the answer
+   ENDED (McpSession>>endCallBecause:) is answered here rather than by the worker, and the answer
    has to bear the id the client is waiting on."
   | sess |
   sid isNil ifTrue: [^self writeSessionError: 'Missing MCP-Session-Id header (call initialize first)' code: 400 reason: 'Bad Request' on: conn].
@@ -2112,7 +2116,7 @@ timeoutErrorFor: anError id: anIdOrNil
     at: 'message' put: anError description;
     at: 'data' put: (Dictionary new at: 'kind' put: anError kind asString; yourself);
     yourself).
-  ^err asJson
+  ^McpJson write: err
 %
 category: 'tls'
 method: McpRouter
@@ -2446,7 +2450,7 @@ writeParseError: conn
   err := Dictionary new.
   err at: 'jsonrpc' put: '2.0'; at: 'id' put: nil.
   err at: 'error' put: (Dictionary new at: 'code' put: -32700; at: 'message' put: 'Parse error'; yourself).
-  conn writeStatus: 400 reason: 'Bad Request' body: err asJson
+  conn writeStatus: 400 reason: 'Bad Request' body: (McpJson write: err)
 %
 category: 'routing'
 method: McpRouter
@@ -2458,12 +2462,12 @@ writeSessionError: aMessage code: httpCode reason: reasonString on: conn
   err := Dictionary new.
   err at: 'jsonrpc' put: '2.0'; at: 'id' put: nil.
   err at: 'error' put: (Dictionary new at: 'code' put: -32600; at: 'message' put: aMessage; yourself).
-  conn writeStatus: httpCode reason: reasonString body: err asJson
+  conn writeStatus: httpCode reason: reasonString body: (McpJson write: err)
 %
 category: 'routing'
 method: McpRouter
 writeTimeoutError: anError forSession: sess id: anIdOrNil on: conn
-  "Answer a request this server ended (McpSession>>endOverrunningCall) on a call being answered as
+  "Answer a request this server ended (McpSession>>endCallBecause:) on a call being answered as
    ordinary JSON.
    HTTP 200 with a JSON-RPC error, not an HTTP error status: the request was accepted, routed and
    served, and what failed is the call inside it -- a result the client should match to its request

@@ -45,10 +45,22 @@ removeallclassmethods McpBase
 category: 'private'
 classmethod: McpBase
 parseBody: aString
-  "Parse a JSON body to its Dictionary, or nil if empty/malformed.
-   Cross-version: GS 3.7.x's JsonParser raises on bad input, but 3.6.2's (PetitParser-based)
-   returns a PPFailure instead of raising -- so reject any non-Dictionary result, not just
-   exceptions. A valid JSON-RPC request is always an object, so nil here -> a -32700 Parse error.
+  "Parse a JSON-RPC request body to its Dictionary, or nil if empty/malformed. A valid JSON-RPC
+   request is always an object, so nil here -> a -32700 Parse error.
+   aString is WIRE BYTES, straight off the socket, which is why this goes through McpJson's
+   #parseWire: and not its #parse: -- it decodes UTF-8 before parsing. Without that a client
+   sending raw UTF-8 (which is every real one; only an escaping encoder like Python's json.dumps
+   avoids it) had each byte read as one Latin-1 character, so text arrived corrupted and was stored
+   corrupted. ASCII decodes to itself, so the callers that hand us a string gs-mcp produced -- the
+   router's own config, the worker's toolset options -- are unaffected by the decode.
+   This is the ONLY parse on the request path, and it serves both sides of the worker boundary: the
+   front end parses the body to classify it (McpRouter>>servePost:) and then forwards the SAME RAW
+   BYTES to the worker gem, which parses them again here. Nothing re-encodes in between, so the two
+   decodes cannot disagree.
+   McpJson replaces kernel JsonParser, which mishandled Unicode three ways and differed by version
+   while doing it -- see the McpJson class comment. The result-shape check and the catch-all stay:
+   the check because a JSON-RPC request that parses to anything but an object is still not a
+   request, and the catch-all because turning every rejection into one -32700 is this method's job.
 
    BOTH class- and instance-side, with the class-side as the single implementation, because the
    worker bootstrap that parses the deployment's toolset options
@@ -56,7 +68,7 @@ parseBody: aString
    Same arrangement, and same reason, as the shared helpers on McpToolset."
   (aString isNil or: [aString isEmpty]) ifTrue: [^nil].
   ^[ | parsed |
-     parsed := JsonParser parse: aString.
+     parsed := McpJson parseWire: aString.
      (parsed isKindOf: Dictionary) ifTrue: [parsed] ifFalse: [nil] ]
    on: Error do: [:ex | nil]
 %
@@ -77,7 +89,8 @@ log: aString
 category: 'json-rpc'
 method: McpBase
 notification: aMethodString params: aDictOrNil
-  "A JSON-RPC notification (no id, so no answer is expected) as a Dictionary, ready for #asJson.
+  "A JSON-RPC notification (no id, so no answer is expected) as a Dictionary, ready for
+   McpJson>>write:.
    A nil params is left OUT rather than sent as null."
   | d |
   d := Dictionary new.
@@ -113,7 +126,7 @@ category: 'json-rpc'
 method: McpBase
 request: aMethodString params: aDictOrNil id: anId
   "A JSON-RPC request (it carries an id, so the receiver MUST answer) as a Dictionary, ready for
-   #asJson. The answer does NOT come back on the stream: a client replies by POSTing a JSON-RPC
+   McpJson>>write:. The answer does NOT come back on the stream: a client replies by POSTing a JSON-RPC
    response to /mcp, which is why McpRouter keeps a pending-request table and why servePost: has
    to recognize a body with an id and no method."
   | d |
