@@ -47,8 +47,20 @@ classmethod: McpBase
 parseBody: aString
   "Parse a JSON-RPC request body to its Dictionary, or nil if empty/malformed. A valid JSON-RPC
    request is always an object, so nil here -> a -32700 Parse error.
-   aString is WIRE BYTES, straight off the socket, and the two sends before the parse are the whole
-   of gs-mcp''s Unicode handling.
+   aString is WIRE BYTES by origin. By CLASS it is whatever the caller''s image made of those bytes,
+   which is not always a byte String -- see THE WORKER RECOMPILES THE BODY below. The three sends
+   around the parse are the whole of gs-mcp''s Unicode handling.
+   The LEADING #asString, because #decodeFromUTF8 is implemented on String and on Unicode7 and on
+   nothing else -- not on Unicode16, not on DoubleByteString. Sent to a Unicode16 body it is a bare
+   MessageNotUnderstood, which the catch-all below then reports as a -32700: the whole request
+   refused, on every image whose #StringConfiguration is Unicode16, which is every Grail image and
+   so the one the live server runs on. #asString narrows a Unicode16 holding only codepoints below
+   256 to a String, and answers the RECEIVER ITSELF for a String, so it is an identity send
+   whenever the socket''s bytes reach us unchanged.
+   It is exact for a body that came off a socket, and no wider than that: every codepoint in such a
+   body is below 256 whatever the bytes go on to mean, so the narrowing always lands on String. A
+   genuinely wide string would narrow to DoubleByteString and raise the same MNU -- gs-mcp never
+   hands one here, and a decoder rather than a narrowing send would be the answer if it ever did.
    #decodeFromUTF8, because JSON is UTF-8 on the wire (RFC 8259 8.1) while JsonParser takes a
    CHARACTER string, with nothing in its API to say which of the two it wants. Without the decode
    every byte was read as one Latin-1 character: a pound sign or a degree sign arrived as two
@@ -56,7 +68,8 @@ parseBody: aString
    client that emits raw UTF-8 rather than escapes is affected, which is JSON.stringify and
    therefore most of them. It also decodes an emoji correctly, since a raw-UTF-8 body needs no
    surrogate pair -- only a \u-escaping client trips the parser defect below.
-   #asString, because #decodeFromUTF8 answers the UNICODE family (Unicode7/16/32), and on an image
+   The TRAILING #asString, because #decodeFromUTF8 answers the UNICODE family (Unicode7/16/32), and
+   on an image
    whose #StringConfiguration is String -- the default, and every stock image -- comparing one of
    those to a String RAISES rather than answering false. A Dictionary keyed by them would raise on
    every `args at: ''code''` in every toolset. #asString narrows by content to String,
@@ -83,9 +96,16 @@ parseBody: aString
    This is the ONLY parse on the request path, and it serves both sides of the worker boundary: the
    front end parses the body to classify it (McpRouter>>servePost:) and then forwards the SAME RAW
    BYTES to the worker gem, which parses them again here. Nothing re-encodes in between, so the two
-   decodes cannot disagree. It follows that aString must be a byte String: the callers that hand us
-   a string gs-mcp itself produced (the router''s own config, the worker''s toolset options) pass
-   ASCII, and a wide string would not understand #decodeFromUTF8 at all.
+   decodes cannot disagree.
+   THE WORKER RECOMPILES THE BODY, which is why the leading #asString is not optional. The front end
+   parses the body only to classify it, then forwards the same raw bytes to the worker gem embedded
+   in a Smalltalk expression (McpSession>>workerExpressionFor:, via printString). The worker
+   COMPILES that literal, so the class it arrives as comes from the WORKER session''s
+   #StringConfiguration rather than from anything the front end sent: configured for Unicode16, an
+   all-ASCII body compiles as Unicode7 and a body carrying one byte above 16r7F compiles as
+   Unicode16. The front-end parse is unaffected, since McpHttpConnection hands it the byte String
+   it read off the socket -- so the failure appears only past the worker boundary, and there only
+   for a body that actually needs decoding.
    WHAT THE KERNEL PARSER STILL GETS WRONG, left alone on purpose. It has no surrogate-pair
    decoding, so a client that escapes an emoji instead of sending it raw -- which Python''s
    json.dumps does by default -- fails its whole request with a -32700; an escape the parser does
@@ -93,6 +113,9 @@ parseBody: aString
    raw control characters are all accepted. Those are kernel defects, measured in the kernel JSON
    Unicode report and awaiting a kernel fix, rather than ones gs-mcp works around: the codec that
    did work around them is preserved on the emoji-safe branch.
+   Unicode16>>decodeFromUTF8 belongs in that report as well: a class that can hold the bytes in
+   question should narrow and delegate, or signal something that names the problem, rather than
+   answer a bare MessageNotUnderstood.
    Cross-version: 3.7.x''s JsonParser raises on bad input, but 3.6.2''s (PetitParser-based) returns a
    PPFailure instead of raising -- so reject any non-Dictionary result, not just exceptions. The
    catch-all stays because turning every rejection into one -32700 is this method''s job.
@@ -103,7 +126,7 @@ parseBody: aString
    Same arrangement, and same reason, as the shared helpers on McpToolset."
   (aString isNil or: [aString isEmpty]) ifTrue: [^nil].
   ^[ | parsed |
-     parsed := JsonParser parse: aString decodeFromUTF8 asString.
+     parsed := JsonParser parse: aString asString decodeFromUTF8 asString.
      (parsed isKindOf: Dictionary) ifTrue: [parsed] ifFalse: [nil] ]
    on: Error do: [:ex | nil]
 %
