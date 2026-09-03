@@ -196,13 +196,6 @@ toolsetClassNamed: aName
     ^self error: 'Not a toolset: ' , aName asString , ' is not a subclass of McpToolset.'].
   ^cls
 %
-category: 'constants'
-classmethod: McpServer
-unrenderableResponseJson
-  "The last-resort response body: valid JSON-RPC, no id, used only if even the structured
-   render-failure envelope could not be rendered. See McpServer>>renderResponse:for:."
-  ^'{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Internal error: the response could not be rendered as JSON."}}'
-%
 ! ------------------- Instance methods for McpServer
 category: 'read-only'
 method: McpServer
@@ -263,7 +256,7 @@ handleJsonString: aRawJsonString
   | parsed response |
   parsed := self parseBody: aRawJsonString.
   response := dispatcher handle: parsed.
-  ^response isNil ifTrue: [''] ifFalse: [self renderResponse: response for: parsed]
+  ^response isNil ifTrue: [''] ifFalse: [response asJson]
 %
 category: 'initialization'
 method: McpServer
@@ -355,47 +348,6 @@ registerToolsets
       (ts toolNames reject: [:n | safe includes: n])
         do: [:n | toolRegistry removeToolNamed: n]]].
   ^self
-%
-category: 'protocol'
-method: McpServer
-renderFailureFor: aRequestOrNil because: anException
-  "The JSON-RPC error a client is answered with when its response could not be RENDERED. Not the
-   call failing -- the call succeeded, and what it answered could not be turned into JSON.
-   McpJson refuses an object it has no rule for, where the kernel writer answered {} and shipped a
-   silently empty value to the client. Refusing is the better default, but only if the refusal is
-   REPORTED: it says which class has no rule, which is the one fact needed to add one.
-   The id is carried over so the client can match this to the request it is waiting on; without it
-   the client waits out its own timeout instead."
-  | err payload |
-  err := Dictionary new.
-  err at: 'code' put: -32603.
-  err at: 'message' put: 'Internal error: this response could not be rendered as JSON. '
-    , (anException description ifNil: ['(no detail available)']).
-  payload := Dictionary new.
-  payload at: 'jsonrpc' put: '2.0'.
-  payload at: 'id' put:
-    (aRequestOrNil isNil ifTrue: [nil] ifFalse: [aRequestOrNil at: 'id' ifAbsent: [nil]]).
-  payload at: 'error' put: err.
-  ^payload
-%
-category: 'protocol'
-method: McpServer
-renderResponse: aResponse for: aRequestOrNil
-  "Render a response to JSON, and make sure SOMETHING valid comes back even if that fails.
-   Why this is wrapped at all: an error here would otherwise leave #handleJsonString: unhandled, and
-   this method runs in a worker gem -- so it would reach the front end as a GciError, which the
-   client sees as the whole call collapsing rather than as one response it could not be given. The
-   front end already has this protection for its own rendering (McpRouter>>handleConnection: answers
-   500 on any error); the worker gem had none.
-   The second guard is not paranoia about the first: the fallback is built from literal strings and
-   integers and cannot fail, so if it somehow does, the only honest thing left is a constant. A
-   client must never be handed a partial body or nothing at all -- it is waiting on this id."
-  ^[McpJson write: aResponse]
-    on: Error
-    do: [:ex |
-      [McpJson write: (self renderFailureFor: aRequestOrNil because: ex)]
-        on: Error
-        do: [:inner | self class unrenderableResponseJson]]
 %
 category: 'identity'
 method: McpServer

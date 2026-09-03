@@ -88,7 +88,7 @@ iferr 1 stk
 run
 | s classes up optional |
 up := System myUserProfile.
-classes := #( 'McpJsonTest' 'McpToolTest' 'McpDispatcherTest' 'McpSessionTest' 'McpOutboxTest'
+classes := #( 'McpUtf8Test' 'McpToolTest' 'McpDispatcherTest' 'McpSessionTest' 'McpOutboxTest'
   'McpStreamTest' 'McpLifetimeTest' 'McpTransportTest' 'McpContractTest'
   'McpExtensionTest' 'McpExternalSessionTest' 'McpWorkerDeadlineTest' ) asOrderedCollection.
 "Suites from the optional groups, run only where their group was installed. Named as a list so

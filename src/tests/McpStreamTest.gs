@@ -55,7 +55,7 @@ firstQueuedIn: sess
   "Drain sess's outbox and answer its first message parsed back from JSON, or nil if empty."
   | drained |
   drained := sess outbox drain asArray.
-  ^drained isEmpty ifTrue: [nil] ifFalse: [McpJson parse: drained first]
+  ^drained isEmpty ifTrue: [nil] ifFalse: [JsonParser parse: drained first]
 %
 category: 'helpers'
 method: McpStreamTest

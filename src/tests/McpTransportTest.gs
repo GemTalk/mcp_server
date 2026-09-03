@@ -610,6 +610,11 @@ category: 'tests'
 method: McpTransportTest
 testUnicodeResponseIsAsciiWithByteAccurateContentLength
   "THE TRANSPORT'S UNICODE CONTRACT, and the test whose absence let three defects ship.
+   Latin-1 and BMP text only, and deliberately: an astral character would fail here, through no
+   fault of the transport. Kernel printJsonOn: writes a codepoint above U+FFFF as one wrong escape
+   instead of a surrogate pair, so U+1F600 would come back as U+F600 -- a defect gs-mcp accepts
+   rather than works around (the kernel JSON Unicode report, defect 2). Add an emoji to `text` and
+   this test measures that defect instead of the contract it is here for.
    Content-Length is written as `body size`, which is the byte count ONLY while the body holds
    nothing outside 0x20-0x7E. So the two assertions belong together: a response carrying non-ASCII
    text must still leave as pure ASCII, and the length must be one a client can trust. If the
@@ -619,8 +624,7 @@ testUnicodeResponseIsAsciiWithByteAccurateContentLength
    what the transport must not do is alter it in passing."
   | r sess text response out body raw |
   text := 'caf' , (String with: (Character codePoint: 16rE9)) , ' '
-    , (String with: (Character codePoint: 16r2603))
-    , (String with: (Character codePoint: 16r1F600)).
+    , (String with: (Character codePoint: 16r2603)).
   response := Dictionary new.
   response at: 'jsonrpc' put: '2.0'.
   response at: 'id' put: 1.
@@ -629,15 +633,15 @@ testUnicodeResponseIsAsciiWithByteAccurateContentLength
     , '{"code":"' , (self bytesOf: #(16rC3 16rA9 16rE2 16r98 16r83)) , '"}}}'.
   r := McpFixtureRouter new.
   sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
-  sess mockWorker nextResult: (McpJson write: response).
+  sess mockWorker nextResult: response asJson.
   out := (self runRequest: (self postRequest: raw sessionId: sess id) onRouter: r) output.
   "Pure ASCII on the wire, header and body alike."
   1 to: out size do: [:i | self assert: (out at: i) codePoint < 128].
   "Content-Length is the byte count of exactly what followed it."
   body := self bodyOf: out.
   self assert: (self contentLengthOf: out) equals: body size.
-  "And the text survived the trip intact, astral character included."
-  self assert: (((McpJson parse: body) at: 'result') at: 'text') equals: text.
+  "And the text survived the trip intact."
+  self assert: (((JsonParser parse: body) at: 'result') at: 'text') equals: text.
   "The raw request body reached the worker unaltered -- five bytes, not decoded and not mangled."
   self assert: ((sess mockWorker expressions last)
     findString: (self bytesOf: #(16rC3 16rA9 16rE2 16r98 16r83)) startingAt: 1) > 0

@@ -14,7 +14,7 @@ run
 | d names |
 d := System myUserProfile objectNamed: #Published.
 names := #( #McpMockSocket #McpMockWorker #McpMockSession #McpStubSession #McpFixtureToolset
-  #McpFixtureServer #McpFixtureRouter #McpJsonTest #McpToolTest #McpDispatcherTest
+  #McpFixtureServer #McpFixtureRouter #McpUtf8Test #McpToolTest #McpDispatcherTest
   #McpTransportTest #McpContractTest #McpExtensionTest #McpSessionTest #McpOutboxTest
   #McpStreamTest #McpLifetimeTest #McpExternalSessionTest #McpWorkerDeadlineTest ).
 names do: [:s | (d includesKey: s) ifFalse: [ d at: s put: nil ] ].
@@ -32,7 +32,7 @@ input src/tests/McpFixtureServer.gs
 input src/tests/McpFixtureRouter.gs
 
 ! The suites themselves.
-input src/tests/McpJsonTest.gs
+input src/tests/McpUtf8Test.gs
 input src/tests/McpToolTest.gs
 input src/tests/McpDispatcherTest.gs
 input src/tests/McpTransportTest.gs

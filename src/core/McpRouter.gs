@@ -408,7 +408,7 @@ category: 'config'
 method: McpRouter
 configJson
   "This router's config (configDict) as a JSON string."
-  ^McpJson write: self configDict
+  ^self configDict asJson
 %
 category: 'running'
 method: McpRouter
@@ -1391,7 +1391,7 @@ sendRequest: aMethodString params: aDictOrNil toSession: sess
    bidirectional worker channel, which is why those two scenarios sit last in the plan."
   entry at: 'origin' put: 'router'.
   pendingMutex critical: [pendingRequests at: rid put: entry].
-  (sess outbox add: (McpJson write: (self request: aMethodString params: aDictOrNil id: rid))) ifFalse: [
+  (sess outbox add: (self request: aMethodString params: aDictOrNil id: rid) asJson) ifFalse: [
     pendingMutex critical: [pendingRequests removeKey: rid ifAbsent: [nil]].
     ^nil].
   ^rid
@@ -1972,7 +1972,7 @@ writeParseError: conn
   err := Dictionary new.
   err at: 'jsonrpc' put: '2.0'; at: 'id' put: nil.
   err at: 'error' put: (Dictionary new at: 'code' put: -32700; at: 'message' put: 'Parse error'; yourself).
-  conn writeStatus: 400 reason: 'Bad Request' body: (McpJson write: err)
+  conn writeStatus: 400 reason: 'Bad Request' body: err asJson
 %
 category: 'routing'
 method: McpRouter
@@ -1984,7 +1984,7 @@ writeSessionError: aMessage code: httpCode reason: reasonString on: conn
   err := Dictionary new.
   err at: 'jsonrpc' put: '2.0'; at: 'id' put: nil.
   err at: 'error' put: (Dictionary new at: 'code' put: -32600; at: 'message' put: aMessage; yourself).
-  conn writeStatus: httpCode reason: reasonString body: (McpJson write: err)
+  conn writeStatus: httpCode reason: reasonString body: err asJson
 %
 category: 'routing'
 method: McpRouter
@@ -2008,5 +2008,5 @@ writeTimeoutError: anError forSession: sess id: anIdOrNil on: conn
     at: 'message' put: anError description;
     at: 'data' put: (Dictionary new at: 'kind' put: anError kind asString; yourself);
     yourself).
-  conn writeJson: (McpJson write: err)
+  conn writeJson: err asJson
 %

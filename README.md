@@ -432,6 +432,19 @@ forbidden here" from "no such tool". A tool absent because its toolset was never
 Built on existing image facilities: `GsSocket` (TCP), `JsonParser parse:` and
 `Object>>asJson` (JSON), and `String>>evaluate` (the `execute_code` engine).
 
+The kernel's JSON is taken as-is with one exception, on the way in: `McpBase>>parseBody:` reads
+`JsonParser parse: aString decodeFromUTF8 asString`, because `JsonParser` wants characters and a
+socket delivers bytes. Without the decode a `£` or a `°` arrives as two Latin-1 characters and
+`compile_method` stores it that way; the `asString` keeps the result in the byte/`DoubleByteString`
+family, since a `Unicode7` compared to a `String` raises on a stock image rather than answering
+false. A malformed sequence — truncated, overlong, an encoded surrogate — refuses the whole body
+with a `-32700` naming the byte offset, rather than being repaired into stored text. Three *further*
+Unicode defects in the kernel's JSON are measured in a defect report against the kernel and
+deliberately left in place here, since no user has met one: an emoji escaped as a surrogate pair
+fails the whole request, an emoji written out becomes a single wrong escape, and an unrecognized
+escape is silently dropped. The codec that worked around all three is preserved on the `emoji-safe`
+branch, so adopting it again is a merge rather than a rewrite.
+
 ## Why a dedicated gem
 
 Forked `GsProcess`es **only run while the gem is actively executing Smalltalk**. A
@@ -935,13 +948,13 @@ flag, so a missing suite is a skip and not an error:
 
 Run a single suite while a server is up via the `run_test_class` tool (e.g. `run_test_class
 McpToolTest`). `./run-unit-tests.sh` runs them all and exits 0 when every test passes: the
-socket-less suites `McpJsonTest` (20), `McpToolTest` (52), `McpDispatcherTest` (12),
+socket-less suites `McpUtf8Test` (4), `McpToolTest` (52), `McpDispatcherTest` (12),
 `McpSessionTest` (18), `McpOutboxTest` (9), `McpStreamTest` (18), `McpLifetimeTest` (43),
-`McpTransportTest` (36), `McpContractTest` (36) and `McpExtensionTest` (9), plus
-`McpExternalSessionTest` (5) and `McpWorkerDeadlineTest` (4) — **262 tests**, which is the whole
+`McpTransportTest` (36), `McpContractTest` (35) and `McpExtensionTest` (9), plus
+`McpExternalSessionTest` (5) and `McpWorkerDeadlineTest` (4) — **245 tests**, which is the whole
 suite on a base install. Where the optional groups are installed the runner picks their suites up
-automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **318 tests** — and
-**345 with the 27 in `McpGrailToolsetTest`** on a Grail image.
+automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **301 tests** — and
+**310 with the 9 in `McpGrailToolsetTest`** on a Grail image.
 
 All but two of those run with no netldi. The exceptions are `McpExternalSessionTest`, which drives a
 real worker gem because it is asking about the *image* — whether a result comes back with the bytes
