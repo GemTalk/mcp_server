@@ -354,7 +354,7 @@ check "run_test_class SUnitTest reports passed" 'passed'                 "$r"
 
 # --- mutation + failing-test path on a throwaway TestCase, then clean up ---
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":35,"method":"tools/call","params":{"name":"compile_class_definition","arguments":{"source":"TestCase subclass: 'McpParityTest' instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()"}}}
+{"jsonrpc":"2.0","id":35,"method":"tools/call","params":{"name":"compile_class_definition","arguments":{"className":"McpParityTest","superclassName":"TestCase","dictionary":"UserGlobals"}}}
 JSON
 )
 check "compile_class_definition creates class" 'Compiled class: McpParityTest' "$r"
@@ -382,6 +382,16 @@ r=$(post <<'JSON'
 JSON
 )
 check "list_failing_tests lists the failure"   'McpParityTest'          "$r"
+
+# The blind-write guardrail requires the CURRENT comment to have been read in this session before
+# one can be written over it, so the describe_class is part of the call sequence a real client must
+# make and not a redundant check -- delete it and set_class_comment goes back to being refused with
+# kind 'blindWrite'. See docs/blind-write-guardrail.md.
+r=$(post <<'JSON'
+{"jsonrpc":"2.0","id":39,"method":"tools/call","params":{"name":"describe_class","arguments":{"className":"McpParityTest"}}}
+JSON
+)
+check "describe_class reads the comment first" 'McpParityTest'          "$r"
 
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":40,"method":"tools/call","params":{"name":"set_class_comment","arguments":{"className":"McpParityTest","comment":"throwaway parity test"}}}
