@@ -83,3 +83,11 @@ write: aString
   outStream nextPutAll: aString.
   ^aString size
 %
+category: 'socket protocol'
+method: McpMockSocket
+writeWillNotBlockWithin: ms
+  "A mock socket always takes output. The real guard exists because GsSocket>>write: suspends the
+   calling GsProcess with no timeout when the peer has stopped reading
+   (McpHttpConnection>>writeSse:); nothing here can stall."
+  ^true
+%

@@ -16,7 +16,7 @@ doit
 McpGrailToolsetTest comment: 
 'Tests for the optional Grail-powered python tools, which live in McpGrailToolset (eval_python /
 compile_python). Its own source group (src/grail/), loaded only into a Grail-equipped image
-(load-grail.gs, i.e. install.sh --grail); the core suites (McpToolTest, McpDispatcherTest,
+(src/grail/load.gs, filed in by install.sh --grail); the core suites (McpToolTest, McpDispatcherTest,
 McpTransportTest, McpContractTest, McpExtensionTest) cover the Grail-free server.
 
 Covers all three Python failure paths for real: an undefined name, a runtime error and a syntax error.

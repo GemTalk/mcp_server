@@ -61,6 +61,22 @@ initBody
 %
 category: 'helpers'
 method: McpAuthTest
+jwtForUser: aUserId expiringIn: seconds writeScope: aBoolean
+  "A parseable JWT carrying sub, exp and (optionally) the write scope. The signature segment is
+   filler: every method under test here parses the token WITHOUT verifying it, because verification
+   already happened in #tokenRejectionFor: earlier in the request. alg must still name a real
+   algorithm -- JsonWebToken rejects alg 'none' outright, so a token that claims to be unsigned
+   cannot even be built by accident."
+  | enc scopes |
+  enc := [:str | (str asByteArray asBase64UrlString) select: [:c | c ~= $=]].
+  scopes := aBoolean ifTrue: ['mcp:use mcp:write'] ifFalse: ['mcp:use'].
+  ^(enc value: '{"alg":"RS256","typ":"JWT"}')
+    , '.' , (enc value: '{"sub":"' , aUserId , '","exp":'
+        , (System timeGmt + seconds) printString , ',"scope":"' , scopes , '"}')
+    , '.' , (enc value: 'signature-not-checked-here')
+%
+category: 'helpers'
+method: McpAuthTest
 post: body headers: extraHeaderLines
   "A raw HTTP POST /mcp request carrying body as application/json, plus extraHeaderLines (a String
    of complete CRLF-terminated header lines, or '' for none)."
@@ -69,6 +85,16 @@ post: body headers: extraHeaderLines
   ^'POST /mcp HTTP/1.1' , crlf , 'Host: localhost' , crlf , extraHeaderLines ,
    'Content-Type: application/json' , crlf ,
    'Content-Length: ' , body size printString , crlf , crlf , body
+%
+category: 'helpers'
+method: McpAuthTest
+renewingRouter
+  "An auth router with per-session write gating on, which is what makes the scope half of renewal
+   meaningful: with no writeScope configured every token grants write."
+  | router |
+  router := McpAuthRouter new.
+  router writeScope: 'mcp:write'.
+  ^router
 %
 category: 'helpers'
 method: McpAuthTest
@@ -94,6 +120,79 @@ category: 'helpers'
 method: McpAuthTest
 statusBody
   ^'{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"status","arguments":{}}}'
+%
+category: 'tests'
+method: McpAuthTest
+testAnUnparseableTokenBuysNoTimeOnAWriteSession
+  "Fail safe in the direction that matters now that this parse can EXTEND a life rather than only
+   shorten one: a token that cannot be read grants no write scope, so it cannot lengthen a
+   read-write session."
+  | router sess deadline |
+  router := self renewingRouter.
+  sess := McpStubSession new startWithId: 'sid-garbage'.
+  deadline := System timeGmt + 60.
+  sess expiresAtSeconds: deadline.
+  self deny: (router renewSessionExpiry: sess from: 'not.a.jwt').
+  self assert: sess expiresAtSeconds equals: deadline
+%
+category: 'tests'
+method: McpAuthTest
+testAnUnreadableTokenExpiryLeavesTheIdlePolicyInCharge
+  "Fail soft, not open: a token whose exp cannot be parsed simply leaves the session bound by the
+   idle policy alone, which is where it stood before this existed. It cannot fail OPEN, because the
+   token's claims were validated before this point and are validated again by GemStone at login."
+  | router |
+  router := McpAuthRouter new.
+  self assert: (router tokenExpirySecondsOf: 'not.a.jwt') isNil.
+  self assert: (router tokenExpirySecondsOf: '') isNil
+%
+category: 'tests'
+method: McpAuthTest
+testAReadOnlySessionIsRenewedByAReadOnlyToken
+  "The mirror of the above: a session that never had write access is not being handed anything it
+   lacks, so a token without the write scope renews it normally. Otherwise read-only sessions would
+   be the only ones still capped at their opening token."
+  | router sess |
+  router := self renewingRouter.
+  sess := McpStubSession new startWithId: 'sid-ro'; beReadOnly; yourself.
+  sess expiresAtSeconds: System timeGmt + 60.
+  self assert: sess readOnly.
+  self assert: (router renewSessionExpiry: sess
+    from: (self jwtForUser: 'alice' expiringIn: 1800 writeScope: false)).
+  self assert: sess expiresAtSeconds > (System timeGmt + 1000)
+%
+category: 'tests'
+method: McpAuthTest
+testARefreshedTokenBuysAWriteSessionMoreLife
+  "The defect this exists to fix. A session's deadline is stamped once, from the token that opened
+   it, so a client working steadily lost its worker gem -- and the uncommitted transaction in it --
+   one access-token lifetime after opening, however recently it had called. A fresh token for the
+   same user is a renewed grant, and it now moves the deadline."
+  | router sess |
+  router := self renewingRouter.
+  sess := McpStubSession new startWithId: 'sid-renew'.
+  sess expiresAtSeconds: System timeGmt + 60.
+  self assert: (router renewSessionExpiry: sess
+    from: (self jwtForUser: 'alice' expiringIn: 1800 writeScope: true)).
+  self assert: sess expiresAtSeconds > (System timeGmt + 1000)
+%
+category: 'tests'
+method: McpAuthTest
+testATokenThatLostTheWriteScopeBuysNoMoreLife
+  "A read-WRITE session must not be extended on a token that no longer carries the write scope: the
+   session's mode was fixed at open, so that would keep a broader authorization alive on the strength
+   of a grant the client has demonstrably lost. The token still WORKS -- it is valid and belongs to
+   the session's user -- it just buys no time, so the session ends at its existing deadline and the
+   next one opens read-only, which is what the current grant actually says."
+  | router sess deadline |
+  router := self renewingRouter.
+  sess := McpStubSession new startWithId: 'sid-narrowed'.
+  self deny: sess readOnly.
+  deadline := System timeGmt + 60.
+  sess expiresAtSeconds: deadline.
+  self deny: (router renewSessionExpiry: sess
+    from: (self jwtForUser: 'alice' expiringIn: 1800 writeScope: false)).
+  self assert: sess expiresAtSeconds equals: deadline
 %
 category: 'tests'
 method: McpAuthTest
@@ -286,6 +385,18 @@ testNonBearerReturns401
 %
 category: 'tests'
 method: McpAuthTest
+testPresentingTheSameTokenAgainRenewsNothing
+  "Every request carries a token, so the overwhelmingly common case is the SAME token as last time.
+   That must report no movement, or the router would log a renewal on every single request."
+  | router sess jwt |
+  router := self renewingRouter.
+  sess := McpStubSession new startWithId: 'sid-same'.
+  jwt := self jwtForUser: 'alice' expiringIn: 1800 writeScope: true.
+  sess expiresAtSeconds: (router tokenExpirySecondsOf: jwt).
+  self deny: (router renewSessionExpiry: sess from: jwt)
+%
+category: 'tests'
+method: McpAuthTest
 testProtectedResourceMetadataPublishesConfiguredResource
   "The RFC 9728 `resource` identifier is the CONFIGURED canonical identifier (expectedAudience) --
    the same value the router validates in a token's aud claim -- and it does not vary with the
@@ -373,6 +484,30 @@ testRequiresTlsToServe
 %
 category: 'tests'
 method: McpAuthTest
+testSessionIsCappedAtTheTokenExpiry
+  "The bound that matters on an authenticated router, and the one no idle policy expresses. The
+   worker gem is logged in as the token's GemStone user, so a session allowed to outlive its access
+   token leaves the authorization it was opened with in force after the grant expired -- indefinitely,
+   on a router configured with no idle deadline. exp is required of every token this router accepts,
+   so there is always one to bind to."
+  | router |
+  router := McpAuthRouter new.
+  router expectedAudience: nil; expectedIssuer: nil; requiredScopes: #(); userIdClaim: 'sub'.
+  self withJwtUser: 'McpExpiryTestUser' router: router do: [:jwt | | sid sess exp |
+    exp := router tokenExpirySecondsOf: jwt.
+    self deny: exp isNil.
+    sid := self sessionIdFrom: (self runRequest:
+      (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: router).
+    self deny: sid isNil.
+    sess := router sessionAt: sid.
+    self deny: sess isNil.
+    self assert: sess expiresAtSeconds equals: exp.
+    self deny: sess isExpired.
+    "the fixture mints an hour-long token, and that hour is what the session gets"
+    self assert: ((sess expiresAtSeconds - System timeGmt) - 3600) abs < 60]
+%
+category: 'tests'
+method: McpAuthTest
 testSufficientScopeAccepted
   "A token whose space-delimited scope claim contains the required scope passes."
   | p router |
@@ -434,7 +569,7 @@ testTokenWithoutWriteScopeGivesReadOnlySession
   router := McpAuthRouter new.
   router expectedAudience: nil; expectedIssuer: nil; requiredScopes: #(); writeScope: 'mcp:write';
     userIdClaim: 'sub'.
-  self withJwtUser: 'McpWriteScopeUser' do: [:jwt | | sid out |
+  self withJwtUser: 'McpWriteScopeUser' router: router do: [:jwt | | sid out |
     out := self runRequest: (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: router.
     self assert: (self includesCS: 'HTTP/1.1 200 OK' in: out).
     sid := self sessionIdFrom: out.
@@ -454,7 +589,7 @@ testTokenWithWriteScopeGivesWritableSession
   router := McpAuthRouter new.
   router expectedAudience: nil; expectedIssuer: nil; requiredScopes: #(); writeScope: 'mcp:write';
     userIdClaim: 'sub'.
-  self withJwtUser: 'McpWriteScopeUser' scope: 'openid mcp:write' do: [:jwt | | sid out |
+  self withJwtUser: 'McpWriteScopeUser' scope: 'openid mcp:write' router: router do: [:jwt | | sid out |
     out := self runRequest: (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: router.
     sid := self sessionIdFrom: out.
     self deny: sid isNil.
@@ -471,7 +606,7 @@ testValidScopedTokenOpensSession
   | router |
   router := McpAuthRouter new.
   router expectedAudience: nil; expectedIssuer: nil; requiredScopes: #('mcp:use'); userIdClaim: 'sub'.
-  self withJwtUser: 'McpScopeTestUser' scope: 'openid mcp:use' do: [:jwt | | out |
+  self withJwtUser: 'McpScopeTestUser' scope: 'openid mcp:use' router: router do: [:jwt | | out |
     out := self runRequest: (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: router.
     self assert: (self includesCS: 'HTTP/1.1 200 OK' in: out).
     self assert: (self includesCS: 'MCP-Session-Id:' in: out)]
@@ -487,7 +622,7 @@ testValidTokenOpensPerUserSession
   | router |
   router := McpAuthRouter new.
   router requiredScopes: #(); expectedAudience: nil; expectedIssuer: nil; userIdClaim: 'sub'.
-  self withJwtUser: 'McpAuthTestUser' do: [:jwt | | initOut sid statusOut |
+  self withJwtUser: 'McpAuthTestUser' router: router do: [:jwt | | initOut sid statusOut |
     initOut := self runRequest: (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: router.
     self assert: (self includesCS: 'HTTP/1.1 200 OK' in: initOut).
     self assert: (self includesCS: 'MCP-Session-Id:' in: initOut).
@@ -504,11 +639,19 @@ withJwtUser: aUserId do: aOneArgBlock
 %
 category: 'helpers'
 method: McpAuthTest
+withJwtUser: aUserId router: aRouter do: aOneArgBlock
+  "withJwtUser:scope:router:do: with no scope claim on the token."
+  ^self withJwtUser: aUserId scope: nil router: aRouter do: aOneArgBlock
+%
+category: 'helpers'
+method: McpAuthTest
 withJwtUser: aUserId scope: aScopeStringOrNil do: aOneArgBlock
   "Provision a JWT-enabled UserProfile for aUserId (identity from the 'sub' claim, wildcard
    issuer/audience) + register a signing key, mint a matching JWT (carrying aScopeStringOrNil as its
    space-delimited `scope` claim when non-nil), evaluate aOneArgBlock with the JWT string, and
-   ALWAYS clean up the key + user afterward. Answers the block's value."
+   ALWAYS clean up the key + user afterward. Answers the block's value.
+   A test that drives a SUCCESSFUL initialize wants #withJwtUser:scope:router:do: instead -- this
+   variant releases no worker gem, because it is given no router to release one from."
   | keyId jwtSec up now tok |
   keyId := 'mcp-authtest-key'.
   (AllUsers userWithId: aUserId ifAbsent: [nil]) ifNotNil: [:u |
@@ -518,6 +661,12 @@ withJwtUser: aUserId scope: aScopeStringOrNil do: aOneArgBlock
   up := AllUsers addNewUserWithId: aUserId password: 'swordfishXYZ'.
   up enableJwtAuthenticationWith: jwtSec.
   System commitTransaction.
+  "Clear the key first, exactly as the user above is cleared first and for the same reason: the key
+   register is STONE-wide runtime state, so a run that was interrupted between #addJwtKey: and the
+   ensure below leaves it behind, and every later run of every test that uses this fixture dies on
+   'key already exists' until someone removes it by hand. The ensure is the tidy path, not the
+   guarantee -- one is needed at each end."
+  [System removeJwtKeyWithId: keyId] on: Error do: [:e | nil].
   System addJwtKey: JsonWebToken example_publicKey withId: keyId.
   now := System timeGmt.
   tok := JsonWebToken newForRsa256.
@@ -528,4 +677,21 @@ withJwtUser: aUserId scope: aScopeStringOrNil do: aOneArgBlock
   ^[aOneArgBlock value: tok asJwtString] ensure: [
     [System removeJwtKeyWithId: keyId] on: Error do: [:e | nil].
     [AllUsers removeAndCleanupUserWithId: aUserId ifAbsent: [nil]. System commitTransaction] on: Error do: [:e | nil]]
+%
+category: 'helpers'
+method: McpAuthTest
+withJwtUser: aUserId scope: aScopeStringOrNil router: aRouter do: aOneArgBlock
+  "#withJwtUser:scope:do:, plus the release of every worker gem aRouter opened while the block ran.
+   EVERY test whose initialize is meant to SUCCEED must use this variant. A successful initialize
+   logs in a real worker gem, and nothing else here would ever log it out: the idle reaper runs only
+   inside a live accept loop, which these tests never start, and #withJwtUser:scope:do: removing the
+   UserProfile does NOT terminate a session already logged in as it. Left alone, each such test costs
+   one login slot for the life of the gem RUNNING the tests -- invisible under ./run-unit-tests.sh,
+   whose topaz exits and takes the gems with it, but cumulative when the suite is re-run inside one
+   long-lived gem, until logins start failing and the tests that assert nothing about the login fail
+   for a reason unrelated to what they check.
+   Releases the gems INSIDE the outer fixture, so a worker is logged out while the UserProfile it
+   authenticated as still exists."
+  ^self withJwtUser: aUserId scope: aScopeStringOrNil do: [:jwt |
+    [aOneArgBlock value: jwt] ensure: [[aRouter closeAllSessions] on: Error do: [:e | nil]]]
 %

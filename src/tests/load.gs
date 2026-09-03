@@ -14,8 +14,9 @@ run
 | d names |
 d := System myUserProfile objectNamed: #Published.
 names := #( #McpMockSocket #McpMockWorker #McpMockSession #McpStubSession #McpFixtureToolset
-  #McpFixtureServer #McpToolTest #McpDispatcherTest #McpTransportTest #McpContractTest
-  #McpExtensionTest #McpSessionTest ).
+  #McpFixtureServer #McpFixtureRouter #McpJsonTest #McpToolTest #McpDispatcherTest
+  #McpTransportTest #McpContractTest #McpExtensionTest #McpSessionTest #McpOutboxTest
+  #McpStreamTest #McpLifetimeTest #McpExternalSessionTest #McpWorkerDeadlineTest ).
 names do: [:s | (d includesKey: s) ifFalse: [ d at: s put: nil ] ].
 names size
 %
@@ -28,11 +29,21 @@ input src/tests/McpMockSession.gs
 input src/tests/McpStubSession.gs
 input src/tests/McpFixtureToolset.gs
 input src/tests/McpFixtureServer.gs
+input src/tests/McpFixtureRouter.gs
 
 ! The suites themselves.
+input src/tests/McpJsonTest.gs
 input src/tests/McpToolTest.gs
 input src/tests/McpDispatcherTest.gs
 input src/tests/McpTransportTest.gs
 input src/tests/McpContractTest.gs
 input src/tests/McpExtensionTest.gs
 input src/tests/McpSessionTest.gs
+input src/tests/McpOutboxTest.gs
+input src/tests/McpStreamTest.gs
+input src/tests/McpLifetimeTest.gs
+
+! Needs a real worker gem, so it needs a NETLDI -- see the class comment and
+! run-unit-tests.sh. It is the only suite here that is not purely in-image.
+input src/tests/McpExternalSessionTest.gs
+input src/tests/McpWorkerDeadlineTest.gs

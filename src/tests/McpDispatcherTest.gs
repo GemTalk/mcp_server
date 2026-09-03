@@ -75,6 +75,25 @@ testInitialize
 %
 category: 'tests'
 method: McpDispatcherTest
+testInitializeDeclaresToolsAndNothingElse
+  "A server may send only what it has declared, and must not declare what it cannot do. Tools are
+   the whole of it. 'logging' was declared until 2026-08-27 to license notifications/message for the
+   front end's idle and session-ending warnings; those are gone, so the promise goes with them.
+   The absences are as deliberate as the presence: no listChanged (a session's tool surface is fixed
+   at initialize), no resources, prompts or completions -- and nothing for progress, which is a
+   base-protocol utility the CLIENT opts into per request."
+  | caps |
+  caps := ((self dispatch: (self request: 'initialize' params: Dictionary new)) at: 'result')
+    at: 'capabilities'.
+  self assert: (caps includesKey: 'tools').
+  self deny: (caps includesKey: 'logging').
+  self deny: ((caps at: 'tools') includesKey: 'listChanged').
+  self deny: (caps includesKey: 'resources').
+  self deny: (caps includesKey: 'prompts').
+  self deny: (caps includesKey: 'completions')
+%
+category: 'tests'
+method: McpDispatcherTest
 testInitializeFallsBackForUnsupportedVersion
   "An unsupported requested protocolVersion falls back to our preferred (latest) version. 2025-03-26
    is unsupported on purpose: it mandates receiving JSON-RPC batches, which we don't handle."

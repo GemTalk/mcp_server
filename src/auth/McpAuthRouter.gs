@@ -294,9 +294,18 @@ category: 'sessions'
 method: McpAuthRouter
 openSessionForUser: aUserId jwt: aJwtString readOnly: aBoolean
   "Open + register a worker session for aUserId. When aBoolean, the worker is read-only for its
-   whole life (its token lacked the write scope)."
-  ^self openSessionCreating: [:newId |
-    McpSession startWithId: newId user: aUserId jwt: aJwtString readOnly: aBoolean]
+   whole life (its token lacked the write scope).
+   The session is also bound to the TOKEN'S OWN expiry. That matters more here than any idle policy:
+   the worker gem is logged in as the token's GemStone user, so a session allowed to outlive its
+   access token would leave the authorization it was opened with in force after the grant expired --
+   indefinitely, on a router configured with no idle deadline. exp is required of every token this
+   router accepts (#rejectionForPayload:), so there is always one to bind to; McpSession only ever
+   moves an expiry earlier, so this composes with #maxSessionLifetimeSeconds rather than fighting it."
+  | sess |
+  sess := self openSessionCreating: [:newId |
+    McpSession startWithId: newId user: aUserId jwt: aJwtString readOnly: aBoolean].
+  sess expiresAtSeconds: (self tokenExpirySecondsOf: aJwtString).
+  ^sess
 %
 category: 'metadata'
 method: McpAuthRouter
@@ -349,6 +358,30 @@ rejectionForPayload: payload
       ^Array with: 403 with: 'insufficient_scope'
         with: 'Token missing required scope(s): ' , (self spaceSeparated: missing)]].
   ^nil
+%
+category: 'session lifetime'
+method: McpAuthRouter
+renewSessionExpiry: sess from: aJwtString
+  "Extend sess's deadline to the exp of aJwtString -- the token on the request being served right
+   now -- so that a client which keeps proving its authorization keeps its worker gem. Answers
+   whether the deadline moved.
+   Called from #tokenOwnsNamedSession:on:, which is the one place that has everything required and
+   has already established it: the signature, exp, scopes, issuer and audience passed
+   #tokenRejectionFor:, and the subject matches sess userId. A fresh token for the same user IS a
+   renewed grant, and honouring its exp is reading the credential in front of you rather than
+   relaxing a rule.
+   The scope check is the part that is easy to miss. A session's read/write mode is fixed at open
+   from the opening token's write scope (#openSessionForUser:jwt:readOnly:), so extending a
+   read-WRITE session on a token that no longer carries the write scope would keep the broader
+   authorization alive on the strength of a narrower grant -- a privilege the client has just
+   demonstrably lost. Such a token is allowed to keep working (it is valid, and the session is still
+   its user's) but it buys no more time: the session runs out at its existing deadline, and the
+   client's next session is opened read-only, which is what its current grant actually says.
+   A session already past its deadline but not yet reaped is renewable on purpose. The reaper runs on
+   an interval, so that window is an artefact of scheduling, and the client presenting a valid token
+   inside it is exactly the client that should keep its gem."
+  (sess readOnly not and: [(self tokenGrantsWrite: aJwtString) not]) ifTrue: [^false].
+  ^sess renewExpiryTo: (self tokenExpirySecondsOf: aJwtString)
 %
 category: 'routing'
 method: McpAuthRouter
@@ -567,7 +600,7 @@ serveProtectedResourceMetadata: req on: conn
   meta at: 'authorization_servers' put: self authorizationServers asArray.
   meta at: 'scopes_supported' put: self supportedScopes asArray.
   meta at: 'bearer_methods_supported' put: (Array with: 'header').
-  conn writeStatus: 200 reason: 'OK' body: meta asJson
+  conn writeStatus: 200 reason: 'OK' body: (McpJson write: meta)
 %
 category: 'validation'
 method: McpAuthRouter
@@ -616,6 +649,25 @@ supportedScopes
   extraScopes do: [:s | (all includes: s) ifFalse: [all add: s]].
   ^all asArray
 %
+category: 'auth'
+method: McpAuthRouter
+tokenExpirySecondsOf: aJwtString
+  "The token's exp claim as a wall-clock second, or nil if it cannot be read. An UNVERIFIED parse,
+   like #userIdFromToken:. It has two callers, and they rest on different ground:
+    * #openSessionForUser:jwt:readOnly: uses it to SHORTEN a session's life, which is safe whatever
+      the parse says -- a wrong answer can only cost the session time it was not owed.
+    * #renewSessionExpiry:from: uses it to EXTEND one, where a wrong answer would hand a session
+      life it never earned. That caller is safe only because #tokenRejectionFor: has already
+      verified this token's signature, exp, scopes and (when configured) issuer and audience earlier
+      in the same request, so by then the bytes being re-parsed here are known-good. Do not call it
+      to extend anything from a path that has not passed that gate.
+   A token whose exp cannot be read leaves the session bound by the idle policy alone, which is
+   where it stood before this existed."
+  ^[ | exp |
+     exp := (JsonWebToken fromJwtString: aJwtString) payload at: 'exp' ifAbsent: [nil].
+     (exp isKindOf: Number) ifTrue: [exp truncated] ifFalse: [nil] ]
+   on: Error do: [:e | nil]
+%
 category: 'validation'
 method: McpAuthRouter
 tokenGrantsWrite: aJwtString
@@ -642,13 +694,21 @@ tokenOwnsNamedSession: req on: conn
    A mismatch answers exactly what an unknown session answers, so the difference cannot be used to
    probe which session ids exist; 404 also tells the client to re-initialize, which is the correct
    recovery. Sessions are compared by userId, not by token, so a client that legitimately refreshes
-   its access token mid-session keeps working."
-  | sid sess |
+   its access token mid-session keeps working. It is also where a refreshed token is allowed to
+   buy that session more life (#renewSessionExpiry:from:) -- the only path on which every fact
+   the renewal needs has just been established, which is why it lives here rather than
+   somewhere more obvious."
+  | sid sess token |
   sid := self sessionIdOf: req.
   sid isNil ifTrue: [^true].
   sess := self sessionAt: sid.
   sess isNil ifTrue: [^true].  "unknown or reaped -- the routing handler answers 404 on its own"
-  (self userIdFromToken: (self bearerTokenOf: req)) = sess userId ifTrue: [^true].
+  token := self bearerTokenOf: req.
+  (self userIdFromToken: token) = sess userId ifTrue: [
+    (self renewSessionExpiry: sess from: token) ifTrue: [
+      self log: 'Renewed MCP session ' , sid printString
+        , ' to its refreshed token''s expiry (' , sess expiresAtSeconds printString , ').'].
+    ^true].
   self log: 'McpAuthRouter refused session ' , sid printString ,
     ': the presented token does not belong to its user.'.
   self writeSessionError: 'Unknown or expired session: ' , sid code: 404 reason: 'Not Found'
@@ -756,7 +816,7 @@ writeAuthError: httpCode oauthError: errorCodeOrNil description: aMessage on: co
   err := Dictionary new.
   err at: 'jsonrpc' put: '2.0'; at: 'id' put: nil.
   err at: 'error' put: (Dictionary new at: 'code' put: -32600; at: 'message' put: aMessage; yourself).
-  conn writeStatus: httpCode reason: reason headers: challenge , crlf body: err asJson
+  conn writeStatus: httpCode reason: reason headers: challenge , crlf body: (McpJson write: err)
 %
 category: 'validation'
 method: McpAuthRouter

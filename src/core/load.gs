@@ -12,13 +12,16 @@ run
  Existing keys are left alone, so re-installing over a loaded image changes nothing."
 | d names |
 d := System myUserProfile objectNamed: #Published.
-names := #( #McpError #McpTool #McpToolRegistry #McpToolset #McpBrowsingToolset
+names := #( #McpJson #McpError #McpTool #McpToolRegistry #McpToolset #McpBrowsingToolset
   #McpExecutionToolset #McpListingToolset #McpMutationToolset #McpSearchToolset
   #McpSessionToolset #McpTestingToolset #McpHttpConnection #McpDispatcher #McpBase
-  #McpServer #McpSession #McpRouter ).
+  #McpServer #McpOutbox #McpSession #McpRouter ).
 names do: [:s | (d includesKey: s) ifFalse: [ d at: s put: nil ] ].
 names size
 %
+
+! The JSON codec everything else speaks through. Depends on nothing, so it goes first.
+input src/core/McpJson.gs
 
 ! The tool protocol: an error kind, a tool, the registry that holds them.
 input src/core/McpError.gs
@@ -41,5 +44,8 @@ input src/core/McpHttpConnection.gs
 input src/core/McpDispatcher.gs
 input src/core/McpBase.gs
 input src/core/McpServer.gs
+! The server-to-client pathway: a per-session outbox the front end drains onto that client's SSE
+! stream. Ahead of McpSession, which builds one for every session.
+input src/core/McpOutbox.gs
 input src/core/McpSession.gs
 input src/core/McpRouter.gs

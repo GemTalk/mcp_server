@@ -412,10 +412,10 @@ testFindReferencesToNone
 category: 'tests'
 method: McpToolTest
 testFindSenders
-  "serveGetStream: is sent from serveGet:on: (the GET route dispatch in McpRouter). Few senders ->
-   not capped."
+  "serveGetStream:forSession: is sent from serveGet:on: (the GET route dispatch in McpRouter). Few
+   senders -> not capped."
   | out |
-  out := self searchTools tool_find_senders: (self oneArg: 'selector' value: 'serveGetStream:').
+  out := self searchTools tool_find_senders: (self oneArg: 'selector' value: 'serveGetStream:forSession:').
   self assert: (self includesCS: 'serveGet:on:' in: out).
   self deny: (self includesCS: 'showing first' in: out)
 %

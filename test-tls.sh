@@ -41,9 +41,13 @@ PASS=0; FAIL=0; SID=""
 cleanup() {
   echo
   echo "Tearing down TLS server on port $PORT ..."
-  local pid
-  pid="$(lsof -nP -iTCP:$PORT -sTCP:LISTEN -t 2>/dev/null || true)"
-  [ -n "$pid" ] && kill $pid 2>/dev/null
+  # Delegate rather than open-code a kill: stop-server.sh locates lsof properly (see
+  # gs_env_require_lsof -- lsof is /usr/sbin/lsof on macOS and absent from a minimal PATH, and a
+  # teardown that reads its silence as "nothing is listening" leaves the server running), kills
+  # only a process that looks like a gem, and escalates SIGTERM -> SIGKILL with a wait rather than
+  # firing and letting the shell exit. A leaked front end here keeps the TLS port, so the next run
+  # tests against it -- and a router gem does not pick up recompiled code the way workers do.
+  GS_MCP_PORT="$PORT" ./stop-server.sh >/dev/null 2>&1
   rm -f "$SERVER_LOG"
 }
 trap cleanup EXIT
@@ -113,11 +117,6 @@ tls=$(curl -kv -N -m 3 "$URL" 2>&1 | head -40)
 check "TLS handshake negotiates TLS"           'SSL connection using TL'  "$tls"
 check "server presents the localhost cert"     'CN=localhost'             "$tls"
 
-# --- SSE GET stream over TLS (headers + body, without the verbose handshake noise) ---
-sse=$(curl -sk -i -N -m 3 "$URL" 2>&1 | head -12)
-check "GET /mcp over TLS => text/event-stream" 'text/event-stream'        "$sse"
-check "GET /mcp over TLS sends 'connected'"    ': connected'              "$sse"
-
 # --- initialize establishes this client's session id (MCP-Session-Id) ---
 r=$(curl -sk -i -m 10 "$URL" --data-binary @- <<'JSON'
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"tls-test-client","version":"1.0"}}}
@@ -136,6 +135,16 @@ code=$(curl -sk -m 10 -o /dev/null -w '%{http_code}' "$URL" -H "MCP-Session-Id: 
 JSON
 )
 check "initialized notification => 202"        '202'                      "$code"
+
+# --- SSE GET stream over TLS (headers + body, without the verbose handshake noise) ---
+# This has to come AFTER initialize. The standalone stream is session-scoped -- the same 400/404
+# gates as POST and DELETE -- so a GET carrying no session id, which is where this block used to
+# sit, now correctly gets a 400 instead of a stream.
+sse=$(curl -sk -i -N -m 3 "$URL" 2>&1 | head -12)
+check "GET /mcp over TLS without a session => 400" 'HTTP/1.1 400'         "$sse"
+sse=$(curl -sk -i -N -m 3 "$URL" -H "MCP-Session-Id: $SID" 2>&1 | head -12)
+check "GET /mcp over TLS => text/event-stream" 'text/event-stream'        "$sse"
+check "GET /mcp over TLS sends 'connected'"    ': connected'              "$sse"
 
 # --- routed tools/list (forwarded to this client's worker gem over TLS) ---
 r=$(post <<'JSON'

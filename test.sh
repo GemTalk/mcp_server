@@ -4,7 +4,8 @@
 # Starts the server in its own gem (one session) via run-server.sh, then acts as an
 # MCP client (a separate process) driving the Streamable HTTP transport end-to-end:
 # initialize, the initialized notification, tools/list, every core tool, the error
-# paths, the SSE GET stream, and DELETE. Compiles + runs a throwaway method to exercise
+# paths, the SSE GET stream, DELETE, and (on a second, differently-configured front end)
+# that a session-lifetime policy survives the fork into its own gem. Compiles + runs a throwaway method to exercise
 # compile_method/commit, then cleans it up. Shuts the server down on exit.
 #
 # Configure (or export before running):
@@ -36,6 +37,8 @@ SERVER_LOG="$(mktemp -t gsmcp-server.XXXXXX)"
 
 PASS=0; FAIL=0
 WRAPPER_PID=""
+LIFE_WRAPPER_PID=""
+LIFE_LOG=""
 SID=""
 
 cleanup() {
@@ -52,7 +55,10 @@ cleanup() {
   # transport code and the run reports failures belonging to a version nobody is testing.
   GS_MCP_PORT="$PORT" ./stop-server.sh >/dev/null 2>&1
   [ -n "$WRAPPER_PID" ] && kill "$WRAPPER_PID" 2>/dev/null
-  rm -f "$SERVER_LOG"
+  # the second, differently-configured front end the lifetime section starts (see [3/4])
+  GS_MCP_PORT="$((PORT + 1))" ./stop-server.sh >/dev/null 2>&1
+  [ -n "$LIFE_WRAPPER_PID" ] && kill "$LIFE_WRAPPER_PID" 2>/dev/null
+  rm -f "$SERVER_LOG" "${LIFE_LOG:-}"
 }
 trap cleanup EXIT
 
@@ -76,7 +82,7 @@ echo "Stone=$GS_STONE  User=$GS_USER  Port=$PORT"
 echo
 
 # ---------------------------------------------------------------------------
-echo "[1/3] Starting server gem (session A) ..."
+echo "[1/4] Starting server gem (session A) ..."
 GS_MCP_PORT="$PORT" ./run-server.sh > "$SERVER_LOG" 2>&1 &
 WRAPPER_PID=$!
 for i in $(seq 1 60); do nc -z 127.0.0.1 "$PORT" 2>/dev/null && break; sleep 0.5; done
@@ -89,7 +95,7 @@ echo "  server is listening on 127.0.0.1:$PORT"
 echo
 
 # ---------------------------------------------------------------------------
-echo "[2/3] Driving requests from the client (session B) ..."
+echo "[2/4] Driving requests from the client (session B) ..."
 
 # --- handshake: initialize establishes this client's session id (MCP-Session-Id) ---
 r=$(curl -s -i -m 10 "$URL" --data-binary @- <<'JSON'
@@ -299,7 +305,7 @@ JSON
 check "find_implementors finds runOnPort:"     'McpRouter>>runOnPort:' "$r"
 
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":30,"method":"tools/call","params":{"name":"find_senders","arguments":{"selector":"serveGetStream:"}}}
+{"jsonrpc":"2.0","id":30,"method":"tools/call","params":{"name":"find_senders","arguments":{"selector":"serveGetStream:forSession:"}}}
 JSON
 )
 check "find_senders finds the caller"          'serveGet:on:'      "$r"
@@ -378,17 +384,73 @@ JSON
 )
 check "delete_class removes the class"         'Deleted class'           "$r"
 
-# --- transport: SSE GET stream (session-scoped) ---
-# The stream is gated the same way POST and DELETE are: no session id => 400, unknown id => 404, and
-# only a live session gets a stream. Before that gate, a bare GET opened a keepalive stream that
-# belonged to no session and held a socket and a GsProcess for the life of the server.
-r=$(curl -s -i -N -m 3 "$URL" 2>&1 | head -1)
-check "GET without a session id => 400"       '400 Bad Request'          "$r"
-r=$(curl -s -i -N -m 3 "$URL" -H 'MCP-Session-Id: DEADBEEF' 2>&1 | head -1)
-check "GET with an unknown session => 404"    '404 Not Found'            "$r"
+# --- transport: SSE GET stream ---
+# The standalone stream is the ONLY way this server can speak first, and it is session-scoped: the
+# same 400/404/200 gates as POST and DELETE. It used to answer any anonymous GET with a stream that
+# belonged to no session -- attachable to no outbox, and still sending keepalives long after the
+# reaper had logged out the gem it was opened for.
+r=$(curl -s -i -N -m 3 "$URL" 2>&1 | head -12)
+check "GET /mcp without a session id => 400"  'HTTP/1.1 400'             "$r"
+r=$(curl -s -i -N -m 3 "$URL" -H 'MCP-Session-Id: DEADBEEF' 2>&1 | head -12)
+check "GET /mcp with a dead session id => 404" 'HTTP/1.1 404'            "$r"
 r=$(curl -s -i -N -m 3 "$URL" -H "MCP-Session-Id: $SID" 2>&1 | head -12)
 check "GET /mcp => text/event-stream"         'text/event-stream'        "$r"
 check "GET /mcp sends 'connected' comment"    ': connected'              "$r"
+
+# --- transport: cancelling a call in flight ---
+# Measured 2026-08-31: Claude Code sends notifications/cancelled within seconds of the user pressing
+# Esc, and does NOT close the response stream -- so this notification is how a cancellation actually
+# arrives. Before it was intercepted in the front end it was ROUTED, which queued it on the session's
+# worker mutex behind the very call it asked to stop: measured at 17s on a 20-second call, i.e. it
+# did nothing at all. Both halves are checked: the cancel is answered promptly, and the call ends
+# early rather than running to completion.
+CANCEL_OUT=$(mktemp)
+( curl -s -o "$CANCEL_OUT" -m 60 "$URL" -H "MCP-Session-Id: $SID" \
+    --data-binary '{"jsonrpc":"2.0","id":95,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"(Delay forSeconds: 30) wait. 555"}}}' ) &
+SLOW_CANCEL_PID=$!
+sleep 3
+t0=$(date +%s)
+code=$(curl -s -m 20 -o /dev/null -w '%{http_code}' "$URL" -H "MCP-Session-Id: $SID" \
+  --data-binary '{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":95,"reason":"test"}}')
+t1=$(date +%s)
+check "notifications/cancelled => 202"        '202'                      "$code"
+[ $((t1-t0)) -le 3 ] && verdict="prompt ($((t1-t0))s)" || verdict="queued behind the call ($((t1-t0))s)"
+check "...answered promptly, not behind the call" "prompt"               "$verdict"
+wait $SLOW_CANCEL_PID
+t2=$(date +%s)
+[ $((t2-t0)) -le 15 ] && verdict="ended early ($((t2-t0))s)" || verdict="ran to completion ($((t2-t0))s)"
+check "...and the 30s call was ended early"   'ended early'              "$verdict"
+# The spec asks a receiver not to send a response for a cancelled request.
+grep -q 'jsonrpc' "$CANCEL_OUT" && verdict='sent a JSON-RPC response' || verdict='no response body'
+check "...with no JSON-RPC response for it"   'no response body'         "$verdict"
+rm -f "$CANCEL_OUT"
+# The session survives: the client cancelled a request, not its work.
+r=$(post <<'JSON'
+{"jsonrpc":"2.0","id":96,"method":"ping"}
+JSON
+)
+check "...and the session is still usable"    '"id":96'                  "$r"
+
+# --- transport: a POSTed JSON-RPC response ---
+# How a client answers a request the SERVER sent it (today a liveness ping): a body with an id and
+# no method. The spec wants 202 Accepted and no body. This used to be forwarded to the worker, whose
+# dispatcher saw no method and answered -32600 Invalid Request with a 200 -- so a client's reply to
+# a server ping came back to it as an error.
+r=$(curl -s -i -m 10 "$URL" -H "MCP-Session-Id: $SID" \
+  --data-binary '{"jsonrpc":"2.0","id":"srv-999","result":{}}' 2>&1)
+check "a POSTed JSON-RPC response => 202"     'HTTP/1.1 202'             "$r"
+echo "$r" | grep -q -- '-32600' && verdict='answered -32600' || verdict='no error body'
+check "...and not routed to the worker"       'no error body'            "$verdict"
+
+# --- transport: logging/setLevel is NOT served ---
+# The logging capability was retired on 2026-08-27 (see McpDispatcher>>capabilities): both idle
+# warnings are gone, and the draft revision prohibits an unsolicited notifications/message anyway.
+# A server must not answer a method it does not declare, so the undeclared method is the assertion.
+r=$(post <<'JSON'
+{"jsonrpc":"2.0","id":43,"method":"logging/setLevel","params":{"level":"debug"}}
+JSON
+)
+check "logging/setLevel is not a method"      '-32601'                   "$r"
 
 # --- transport: a slow call must not block another client ---
 # The property the whole front end rests on: one client's long tool call does not stop the server.
@@ -417,9 +479,29 @@ wait "$slow_pid" || true
 check "the slow call still returned its own result" '"text":"4321"'        "$(cat "$SLOW_OUT")"
 rm -f "$SLOW_OUT"
 
+# --- transport: ending a session closes its open stream ---
+# The only end-to-end exercise of the drain loop: a stream is held open, the session is ended, and
+# the loop must notice and finish. Ending a session marks its outbox CLOSING rather than closed
+# precisely so the loop gets one more pass -- that is what lets the reaper deliver a session-ending
+# notice instead of cutting the client off with the gem. If the loop ignored it, this curl would sit
+# there until its own timeout.
+STREAM_OUT="$(mktemp "${TMPDIR:-/tmp}/mcp-stream.XXXXXX")"
+curl -s -N -m 30 "$URL" -H "MCP-Session-Id: $SID" >"$STREAM_OUT" 2>&1 &
+stream_pid=$!
+sleep 1                       # let the stream attach to the session's outbox
+started=$SECONDS
+curl -s -m 10 -X DELETE "$URL" -H "MCP-Session-Id: $SID" >/dev/null 2>&1
+wait "$stream_pid" || true
+elapsed=$((SECONDS - started))
+[ "$elapsed" -lt 5 ] && verdict="closed" || verdict="hung for ${elapsed}s"
+check "ending a session closes its stream (${elapsed}s)" 'closed'        "$verdict"
+check "...having delivered what was queued"   ': connected'              "$(cat "$STREAM_OUT")"
+rm -f "$STREAM_OUT"
+
 # --- transport: DELETE (session termination) ---
 # Same status codes as the POST path: no header => 400, unknown id => 404, live id => 200.
-# Runs last, because the final DELETE ends this client's session.
+# The live-id case ran just above (it is what closed the stream), so this id is now gone: what is
+# left to check here is the two error gates and the 404 a client meets afterwards.
 r=$(curl -s -i -m 10 -X DELETE "$URL" 2>&1 | head -1)
 check "DELETE without session => 400"          '400'                     "$r"
 
@@ -427,7 +509,7 @@ r=$(curl -s -i -m 10 -X DELETE "$URL" -H 'MCP-Session-Id: DEADBEEF' 2>&1 | head 
 check "DELETE unknown session => 404"          '404'                     "$r"
 
 r=$(curl -s -i -m 10 -X DELETE "$URL" -H "MCP-Session-Id: $SID" 2>&1 | head -1)
-check "DELETE live session => 200"             '200'                     "$r"
+check "DELETE an already-ended session => 404" '404'                     "$r"
 
 # After termination the spec requires 404 for any request still carrying that id, which is
 # the client's cue to re-initialize.
@@ -436,6 +518,53 @@ r=$(curl -s -i -m 10 "$URL" -H "MCP-Session-Id: $SID" \
 check "POST after DELETE => 404"               '404'                     "$r"
 
 # ---------------------------------------------------------------------------
+# --- session lifetime: the intervals are deployment config ---
+# The idle policy is no longer literals in a method, so the thing worth checking on real wires is
+# that a configured lifetime SURVIVES THE FORK: config reaches a detached front end only by being
+# serialized into its fork string, and a router that quietly reverted to the defaults would look
+# perfectly healthy while ignoring everything the operator asked for.
+# The no-deadline case is the one to check, because it is the only setting whose instruction is a
+# JSON null -- absence and "none" mean different things, and only one of them is what was asked for.
 echo
-echo "[3/3] Results: $PASS passed, $FAIL failed"
+echo "[3/4] Session lifetime configuration ..."
+LIFE_PORT=$((PORT + 1))
+LIFE_URL="http://127.0.0.1:$LIFE_PORT/mcp"
+LIFE_LOG="$(mktemp -t gsmcp-life.XXXXXX)"
+GS_MCP_PORT="$LIFE_PORT" GS_MCP_IDLE_TIMEOUT=none GS_MCP_PROBE_INTERVAL=30s GS_MCP_REAPER_INTERVAL=15s \
+  GS_MCP_STREAMLESS_TIMEOUT=20m GS_MCP_MAX_LIFETIME=8h ./run-server.sh > "$LIFE_LOG" 2>&1 &
+LIFE_WRAPPER_PID=$!
+for i in $(seq 1 60); do nc -z 127.0.0.1 "$LIFE_PORT" 2>/dev/null && break; sleep 0.5; done
+if nc -z 127.0.0.1 "$LIFE_PORT" 2>/dev/null; then
+  check "a router with no idle deadline starts"  'listening'   "$(cat "$LIFE_LOG")"
+  r=$(curl -s -i -m 10 "$LIFE_URL" --data-binary @- <<'JSON'
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}
+JSON
+)
+  check "...and serves a session on it"          'MCP-Session-Id'  "$r"
+  LIFE_SID=$(printf '%s' "$r" | grep -i '^mcp-session-id:' | tr -d '\r' | awk '{print $2}')
+  curl -s -m 10 -X DELETE "$LIFE_URL" -H "MCP-Session-Id: $LIFE_SID" >/dev/null 2>&1
+else
+  check "a router with no idle deadline starts"  'listening'   "did not start. log: $(cat "$LIFE_LOG")"
+fi
+# A deliberately incoherent combination must be refused -- here an idle timeout shorter than the
+# interval idleness is measured in, which would release a session before its client could be asked
+# anything at all -- and refused IN THE LAUNCHING SESSION: a
+# detached child gem that raises on startup leaves the operator looking at a cheerful "forked into
+# gem session N" and a port that never opens. So forkOnPort: validates before it forks, and the
+# message lands where whoever typed it will see it.
+BAD_PORT=$((PORT + 2))
+BAD_LOG="$(mktemp -t gsmcp-bad.XXXXXX)"
+GS_MCP_PORT="$BAD_PORT" GS_MCP_IDLE_TIMEOUT=90s GS_MCP_PROBE_INTERVAL=300s \
+  ./run-server.sh > "$BAD_LOG" 2>&1 || true
+check "an unmeasurable idle timeout is refused"  'shorter than'   "$(cat "$BAD_LOG")"
+if nc -z 127.0.0.1 "$BAD_PORT" 2>/dev/null; then
+  check "...and no front end is left running"  'nothing listening'  "something is listening on $BAD_PORT"
+else
+  check "...and no front end is left running"  'nothing listening'  "nothing listening"
+fi
+rm -f "$BAD_LOG"
+
+# ---------------------------------------------------------------------------
+echo
+echo "[4/4] Results: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

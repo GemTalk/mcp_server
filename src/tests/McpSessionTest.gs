@@ -15,8 +15,9 @@ expectvalue /Class
 doit
 McpSessionTest comment: 
 'Covers how McpSession drives its worker gem: McpSession>>runWorker:, the non-blocking call that
-#forward: and #prepareWorker both go through, and the two guarantees that come with it -- one call
-in flight per worker, and no reaping a session mid-call.
+#forward: and #prepareWorker both go through, and the three guarantees that come with it -- one call
+in flight per worker, no reaping a session mid-call, and no call outrunning the deadline its router
+configured.
 
 A blocking GCI executeString: blocks in C, so while one ran the front-end gem executed no Smalltalk
 and EVERY other GsProcess stopped: other clients'' requests, the accept loop, the idle reaper, and
@@ -43,6 +44,180 @@ includesCS: aSubstring in: aString
    (e.g. 'FAIL' matches the 'fail' in 'failed'), so use findString:startingAt: (which is
    case-sensitive) for assert:/deny: substring checks."
   ^(aString findString: aSubstring startingAt: 1) > 0
+%
+category: 'tests - deadline'
+method: McpSessionTest
+testACallThatBeatsTheDeadlineIsNeverBroken
+  "A deadline is a limit, not a schedule. An ordinary call that finishes inside it is untouched, and
+   a session with one configured drives its worker exactly as a session without one does."
+  | sess w |
+  sess := McpMockSession startWithId: 'in-time'.
+  sess requestTimeoutSeconds: 600.
+  w := sess mockWorker.
+  w waitsBeforeDone: 3; nextResult: 'DONE'.
+  self assert: (sess forward: 'QUICK') equals: 'DONE'.
+  self assert: w softBreakCount equals: 0.
+  self assert: w hardBreakCount equals: 0.
+  self deny: sess workerAbandoned
+%
+category: 'tests - cancellation'
+method: McpSessionTest
+testACancelForAnotherRequestIsIgnored
+  "The id check is load-bearing, not a formality. A cancellation very often arrives just after the
+   call it names has finished -- the spec says as much and asks receivers to ignore those -- and
+   without the check a late cancel would end whatever call happened to be running instead of the one
+   the client meant. Which is the same call to the client, and a different one entirely to the gem."
+  | sess w raised |
+  sess := McpMockSession startWithId: 'wrong-id'.
+  w := sess mockWorker.
+  w waitsBeforeDone: 3; nextResult: 'FINISHED-ANYWAY'.
+  [(Delay forMilliseconds: 50) wait.
+   self deny: (sess requestCancel: 999).
+   self deny: (sess requestCancel: nil)] fork.
+  raised := nil.
+  self assert: ([sess forward: 'KEEP-GOING'] on: McpError do: [:ex | raised := ex. nil])
+    equals: 'FINISHED-ANYWAY'.
+  self assert: raised isNil.
+  self assert: w softBreakCount equals: 0
+%
+category: 'tests - cancellation'
+method: McpSessionTest
+testACancelFromAnotherProcessEndsTheCallAndLeavesTheSessionUsable
+  "A client asking to stop a call runs the SAME escalation a deadline does -- that is why
+   cancellation needed no new mechanism -- and costs the client the same thing: that request, not its
+   gem, and not the uncommitted work in it.
+   The cancel is requested from a DIFFERENT GsProcess, which is how it really arrives: the front end
+   serves the notifications/cancelled POST on its own connection while this call holds the worker
+   mutex. #requestCancel: therefore only sets a flag; the break is sent by the process that owns the
+   mutex, on its next wait."
+  | sess w raised |
+  sess := McpMockSession startWithId: 'cancel'.
+  w := sess mockWorker.
+  w waitsBeforeDone: 1000000.        "a call that never finishes on its own"
+  [(Delay forMilliseconds: 50) wait. sess requestCancel: 7] fork.
+  raised := nil.
+  [sess forward: 'LONG-RUNNING' requestId: 7] on: McpError do: [:ex | raised := ex].
+  self assert: raised notNil.
+  self assert: raised kind equals: #cancelled.
+  self assert: (raised description findString: 'cancelled' startingAt: 1) > 0.
+  self assert: w softBreakCount equals: 1.
+  self assert: w hardBreakCount equals: 0.
+  self deny: sess workerAbandoned.
+  self deny: sess isBusy.
+  "and the client keeps its session -- it cancelled a request, not its work"
+  w waitsBeforeDone: 1; nextResult: 'AFTER-CANCEL'.
+  self assert: (sess forward: 'NEXT-REQUEST') equals: 'AFTER-CANCEL'
+%
+category: 'tests - cancellation'
+method: McpSessionTest
+testACancelIsForgottenWhenItsCallEnds
+  "The hazard in letting another GsProcess set a flag: a cancellation that arrived too late, or that
+   was never acted on, must not end the NEXT call. Both ends of #forward: clear it -- on the way in
+   as well as out, because a cancel can land in the instant between one call finishing and its
+   ensure: running."
+  | sess w |
+  sess := McpMockSession startWithId: 'stale-flag'.
+  w := sess mockWorker.
+  w waitsBeforeDone: 1; nextResult: 'FIRST'.
+  self assert: (sess forward: 'FIRST-REQUEST' requestId: 1) equals: 'FIRST'.
+  "the call is over, so this names nothing and must not be remembered"
+  self deny: (sess requestCancel: 1).
+  w waitsBeforeDone: 1; nextResult: 'SECOND'.
+  self assert: (sess forward: 'SECOND-REQUEST' requestId: 2) equals: 'SECOND'.
+  self assert: w softBreakCount equals: 0
+%
+category: 'tests - deadline'
+method: McpSessionTest
+testADeadlineEndsARunawayCallAndLeavesTheSessionUsable
+  "What the deadline is for: a call that will not finish is ended, the client is told, and the client
+   keeps its gem. A soft break is what ends it -- the worker is usable immediately afterwards, so the
+   session and the uncommitted work in it survive -- and the worker mutex is released on the way out,
+   or one runaway would wedge that client for the life of its session."
+  | sess w raised |
+  sess := McpMockSession startWithId: 'deadline'.
+  sess requestTimeoutSeconds: 1.
+  w := sess mockWorker.
+  w waitsBeforeDone: 1000000.        "a call that never finishes on its own"
+  raised := nil.
+  [sess forward: 'RUNAWAY'] on: McpError do: [:ex | raised := ex].
+  self assert: raised notNil.
+  self assert: raised kind equals: #timeout.
+  self assert: w softBreakCount equals: 1.
+  self assert: w hardBreakCount equals: 0.
+  self deny: sess workerAbandoned.
+  self deny: sess workerGemStopped.
+  self deny: sess isBusy.
+  "the session is still the client's to use -- that is the whole difference between ending a call and
+   ending a session"
+  w waitsBeforeDone: 1; nextResult: 'AFTER-TIMEOUT'.
+  self assert: (sess forward: 'NEXT-REQUEST') equals: 'AFTER-TIMEOUT'
+%
+category: 'tests - deadline'
+method: McpSessionTest
+testAWorkerThatIgnoresBothBreaksIsStoppedAndFinishesTheSession
+  "The last resort. A gem that takes neither break can never serve again -- GCI allows one call in
+   flight and this one never ends -- so it is stopped from the stone side and the session is marked
+   finished. Two things follow that the reaper and the close path each have to get right: such a
+   session must not read as BUSY (its call is in flight and always will be), and closing it must not
+   send a logout, which is a GCI call that would queue behind the call that could not be ended."
+  | sess w raised |
+  sess := McpMockSession startWithId: 'unbreakable'.
+  sess requestTimeoutSeconds: 1.
+  w := sess mockWorker.
+  w waitsBeforeDone: 1000000; resistSoftBreak: true; resistHardBreak: true.
+  raised := nil.
+  [sess forward: 'UNBREAKABLE'] on: McpError do: [:ex | raised := ex].
+  self assert: raised notNil.
+  self assert: raised kind equals: #timeout.
+  self assert: w softBreakCount equals: 1.
+  self assert: w hardBreakCount equals: 1.
+  self assert: sess workerGemStopped.
+  self assert: sess workerAbandoned.
+  self deny: sess isBusy.
+  sess close.
+  self assert: w logoutCount equals: 0
+%
+category: 'tests - cancellation'
+method: McpSessionTest
+testAWorkerThatIgnoresBothBreaksIsStoppedOnACancelToo
+  "The escalation is the same one, so its last resort is too: a gem that takes neither break is
+   stopped from the stone side and the session is finished. The error says #cancelled -- the client
+   asked for this -- but it also has to say the session went with it, because that is the one ending
+   where cancelling a request costs more than the request."
+  | sess w raised |
+  sess := McpMockSession startWithId: 'unbreakable-cancel'.
+  w := sess mockWorker.
+  w waitsBeforeDone: 1000000; resistSoftBreak: true; resistHardBreak: true.
+  [(Delay forMilliseconds: 50) wait. sess requestCancel: 3] fork.
+  raised := nil.
+  [sess forward: 'STUBBORN' requestId: 3] on: McpError do: [:ex | raised := ex].
+  self assert: raised notNil.
+  self assert: raised kind equals: #cancelled.
+  self assert: w softBreakCount equals: 1.
+  self assert: w hardBreakCount equals: 1.
+  self assert: sess workerAbandoned.
+  self assert: sess workerGemStopped.
+  self assert: (raised description findString: 'initialize again' startingAt: 1) > 0
+%
+category: 'tests - deadline'
+method: McpSessionTest
+testAWorkerThatIgnoresTheSoftBreakGetsAHardOne
+  "The middle step. A soft break that is not taken escalates to a hard one, and a worker that takes
+   THAT is still a worker the client keeps: the session is not abandoned and its gem is not stopped."
+  | sess w raised |
+  sess := McpMockSession startWithId: 'stubborn'.
+  sess requestTimeoutSeconds: 1.
+  w := sess mockWorker.
+  w waitsBeforeDone: 1000000; resistSoftBreak: true.
+  raised := nil.
+  [sess forward: 'STUBBORN'] on: McpError do: [:ex | raised := ex].
+  self assert: raised notNil.
+  self assert: raised kind equals: #timeout.
+  self assert: w softBreakCount equals: 1.
+  self assert: w hardBreakCount equals: 1.
+  self deny: sess workerAbandoned.
+  self deny: sess workerGemStopped.
+  self deny: sess isBusy
 %
 category: 'tests - forwarding'
 method: McpSessionTest
@@ -130,6 +305,21 @@ testIsBusyReportsACallInFlight
   self assert: (self waitUpTo: 1000 for: [sess isBusy]).
   self assert: (self waitUpTo: 1000 for: [sess isBusy not])
 %
+category: 'tests - deadline'
+method: McpSessionTest
+testNoDeadlineLetsALongCallRunToCompletion
+  "nil is a real setting, and the one a deployment asks for when its tools are legitimately slow:
+   with no deadline a call is waited out however long it takes. It is also what a session configures
+   for ITSELF -- the policy belongs to the router, which pushes one in as it opens the session."
+  | sess w |
+  sess := McpMockSession startWithId: 'no-deadline'.
+  self assert: sess requestTimeoutSeconds isNil.
+  w := sess mockWorker.
+  w waitsBeforeDone: 25; nextResult: 'SLOW-BUT-DONE'.
+  self assert: (sess forward: 'SLOW') equals: 'SLOW-BUT-DONE'.
+  self assert: w softBreakCount equals: 0.
+  self assert: w hardBreakCount equals: 0
+%
 category: 'tests - forwarding'
 method: McpSessionTest
 testPrepareWorkerUsesTheSameNonBlockingPath
@@ -146,14 +336,17 @@ category: 'tests - reaping'
 method: McpSessionTest
 testReaperLeavesASessionWithACallInFlightAlone
   "forward: stamps the activity clock when a call STARTS, so a request that outlives the idle
-   timeout would look idle while it was still running -- and the reaper would log its worker out
+   deadline would look idle while it was still running -- and the reaper would log its worker out
    from under it. That was impossible while forwarding froze the gem (the reaper could not run
    either), so the guard belongs with the non-blocking forward."
   | r sess w |
   r := McpRouter new.
   sess := r openSessionCreating: [:id | McpMockSession startWithId: id].
   w := sess mockWorker.
-  sess fakeIdleSeconds: 999999.          "far past sessionIdleTimeoutSeconds"
+  "Fully idle by this server's measure -- as many answered pings as release takes. It has to be a
+   fake: #runWorker: stamps the activity clock when a call ENDS as well as when it starts, and that
+   legitimately resets the real count, so a genuine one could not survive the call being tested."
+  sess fakeQuietProbes: r confirmationsBeforeRelease.
   w waitsBeforeDone: 10; waitMs: 20.
   [sess forward: 'SLOW-REQUEST'] fork.
   self assert: (self waitUpTo: 1000 for: [sess isBusy]).
