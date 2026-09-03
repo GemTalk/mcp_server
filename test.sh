@@ -74,6 +74,20 @@ check() {
   fi
 }
 
+# deny NAME FORBIDDEN-SUBSTRING ACTUAL  -- the mirror of check, for a property whose whole point is
+# an ABSENCE. The Unicode section needs it: "the emoji arrived" and "it did not arrive as an escape"
+# are different claims, and only the second one fails if the escaping policy comes back.
+deny() {
+  if printf '%s' "$3" | grep -qF -- "$2"; then
+    printf '  \033[31m✗\033[0m %s\n' "$1"
+    printf '      expected NOT to contain: %s\n' "$2"
+    printf '      got: %s\n' "$3"
+    FAIL=$((FAIL+1))
+  else
+    printf '  \033[32m✓\033[0m %s\n' "$1"; PASS=$((PASS+1))
+  fi
+}
+
 # post  -- reads a JSON-RPC body from stdin, returns the response body (carries the session id)
 post() { curl -s -m 10 "$URL" -H "MCP-Session-Id: $SID" --data-binary @-; }
 
@@ -190,6 +204,41 @@ JSON
 # appears only when that session happens to have uncommitted work -- so an assertion that closed the
 # quote passed or failed by run order rather than by behaviour.
 check "compiled method runs => 42"            '"text":"42'               "$r"
+
+# --- Unicode on the wire: UTF-8 in BOTH directions, for BOTH kinds of client ---
+# The only over-the-wire coverage of either half, and what would catch a return to the old
+# ASCII-escaping policy. Outbound is McpJson (which exists because kernel printJsonOn: writes a
+# codepoint above U+FFFF as one WRONG escape); inbound is the decode in McpBase class>>parseBody:
+# plus its surrogate-escape repair. Both spelled as bytes, so nothing depends on this file's own
+# encoding surviving an editor.
+EMOJI=$(printf '\360\237\230\200')   # U+1F600, as its four UTF-8 bytes
+EACUTE=$(printf '\303\251')            # U+00E9, as its two
+
+# A raw-UTF-8 client -- JSON.stringify, and therefore most of them. Store non-ASCII text in a method
+# comment and read it back: the round trip that used to store Latin-1 mojibake in the image to stay.
+r=$(printf '%s' '{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"compile_method","arguments":{"className":"McpSmokeClass","source":"greet\n  \"caf'"$EACUTE"' '"$EMOJI"'\"\n  ^1","category":"smoke"}}}' | post)
+check "compile_method accepts raw UTF-8"      'Compiled McpSmokeClass'   "$r"
+
+r=$(post <<'JSON'
+{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"get_method_source","arguments":{"className":"McpSmokeClass","selector":"greet"}}}
+JSON
+)
+check "...and the emoji comes back as UTF-8"  "$EMOJI"                   "$r"
+check "...and the e-acute with it"            "$EACUTE"                  "$r"
+deny  "...not as a surrogate-pair escape"     'uD83D'                    "$r"
+deny  "...and not as a BMP escape"            'u00E9'                    "$r"
+
+# An ESCAPING client -- Python's json.dumps, where ensure_ascii=True is the default. The pair below
+# is the only way JSON can spell U+1F600 as an escape, and kernel JsonParser refuses each half on
+# its own (OutOfRange 2723), so this whole request used to come back -32700. describe_class echoes
+# the name it was given, and changes nothing.
+r=$(post <<'JSON'
+{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"describe_class","arguments":{"className":"Zz\uD83D\uDE00"}}}
+JSON
+)
+deny  "an escaped emoji is not a parse error" '-32700'                   "$r"
+check "...it is repaired on the way in"       'Class not found: Zz'      "$r"
+check "...and echoed back as UTF-8"           "$EMOJI"                   "$r"
 
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"UserGlobals removeKey: #McpSmokeClass ifAbsent: [nil]. System commitTransaction. 'cleaned'"}}}

@@ -116,6 +116,50 @@ testEscapedSurrogatePairIsCombined
 %
 category: 'tests-utf8'
 method: McpUtf8Test
+testForwardedBodyDecodesWhateverClassTheWorkerCompiledItAs
+  "REGRESSION, and the one defect in this area that in-image tests could not see. The front end
+   forwards the raw body to the worker gem embedded in a Smalltalk expression via #printString
+   (McpSession>>workerExpressionFor:lifetimeBounds:), so the worker receives its copy as a COMPILED
+   STRING LITERAL -- and which class that is depends on the WORKER SESSION's #StringConfiguration,
+   not on what the front end sent. Configured for Unicode16, which any Grail image is, an all-ASCII
+   literal compiles as Unicode7 and one with a byte above 0x7F as Unicode16. Unicode7 understands
+   #decodeFromUTF8; Unicode16 does not. So every request body carrying one non-ASCII byte failed in
+   the worker with a MessageNotUnderstood that this method's catch-all reported as a -32700 -- over
+   a real socket, an e-acute in a compile_method source was refused outright while the same call in
+   ASCII worked.
+   Every other test here hands #parseBody: a byte String, which is why none of them caught it. This
+   one hands it what the worker actually holds, in each of the three classes a literal can be, and
+   requires the same answer from all of them. #asStringEncoding: is not used to build them because
+   it is not in every extent; the codepoints are put in one at a time, which is exactly what the
+   compiler does with a printString'd byte string. Nothing here asserts which class the COMPILER
+   would choose -- that is the session's business -- only that every class it can choose works."
+  | bytes wide plain |
+  bytes := self bodyOfBytes: #(123 34 107 34 58 34 99 97 102 16rC3 16rA9 34 125).
+  "The two a body with a non-ASCII byte can arrive as. A Unicode7 is NOT among them: it holds
+   7 bits, so adding the e-acute's lead byte widens it to Unicode16 by itself -- which is the same
+   reason the compiler cannot answer a Unicode7 for such a literal."
+  wide := Unicode16 new.
+  1 to: bytes size do: [:i | wide add: (bytes at: i)].
+  self assert: wide class equals: Unicode16.
+  self assert: wide size equals: bytes size
+    description: 'the Unicode16 must hold the BYTES as codepoints, one each'.
+  self assert: (McpBase parseBody: bytes) notNil.
+  self assert: (McpBase parseBody: wide) notNil
+    description: 'a body the worker compiled as a Unicode16 failed to parse: '
+      , 'Unicode16 does not understand #decodeFromUTF8'.
+  self assert: (self charAt: 4 of: ((McpBase parseBody: wide) at: 'k')) equals: 16rE9.
+  self assert: ((McpBase parseBody: wide) at: 'k') size equals: 4.
+  "And the all-ASCII case, which is what a Unicode-configured session compiles as a Unicode7. This
+   one always worked -- Unicode7 does understand #decodeFromUTF8 -- so it is here to keep the fix
+   from being read as being about wide strings in general."
+  plain := Unicode7 new.
+  bytes := self bodyOfBytes: #(123 34 107 34 58 34 111 107 34 125).
+  1 to: bytes size do: [:i | plain add: (bytes at: i)].
+  self assert: plain class equals: Unicode7.
+  self assert: ((McpBase parseBody: plain) at: 'k') equals: 'ok'
+%
+category: 'tests-utf8'
+method: McpUtf8Test
 testLiteralBackslashUIsNotRewritten
   "BACKSLASH PARITY, the one way a surrogate-combining scan can do harm. A body may legitimately
    carry the six characters of an escape AS TEXT -- a compile_method source describing this very

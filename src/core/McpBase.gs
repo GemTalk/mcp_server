@@ -147,7 +147,7 @@ classmethod: McpBase
 parseBody: aString
   "Parse a JSON-RPC request body to its Dictionary, or nil if empty/malformed. A valid JSON-RPC
    request is always an object, so nil here -> a -32700 Parse error.
-   aString is WIRE BYTES, straight off the socket, and the three sends before the parse are the
+   aString is WIRE BYTES, straight off the socket, and the four sends before the parse are the
    whole of gs-mcp''s INBOUND Unicode handling. The outbound half is McpJson.
    #decodeFromUTF8, because JSON is UTF-8 on the wire (RFC 8259 8.1) while JsonParser takes a
    CHARACTER string, with nothing in its API to say which of the two it wants. Without the decode
@@ -180,12 +180,26 @@ parseBody: aString
    encoded surrogate, naming the byte offset, and the catch-all below turns that into the -32700.
    That is the intended policy: a client whose encoder is broken is told so, rather than having one
    U+FFFD substituted into text this server would then store.
-   This is the ONLY parse on the request path, and it serves both sides of the worker boundary: the
-   front end parses the body to classify it (McpRouter>>servePost:) and then forwards the SAME RAW
-   BYTES to the worker gem, which parses them again here. Nothing re-encodes in between, so the two
-   decodes cannot disagree. It follows that aString must be a byte String: the callers that hand us
-   a string gs-mcp itself produced (the router''s own config, the worker''s toolset options) pass
-   ASCII, and a wide string would not understand #decodeFromUTF8 at all.
+   THE LEADING #asString IS NOT COSMETIC, and the bug it fixes is why it is here. This is the ONLY
+   parse on the request path, and it serves both sides of the worker boundary: the front end parses
+   the body to classify it (McpRouter>>servePost:) and then forwards the SAME RAW BYTES to the
+   worker gem, embedded in a Smalltalk expression via #printString
+   (McpSession>>workerExpressionFor:lifetimeBounds:) -- so the worker gets its copy as a COMPILED
+   STRING LITERAL, and which class that literal is depends on the WORKER SESSION''s
+   #StringConfiguration, not on what the front end sent. On an image configured for Unicode16 --
+   which any Grail image is -- an all-ASCII literal compiles as a Unicode7 and a literal with a
+   byte above 0x7F in it compiles as a Unicode16. Unicode7 understands #decodeFromUTF8; Unicode16
+   does NOT (nor does DoubleByteString). So every request body carrying a single non-ASCII byte
+   failed in the worker with a MessageNotUnderstood, which this method''s catch-all turned into a
+   -32700 Parse error -- measured over a real socket, where a `caf` with an e-acute in a
+   compile_method source was refused outright while the same call with ASCII worked. In-image tests
+   could not see it: they hand this method a byte String directly, and only a real GCI hop
+   re-compiles the body into whatever the worker''s configuration says a literal is.
+   #asString answers the receiver for a byte String, so it costs nothing on the common path, and it
+   narrows a Unicode16 whose codepoints are all below 256 -- which is exactly what a printString''d
+   byte string compiles to -- straight back to the byte String those bytes came from. A genuinely
+   WIDE string still cannot be decoded and still becomes a -32700, which is right: a wide string is
+   not wire bytes and nothing should be pretending it is.
    #combineSurrogateEscapesIn:, because JsonParser sends `Character codePoint:` to each \uXXXX
    escape on its own and 3.7.x refuses a surrogate, so an emoji ESCAPED as a surrogate pair failed
    the whole request with a -32700. Python''s json.dumps escapes by default, so that is a real
@@ -207,8 +221,9 @@ parseBody: aString
    (McpServer class>>prepareWorkerWithToolsets:options:...) runs before any server instance exists.
    Same arrangement, and same reason, as the shared helpers on McpToolset."
   (aString isNil or: [aString isEmpty]) ifTrue: [^nil].
-  ^[ | parsed |
-     parsed := JsonParser parse: (self combineSurrogateEscapesIn: aString decodeFromUTF8 asString).
+  ^[ | bytes parsed |
+     bytes := aString asString.
+     parsed := JsonParser parse: (self combineSurrogateEscapesIn: bytes decodeFromUTF8 asString).
      (parsed isKindOf: Dictionary) ifTrue: [parsed] ifFalse: [nil] ]
    on: Error do: [:ex | nil]
 %
