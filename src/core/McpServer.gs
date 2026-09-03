@@ -476,7 +476,7 @@ handleJsonString: aRawJsonString lifetimeBounds: anArrayOrNil
   depth > 1 ifTrue: [temps removeKey: #McpProgress otherwise: nil].
   ^[parsed := self parseBody: aRawJsonString.
     response := dispatcher handle: parsed.
-    response isNil ifTrue: [''] ifFalse: [response asJson]]
+    response isNil ifTrue: [''] ifFalse: [McpJson write: response]]
       ensure: [
         temps at: #McpCallDepth put: depth - 1.
         outer isNil

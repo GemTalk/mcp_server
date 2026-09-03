@@ -14,8 +14,9 @@ GsTestCase subclass: 'McpUtf8Test'
 expectvalue /Class
 doit
 McpUtf8Test comment: 
-'Unit tests for the one Unicode fix gs-mcp carries: the UTF-8 decode in
-McpBase class>>parseBody:, which is `JsonParser parse: aString decodeFromUTF8 asString`.
+'Unit tests for the INBOUND half of gs-mcp''s wire contract: the UTF-8 decode kernel JsonParser
+needs, in McpBase class>>parseBody:, which is `JsonParser parse: aString decodeFromUTF8 asString`.
+The outbound half -- the writer -- is McpJsonTest.
 
 JSON is UTF-8 on the wire and kernel JsonParser takes a CHARACTER string, so a body handed straight
 from the socket to the parser was read one Latin-1 character per byte. That is the defect these
@@ -28,11 +29,16 @@ The second is a deliberate choice -- an earlier gs-mcp decoder substituted one U
 sequence and kept the call. Refusing tells a client with a broken encoder that it is broken,
 instead of storing text nobody meant.
 
-The kernel''s OTHER JSON defects are deliberately NOT covered here, because gs-mcp no longer works
-around them: an escaped surrogate pair still fails a request, an astral character still goes out as
-one wrong escape, and an unknown escape is still silently dropped. They are measured in the kernel
-JSON Unicode report, and the codec that used to answer them is preserved on the emoji-safe branch.
-Testing them here would only pin defects this code does not own.
+WHAT THE KERNEL PARSER STILL GETS WRONG, and is deliberately not covered here, because gs-mcp does
+not work around it: an escaped surrogate pair fails the whole request (Python''s json.dumps escapes
+by default, so that client cannot send an emoji), and an escape the parser does not recognize is
+silently dropped. Both are inbound and both need a real parser to fix. They are measured in the
+kernel JSON Unicode report; testing them here would only pin defects this code does not own.
+Note which one is NO LONGER on that list. The write-path defect -- an astral codepoint going out as
+one wrong escape -- was the one an application could not route around, and gs-mcp answered it by
+writing UTF-8 instead of escapes (McpJson). So a client that sends an emoji RAW, which is
+JSON.stringify and therefore most of them, now round-trips it correctly; only an escaping client
+still cannot.
 
 Everything here is pure -- no commits, no view movement -- so this suite needs no
 movesTheSessionView opt-in.
@@ -116,9 +122,9 @@ method: McpUtf8Test
 testMultiByteSequencesAreDecoded
   "REGRESSION. Nothing decoded the body, so a raw-UTF-8 client -- which is every real MCP client --
    had each byte read as one Latin-1 character: 'cafe' with an e-acute measured 5, not 4.
-   Two-, three- and four-byte sequences: U+00E9, U+2603 and U+1F600. The four-byte case arrives
-   correctly even though the kernel writer cannot write it back out (the kernel JSON Unicode report,
-   defect 2) -- what a client sends is still stored correctly, which is the half that matters."
+   Two-, three- and four-byte sequences: U+00E9, U+2603 and U+1F600. The four-byte case is the one
+   that used to arrive correctly and then be written back out wrong; McpJsonTest owns the other end
+   of it now, so between the two suites the emoji is covered in both directions."
   | parsed |
   parsed := McpBase parseBody:
     (self bodyOfBytes: #(123 34 107 34 58 34 99 97 102 16rC3 16rA9 34 125)).

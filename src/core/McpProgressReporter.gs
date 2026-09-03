@@ -160,7 +160,7 @@ sendProgress: aNumber of: aTotalOrNil message: aStringOrNil
     d at: 'm' put: (m size > self maxMessageSize
       ifTrue: [m copyFrom: 1 to: self maxMessageSize]
       ifFalse: [m])].
-  System sendSignal: 1 to: frontEndSession withMessage: d asJson.
+  System sendSignal: 1 to: frontEndSession withMessage: (McpJson write: d).
   lastProgress := aNumber.
   lastSentMs := now.
   sent := sent + 1.

@@ -14,7 +14,7 @@ run
 d := System myUserProfile objectNamed: #Published.
 names := #( #McpError #McpTool #McpToolRegistry #McpToolset #McpBrowsingToolset
   #McpExecutionToolset #McpListingToolset #McpMutationToolset #McpSearchToolset
-  #McpSessionToolset #McpTestingToolset #McpHttpConnection #McpDispatcher #McpBase
+  #McpSessionToolset #McpTestingToolset #McpJson #McpHttpConnection #McpDispatcher #McpBase
   #McpProgressReporter #McpServer #McpOutbox #McpProgressChannel #McpSession #McpRouter ).
 names do: [:s | (d includesKey: s) ifFalse: [ d at: s put: nil ] ].
 names size
@@ -24,6 +24,10 @@ names size
 input src/core/McpError.gs
 input src/core/McpTool.gs
 input src/core/McpToolRegistry.gs
+
+! The JSON writer every response on every path is rendered through. After McpError, which it
+! signals through, and ahead of everything that renders.
+input src/core/McpJson.gs
 
 ! Toolsets: the abstract superclass first, then the concrete core surface.
 input src/core/McpToolset.gs

@@ -165,7 +165,12 @@ writeSseComment: aString
 category: 'writing-sse'
 method: McpHttpConnection
 writeSseData: aJsonString
-  "Write one SSE 'message' event carrying aJsonString. Returns nil on write failure."
+  "Write one SSE 'message' event carrying aJsonString. Returns nil on write failure.
+   aJsonString is a byte String of UTF-8 from McpJson, which is what an event stream carries:
+   text/event-stream is defined as UTF-8 and has no charset parameter to say otherwise. There is no
+   Content-Length here to get wrong, but a wide string would still be written to the socket as
+   whatever its raw storage happens to be, so the same invariant holds as for a framed response --
+   the body reaching a socket is bytes."
   | lf |
   lf := String with: Character lf.
   ^self writeSse: 'event: message' , lf , 'data: ' , aJsonString , lf , lf
@@ -211,8 +216,17 @@ method: McpHttpConnection
 writeStatus: code reason: reasonString headers: extraHeaders body: aBodyString
   "The single place a complete HTTP/1.1 JSON response is assembled. extraHeaders is a String of
    complete CRLF-terminated header lines (e.g. an MCP-Session-Id or WWW-Authenticate line), or ''
-   for none. Content-Length is the byte size of the body; GemStone Strings are byte-oriented, so
-   for ASCII/UTF-8 JSON size = byte count."
+   for none.
+   Content-Length is written as `aBodyString size`, and THAT REQUIRES aBodyString TO BE A byte
+   String: a byte String's #size is its byte count, but a DoubleByteString of n characters is 2n
+   bytes on the wire and a QuadByteString 4n, so a wide body here would announce a length a
+   fraction of what followed it and every client would hang waiting for the rest. Every body
+   reaching this method is rendered by McpJson, which encodes to UTF-8 BYTES rather than leaving
+   characters for the transport (see its class comment), so the requirement is met by construction
+   -- not by the body happening to be ASCII, which is what it used to rest on.
+   No charset parameter on the Content-Type: RFC 8259 8.1 makes JSON UTF-8 by definition and the
+   application/json media type defines no charset parameter, so `; charset=utf-8` would be noise a
+   strict client is entitled to ignore."
   | crlf resp |
   crlf := String with: Character cr with: Character lf.
   resp := 'HTTP/1.1 ' , code printString , ' ' , reasonString , crlf ,

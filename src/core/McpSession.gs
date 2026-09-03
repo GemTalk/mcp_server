@@ -834,7 +834,7 @@ workerBootstrapExpression
     , ' prepareWorkerWithToolsets: ' , (self quotedNameArrayFor: toolsetNames)
     , ' options: ' , ((toolsetOptions isNil or: [toolsetOptions isEmpty])
         ifTrue: ['nil']
-        ifFalse: [toolsetOptions asJson printString])
+        ifFalse: [(McpJson write: toolsetOptions) printString])
     , ' readOnly: ' , self readOnly printString
     , ' serverName: ' , (serverName isNil ifTrue: ['nil'] ifFalse: [serverName printString])
     , ' title: ' , (serverTitle isNil ifTrue: ['nil'] ifFalse: [serverTitle printString])
