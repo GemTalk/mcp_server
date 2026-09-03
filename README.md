@@ -559,7 +559,9 @@ Built on existing image facilities: `GsSocket` (TCP), `JsonParser parse:` (JSON 
 ### The wire is UTF-8, in both directions
 
 That is what RFC 8259 §8.1 says JSON on a wire is, and gs-mcp holds to it on both sides. It costs
-the kernel parser on the way in and a writer of gs-mcp's own on the way out.
+the kernel parser on the way in and a writer of gs-mcp's own on the way out. Why that trade was
+made, what it cost in code owned, and what the change turned up about the front end have their own
+document: **[docs/utf8-wire.md](docs/utf8-wire.md)**.
 
 **In**, `McpBase class>>parseBody:` reads `JsonParser parse: aString decodeFromUTF8 asString`.
 `JsonParser` wants characters and a socket delivers bytes, with nothing in its API to say which;
