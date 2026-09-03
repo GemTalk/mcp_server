@@ -555,10 +555,13 @@ forbidden here" from "no such tool". A tool absent because its toolset was never
 Built on existing image facilities: `GsSocket` (TCP), `JsonParser parse:` and
 `Object>>asJson` (JSON), and `String>>evaluate` (the `execute_code` engine).
 
-The kernel's JSON is taken as-is with one exception, on the way in: a request body is decoded from
-UTF-8 before it is parsed (`McpBase class>>decodeUtf8:`), because `JsonParser` wants characters and
-a socket delivers bytes. Without that a `£` or a `°` arrives as two Latin-1 characters and
-`compile_method` stores it that way. Three *further* Unicode defects in the kernel's JSON are
+The kernel's JSON is taken as-is with one exception, on the way in: `McpBase class>>parseBody:`
+reads `JsonParser parse: aString decodeFromUTF8 asString`, because `JsonParser` wants characters
+and a socket delivers bytes. Without the decode a `£` or a `°` arrives as two Latin-1 characters
+and `compile_method` stores it that way; the `asString` keeps the result in the byte/`DoubleByteString`
+family, since a `Unicode7` compared to a `String` raises on a stock image rather than answering
+false. A malformed sequence — truncated, overlong, an encoded surrogate — refuses the whole body
+with a `-32700` naming the byte offset, rather than being repaired into stored text. Three *further* Unicode defects in the kernel's JSON are
 measured in a defect report against the kernel and deliberately left in place here, since no user
 has met one: an emoji escaped as a surrogate pair fails the whole request, an emoji written out
 becomes a single wrong escape, and an unrecognized escape is silently dropped. The codec that

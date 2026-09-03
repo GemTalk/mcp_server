@@ -528,8 +528,8 @@ testWorkerDecodesUtf8AndAnswersAscii
   "The worker entry's Unicode contract, at the boundary a client's bytes actually cross.
    Two properties, and they are the two halves of the round trip. INBOUND: the body arrives as raw
    UTF-8 -- what every real client sends, since only an escaping encoder avoids it -- and must be
-   decoded, so 'Cafe' with an e-acute is five characters and not six. Without
-   McpBase class>>decodeUtf8: it is read one Latin-1 character per byte, and the corruption goes on
+   decoded, so 'Cafe' with an e-acute is five characters and not six. Without the #decodeFromUTF8 in
+   McpBase class>>parseBody: it is read one Latin-1 character per byte, and the corruption goes on
    to be stored -- which is why that decode is the one Unicode fix gs-mcp still carries.
    OUTBOUND: whatever the tool answers, the rendered response holds nothing outside 0x20-0x7E.
    Content-Length elsewhere is computed as `body size` and is the byte count only while that is true.

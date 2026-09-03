@@ -158,14 +158,19 @@ echo "Filing in: $MCP_GROUPS  (auth: $AUTH_NOTE)"
 # leaves #StringConfiguration = Unicode16, so a Grail image and a stock image compile the same
 # source into different literal classes.
 #
-# We pin it because the difference is not cosmetic. See the Unicode7 trap in section 5 of
-# docs/kernel-json-unicode.md, and McpBase class>>decodeUtf8:, which exists because of it: on a
-# stock image comparing a Unicode7 to a String RAISES (ArgumentError, non-Unicode
-# argument disallowed in Unicode comparison) rather than answering false. Grail happens to patch
-# Unicode7>>= so its own images survive their own setting, but nothing guarantees a customer image
-# that sets Unicode16 also carries that patch -- and there every `args at: 'code'` in every toolset
-# would be comparing a decoded String key against a Unicode7 literal. Pinning the literals to
-# byte Strings makes the installed code identical on every image and keeps that pairing impossible.
+# We pin it so that the installed code is identical on every image: one literal class, one set of
+# comparison semantics, whatever the host was configured for. The alternative is methods whose
+# behaviour depends on the setting in force at file-in time, which is a hard thing to reason about
+# from a bug report.
+#
+# NOT because comparison would otherwise raise -- that was the original reason given here, and it
+# was wrong. #StringConfiguration drives BOTH halves: set to Unicode16 it makes literals compile as
+# Unicode7 AND has GsCurrentSession>>initialize install unicode-aware #= for String and the Unicode
+# classes alike (Unicode16 class>>_unicodeCompareMapping), so a Unicode7 literal compares correctly
+# with a decoded String on exactly the images where such literals arise. Grail's own patch to
+# Unicode7>>= is redundant with that, not load-bearing. What DOES raise is a Unicode string reaching
+# a stock (String-configured) image, which is why McpBase class>>parseBody: narrows with #asString
+# after #decodeFromUTF8 -- see the Unicode trap in section 5 of the kernel JSON Unicode report.
 #
 # Safe to pin because every file under src/ is pure ASCII, and this leaves `fileformat utf8` alone,
 # so a non-ASCII byte in a future source file would still be read correctly.

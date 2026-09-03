@@ -14,13 +14,19 @@ GsTestCase subclass: 'McpUtf8Test'
 expectvalue /Class
 doit
 McpUtf8Test comment: 
-'Unit tests for the one Unicode fix gs-mcp carries: McpBase class>>decodeUtf8:, and McpBase
-class>>parseBody: on top of it.
+'Unit tests for the one Unicode fix gs-mcp carries: the UTF-8 decode in
+McpBase class>>parseBody:, which is `JsonParser parse: aString decodeFromUTF8 asString`.
 
 JSON is UTF-8 on the wire and kernel JsonParser takes a CHARACTER string, so a body handed straight
 from the socket to the parser was read one Latin-1 character per byte. That is the defect these
 tests are a regression for, and the one every real client hits -- a pound sign or a degree sign in a
 compile_method source arrived as two characters and was stored that way.
+
+Both sends are stock kernel, so these tests pin a POLICY, not an algorithm: that the decode happens
+at all, and that a malformed sequence refuses the whole body rather than being repaired into it.
+The second is a deliberate choice -- an earlier gs-mcp decoder substituted one U+FFFD per bad
+sequence and kept the call. Refusing tells a client with a broken encoder that it is broken,
+instead of storing text nobody meant.
 
 The kernel''s OTHER JSON defects are deliberately NOT covered here, because gs-mcp no longer works
 around them: an escaped surrogate pair still fails a request, an astral character still goes out as
@@ -46,7 +52,7 @@ removeallclassmethods McpUtf8Test
 ! ------------------- Instance methods for McpUtf8Test
 category: 'helpers'
 method: McpUtf8Test
-bytesOf: anArrayOfByteValues
+bodyOfBytes: anArrayOfByteValues
   "A byte String holding exactly these byte values -- how this suite spells a wire body without
    putting a non-ASCII character in the source."
   | out |
@@ -60,72 +66,83 @@ charAt: anIndex of: aString
   "The codePoint of aString's anIndex-th character, so an assertion can name a number."
   ^(aString at: anIndex) codePoint
 %
-category: 'tests-utf8'
+category: 'helpers'
 method: McpUtf8Test
-testAsciiBodyTakesTheFastPathUnchanged
-  "#decodeUtf8: short-circuits an all-ASCII body and answers the receiver itself -- which is what
-   keeps the decode free for the two callers that hand it a string gs-mcp produced (the router's own
-   config, the worker's toolset options) and for every request that has no non-ASCII in it."
-  | body |
-  body := '{"a":[1,"x",true,null],"b":{"c":2}}'.
-  self assert: (McpBase decodeUtf8: body) == body.
-  self assert: ((McpBase parseBody: body) at: 'a') size equals: 4
+includesCS: aSubstring in: aString
+  "Case-sensitive substring test (String>>includesString: is case-INsensitive in GemStone)."
+  ^(aString findString: aSubstring startingAt: 1) > 0
 %
 category: 'tests-utf8'
 method: McpUtf8Test
-testDecodeUtf8DecodesMultiByteSequences
+testAsciiBodyCostsNothingToDecode
+  "There is no all-ASCII fast path and none is needed: #decodeFromUTF8 is a primitive (measured ~30x
+   faster over a 60KB body than the character loop gs-mcp used to run), and #asString answers the
+   RECEIVER ITSELF for a String, so an ASCII body is not copied a second time. That identity is the
+   property, because it is what licenses sending both unconditionally."
+  | body parsed |
+  body := '{"a":[1,"x",true,null],"b":{"c":2}}'.
+  self assert: body decodeFromUTF8 asString equals: body.
+  self assert: body asString == body.
+  parsed := McpBase parseBody: body.
+  self assert: ((parsed at: 'a') size) equals: 4.
+  self assert: ((parsed at: 'b') at: 'c') equals: 2
+%
+category: 'tests-utf8'
+method: McpUtf8Test
+testMalformedUtf8RefusesTheWholeBody
+  "THE POLICY, and the one behaviour here that is a choice rather than a fact about the kernel.
+   #decodeFromUTF8 raises on a truncated sequence, a bad continuation byte, an overlong encoding
+   (16rC0 16rAF is the classic smuggled '/', which must not become one) and an encoded surrogate,
+   naming the byte offset. parseBody: catches it like any other parse failure, so the client gets
+   one -32700 and nothing is stored.
+   The predecessor substituted one U+FFFD per bad sequence and kept the call. If that judgement is
+   ever revisited, this is the test that says so out loud."
+  | truncated bareContinuation overlong encodedSurrogate |
+  truncated := self bodyOfBytes: #(123 34 107 34 58 34 16rE2 16r98 34 125).
+  bareContinuation := self bodyOfBytes: #(123 34 107 34 58 34 16r80 34 125).
+  overlong := self bodyOfBytes: #(123 34 107 34 58 34 16rC0 16rAF 34 125).
+  encodedSurrogate := self bodyOfBytes: #(123 34 107 34 58 34 16rED 16rA0 16rBD 34 125).
+  self assert: (McpBase parseBody: truncated) isNil.
+  self assert: (McpBase parseBody: bareContinuation) isNil.
+  self assert: (McpBase parseBody: overlong) isNil.
+  self assert: (McpBase parseBody: encodedSurrogate) isNil.
+  "And the raise names where it went wrong, which is the whole reason refusing beats repairing."
+  self assert: (self includesCS: 'offset'
+    in: ([(self bodyOfBytes: #(16rE2 16r98 120)) decodeFromUTF8. 'NO RAISE']
+      on: Error do: [:ex | ex description]))
+%
+category: 'tests-utf8'
+method: McpUtf8Test
+testMultiByteSequencesAreDecoded
   "REGRESSION. Nothing decoded the body, so a raw-UTF-8 client -- which is every real MCP client --
    had each byte read as one Latin-1 character: 'cafe' with an e-acute measured 5, not 4.
-   Two-, three- and four-byte sequences: U+00E9, U+2603 and U+1F600. The four-byte case decodes
-   correctly even though the kernel writer cannot write it back out (the kernel JSON Unicode
-   report, defect 2) -- what arrives is still stored correctly, which is the half that matters."
-  | decoded parsed |
-  decoded := McpBase decodeUtf8: (self bytesOf: #(99 97 102 16rC3 16rA9)).
-  self assert: decoded size equals: 4.
-  self assert: (self charAt: 4 of: decoded) equals: 16rE9.
-  decoded := McpBase decodeUtf8: (self bytesOf: #(16rE2 16r98 16r83)).
-  self assert: decoded size equals: 1.
-  self assert: (self charAt: 1 of: decoded) equals: 16r2603.
-  decoded := McpBase decodeUtf8: (self bytesOf: #(16rF0 16r9F 16r98 16r80)).
-  self assert: decoded size equals: 1.
-  self assert: (self charAt: 1 of: decoded) equals: 16r1F600.
-  "And through the real entry point, which is where it has to hold."
+   Two-, three- and four-byte sequences: U+00E9, U+2603 and U+1F600. The four-byte case arrives
+   correctly even though the kernel writer cannot write it back out (the kernel JSON Unicode report,
+   defect 2) -- what a client sends is still stored correctly, which is the half that matters."
+  | parsed |
   parsed := McpBase parseBody:
-    (self bytesOf: #(123 34 107 34 58 34 99 97 102 16rC3 16rA9 34 125)).
+    (self bodyOfBytes: #(123 34 107 34 58 34 99 97 102 16rC3 16rA9 34 125)).
   self assert: (parsed at: 'k') size equals: 4.
-  self assert: (self charAt: 4 of: (parsed at: 'k')) equals: 16rE9
-%
-category: 'tests-utf8'
-method: McpUtf8Test
-testMalformedUtf8BecomesReplacement
-  "A bad sequence costs a character, not the whole request -- one mis-encoded byte in a 50KB source
-   argument must not lose the call. Flip this policy in McpBase class>>decodeUtf8: if that
-   judgement ever changes."
-  | decoded |
-  "A truncated three-byte sequence, then a good character."
-  decoded := McpBase decodeUtf8: (self bytesOf: #(16rE2 16r98 120)).
-  self assert: (self charAt: 1 of: decoded) equals: 16rFFFD.
-  self assert: (self charAt: decoded size of: decoded) equals: 120.
-  "A bare continuation byte."
-  decoded := McpBase decodeUtf8: (self bytesOf: #(16r80)).
-  self assert: (self charAt: 1 of: decoded) equals: 16rFFFD.
-  "An overlong encoding of '/' -- the classic smuggling trick -- must not become a '/'."
-  decoded := McpBase decodeUtf8: (self bytesOf: #(16rC0 16rAF)).
-  self assert: ((decoded includes: $/) not).
-  "An encoded surrogate."
-  decoded := McpBase decodeUtf8: (self bytesOf: #(16rED 16rA0 16rBD)).
-  self assert: (self charAt: 1 of: decoded) equals: 16rFFFD
+  self assert: (self charAt: 4 of: (parsed at: 'k')) equals: 16rE9.
+  parsed := McpBase parseBody: (self bodyOfBytes: #(123 34 107 34 58 34 16rE2 16r98 16r83 34 125)).
+  self assert: (parsed at: 'k') size equals: 1.
+  self assert: (self charAt: 1 of: (parsed at: 'k')) equals: 16r2603.
+  parsed := McpBase parseBody:
+    (self bodyOfBytes: #(123 34 107 34 58 34 16rF0 16r9F 16r98 16r80 34 125)).
+  self assert: (parsed at: 'k') size equals: 1.
+  self assert: (self charAt: 1 of: (parsed at: 'k')) equals: 16r1F600
 %
 category: 'tests-utf8'
 method: McpUtf8Test
 testParsedKeysCompareWithStringLiterals
-  "THE Unicode7 TRAP, and the reason #decodeUtf8: does not simply send #decodeFromUTF8.
-   `'code' decodeFromUTF8` answers a Unicode7, and comparing one to a String RAISES rather than
-   answering false -- so a decode that left an ASCII key wide would make every `args at: 'code'` in
-   every toolset raise. An all-ASCII body must come back with byte-String keys."
+  "THE Unicode TRAP, and why #asString follows #decodeFromUTF8. `'code' decodeFromUTF8` answers a
+   Unicode7, and on a stock image comparing one to a String RAISES rather than answering false --
+   so a body decoded but not narrowed could make every `args at: 'code'` in every toolset raise.
+   A parsed body must come back with keys a byte-String literal can find, on every image."
   | parsed |
-  parsed := McpBase parseBody: '{"code":"x","n":1}'.
-  self assert: (parsed at: 'code' ifAbsent: ['MISSING']) equals: 'x'.
+  parsed := McpBase parseBody: (self bodyOfBytes:
+    #(123 34 99 111 100 101 34 58 34 120 16rC3 16rA9 34 44 34 110 34 58 49 125)).
+  self assert: (parsed at: 'code' ifAbsent: ['MISSING']) size equals: 2.
   self assert: (parsed at: 'n' ifAbsent: [0]) equals: 1.
   self assert: (parsed keys detect: [:k | k = 'code'] ifNone: [nil]) notNil.
   parsed keysAndValuesDo: [:k :v | self assert: k class equals: String]
