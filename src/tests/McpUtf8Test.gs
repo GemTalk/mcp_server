@@ -14,25 +14,35 @@ GsTestCase subclass: 'McpUtf8Test'
 expectvalue /Class
 doit
 McpUtf8Test comment: 
-'Unit tests for the one Unicode fix gs-mcp carries: the UTF-8 decode in
-McpBase class>>parseBody:, which is `JsonParser parse: aString asString decodeFromUTF8 asString`.
+'Unit tests for the INBOUND half of gs-mcp''s wire contract: the UTF-8 decode kernel JsonParser
+needs, and the surrogate-escape repair it needs alongside it, in McpBase class>>parseBody: --
+`JsonParser parse: (self combineSurrogateEscapesIn: aString asString decodeFromUTF8 asString)`.
+The outbound half -- the writer -- is McpJsonTest.
 
 JSON is UTF-8 on the wire and kernel JsonParser takes a CHARACTER string, so a body handed straight
 from the socket to the parser was read one Latin-1 character per byte. That is the defect these
 tests are a regression for, and the one every real client hits -- a pound sign or a degree sign in a
 compile_method source arrived as two characters and was stored that way.
 
-All three sends are stock kernel, so these tests pin a POLICY, not an algorithm: that the decode
-happens at all, and that a malformed sequence refuses the whole body rather than being repaired in.
+Every send but #combineSurrogateEscapesIn: is stock kernel, so these tests pin a POLICY, not an
+algorithm: that the decode happens at all, and that a malformed sequence refuses the whole body
+rather than being repaired in.
 The second is a deliberate choice -- an earlier gs-mcp decoder substituted one U+FFFD per bad
 sequence and kept the call. Refusing tells a client with a broken encoder that it is broken,
 instead of storing text nobody meant.
 
-The kernel''s OTHER JSON defects are deliberately NOT covered here, because gs-mcp no longer works
-around them: an escaped surrogate pair still fails a request, an astral character still goes out as
-one wrong escape, and an unknown escape is still silently dropped. They are measured in the kernel
-JSON Unicode report, and the codec that used to answer them is preserved on the emoji-safe branch.
-Testing them here would only pin defects this code does not own.
+WHAT THE KERNEL PARSER STILL GETS WRONG, and is deliberately not covered here, because gs-mcp does
+not work around it: an escape the parser does not recognize is silently dropped rather than refused,
+and trailing content, duplicate keys and raw control characters are all accepted. Those need a real
+parser to fix, they are measured in the kernel JSON Unicode report, and testing them here would only
+pin defects this code does not own.
+Note the two that are NO LONGER on that list, because both halves of the emoji problem are answered
+now. Outbound, an astral codepoint went out as one wrong escape -- the defect an application could
+not route around -- and gs-mcp answers it by writing UTF-8 instead of escapes (McpJson). Inbound, an
+escaped surrogate pair failed the whole request, which is what Python''s json.dumps sends by
+default, and #combineSurrogateEscapesIn: repairs it before the parser can refuse it. So both client
+styles now round-trip an emoji, and testEscapedSurrogatePairIsCombined is the regression for the
+second.
 
 ONE test crosses a real worker gem, and it is the important one. Everything else hands parseBody: a
 byte String, because that is what a socket delivers -- and that shared assumption is exactly how the
@@ -111,6 +121,55 @@ testAsciiBodyCostsNothingToDecode
 %
 category: 'tests-utf8'
 method: McpUtf8Test
+testEscapedSurrogatePairIsCombined
+  "THE OTHER inbound defect, and the reason McpBase class>>combineSurrogateEscapesIn: exists. RFC
+   8259 7 gives JSON one way to write a character above U+FFFF as an escape -- the UTF-16 surrogate
+   pair -- and JsonParser sends `Character codePoint:` to each half separately, which 3.7.x refuses
+   (OutOfRange 2723). So an escaped emoji used to fail the WHOLE request with a -32700, while a BMP
+   escape from the same client worked. Python's json.dumps escapes by default, so this is a real
+   client rather than a hypothetical one.
+   Asserted on the CODEPOINT: on 3.6.2 surrogates are legal Characters, so the unrepaired parser
+   answers two of them there instead of raising, and only a codepoint tells the two apart.
+   The BMP escape is here too, to show the repair did not disturb the case that already worked."
+  | parsed |
+  parsed := McpBase parseBody: '{"k":"a\uD83D\uDE00b"}'.
+  self assert: parsed notNil description: 'an escaped surrogate pair failed the whole request'.
+  self assert: (parsed at: 'k') size equals: 3.
+  self assert: (self charAt: 2 of: (parsed at: 'k')) equals: 16r1F600.
+  parsed := McpBase parseBody: '{"k":"a\u2603b"}'.
+  self assert: (parsed at: 'k') size equals: 3.
+  self assert: (self charAt: 2 of: (parsed at: 'k')) equals: 16r2603
+%
+category: 'tests-utf8'
+method: McpUtf8Test
+testLiteralBackslashUIsNotRewritten
+  "BACKSLASH PARITY, the one way a surrogate-combining scan can do harm. A body may legitimately
+   carry the six characters of an escape AS TEXT -- a compile_method source describing this very
+   defect does -- and it arrives with the backslash doubled. A scan that just looked for a
+   backslash followed by 'u' would rewrite it and silently corrupt the source.
+   So: a JSON string whose CONTENT is the eleven characters `\uD83D\uDE00`... spelled here as a
+   doubled backslash in the body, which JSON says means one literal backslash. What must come back
+   is text, twelve characters of it, with backslashes still in it -- and no emoji anywhere.
+   Also the case just past the end: a truncated escape at the tail must not be read off the end."
+  | parsed value |
+  parsed := McpBase parseBody: '{"k":"\\uD83D\\uDE00"}'.
+  self assert: parsed notNil.
+  value := parsed at: 'k'.
+  self assert: value size equals: 12.
+  self assert: (self charAt: 1 of: value) equals: 92.
+  self assert: (self charAt: 2 of: value) equals: 117.
+  self assert: ((1 to: value size) detect: [:i | (value at: i) codePoint > 16rFFFF] ifNone: [nil]) isNil
+    description: 'a literal backslash-u was rewritten into an astral character'.
+  "A high-surrogate escape with nothing after it must not run off the end, and must not raise."
+  self assert: (McpBase parseBody: '{"k":"\uD83D"}') notNil.
+  self assert: (self charAt: 1 of: ((McpBase parseBody: '{"k":"\uD83D"}') at: 'k'))
+    equals: 16rFFFD.
+  "An unpaired LOW half is the same policy."
+  self assert: (self charAt: 1 of: ((McpBase parseBody: '{"k":"\uDE00"}') at: 'k'))
+    equals: 16rFFFD
+%
+category: 'tests-utf8'
+method: McpUtf8Test
 testMalformedUtf8RefusesTheWholeBody
   "THE POLICY, and the one behaviour here that is a choice rather than a fact about the kernel.
    #decodeFromUTF8 raises on a truncated sequence, a bad continuation byte, an overlong encoding
@@ -138,9 +197,9 @@ method: McpUtf8Test
 testMultiByteSequencesAreDecoded
   "REGRESSION. Nothing decoded the body, so a raw-UTF-8 client -- which is every real MCP client --
    had each byte read as one Latin-1 character: 'cafe' with an e-acute measured 5, not 4.
-   Two-, three- and four-byte sequences: U+00E9, U+2603 and U+1F600. The four-byte case arrives
-   correctly even though the kernel writer cannot write it back out (the kernel JSON Unicode report,
-   defect 2) -- what a client sends is still stored correctly, which is the half that matters."
+   Two-, three- and four-byte sequences: U+00E9, U+2603 and U+1F600. The four-byte case is the one
+   that used to arrive correctly and then be written back out wrong; McpJsonTest owns the other end
+   of it now, so between the two suites the emoji is covered in both directions."
   | parsed |
   parsed := McpBase parseBody:
     (self bodyOfBytes: #(123 34 107 34 58 34 99 97 102 16rC3 16rA9 34 125)).
@@ -184,9 +243,13 @@ testWorkerDecodesABodyItRecompiled
    The leading #asString in parseBody: is what fixes it, and this is the test that holds it there.
    Asserted through #forward: rather than a hand-built expression so the real expression builder is
    in the path -- the bug lived in the gap between what that builds and what parseBody: assumed.
-   describe_class, following McpContractTest>>testWorkerDecodesUtf8AndAnswersAscii, because it
+   describe_class, following McpContractTest>>testWorkerDecodesUtf8AndAnswersUtf8, because it
    echoes the name it was given straight back and changes nothing. That test makes the same two
-   assertions in-process; this one makes them across the boundary that broke."
+   assertions in-process; this one makes them across the boundary that broke.
+   The outbound assertion is spelled in BYTES, because the wire is UTF-8 in both directions now
+   (McpJson): the e-acute leaves as the same two bytes it arrived as, not as a \u escape. Missing
+   the decode does not merely lose the character -- the two bytes are read as two Latin-1
+   characters and re-encoded as FOUR, which is the mojibake the second assertion denies."
   | eAcute body out compiledAs |
   eAcute := self bodyOfBytes: #(16rC3 16rA9).
   session := McpSession startWithId: 'utf8-worker-recompile'.
@@ -198,7 +261,9 @@ testWorkerDecodesABodyItRecompiled
     description: 'the worker refused a body with one accented character as malformed JSON. It'
       , ' compiled that body as ' , compiledAs printString , ', and parseBody: has to decode'
       , ' whatever class the worker made of it: ' , out.
-  self assert: (self includesCS: 'Caf' , (String with: (Character codePoint: 92)) , 'u00E9' in: out)
-    description: 'the worker answered without a single U+00E9. Two bytes were read as two Latin-1'
-      , ' characters instead of one character, and text like that gets stored: ' , out
+  self assert: (self includesCS: 'Caf' , eAcute in: out)
+    description: 'the worker answered without the e-acute''s two UTF-8 bytes behind ''Caf'': ' , out.
+  self deny: (self includesCS: (self bodyOfBytes: #(16rC3 16r82 16rC2 16rA9)) in: out)
+    description: 'the two bytes were read as two Latin-1 characters and written back as four --'
+      , ' the mojibake that compile_method would store to stay: ' , out
 %

@@ -551,22 +551,76 @@ forbidden here" from "no such tool". A tool absent because its toolset was never
 | `McpToolRegistry` | name → `McpTool` map; produces `tools/list` descriptors |
 | `McpTool` | one tool: name, description, JSON Schema, handler block; validates arguments against the schema |
 | `McpError` | an error carrying a machine-readable `kind` (e.g. `refused`, `readOnly`) that the dispatcher surfaces in the tool-call error envelope |
+| `McpJson` | the JSON writer: renders a response as a byte `String` of UTF-8, replacing `Object>>asJson`, whose escaping corrupts every codepoint above U+FFFF |
 
-Built on existing image facilities: `GsSocket` (TCP), `JsonParser parse:` and
-`Object>>asJson` (JSON), and `String>>evaluate` (the `execute_code` engine).
+Built on existing image facilities: `GsSocket` (TCP), `JsonParser parse:` (JSON in) and
+`String>>evaluate` (the `execute_code` engine).
 
-The kernel's JSON is taken as-is with one exception, on the way in: `McpBase class>>parseBody:`
-reads `JsonParser parse: aString decodeFromUTF8 asString`, because `JsonParser` wants characters
-and a socket delivers bytes. Without the decode a `£` or a `°` arrives as two Latin-1 characters
-and `compile_method` stores it that way; the `asString` keeps the result in the byte/`DoubleByteString`
-family, since a `Unicode7` compared to a `String` raises on a stock image rather than answering
-false. A malformed sequence — truncated, overlong, an encoded surrogate — refuses the whole body
-with a `-32700` naming the byte offset, rather than being repaired into stored text. Three *further* Unicode defects in the kernel's JSON are
-measured in a defect report against the kernel and deliberately left in place here, since no user
-has met one: an emoji escaped as a surrogate pair fails the whole request, an emoji written out
-becomes a single wrong escape, and an unrecognized escape is silently dropped. The codec that
-worked around all three is preserved on the `emoji-safe` branch, so adopting it again is a merge
-rather than a rewrite.
+### The wire is UTF-8, in both directions
+
+That is what RFC 8259 §8.1 says JSON on a wire is, and gs-mcp holds to it on both sides. It costs
+the kernel parser on the way in and a writer of gs-mcp's own on the way out. Why that trade was
+made, what it cost in code owned, and what the change turned up about the front end have their own
+document: **[docs/utf8-wire.md](docs/utf8-wire.md)**.
+
+**In**, `McpBase class>>parseBody:` reads
+`JsonParser parse: (self combineSurrogateEscapesIn: aString asString decodeFromUTF8 asString)`.
+`JsonParser` wants characters and a socket delivers bytes, with nothing in its API to say which;
+without the decode a `£` or a `°` arrives as two Latin-1 characters and `compile_method` stores it
+that way. The *leading* `asString` is there because the body does not reach the worker gem as the
+bytes the socket read: the front end forwards it embedded in an expression and the worker
+**compiles** that literal, so its class comes from the worker session's `#StringConfiguration` — and
+a `Unicode16`, which is what an accented body compiles to on any Grail image, does not understand
+`decodeFromUTF8` at all. The *trailing* one narrows the `Unicode7`/`16`/`32` that `decodeFromUTF8`
+answers back into the byte/`DoubleByteString`/`QuadByteString` family, since a `Unicode7` compared
+to a `String` raises on a stock image rather than answering false. `combineSurrogateEscapesIn:` is
+the one repair gs-mcp makes to what the parser is handed — see below. A malformed sequence —
+truncated, overlong, an encoded surrogate — refuses the whole body with a `-32700` naming the byte
+offset, rather than being repaired into stored text. Everything else about the kernel parser is
+kept, including the part it gets right that matters most here: a **raw** astral character decodes
+correctly.
+
+**Out**, `McpJson class>>write:` replaces `Object>>asJson`, and answers a byte `String` of UTF-8. A
+character above `0x7F` is written as its 2–4 UTF-8 bytes; only what RFC 8259 §7 actually requires
+is escaped — the quote, the backslash, and the C0 controls.
+
+Owning the writer is not a preference. `CharacterCollection>>printJsonOn:` keeps only bits 12–15 of
+a codepoint above U+FFFF instead of emitting a surrogate pair, so `asJson` renders U+1F600 as
+`"\uF600"` — silently the wrong character — and for some codepoints emits a **lone surrogate**,
+which is not well-formed JSON. By the time `asJson` has answered, the codepoint is gone, so no
+post-pass can repair it: the only choices are to patch a kernel method (lost on an extent reload,
+and it changes behaviour for every other consumer in the image) or to write JSON directly. Writing
+UTF-8 does not fix that arithmetic so much as never reach it — a surrogate pair is an artefact of
+`\u` escapes and of UTF-16, and UTF-8 spells an astral codepoint directly in four bytes.
+
+The writer encodes to **bytes** rather than leaving characters for the transport, and that is
+load-bearing. Three unrelated mechanisms downstream read a response as bytes: `Content-Length` is
+written as `body size`; the worker → front-end hop is measured in bytes by the kernel's result
+fetch, whose buffer is sized in bytes; and `GS_MCP_TRACE` writes bodies to the gem log through
+`GsFile`, where a 16-bit string comes out garbled. A byte `String`'s `#size` *is* its byte count
+whatever the bytes are, so all three hold by construction — where under the old ASCII-escaping
+policy they held only because nothing above `0x7E` was ever on the wire.
+
+`McpJson writeUtf8CodePoint:on:` is checked against an oracle: `McpJsonTest` requires it to agree
+with the kernel primitive `String>>encodeAsUTF8` for every codepoint, including both sides of all
+three sequence-length boundaries. Nothing in the kernel emits a *correct* JSON escape for an astral
+codepoint, so an escaping writer's surrogate arithmetic has no second opinion available to it.
+
+The inbound half needs one repair of its own, and gets it before the parse rather than inside a
+parser. Kernel `JsonParser` sends `Character codePoint:` to each `\uXXXX` escape separately and
+3.7.x refuses to build a surrogate, so an emoji written as the surrogate **pair** RFC 8259 §7
+prescribes failed the whole request with a `-32700`. That is a real client, not a hypothetical one:
+Python's `json.dumps` escapes by default. `McpBase class>>combineSurrogateEscapesIn:` folds a pair
+into the one codepoint it spells before the parser can see either half — forty lines at the edge,
+where the outbound defect needed a writer, because inbound the information is still there in the
+escapes. A body with no escape in it is answered as the receiver itself. So both client styles
+round-trip an emoji now: raw UTF-8 (`JSON.stringify`, and therefore most of them) and escaped.
+
+What the kernel parser still gets wrong is left in place, because working around it needs a real
+parser, and it is measured in the defect report (`docs/kernel-json-unicode.md`): an escape it does
+not recognize is silently dropped rather than refused, and trailing content, duplicate keys and raw
+control characters are all accepted. None of those corrupts text — the worst a client gets is one
+wrong value from a request its own encoder built wrong.
 
 ## Why a dedicated gem
 
@@ -972,7 +1026,7 @@ grouped by area, with one loader per group:
 
 ```
 src/core/    21 classes  the server itself: protocol, transport, dispatch, toolsets   (always)
-src/tests/   23 classes  the SUnit suites and their fixtures                          (always)
+src/tests/   24 classes  the SUnit suites and their fixtures                          (always)
 src/auth/     3 classes  the OAuth/OIDC front end McpAuthRouter + its two suites      (3.7.5+)
 src/grail/    2 classes  the optional GemStone-Python toolset + its suite             (--grail)
 load.gs                  files in core + tests, then commits

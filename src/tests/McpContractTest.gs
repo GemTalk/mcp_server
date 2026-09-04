@@ -43,6 +43,16 @@ bytesOf: anArrayOfByteValues
 %
 category: 'helpers'
 method: McpContractTest
+charsOf: anArrayOfCodePoints
+  "A string holding these CODEPOINTS, whatever width the image needs -- the decoded counterpart of
+   #bytesOf:, for spelling an expectation about text rather than about the wire."
+  | out |
+  out := String new.
+  anArrayOfCodePoints do: [:each | out add: (Character codePoint: each)].
+  ^out
+%
+category: 'helpers'
+method: McpContractTest
 dispatch: requestDict
   "Route requestDict through a fresh dispatcher wired to its owning server, so read-only gating is
    exercised through the real path."
@@ -524,19 +534,21 @@ testValidArgumentsAccepted
 %
 category: 'tests - transport'
 method: McpContractTest
-testWorkerDecodesUtf8AndAnswersAscii
-  "The worker entry's Unicode contract, at the boundary a client's bytes actually cross.
-   Two properties, and they are the two halves of the round trip. INBOUND: the body arrives as raw
-   UTF-8 -- what every real client sends, since only an escaping encoder avoids it -- and must be
-   decoded, so 'Cafe' with an e-acute is five characters and not six. Without the #decodeFromUTF8 in
-   McpBase class>>parseBody: it is read one Latin-1 character per byte, and the corruption goes on
-   to be stored -- which is why that decode is the one Unicode fix gs-mcp still carries.
-   OUTBOUND: whatever the tool answers, the rendered response holds nothing outside 0x20-0x7E.
-   Content-Length elsewhere is computed as `body size` and is the byte count only while that is true.
+testWorkerDecodesUtf8AndAnswersUtf8
+  "The worker entry's Unicode contract, at the boundary a client's bytes actually cross, in BOTH
+   directions -- and the same UTF-8 in both, which is the whole of the design.
+   INBOUND: the body arrives as raw UTF-8 -- what every real client sends, since only an escaping
+   encoder avoids it -- and must be decoded, so 'Cafe' with an e-acute is five characters and not
+   six. Without the #decodeFromUTF8 in McpBase class>>parseBody: it is read one Latin-1 character
+   per byte, and the corruption goes on to be stored.
+   OUTBOUND: the rendered response is a byte String of UTF-8 (McpJson), so the e-acute leaves as its
+   two bytes C3 A9 and not as a six-byte \u escape, and #size is still the byte count that
+   Content-Length is computed from elsewhere.
+   AN EMOJI IS IN HERE ON PURPOSE. Under the escaping policy this test had to stay inside the BMP,
+   because the kernel writer turned an astral codepoint into one wrong escape and the test would
+   have measured that defect instead of this contract. Writing UTF-8 removes the restriction: the
+   four bytes go out and come back as one codepoint.
    describe_class is used because it echoes the name it was given straight back and changes nothing.
-   BMP text only, here and in McpTransportTest: an astral character is written back as one wrong
-   escape by the kernel writer, a defect gs-mcp accepts rather than works around (the kernel JSON
-   Unicode report, defect 2).
 
    The one test here that asserts on ANNOTATED text, hence the #withoutSessionNote:. Three of this
    suite's kernel-guard tests leave the session dirty on purpose -- a tools/call would abort the
@@ -544,13 +556,22 @@ testWorkerDecodesUtf8AndAnswersAscii
    runs in order, and this test passed alone and failed in the suite without it."
   | body out text |
   body := '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"describe_class",'
-    , '"arguments":{"className":"Caf' , (self bytesOf: #(16rC3 16rA9)) , '"}}}'.
+    , '"arguments":{"className":"Caf' , (self bytesOf: #(16rC3 16rA9 16rF0 16r9F 16r98 16r80))
+    , '"}}}'.
   out := McpServer new handleJsonString: body.
-  1 to: out size do: [:i | self assert: (out at: i) codePoint < 128].
-  text := ((JsonParser parse: out) at: 'result') at: 'content'.
+  "The answer is bytes, whatever is in it -- the invariant Content-Length rests on."
+  self assert: out class equals: String.
+  text := ((McpBase parseBody: out) at: 'result') at: 'content'.
   text := self withoutSessionNote: ((text at: 1) at: 'text').
-  self assert: text equals: 'Class not found: Caf' , (String with: (Character codePoint: 16rE9)).
-  self assert: (self includesCS: 'Caf' , (String with: (Character codePoint: 92)) , 'u00E9' in: out)
+  "Codepoints, never round-tripped text: on 3.6.2 the kernel's two defects cancel and an emoji
+   appears to survive for the wrong reason. The echoed name is the tail of the message, so assert
+   from the end rather than counting the prose in front of it."
+  self assert: text equals: 'Class not found: Caf' , (self charsOf: #(16rE9 16r1F600)).
+  self assert: (text at: text size - 1) codePoint equals: 16rE9.
+  self assert: text last codePoint equals: 16r1F600.
+  "And on the wire both went out as UTF-8, not as escapes."
+  self assert: (self includesCS: (self bytesOf: #(16rC3 16rA9 16rF0 16r9F 16r98 16r80)) in: out).
+  self deny: (self includesCS: (String with: (Character codePoint: 92)) , 'u00E9' in: out)
 %
 category: 'helpers'
 method: McpContractTest

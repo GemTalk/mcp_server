@@ -14,7 +14,7 @@ run
 | d names |
 d := System myUserProfile objectNamed: #Published.
 names := #( #McpMockSocket #McpMockWorker #McpMockSession #McpStubSession #McpFixtureToolset
-  #McpFixtureServer #McpFixtureRouter #McpUtf8Test #McpToolTest #McpDispatcherTest
+  #McpFixtureServer #McpFixtureRouter #McpJsonTest #McpUtf8Test #McpToolTest #McpDispatcherTest
   #McpTransportTest #McpContractTest #McpExtensionTest #McpSessionTest #McpOutboxTest
   #McpProgressTest #McpStreamTest #McpLifetimeTest #McpExternalSessionTest #McpTransactionTest
   #McpWorkerDeadlineTest #McpBlindWriteTest #McpConcurrentEditTest ).
@@ -32,7 +32,9 @@ input src/tests/McpFixtureToolset.gs
 input src/tests/McpFixtureServer.gs
 input src/tests/McpFixtureRouter.gs
 
-! The suites themselves.
+! The suites themselves. The two Unicode suites first: McpJsonTest owns the outbound half of the
+! wire contract (the writer) and McpUtf8Test the inbound half (the decode kernel JsonParser needs).
+input src/tests/McpJsonTest.gs
 input src/tests/McpUtf8Test.gs
 input src/tests/McpBlindWriteTest.gs
 input src/tests/McpConcurrentEditTest.gs

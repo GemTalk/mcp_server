@@ -748,43 +748,55 @@ testTlsEnabledWhenConfigured
 %
 category: 'tests'
 method: McpTransportTest
-testUnicodeResponseIsAsciiWithByteAccurateContentLength
+testUnicodeResponseIsUtf8WithByteAccurateContentLength
   "THE TRANSPORT'S UNICODE CONTRACT, and the test whose absence let three defects ship.
-   Latin-1 and BMP text only, and deliberately: an astral character would fail here, through no
-   fault of the transport. Kernel printJsonOn: writes a codepoint above U+FFFF as one wrong escape
-   instead of a surrogate pair, so U+1F600 would come back as U+F600 -- a defect gs-mcp accepts
-   rather than works around (the kernel JSON Unicode report, defect 2). Add an emoji to `text` and
-   this test measures that defect instead of the contract it is here for.
-   Content-Length is written as `body size`, which is the byte count ONLY while the body holds
-   nothing outside 0x20-0x7E. So the two assertions belong together: a response carrying non-ASCII
-   text must still leave as pure ASCII, and the length must be one a client can trust. If the
-   escaping policy is ever changed to put real UTF-8 on the wire, this fails -- which is the point.
+   Latin-1, BMP AND ASTRAL text. The astral case is the one that changed: while responses were
+   rendered by kernel printJsonOn:, an emoji here would have measured that writer's defect (a
+   codepoint above U+FFFF became one wrong escape) rather than the transport, so this test had to
+   stay inside the BMP. McpJson writes UTF-8, so the emoji is now the most interesting row in it.
+   Content-Length is written as `body size`, which is the byte count only while the body is a byte
+   String -- and it always is, because McpJson encodes to bytes rather than leaving characters for
+   the transport (a DoubleByteString of n characters is 2n bytes on the wire, so a wide body would
+   announce a length a fraction of what followed it and every client would hang). So the assertions
+   belong together: the body must be bytes, the length must be one a client can trust, and the text
+   must survive.
+   NOTE WHAT IS NOT ASSERTED ANY MORE: that the wire is pure ASCII. That was a stronger invariant
+   than anything needed, and holding it cost the correctness of every astral character. What the
+   transport actually requires is only that the body be bytes whose count is its #size.
    The request carries RAW UTF-8, the way every real client sends it, and the body is forwarded to
    the worker BYTE FOR BYTE: the worker decodes it (McpBase>>parseBody:), the front end does not, so
    what the transport must not do is alter it in passing."
-  | r sess text response out body raw |
-  text := 'caf' , (String with: (Character codePoint: 16rE9)) , ' '
-    , (String with: (Character codePoint: 16r2603)).
+  | r sess text response out body raw sent |
+  text := WriteStream on: String new.
+  text nextPutAll: 'caf'.
+  text nextPut: (Character codePoint: 16rE9).
+  text nextPut: (Character codePoint: 16r2603).
+  text nextPut: (Character codePoint: 16r1F600).
   response := Dictionary new.
   response at: 'jsonrpc' put: '2.0'.
   response at: 'id' put: 1.
-  response at: 'result' put: (Dictionary new at: 'text' put: text; yourself).
+  response at: 'result' put: (Dictionary new at: 'text' put: text contents; yourself).
+  sent := self bytesOf: #(16rC3 16rA9 16rE2 16r98 16r83).
   raw := '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"x","arguments":'
-    , '{"code":"' , (self bytesOf: #(16rC3 16rA9 16rE2 16r98 16r83)) , '"}}}'.
+    , '{"code":"' , sent , '"}}}'.
   r := McpFixtureRouter new.
   sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
-  sess mockWorker nextResult: response asJson.
+  sess mockWorker nextResult: (McpJson write: response).
   out := (self runRequest: (self postRequest: raw sessionId: sess id) onRouter: r) output.
-  "Pure ASCII on the wire, header and body alike."
-  1 to: out size do: [:i | self assert: (out at: i) codePoint < 128].
+  "Bytes on the wire, header and body alike -- nothing wide reached the socket."
+  self assert: out class equals: String.
   "Content-Length is the byte count of exactly what followed it."
   body := self bodyOf: out.
   self assert: (self contentLengthOf: out) equals: body size.
-  "And the text survived the trip intact."
-  self assert: (((JsonParser parse: body) at: 'result') at: 'text') equals: text.
+  "The text survived, asserted on CODEPOINTS: on 3.6.2 the kernel's write and parse defects cancel,
+   so comparing round-tripped text would pass there for the wrong reason."
+  body := ((McpBase parseBody: body) at: 'result') at: 'text'.
+  self assert: ((1 to: body size) collect: [:i | (body at: i) codePoint])
+    equals: #(99 97 102 16rE9 16r2603 16r1F600).
+  "And it went out as UTF-8: the emoji's four bytes are on the wire, and no escape for it."
+  self assert: (self includesCS: (self bytesOf: #(16rF0 16r9F 16r98 16r80)) in: out).
   "The raw request body reached the worker unaltered -- five bytes, not decoded and not mangled."
-  self assert: ((sess mockWorker expressions last)
-    findString: (self bytesOf: #(16rC3 16rA9 16rE2 16r98 16r83)) startingAt: 1) > 0
+  self assert: ((sess mockWorker expressions last) findString: sent startingAt: 1) > 0
 %
 category: 'tests'
 method: McpTransportTest
