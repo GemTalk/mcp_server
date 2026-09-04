@@ -3,7 +3,7 @@ set compile_env: 0
 expectvalue /Class
 doit
 McpSession subclass: 'McpStubSession'
-  instVarNames: #( wasPrepared)
+  instVarNames: #( wasPrepared fakeWorkerStoneSession)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -17,7 +17,12 @@ McpStubSession comment:
 'A McpSession that spawns no gem: prepareWorker records the call instead of driving a worker over
 executeString:. Lets a test exercise McpRouter>>openSessionCreating: -- the one choke point where a
 router configures a session AND prepares its worker -- without a login, and lets it assert that the
-preparation actually happened rather than only that the values were set.'
+preparation actually happened rather than only that the values were set.
+
+Because nothing logged in, #workerStoneSession is nil -- which is a real state worth testing against
+(a session that cannot be measured or matched to a row in System currentSessions) and a nuisance
+everywhere else. #fakeWorkerStoneSession: supplies one, including this session''s own id, which is the
+one id whose description a test can read without the SessionAccess privilege.'
 %
 expectvalue /Class
 doit
@@ -35,6 +40,13 @@ beReadOnly
    want; the expiry-renewal rules differ between the two, so both have to be reachable."
   readOnly := true.
   ^self
+%
+category: 'testing support'
+method: McpStubSession
+fakeWorkerStoneSession: anIntegerOrNil
+  "Report this as the worker gem's stone session id (nil restores the real one, which for a stub
+   that never logged in is also nil)."
+  fakeWorkerStoneSession := anIntegerOrNil
 %
 category: 'initialization'
 method: McpStubSession
@@ -57,4 +69,9 @@ category: 'accessing'
 method: McpStubSession
 wasPrepared
   ^wasPrepared == true
+%
+category: 'testing support'
+method: McpStubSession
+workerStoneSession
+  ^fakeWorkerStoneSession ifNil: [super workerStoneSession]
 %

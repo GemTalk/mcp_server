@@ -61,6 +61,15 @@
 #                         `exp`, whatever the idle policy says: the worker gem is logged in as that
 #                         token's GemStone user, so a session outliving its token would leave the
 #                         authorization it was opened with in force after the grant expired.
+#   GS_MCP_MAX_COMMITS_BEHIND - how far behind the repository a worker gem's view may fall, in
+#                         COMMITS, before the server acts on it (default 20 -- the same number the stone
+#                         itself uses for STN_SIGNAL_ABORT_CR_BACKLOG; the effective limit is the lower
+#                         of the two). `none` turns it off and leaves every worker's view alone. Counted
+#                         in commits rather than seconds because that is what the stone charges for: a
+#                         view pins the commit record it was taken from, so what hurts is the number of
+#                         records piled up behind it, not how old it is -- an idle session on a quiet
+#                         stone costs nothing. THIS BUILD ONLY MEASURES: it logs which sessions are over
+#                         the line and refreshes nothing.
 #   GS_MCP_FRONT_END_TX_MODE - GemStone transaction mode for the forked FRONT-END gem:
 #                         transactionless (default) or autoBegin. The front end makes no repository
 #                         changes, so transactionless costs it nothing and saves the stone a commit
@@ -111,6 +120,7 @@ GS_MCP_TITLE="${GS_MCP_TITLE:-}"
 GS_MCP_TRACE="${GS_MCP_TRACE:-0}"
 GS_MCP_TRACE_LIMIT="${GS_MCP_TRACE_LIMIT:-}"
 GS_MCP_FRONT_END_TX_MODE="${GS_MCP_FRONT_END_TX_MODE:-transactionless}"
+GS_MCP_MAX_COMMITS_BEHIND="${GS_MCP_MAX_COMMITS_BEHIND:-}"
 MCP_BIND_ADDRESS="${MCP_BIND_ADDRESS:-}"
 MCP_TLS_CERT="${MCP_TLS_CERT:-}"
 MCP_TLS_KEY="${MCP_TLS_KEY:-}"
@@ -202,6 +212,17 @@ case "$GS_MCP_FRONT_END_TX_MODE" in
      echo "       and is '$GS_MCP_FRONT_END_TX_MODE'." >&2
      exit 1 ;;
 esac
+# View hygiene. `none` is an instruction (leave every worker's view alone), so it has to reach the
+# router as an explicit nil rather than as an absence.
+CB_LINE=""
+case "$(printf '%s' "$GS_MCP_MAX_COMMITS_BEHIND" | tr 'A-Z' 'a-z')" in
+  '')          ;;
+  none|off)    CB_LINE="r maxCommitsBehind: nil." ;;
+  *[!0-9]*)    echo "error: GS_MCP_MAX_COMMITS_BEHIND must be a whole number of commits, or 'none'," >&2
+               echo "       and is '$GS_MCP_MAX_COMMITS_BEHIND'." >&2
+               exit 1 ;;
+  *)           CB_LINE="r maxCommitsBehind: $GS_MCP_MAX_COMMITS_BEHIND." ;;
+esac
 BIND_LINE=""
 [ -n "$MCP_BIND_ADDRESS" ] && BIND_LINE="r bindAddress: '$MCP_BIND_ADDRESS'."
 # Message tracing; both settings travel to the forked gem in the config (McpRouter>>configDict).
@@ -261,6 +282,7 @@ $EXTRA_LINE
 $WRITE_LINE
 $RO_LINE
 $TX_MODE_LINE
+$CB_LINE
 $BIND_LINE
 $TRACE_LINE
 $TITLE_LINE

@@ -9,7 +9,8 @@ Object subclass: 'McpSession'
                     serverVersion workerPid workerStoneSession outbox
                     startedAtSeconds expiresAtSeconds quietProbes unansweredProbes
                     streamlessPasses passesSinceProbe streamClosedByClient requestTimeoutSeconds
-                    workerAbandoned inFlightRequestId cancelRequested waitAction)
+                    workerAbandoned inFlightRequestId cancelRequested waitAction
+                    commitsBehind)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -214,6 +215,18 @@ close
   [worker logout] on: Error do: [:e | nil].
   ^self
 %
+category: 'view hygiene'
+method: McpSession
+commitsBehind
+  "How many commits the repository had taken since this session's worker gem obtained its view, as
+   of the last maintenance pass that could read it -- or nil if it has never been read (no pass yet,
+   or the server's user lacks SessionAccess).
+   A REMEMBERED number, not a live one. Nothing here asks the worker or the stone; the front end
+   measures once per pass (McpRouter>>commitsBehindFor:) and hands the answer over, so the figure
+   quoted in a log line or a client-facing note is the one the decision was made on rather than a
+   second reading that may have moved since."
+  ^commitsBehind
+%
 category: 'private'
 method: McpSession
 endCallBecause: aReasonSymbol
@@ -354,6 +367,9 @@ initialize
    a script -- waits for its worker as long as it takes."
   requestTimeoutSeconds := nil.
   workerAbandoned := false.
+  "Nothing measured yet. nil rather than 0 because 'up to date' and 'never asked' are different
+   facts, and only one of them is a reason to leave this session alone."
+  commitsBehind := nil.
   ^self
 %
 category: 'activity'
@@ -406,6 +422,16 @@ noteAlive
    Deliberately NOT #touch -- see the class comment. Answering a ping is not work."
   unansweredProbes := 0.
   quietProbes := quietProbes + 1
+%
+category: 'view hygiene'
+method: McpSession
+noteCommitsBehind: anIntegerOrNil
+  "Record what the maintenance pass measured of this session's view (see #commitsBehind).
+   Deliberately not a #touch and deliberately not a probe: this is the front end writing down what
+   it saw, and it must advance nothing the reaping policy counts. A session that has stopped calling
+   tools is measured every pass like any other, and must still be released on schedule."
+  commitsBehind := anIntegerOrNil.
+  ^self
 %
 category: 'liveness'
 method: McpSession

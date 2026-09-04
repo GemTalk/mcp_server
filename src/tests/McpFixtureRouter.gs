@@ -3,7 +3,8 @@ set compile_env: 0
 expectvalue /Class
 doit
 McpRouter subclass: 'McpFixtureRouter'
-  instVarNames: #( loggedLines)
+  instVarNames: #( loggedLines fakeCommitsBehind fakeBacklogCritical
+                    fakeOldestCrSessions)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -32,6 +33,14 @@ fixture is bending: a mock socket is at EOF from the start, so EVERY stream test
 client-went-away path, and a shipping grace would charge each of them a real ten-second wait for a
 reconnect that no mock will ever make. A test that wants the fast release asks for it by name.
 
+The third seam is the three stone readings view hygiene depends on -- how far behind a worker''s view
+is, whether the repository is over its own commit-record backlog threshold, and which sessions hold
+the oldest record. Faked here (#fakeCommitsBehind: and friends) because a test cannot make a stone
+have a backlog, and cannot make a session it never logged in be twenty commits behind, without a
+second gem and a netldi. What is left under test is the part worth testing: the DECISION those three
+numbers feed. The readings themselves are thin wrappers over stone primitives and are checked
+against a real stone separately, unfaked.
+
 The second seam is the log. #log: is captured into #loggedLines instead of reaching the gem log,
 which is what lets a test assert on what the ROUTER decided to record -- above all the message
 trace, whose whole point is that a line appears (McpRouter>>traceRequest:). Capturing also keeps a
@@ -46,6 +55,32 @@ removeallmethods McpFixtureRouter
 removeallclassmethods McpFixtureRouter
 ! ------------------- Class methods for McpFixtureRouter
 ! ------------------- Instance methods for McpFixtureRouter
+category: 'testing support'
+method: McpFixtureRouter
+commitsBehindFor: sess
+  ^fakeCommitsBehind ifNil: [super commitsBehindFor: sess]
+%
+category: 'testing support'
+method: McpFixtureRouter
+fakeBacklogCritical: aBooleanOrNil
+  "Report this instead of asking the stone whether its commit-record backlog is over threshold
+   (nil restores the real reading)."
+  fakeBacklogCritical := aBooleanOrNil
+%
+category: 'testing support'
+method: McpFixtureRouter
+fakeCommitsBehind: anIntegerOrNil
+  "Report this as EVERY session's commits-behind instead of reading each worker's session
+   description (nil restores the real reading)."
+  fakeCommitsBehind := anIntegerOrNil
+%
+category: 'testing support'
+method: McpFixtureRouter
+fakeOldestCrSessions: anArrayOrNil
+  "Report these as the stone session ids holding the oldest commit record open (nil restores the
+   real reading). An empty Array is a real answer -- nobody does -- and is not the same as nil."
+  fakeOldestCrSessions := anArrayOrNil
+%
 category: 'initialization'
 method: McpFixtureRouter
 initialize
@@ -56,6 +91,10 @@ initialize
   super initialize.
   self streamLossGraceSeconds: nil.
   loggedLines := OrderedCollection new.
+  "nil = do not fake it, use the shipping implementation. Not false/0, which would be an answer."
+  fakeCommitsBehind := nil.
+  fakeBacklogCritical := nil.
+  fakeOldestCrSessions := nil.
   ^self
 %
 category: 'running'
@@ -76,4 +115,14 @@ method: McpFixtureRouter
 loggedLines
   "Every line this router has logged, oldest first."
   ^loggedLines
+%
+category: 'testing support'
+method: McpFixtureRouter
+sessionsHoldingOldestCr
+  ^fakeOldestCrSessions ifNil: [super sessionsHoldingOldestCr]
+%
+category: 'testing support'
+method: McpFixtureRouter
+stoneBacklogCritical
+  ^fakeBacklogCritical ifNil: [super stoneBacklogCritical]
 %

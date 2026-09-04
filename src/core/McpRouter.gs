@@ -11,7 +11,7 @@ McpBase subclass: 'McpRouter'
                     streamlessIdleTimeoutSeconds livenessProbeIntervalSeconds reaperIntervalSeconds maxSessionLifetimeSeconds
                     reapOnFailedProbe streamLossGraceSeconds messageTrace messageTraceLimit
                     requestTimeoutSeconds callChannels callMutex callCounter
-                    frontEndTransactionMode)
+                    frontEndTransactionMode maxCommitsBehind sessionAccessWarned)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -156,6 +156,22 @@ defaultLivenessProbeIntervalSeconds
    and a client that is frozen rather than gone is released after #unansweredProbesBeforeGone of
    them, which at the former five minutes meant a quarter of an hour before anyone noticed."
   ^120
+%
+category: 'view hygiene'
+classmethod: McpRouter
+defaultMaxCommitsBehind
+  "How far behind the repository a worker gem's view may fall before this server refreshes it: 20
+   commits.
+   The number is borrowed rather than invented. StnSignalAbortCrBacklog, the stone's own trigger for
+   sigAborting a gem that is holding the oldest commit record, defaults to 20 -- so this says 'as
+   patient as the stone is, and no more'. It is a PROXY and not the same quantity: the stone counts
+   the whole repository's backlog, where this counts one session's distance from the current state
+   (descriptionOfSession: field 16). What licenses reading one as the other is the practical
+   observation that a session 20 commits behind is plausibly the reason the backlog is 20.
+   For scale, measured on db-1 the moment view hygiene was first deployed: the front end that had
+   never moved its view was 489 commits behind, with a stone backlog of 490. 20 is not a
+   conservative number."
+  ^20
 %
 category: 'message trace'
 classmethod: McpRouter
@@ -397,6 +413,10 @@ applyConfig: aConfigDict
   reaperIntervalSeconds := aConfigDict at: 'reaperIntervalSeconds' ifAbsent: [reaperIntervalSeconds].
   maxSessionLifetimeSeconds := aConfigDict at: 'maxSessionLifetimeSeconds' ifAbsent: [maxSessionLifetimeSeconds].
   reapOnFailedProbe := aConfigDict at: 'reapOnFailedProbe' ifAbsent: [reapOnFailedProbe].
+  "Through the SETTER: nil is a real setting here (view hygiene off) and every other value has a
+   floor, so a number that cannot work must fail on arrival in the child gem."
+  (aConfigDict includesKey: 'maxCommitsBehind')
+    ifTrue: [self maxCommitsBehind: (aConfigDict at: 'maxCommitsBehind')].
   messageTrace := aConfigDict at: 'messageTrace' ifAbsent: [messageTrace].
   messageTraceLimit := aConfigDict at: 'messageTraceLimit' ifAbsent: [messageTraceLimit].
   ^self
@@ -485,6 +505,41 @@ closeAllSessions
   doomed do: [:s | [s close] on: Error do: [:e | nil]].
   ^doomed size
 %
+category: 'view hygiene'
+method: McpRouter
+commitsBehindFor: sess
+  "How many commits the repository has taken since sess's WORKER GEM obtained its view
+   (descriptionOfSession: field 16), or nil if that cannot be read.
+   A stone query made from THIS gem about another session -- it never touches the worker's GCI
+   channel, so it is unaffected by whether the worker has a call in flight, and unaffected by this
+   gem's own view. That is what lets this arm measure a busy session it must not act on.
+   #workerStoneSession was cached at login (McpSession>>cacheWorkerIds) precisely so nothing on this
+   path has to ask the worker anything.
+   Two failures both answer nil: the session has logged out, and this server's user lacks the
+   SessionAccess privilege needed to read ANOTHER session's description. The second disables the
+   whole arm, so it is logged -- once, by #noteSessionAccessDenied:, because a line per session per
+   pass would bury the gem log in a fact that does not change."
+  | sid |
+  sid := sess workerStoneSession.
+  sid isNil ifTrue: [^nil].
+  ^[(System descriptionOfSession: sid) at: 16]
+    on: Error
+    do: [:ex | self noteSessionAccessDenied: ex. nil]
+%
+category: 'view hygiene'
+method: McpRouter
+commitsBehindLimit
+  "The commits-behind figure at which this server refreshes a worker's view: the LOWER of what this
+   router was configured to tolerate (#maxCommitsBehind) and what the stone itself tolerates
+   (StnSignalAbortCrBacklog), so either one firing is enough.
+   Answers nil when the arm is off (#maxCommitsBehind nil). When the stone cannot be read, the
+   configured number stands alone -- an unreadable stone setting must not silently raise the bar."
+  | stone |
+  maxCommitsBehind isNil ifTrue: [^nil].
+  stone := self stoneSignalAbortCrBacklog.
+  stone isNil ifTrue: [^maxCommitsBehind].
+  ^maxCommitsBehind min: stone
+%
 category: 'running'
 method: McpRouter
 completeHandshake: aClientSocket
@@ -542,6 +597,7 @@ configDict
   d at: 'reaperIntervalSeconds' put: reaperIntervalSeconds.
   d at: 'maxSessionLifetimeSeconds' put: maxSessionLifetimeSeconds.
   d at: 'reapOnFailedProbe' put: reapOnFailedProbe.
+  d at: 'maxCommitsBehind' put: maxCommitsBehind.
   "Message tracing has to travel, or it is unreachable: forkOnPort: is the only way this server is
    ever started, so a setting the fork string does not carry is one an operator cannot turn on."
   d at: 'messageTrace' put: messageTrace.
@@ -846,6 +902,14 @@ hasSessionIdleDeadline
    unreachable client's gem."
   ^sessionIdleTimeoutSeconds notNil
 %
+category: 'view hygiene'
+method: McpRouter
+hasViewHygiene
+  "Whether this router watches its workers' views at all. Off means off entirely -- neither the
+   per-session ceiling nor the stone-pressure trigger applies -- which is the same bargain
+   #hasSessionIdleDeadline makes for idleness: nil is a deployment instruction, not an absence."
+  ^maxCommitsBehind notNil
+%
 category: 'routing'
 method: McpRouter
 hostOfOrigin: aString
@@ -906,6 +970,10 @@ initialize
   reaperIntervalSeconds := self class defaultReaperIntervalSeconds.
   maxSessionLifetimeSeconds := nil.  "nil = no absolute cap beyond whatever a credential imposes"
   reapOnFailedProbe := true.
+  "View hygiene. Seeded rather than left nil, because nil is the OFF setting and could not also mean
+   'use the default'. sessionAccessWarned is the once-only latch for the privilege this arm needs."
+  maxCommitsBehind := self class defaultMaxCommitsBehind.
+  sessionAccessWarned := false.
   "Message tracing: OFF, because a traced log records every tool argument a client sent, and an
    operator must choose that rather than discover it. The cap is not optional -- a compile_method or
    execute_code body runs to tens of kilobytes, and an unbounded default would let a chatty session
@@ -1080,8 +1148,71 @@ maintainSessions
        at stream handover (#retirePendingProbesFor:) -- so nothing is waiting on a clock to be
        declared unanswered."
   self refreshFrontEndView.
+  self maintainViewHygiene.
   self probeIdleSessions.
   ^self reapIdleSessions
+%
+category: 'view hygiene'
+method: McpRouter
+maintainViewHygiene
+  "Look at how far behind the repository each worker gem's view has fallen, and answer how many are
+   far enough behind to act on.
+   MEASUREMENT ONLY, deliberately, for this first step: it records the number on each session and
+   logs the ones over the line, and it moves nobody's view. The whole point is to find out what the
+   real numbers look like -- and whether this server's user can read them at all -- before anything
+   acts on them.
+   The two stone-wide figures are read ONCE per pass, not once per session: they are properties of
+   the repository, and asking per session would multiply the cost by the client count for an answer
+   that cannot differ. The session snapshot is taken under the mutex the same way
+   #probeIdleSessions does it, because a session may be reaped or registered while this runs.
+   A session with a call in flight is MEASURED but never acted on, here or later. The measurement is
+   a stone query and cares nothing for the worker's GCI channel; the action would have to go through
+   it, and moving a view out from under a running tool is the corruption the transaction model exists
+   to prevent."
+  | limit critical backlog oldest acted |
+  self hasViewHygiene ifFalse: [^0].
+  limit := self commitsBehindLimit.
+  limit isNil ifTrue: [^0].
+  backlog := self stoneCommitRecordBacklog.
+  critical := self stoneBacklogCritical.
+  "Only needed to decide the pressure case, and only when there IS pressure."
+  oldest := critical ifTrue: [self sessionsHoldingOldestCr] ifFalse: [#()].
+  acted := 0.
+  (mutex critical: [sessions values asArray]) do: [:sess |
+    [ | behind holdsOldest |
+      behind := self commitsBehindFor: sess.
+      behind ifNotNil: [ | changed |
+        "Read BEFORE recording: whether this is news or a repeat is what decides the log line."
+        changed := behind ~= sess commitsBehind.
+        sess noteCommitsBehind: behind.
+        holdsOldest := oldest includes: sess workerStoneSession.
+        "Over the line by either route: this session is far enough behind on its own, OR the stone is
+         over its own backlog threshold AND this is a session holding the oldest record open. The
+         second is deliberately conjunctive. Measured on db-1, a stone can sit far above its
+         threshold for hours (backlog 726 against a threshold of 80) because ONE session pinned the
+         oldest record -- so treating pressure alone as a reason would act on every client every
+         pass, when only one of them is the reason. The same predicate governs the busy case."
+        (behind >= limit or: [critical and: [holdsOldest]]) ifTrue: [
+          acted := acted + 1.
+          "Log a CHANGED number, not a standing one. This step acts on nothing, so a session over
+           the line stays over it, and a line per session per pass is 1440 identical lines a day for
+           one idle client -- measured, three in a row before that session happened to be reaped.
+           Every distinct observation is still recorded, which is what this step is for; only the
+           repeats go. Once the arm acts (the next step) this becomes self-limiting anyway, since a
+           refreshed view reads 0 on the following pass."
+          changed ifTrue: [
+            self log: 'view hygiene (measuring only): session ' , sess id printString
+              , ' worker gem ' , sess workerStoneSession printString
+              , ' is ' , behind printString , ' commits behind (limit ' , limit printString
+              , '), stone backlog ' , backlog printString , '/'
+              , self stoneCrBacklogThreshold printString
+              , ', holds-oldest-cr ' , (holdsOldest ifTrue: ['yes'] ifFalse: ['no'])
+              , ', busy ' , (sess isBusy ifTrue: ['yes'] ifFalse: ['no'])
+              , ' -- would refresh its view.']]]]
+      on: Error
+      do: [:e | self log: 'maintainViewHygiene error: ' ,
+             ([e description] on: Error do: [:x | e class name asString])]].
+  ^acted
 %
 category: 'running'
 method: McpRouter
@@ -1098,6 +1229,31 @@ makeListenerOnPort: aPort
   (sock makeServer: 16 atPort: aPort atAddress: self bindAddress)
     ifNil: [^self error: 'makeServer failed on port ' , aPort printString , ': ' , sock lastErrorString].
   ^sock
+%
+category: 'view hygiene'
+method: McpRouter
+maxCommitsBehind
+  "How far behind the repository a worker gem's view may fall before this server refreshes it, or
+   nil to leave every worker's view alone however far behind it gets.
+   Counted in COMMITS (descriptionOfSession: field 16), not seconds, because that is the quantity
+   the stone charges for: a session's view pins the commit record it was taken from, and what hurts
+   is the number of records piled up behind it, not how long ago it was taken. A session idle for a
+   day on a quiet stone costs nothing."
+  ^maxCommitsBehind
+%
+category: 'view hygiene'
+method: McpRouter
+maxCommitsBehind: anIntegerOrNil
+  "Set the commits-behind ceiling for worker views (nil turns view hygiene off entirely -- see
+   #hasViewHygiene). Raises on anything else.
+   The floor is 2 rather than 1: a ceiling of one commit would refresh a worker's view on the heels
+   of any other session's commit, which for a client mid-plan is a view move per keystroke of
+   somebody else's work."
+  anIntegerOrNil isNil ifTrue: [^maxCommitsBehind := nil].
+  ((anIntegerOrNil isKindOf: Integer) and: [anIntegerOrNil >= 2]) ifFalse: [
+    ^self error: 'maxCommitsBehind must be nil, or an integer of at least 2, and is '
+      , anIntegerOrNil printString , '.'].
+  maxCommitsBehind := anIntegerOrNil
 %
 category: 'session lifetime'
 method: McpRouter
@@ -1187,6 +1343,23 @@ nextSessionId
   | id |
   [id := self randomSessionToken. sessions includesKey: id] whileTrue: [].
   ^id
+%
+category: 'view hygiene'
+method: McpRouter
+noteSessionAccessDenied: anError
+  "Record that a worker's session description could not be read, and say so in the gem log ONCE.
+   Almost always one cause: reading ANOTHER session's description needs the SessionAccess privilege,
+   and without it this whole arm is a no-op. That is worth a line naming the privilege, and worth
+   exactly one -- the alternative is a line per session per pass, for a fact that will not change
+   until somebody changes the user.
+   The error text is included because the other reachable cause, a session that has logged out
+   between the snapshot and the query, is ordinary and should be distinguishable at a glance."
+  sessionAccessWarned == true ifTrue: [^self].
+  sessionAccessWarned := true.
+  ^self log: 'view hygiene is disabled: this server''s user cannot read another session''s '
+    , 'description, which needs the SessionAccess privilege. Grant it, or set maxCommitsBehind to '
+    , 'nil to stop asking. (' , ([anError description] on: Error do: [:x | anError class name asString])
+    , ')'
 %
 category: 'sessions'
 method: McpRouter
@@ -1742,6 +1915,7 @@ runOnPort: aPort
    #refreshFrontEndView is releasing a commit record or re-pinning a fresh one."
   self log: 'transaction mode: '
     , ([System transactionMode asString] on: Error do: [:x | 'unknown']).
+  self log: 'view hygiene: ' , self viewHygieneSummary.
   "Say so when tracing is on, and say nothing when it is off. A reader of this log has to be able to
    tell a quiet server from an untraced one -- otherwise an absence of message lines reads as an
    absence of traffic, which is the wrong conclusion and the expensive one."
@@ -2178,6 +2352,17 @@ sessionIdOf: req
   "The MCP-Session-Id request header (header keys are lower-cased by parseHead:), or nil."
   ^(req at: 'headers' ifAbsent: [Dictionary new]) at: 'mcp-session-id' ifAbsent: [nil]
 %
+category: 'view hygiene'
+method: McpRouter
+sessionsHoldingOldestCr
+  "The stone session ids holding the repository's OLDEST commit record open, as an Array; empty if
+   the question cannot be answered.
+   Needs no privilege, unlike reading another session's description, and answers in one call exactly
+   which sessions are the reason a backlog is not draining. That makes it both the enrichment for
+   the log line and the discriminator for the stone-pressure case: pressure plus THIS session is a
+   reason to act, where pressure alone is not."
+  ^[System sessionsReferencingOldestCr asArray] on: Error do: [:ex | #()]
+%
 category: 'progress'
 method: McpRouter
 signalPollMilliseconds
@@ -2188,6 +2373,59 @@ signalPollMilliseconds
    (enableSignalling), which would interrupt whatever the router happened to be doing at the time.
    Polling costs a wakeup ten times a second and can interrupt nothing."
   ^100
+%
+category: 'view hygiene'
+method: McpRouter
+stoneBacklogCritical
+  "Whether the repository's commit-record backlog is above the stone's OWN threshold for
+   aggressively disposing commit records (StnCrBacklogThreshold). False whenever either number is
+   unreadable or the threshold is disabled -- an unknown is never treated as pressure.
+   This is a fact about the repository and not about any session, so it is never a sufficient reason
+   to move a particular client's view; see #maintainViewHygiene for the conjunction it appears in."
+  | backlog threshold |
+  backlog := self stoneCommitRecordBacklog.
+  backlog isNil ifTrue: [^false].
+  threshold := self stoneCrBacklogThreshold.
+  threshold isNil ifTrue: [^false].
+  ^backlog > threshold
+%
+category: 'view hygiene'
+method: McpRouter
+stoneCommitRecordBacklog
+  "How many commit records the repository is holding, or nil if unreadable. The stone's own
+   CommitRecordCount statistic -- the number this whole arm exists to keep down."
+  ^[System commitRecordBacklog] on: Error do: [:ex | nil]
+%
+category: 'view hygiene'
+method: McpRouter
+stoneCrBacklogThreshold
+  "The backlog above which the stone aggressively disposes commit records
+   (STN_CR_BACKLOG_THRESHOLD), or nil if unreadable or disabled.
+   The stone answers this ALREADY RESOLVED. system.conf documents -1 as meaning twice
+   STN_MAX_SESSIONS, but measured on db-1 -- which sets neither -- the runtime read answers 80 with
+   StnMaxSessions of 10, so resolving -1 here would compute 20 and be WRONG about the number the
+   stone is actually using. The two documented special values are still mapped defensively, in case
+   some version answers the raw setting: 0 means disabled, and a negative means 'the stone did not
+   resolve it for us', which is an unknown rather than a threshold of nothing."
+  | v |
+  v := [System stoneConfigurationAt: #StnCrBacklogThreshold] on: Error do: [:ex | nil].
+  (v isKindOf: Integer) ifFalse: [^nil].
+  v <= 0 ifTrue: [^nil].
+  ^v
+%
+category: 'view hygiene'
+method: McpRouter
+stoneSignalAbortCrBacklog
+  "The backlog above which the stone sigAborts a gem that is outside a transaction and holding the
+   oldest commit record (STN_SIGNAL_ABORT_CR_BACKLOG, default 20), or nil if unreadable.
+   Read for its NUMBER, not for its behaviour: nothing in this server is eligible for that sigAbort
+   in the first place. Worker gems are permanently in transaction (an in-transaction gem is immune
+   unless it has called #enableSignaledFinishTransactionError, which nothing here does), and the
+   front end keeps itself off the oldest record by refreshing every pass. What the number is good
+   for is calibration -- it is the stone's own statement of how far behind is too far."
+  | v |
+  v := [System stoneConfigurationAt: #StnSignalAbortCrBacklog] on: Error do: [:ex | nil].
+  ^(v isKindOf: Integer) ifTrue: [v] ifFalse: [nil]
 %
 category: 'controlling'
 method: McpRouter
@@ -2581,6 +2819,32 @@ verdictAdmissible: aPendingEntry forSession: sess
   gen := aPendingEntry at: 'streamGeneration' ifAbsent: [nil].
   gen isNil ifTrue: [^false].
   ^sess outbox hasStream and: [sess outbox isCurrentStream: gen]
+%
+category: 'view hygiene'
+method: McpRouter
+viewHygieneSummary
+  "One line naming the view-hygiene policy in force, for the startup banner. Says which numbers are
+   in play and, since this step acts on nothing, that it is only watching -- a reader must be able to
+   tell a server that found nothing over the line from one that was never going to look."
+  | s |
+  self hasViewHygiene ifFalse: [^'off (maxCommitsBehind nil) -- worker views are left alone'].
+  s := WriteStream on: String new.
+  s nextPutAll: 'MEASURING ONLY (nothing is refreshed yet), threshold '.
+  s nextPutAll: self commitsBehindLimit printString.
+  s nextPutAll: ' commits behind (configured '; nextPutAll: maxCommitsBehind printString.
+  s nextPutAll: ', stone StnSignalAbortCrBacklog '.
+  s nextPutAll: (self stoneSignalAbortCrBacklog isNil
+    ifTrue: ['unreadable']
+    ifFalse: [self stoneSignalAbortCrBacklog printString]).
+  s nextPutAll: '), stone backlog '.
+  s nextPutAll: (self stoneCommitRecordBacklog isNil
+    ifTrue: ['unreadable']
+    ifFalse: [self stoneCommitRecordBacklog printString]).
+  s nextPutAll: '/'.
+  s nextPutAll: (self stoneCrBacklogThreshold isNil
+    ifTrue: ['disabled']
+    ifFalse: [self stoneCrBacklogThreshold printString]).
+  ^s contents
 %
 category: 'worker class'
 method: McpRouter

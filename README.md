@@ -1159,7 +1159,11 @@ flag, so a missing suite is a skip and not an error:
   refresh takes a whole new view without disturbing the transaction mode, that a maintenance pass
   begins with it — and the bug detector, since a front end that ever writes to the repository loses
   that write *silently* out of transaction, so one log line is all that stands between the defect and
-  nobody noticing. Declares `movesTheSessionView`: its subject is this gem's view.
+  nobody noticing. Then the **workers'** views: that a session far enough behind the repository is
+  noticed and recorded, that pressure on the stone is never on its own a reason to move one
+  particular client's view, that a standing measurement is logged once rather than every pass, and
+  that a reading which cannot be taken is skipped rather than recorded as zero. Declares
+  `movesTheSessionView`: its subject is this gem's view.
 - `McpContractTest` — contract / property tests over the tool surface, all driven through the real
   `McpDispatcher>>handle:` envelope: every tool schema is closed (`additionalProperties:false`),
   unknown/missing arguments → an `isError` tool execution error while a missing tool name / unknown
@@ -1192,13 +1196,13 @@ Run a single suite while a server is up via the `run_test_class` tool (e.g. `run
 McpToolTest`). `./run-unit-tests.sh` runs them all and exits 0 when every test passes: the
 socket-less suites `McpJsonTest` (12), `McpUtf8Test` (7), `McpBlindWriteTest` (41),
 `McpToolTest` (58), `McpDispatcherTest` (18), `McpSessionTest` (19), `McpOutboxTest` (9),
-`McpProgressTest` (19), `McpStreamTest` (18), `McpLifetimeTest` (49), `McpViewHygieneTest` (11),
+`McpProgressTest` (19), `McpStreamTest` (18), `McpLifetimeTest` (49), `McpViewHygieneTest` (23),
 `McpTransportTest` (43), `McpContractTest` (35) and `McpExtensionTest` (14), plus
 `McpConcurrentEditTest` (15), `McpExternalSessionTest` (5), `McpTransactionTest` (8) and
-`McpWorkerDeadlineTest` (4) — **385 tests**,
+`McpWorkerDeadlineTest` (4) — **397 tests**,
 which is the whole suite on a base install. Where the optional groups are installed the runner picks
-their suites up automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **441
-tests** — and **468 with the 27 in `McpGrailToolsetTest`** on a Grail image.
+their suites up automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **453
+tests** — and **480 with the 27 in `McpGrailToolsetTest`** on a Grail image.
 
 Six suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
 `McpAuthConformanceTest` commit a throwaway JWT user and spawn real worker gems; they are in the
