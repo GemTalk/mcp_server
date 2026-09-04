@@ -10,7 +10,8 @@ McpBase subclass: 'McpRouter'
                     pendingRequests pendingMutex serverRequestCounter sessionIdleTimeoutSeconds
                     streamlessIdleTimeoutSeconds livenessProbeIntervalSeconds reaperIntervalSeconds maxSessionLifetimeSeconds
                     reapOnFailedProbe streamLossGraceSeconds messageTrace messageTraceLimit
-                    requestTimeoutSeconds callChannels callMutex callCounter)
+                    requestTimeoutSeconds callChannels callMutex callCounter
+                    frontEndTransactionMode)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -53,6 +54,19 @@ IMPORTANT: runOnPort: is BLOCKING and is meant to be the main activity of a dedi
 GsProcesses only run while the gem is actively executing Smalltalk, so a background fork in an idle
 GCI session would never serve requests.
 
+IMPORTANT: FRONT-END CODE MUST NOT READ PERSISTENT OBJECT GRAPHS. A detached front-end gem runs
+#transactionless (frontEndTransactionMode), so it holds no view worth the name: the view moves under
+it once per maintenance pass, by design (#refreshFrontEndView). That is deliberate -- this class
+makes no repository changes at all, and one left in transaction was measured holding the stone''s
+oldest commit record with its last transaction boundary being its own login 15 hours earlier, which
+nothing stone-side could ever have cleared. The price is the mode''s documented one: a transactionless
+session "may scan database objects, but is at risk of obtaining inconsistent views". Everything here
+today is safe under that rule -- stone primitives, lookups by name, and the worker gems'' own state
+asked for over GCI -- and new front-end code must stay so: walk no committed collection, and cache no
+persistent object across statements. Anything that needs a stable view belongs in a worker gem.
+The corollary, and it cuts both ways: a COMMITTED recompile of a front-end method does take effect in
+a running front end, within one maintenance pass.
+
 Configure a router INSTANCE and run or fork it. Config lives on the instance (no class/committed
 state); forkOnPort: carries it to the detached child gem as JSON embedded in the fork string (paths
 + identifiers only, never key material -- see configDict), so nothing is committed and multiple
@@ -86,6 +100,10 @@ transport and credential gates, so a refused request is traced too. Headers are 
 of them is a bearer token:
     (McpRouter new messageTrace: true) forkOnPort: 8000
     (McpRouter new messageTrace: true; messageTraceLimit: nil) forkOnPort: 8000   "no body cap"
+Keep the detached front end IN TRANSACTION, the way it behaved before view hygiene existed. It will
+pin a commit record for as long as it runs, and nothing on the stone can push its view along; the
+reason to want it is the paragraph above, if front-end code of your own needs a stable view:
+    (McpRouter new frontEndTransactionMode: ''autoBegin'') forkOnPort: 8000
 
 This class CANNOT be made reachable from another host: bindAddress answers loopback and has no
 setter, because a base McpRouter performs no authentication and a reachable port would be an open
@@ -109,6 +127,22 @@ classmethod: McpRouter
 defaultAllowedOriginHosts
   "Loopback hosts only -- a page served from any other origin is a DNS-rebinding attempt."
   ^#('localhost' '127.0.0.1' '[::1]')
+%
+category: 'transaction mode'
+classmethod: McpRouter
+defaultFrontEndTransactionMode
+  "The GemStone transaction mode a DETACHED front-end gem puts itself in: 'transactionless'.
+   A front end has no use for a view. It owns the socket, the session map and the reaper; it makes no
+   repository changes (no committed state of any kind, and no commit/abort/begin anywhere in this
+   class before this one); and every database thing it does is a stone primitive or a lookup by name.
+   A view it never moves is not neutral, though -- it is a commit record the stone cannot dispose of.
+   Measured on a live stone: a front end in transaction was the sole holder of the oldest commit
+   record, its last transaction boundary its own login 15.4 hours earlier, and nothing was ever going
+   to move it (an IN-transaction gem is immune to sigAbort unless it has called
+   #enableSignaledFinishTransactionError, and the workers are in transaction by design too).
+   'autoBegin' is the escape hatch; see the class comment for the constraint this default puts on
+   front-end code."
+  ^'transactionless'
 %
 category: 'session lifetime defaults'
 classmethod: McpRouter
@@ -215,6 +249,16 @@ defaultStreamLossGraceSeconds
    #streamlessIdleTimeoutSeconds as before."
   ^10
 %
+category: 'transaction mode'
+classmethod: McpRouter
+frontEndTransactionModes
+  "The values #frontEndTransactionMode: accepts. Each is the NAME of a GemStone transaction mode, and
+   converts to the symbol System class>>transactionMode: takes with #asSymbol.
+   #manualBegin is deliberately not offered: it differs from #autoBegin only in when a transaction
+   begins, which is a distinction only a session that writes can spend -- and it would give this
+   class a third state to reason about for nothing."
+  ^#('transactionless' 'autoBegin')
+%
 category: 'network'
 classmethod: McpRouter
 loopbackAddress
@@ -238,8 +282,17 @@ category: 'forking'
 classmethod: McpRouter
 runOnPort: aPort configJson: aJsonString
   "Child-gem entry the detached fork runs (see the instance forkOnPort:): build a router of THIS
-   class, apply the serialized config, and run its blocking accept loop."
-  ^(self new applyConfigJson: aJsonString) runOnPort: aPort
+   class, apply the serialized config, put the gem in its configured transaction mode, and run its
+   blocking accept loop.
+   The transaction mode is set HERE and in no other entry point, because this is the only one that
+   owns its session outright: the gem was forked to evaluate this expression and does nothing else
+   afterwards. Every other way in runs in somebody's session -- #forkOnPort: in the launching one,
+   the instance #runOnPort: in an interactive topaz -- and #applyFrontEndTransactionMode aborts on
+   the way in, which in a caller's session would silently discard their uncommitted work."
+  | router |
+  router := self new applyConfigJson: aJsonString.
+  router applyFrontEndTransactionMode.
+  ^router runOnPort: aPort
 %
 ! ------------------- Instance methods for McpRouter
 category: 'routing'
@@ -325,6 +378,10 @@ applyConfig: aConfigDict
   tlsCertificateFile := aConfigDict at: 'tlsCertificateFile' ifAbsent: [tlsCertificateFile].
   tlsPrivateKeyFile := aConfigDict at: 'tlsPrivateKeyFile' ifAbsent: [tlsPrivateKeyFile].
   readOnly := aConfigDict at: 'readOnly' ifAbsent: [readOnly].
+  "Through the SETTER, not the ivar: it is the one thing here whose value has a fixed vocabulary, and
+   a name that is not in it must fail in the child gem rather than be handed to #asSymbol."
+  (aConfigDict includesKey: 'frontEndTransactionMode')
+    ifTrue: [self frontEndTransactionMode: (aConfigDict at: 'frontEndTransactionMode')].
   workerClassName := aConfigDict at: 'workerClassName' ifAbsent: [workerClassName].
   toolsetNames := aConfigDict at: 'toolsetNames' ifAbsent: [toolsetNames].
   (aConfigDict includesKey: 'toolsetOptions')
@@ -349,6 +406,28 @@ method: McpRouter
 applyConfigJson: aJsonString
   "Apply a JSON config string (see applyConfig: / configJson)."
   ^self applyConfig: (self parseBody: aJsonString)
+%
+category: 'transaction mode'
+method: McpRouter
+applyFrontEndTransactionMode
+  "Put THIS GEM into the configured transaction mode (#frontEndTransactionMode), and answer self.
+   Called from the class-side #runOnPort:configJson: and from nowhere else -- see that method for
+   why, and the class comment for what the default mode then forbids of front-end code.
+   A failure is logged and swallowed rather than raised. The mode is hygiene: a front end that could
+   not get it is still a working front end, just one that pins a commit record, and refusing to serve
+   for that reason would be the worse trade. The failure that will actually happen is #transactionless
+   in a SOLO session (the repository open by this gem alone), which is no way to run a server but is
+   exactly how someone tries one out; the log line names the mode the gem is left in, since that is
+   the fact the next question will be about."
+  | mode |
+  mode := self frontEndTransactionMode.
+  ^[System transactionMode: mode asSymbol. self]
+    on: Error
+    do: [:ex |
+      self log: 'Could not put this gem in transaction mode ' , mode , ' -- staying in '
+        , ([System transactionMode asString] on: Error do: [:x | 'an unknown mode'])
+        , ': ' , ([ex description] on: Error do: [:x | ex class name asString]).
+      self]
 %
 category: 'network'
 method: McpRouter
@@ -444,6 +523,7 @@ configDict
   d at: 'tlsCertificateFile' put: tlsCertificateFile.
   d at: 'tlsPrivateKeyFile' put: tlsPrivateKeyFile.
   d at: 'readOnly' put: readOnly.
+  d at: 'frontEndTransactionMode' put: frontEndTransactionMode.
   d at: 'workerClassName' put: workerClassName.
   d at: 'toolsetNames' put: toolsetNames.
   "Toolset options are the one value here the core does not know the shape of. They stay inside the
@@ -709,6 +789,34 @@ forkSignalPoller
          , ([e description] on: Error do: [:x | e class name asString])].
      (Delay forMilliseconds: self signalPollMilliseconds) wait]] fork
 %
+category: 'transaction mode'
+method: McpRouter
+frontEndTransactionMode
+  "The GemStone transaction mode this router's DETACHED gem puts itself in before it serves anything
+   (class-side #runOnPort:configJson: -> #applyFrontEndTransactionMode). 'transactionless' by
+   default; McpRouter class>>defaultFrontEndTransactionMode says why.
+   It says nothing about a router run in the FOREGROUND from an interactive session, which never
+   changes the mode of the session that called it -- so the startup banner reports the mode the gem
+   is actually in rather than this one."
+  ^frontEndTransactionMode
+%
+category: 'transaction mode'
+method: McpRouter
+frontEndTransactionMode: aString
+  "Set the transaction mode this router's detached gem runs in -- one of
+   McpRouter class>>frontEndTransactionModes -- and raise on anything else.
+   Checked here, in the session that is configuring the router, because the alternative is a typo
+   that leaves the front end quietly in transaction: a condition no part of a running server
+   complains about, that costs nothing visible for hours, and that surfaces only as a stone full of
+   commit records."
+  ((aString isKindOf: CharacterCollection)
+    and: [self class frontEndTransactionModes includes: aString asString]) ifFalse: [
+      ^self error: 'frontEndTransactionMode must be one of '
+        , (self class frontEndTransactionModes inject: '' into: [:a :b |
+            a isEmpty ifTrue: [b] ifFalse: [a , ', ' , b]])
+        , ', and is ' , aString printString , '.'].
+  frontEndTransactionMode := aString asString
+%
 category: 'running'
 method: McpRouter
 handleConnection: aConnection
@@ -776,6 +884,10 @@ initialize
   serverName := nil.       "nil = the worker's own default (McpServer class>>defaultServerName)"
   serverTitle := nil.
   serverVersion := nil.
+  "The mode a DETACHED front-end gem puts itself in (#applyFrontEndTransactionMode). Seeded rather
+   than left nil, because nil could only mean 'keep whatever STN_GEM_INITIAL_TRANSACTION_MODE gave
+   this gem at login', and that is the pinned-view behaviour this default exists to end."
+  frontEndTransactionMode := self class defaultFrontEndTransactionMode.
   "server-initiated messaging: the requests this server has sent and is waiting to be answered.
    Its OWN mutex, not the session-map one -- that is held across reapIdleSessions, and correlating
    a client's ping reply must not queue behind another client's login."
@@ -949,16 +1061,25 @@ maintainIdleSession: sess
 category: 'sessions'
 method: McpRouter
 maintainSessions
-  "One pass of session housekeeping, run on the reaper's GsProcess. The order is the point:
-     0. notice whether this pass is itself wildly late -- the host was suspended -- and forgive that
-        time rather than letting it be read as idleness;
-     1. time out server-initiated requests nobody answered, which is what marks a probed session
-        gone (or, where the silence is about the transport rather than the client, discards it);
+  "One pass of session housekeeping, run on the reaper's GsProcess. Answers the number reaped.
+   The order is the point:
+     1. move this gem's OWN view (#refreshFrontEndView), so the front end stops holding a commit
+        record open for the rest of the stone -- and, the same act seen from the other side, so that
+        a committed recompile of front-end code takes effect here;
      2. probe sessions that have gone quiet, so silence can be told from absence;
      3. reap what should go.
-   Step 0 comes first because every step after it reads a wall clock. Reaping comes last so that a
-   session found gone in step 1 is freed in the same pass rather than the next.
-   Answers the number reaped."
+   Step 1 comes first so that everything after it reasons about the repository as it is now rather
+   than as it was when this gem logged in. Reaping comes last so that a session found gone while
+   probing is freed in the same pass rather than the next.
+   Two steps this comment used to promise are gone, and both were REMOVED rather than left undone:
+     * there is no suspend detector, because every ground #reapReasonFor: reads is now a count of
+       something this front end observed, so a suspended host cannot manufacture one and there is no
+       suspend left to forgive;
+     * there is no pass that times out server-initiated requests, because a probe is counted at the
+       moment it is SENT (McpSession>>noteProbeSent) and an inadmissible one has its count taken back
+       at stream handover (#retirePendingProbesFor:) -- so nothing is waiting on a clock to be
+       declared unanswered."
+  self refreshFrontEndView.
   self probeIdleSessions.
   ^self reapIdleSessions
 %
@@ -1395,6 +1516,37 @@ reapReasonFor: sess
       , (self phraseForSeconds: self streamlessIdleTimeoutSeconds)].
   ^nil
 %
+category: 'transaction mode'
+method: McpRouter
+refreshFrontEndView
+  "Move THIS GEM's database view to the current state of the repository, and answer self. Run at the
+   top of every maintenance pass, which makes it two things at once: this gem's release of whatever
+   commit record it was holding, and the front end's code-refresh point.
+   An explicit abort rather than trusting the stone to push the view along, because measured, it will
+   not: a view is STICKY (an idle transactionless session's view did not move at all over 30 seconds
+   of another session committing), and the stone's sigAbort fires only when the backlog is over
+   StnSignalAbortCrBacklog AND this session is on the oldest commit record. Without this the view
+   would move at an unpredictable, load-dependent moment, or never. Once per reaper interval is a
+   boring cadence that can be written down instead.
+   #abortTransaction is legal and correct in every transaction mode, so the 'autoBegin' escape hatch
+   needs no branch here -- in that mode this re-pins a fresh view rather than releasing the old one,
+   which is still the right act.
+   The needsCommit line is a BUG DETECTOR, not hygiene. Out of transaction, a write to a committed
+   object is allowed, sets needsCommit, and is then discarded by this abort with no error raised
+   anywhere -- where the same mistake in an in-transaction gem would at least raise 2030 at the
+   commit. The front end writes nothing today, which is what makes the mode safe; if that ever stops
+   being true, this line is the only thing that will say so."
+  ([System needsCommit] on: Error do: [:ex | false]) == true ifTrue: [
+    self log: 'BUG: the front end gem has uncommitted changes, which this view refresh is about to '
+      , 'discard. Nothing in McpRouter is supposed to write to the repository -- see the class '
+      , 'comment.'].
+  ^[System abortTransaction. self]
+    on: Error
+    do: [:ex |
+      self log: 'Could not refresh the front end''s view: '
+        , ([ex description] on: Error do: [:x | ex class name asString]).
+      self]
+%
 category: 'progress'
 method: McpRouter
 registerChannelForToken: aToken session: sess
@@ -1583,6 +1735,13 @@ runOnPort: aPort
       ifTrue: ['(none -- this router offers no tools)']
       ifFalse: [self effectiveToolsetNames inject: '' into: [:a :b | a isEmpty ifTrue: [b] ifFalse: [a , ' ' , b]]]).
   self log: 'session lifetime: ' , self lifetimeSummary.
+  "The mode the gem IS in, asked of the gem, not the mode this router was configured with. Only a
+   detached front end applies the configured one (class-side runOnPort:configJson:); run in the
+   foreground this reports the calling session's mode, which is the honest answer to 'what will this
+   process do to my view'. It is also the line that says whether the once-per-pass abort in
+   #refreshFrontEndView is releasing a commit record or re-pinning a fresh one."
+  self log: 'transaction mode: '
+    , ([System transactionMode asString] on: Error do: [:x | 'unknown']).
   "Say so when tracing is on, and say nothing when it is off. A reader of this log has to be able to
    tell a quiet server from an untraced one -- otherwise an absence of message lines reads as an
    absence of traffic, which is the wrong conclusion and the expensive one."

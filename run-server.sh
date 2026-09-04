@@ -54,6 +54,15 @@
 #                     for a localhost server you come back to hours later is
 #                     GS_MCP_IDLE_TIMEOUT=none, which keeps a session alive for as long as its client
 #                     keeps answering liveness pings.
+#   GS_MCP_FRONT_END_TX_MODE - GemStone transaction mode for the forked FRONT-END gem:
+#                     transactionless (default) or autoBegin. The front end makes no repository
+#                     changes, so transactionless costs it nothing and saves the stone a commit
+#                     record it could otherwise never dispose of -- measured, a front end left in
+#                     transaction held the oldest commit record with its last transaction boundary
+#                     being its own login 15 hours earlier. autoBegin restores that older behaviour,
+#                     and is only worth asking for if front-end code of your own needs a stable view
+#                     (see the McpRouter class comment). Workers are unaffected: each client's gem
+#                     stays in one long transaction, which is the whole product.
 #   GS_MCP_TRACE    - 1 to write every message a client SENDS to the gem log (default 0). Turn this
 #                     on when a call is going wrong and the client's own UI shows you only the tool
 #                     name: the trace carries the JSON-RPC text, including the arguments. It is off
@@ -81,6 +90,7 @@ GS_MCP_TOOLSET_OPTIONS="${GS_MCP_TOOLSET_OPTIONS:-}"
 GS_MCP_TITLE="${GS_MCP_TITLE:-}"
 GS_MCP_TRACE="${GS_MCP_TRACE:-0}"
 GS_MCP_TRACE_LIMIT="${GS_MCP_TRACE_LIMIT:-}"
+GS_MCP_FRONT_END_TX_MODE="${GS_MCP_FRONT_END_TX_MODE:-transactionless}"
 
 # Resolve the environment and confirm BOTH the stone and a netldi. The netldi requirement is real
 # and is not about how this script logs in: forkOnPort: creates a GsTsExternalSession for the front
@@ -106,6 +116,16 @@ fi
 . ./session-lifetime.sh
 
 [ "$GS_MCP_READONLY" = "1" ] && RO="true" || RO="false"
+
+# The front-end gem's transaction mode. Checked here as well as in the setter (which raises), because
+# a launcher that fails in the shell says so in one line instead of inside a topaz stack.
+TX_MODE_LINE=""
+case "$GS_MCP_FRONT_END_TX_MODE" in
+  transactionless|autoBegin) TX_MODE_LINE="r frontEndTransactionMode: '$GS_MCP_FRONT_END_TX_MODE'." ;;
+  *) echo "error: GS_MCP_FRONT_END_TX_MODE must be transactionless or autoBegin," >&2
+     echo "       and is '$GS_MCP_FRONT_END_TX_MODE'." >&2
+     exit 1 ;;
+esac
 
 # Optional worker-class / toolset configuration, as extra Smalltalk setter sends on the router.
 CONFIG=""
@@ -180,7 +200,8 @@ iferr 1 stk
 run
 | r |
 r := McpRouter new.
-r readOnly: $RO.$CONFIG$LIFETIME_LINES
+r readOnly: $RO.
+$TX_MODE_LINE$CONFIG$LIFETIME_LINES
 r forkOnPort: $GS_MCP_PORT
 %
 logout

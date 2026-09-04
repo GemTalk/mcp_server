@@ -1152,6 +1152,14 @@ flag, so a missing suite is a skip and not an error:
   that an indefinite session lives while it answers and goes when it stops — with a floor for
   the client that opens no stream — that an expiry is absolute, and that a wildly late maintenance
   pass is read as a host suspend and forgiven instead of reaping every live client at once.
+- `McpViewHygieneTest` — what the front end does about database **views**. Which transaction mode a
+  detached front end asks for (`transactionless`, so it stops holding a commit record the stone
+  cannot dispose of), that a mode nobody implements is refused where the router is configured rather
+  than in the gem serving clients, that the setting survives the trip into a forked gem, that the
+  refresh takes a whole new view without disturbing the transaction mode, that a maintenance pass
+  begins with it — and the bug detector, since a front end that ever writes to the repository loses
+  that write *silently* out of transaction, so one log line is all that stands between the defect and
+  nobody noticing. Declares `movesTheSessionView`: its subject is this gem's view.
 - `McpContractTest` — contract / property tests over the tool surface, all driven through the real
   `McpDispatcher>>handle:` envelope: every tool schema is closed (`additionalProperties:false`),
   unknown/missing arguments → an `isError` tool execution error while a missing tool name / unknown
@@ -1182,14 +1190,15 @@ flag, so a missing suite is a skip and not an error:
 
 Run a single suite while a server is up via the `run_test_class` tool (e.g. `run_test_class
 McpToolTest`). `./run-unit-tests.sh` runs them all and exits 0 when every test passes: the
-socket-less suites `McpUtf8Test` (4), `McpBlindWriteTest` (28), `McpToolTest` (58),
-`McpDispatcherTest` (18), `McpSessionTest` (19), `McpOutboxTest` (9), `McpProgressTest` (19),
-`McpStreamTest` (18), `McpLifetimeTest` (49), `McpTransportTest` (43), `McpContractTest` (35)
-and `McpExtensionTest` (14), plus `McpConcurrentEditTest` (6), `McpExternalSessionTest` (5),
-`McpTransactionTest` (8) and `McpWorkerDeadlineTest` (4) — **337 tests**,
+socket-less suites `McpJsonTest` (12), `McpUtf8Test` (7), `McpBlindWriteTest` (41),
+`McpToolTest` (58), `McpDispatcherTest` (18), `McpSessionTest` (19), `McpOutboxTest` (9),
+`McpProgressTest` (19), `McpStreamTest` (18), `McpLifetimeTest` (49), `McpViewHygieneTest` (11),
+`McpTransportTest` (43), `McpContractTest` (35) and `McpExtensionTest` (14), plus
+`McpConcurrentEditTest` (15), `McpExternalSessionTest` (5), `McpTransactionTest` (8) and
+`McpWorkerDeadlineTest` (4) — **385 tests**,
 which is the whole suite on a base install. Where the optional groups are installed the runner picks
-their suites up automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **393
-tests** — and **420 with the 27 in `McpGrailToolsetTest`** on a Grail image.
+their suites up automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **441
+tests** — and **468 with the 27 in `McpGrailToolsetTest`** on a Grail image.
 
 Six suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
 `McpAuthConformanceTest` commit a throwaway JWT user and spawn real worker gems; they are in the

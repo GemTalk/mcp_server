@@ -95,7 +95,7 @@ run
 up := System myUserProfile.
 classes := #( 'McpJsonTest' 'McpUtf8Test' 'McpBlindWriteTest' 'McpConcurrentEditTest' 'McpToolTest'
   'McpDispatcherTest' 'McpSessionTest' 'McpOutboxTest' 'McpProgressTest'
-  'McpStreamTest' 'McpLifetimeTest' 'McpTransportTest' 'McpContractTest'
+  'McpStreamTest' 'McpLifetimeTest' 'McpViewHygieneTest' 'McpTransportTest' 'McpContractTest'
   'McpExtensionTest' 'McpExternalSessionTest' 'McpTransactionTest'
   'McpWorkerDeadlineTest' ) asOrderedCollection.
 "Suites from the optional groups, run only where their group was installed. Named as a list so

@@ -61,6 +61,16 @@
 #                         `exp`, whatever the idle policy says: the worker gem is logged in as that
 #                         token's GemStone user, so a session outliving its token would leave the
 #                         authorization it was opened with in force after the grant expired.
+#   GS_MCP_FRONT_END_TX_MODE - GemStone transaction mode for the forked FRONT-END gem:
+#                         transactionless (default) or autoBegin. The front end makes no repository
+#                         changes, so transactionless costs it nothing and saves the stone a commit
+#                         record it could otherwise never dispose of -- measured, a front end left in
+#                         transaction held the oldest commit record with its last transaction
+#                         boundary being its own login 15 hours earlier. autoBegin restores that
+#                         older behaviour, and is only worth asking for if front-end code of your own
+#                         needs a stable view (see the McpRouter class comment). Workers are
+#                         unaffected: each client's gem stays in one long transaction, which is the
+#                         whole product.
 #   GS_MCP_TRACE        - 1 to write every message a client SENDS to the gem log (default 0). Turn
 #                         this on when a call is going wrong and the client's own UI shows you only
 #                         the tool name: the trace carries the JSON-RPC text, arguments included.
@@ -100,6 +110,7 @@ GS_MCP_READONLY="${GS_MCP_READONLY:-0}"
 GS_MCP_TITLE="${GS_MCP_TITLE:-}"
 GS_MCP_TRACE="${GS_MCP_TRACE:-0}"
 GS_MCP_TRACE_LIMIT="${GS_MCP_TRACE_LIMIT:-}"
+GS_MCP_FRONT_END_TX_MODE="${GS_MCP_FRONT_END_TX_MODE:-transactionless}"
 MCP_BIND_ADDRESS="${MCP_BIND_ADDRESS:-}"
 MCP_TLS_CERT="${MCP_TLS_CERT:-}"
 MCP_TLS_KEY="${MCP_TLS_KEY:-}"
@@ -182,6 +193,15 @@ WRITE_LINE=""
 [ -n "$MCP_WRITE_SCOPE" ] && WRITE_LINE="r writeScope: '$MCP_WRITE_SCOPE'."
 RO_LINE=""
 [ "$GS_MCP_READONLY" = "1" ] && RO_LINE="r readOnly: true."
+# The front-end gem's transaction mode. Checked here as well as in the setter (which raises), because
+# a launcher that fails in the shell says so in one line instead of inside a topaz stack.
+TX_MODE_LINE=""
+case "$GS_MCP_FRONT_END_TX_MODE" in
+  transactionless|autoBegin) TX_MODE_LINE="r frontEndTransactionMode: '$GS_MCP_FRONT_END_TX_MODE'." ;;
+  *) echo "error: GS_MCP_FRONT_END_TX_MODE must be transactionless or autoBegin," >&2
+     echo "       and is '$GS_MCP_FRONT_END_TX_MODE'." >&2
+     exit 1 ;;
+esac
 BIND_LINE=""
 [ -n "$MCP_BIND_ADDRESS" ] && BIND_LINE="r bindAddress: '$MCP_BIND_ADDRESS'."
 # Message tracing; both settings travel to the forked gem in the config (McpRouter>>configDict).
@@ -240,6 +260,7 @@ r userIdClaim: '$MCP_USERID_CLAIM';
 $EXTRA_LINE
 $WRITE_LINE
 $RO_LINE
+$TX_MODE_LINE
 $BIND_LINE
 $TRACE_LINE
 $TITLE_LINE
