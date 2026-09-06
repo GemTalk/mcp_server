@@ -21,6 +21,7 @@ against the others before a port is bound.
 | `maxCommitsBehind` | 20 | how far behind a worker's **view** may fall before the server refreshes it. `nil` = never |
 | `maintenanceCallTimeoutSeconds` | 5 | how long the front end waits on its **own** send into a worker |
 | `stuckViewGraceSeconds` | 60 | how long a view that **cannot** be moved is tolerated under stone pressure. `0` = release on the pass that finds it; `nil` = never on this ground |
+| `pinnedViewGraceSeconds` | 300 | how long a **running call** may hold the oldest commit record open under pressure before it is ended. `nil` = never end one |
 | `reapOnFailedProbe` | `true` | whether an unanswered ping frees a gem early. Forced on with no deadline |
 | `requestTimeoutSeconds` | `nil` | how long **one request** may run before it is ended. `nil` = no limit |
 
@@ -245,6 +246,23 @@ It is **reaped rather than aborted** deliberately. An abort behind the client's 
 the same work silently and leave a live session working from a view it never chose; a reap is loud —
 logged here, and a `404` on the client's next call, which is the mechanism the transport already
 defines for a session that is gone.
+
+**While a call is in flight, nothing can refresh that view** — GCI allows one call per session, and
+moving a view out from under a running tool is the corruption the whole model prevents. So the last
+arm ends the call itself, and it is the only rule in this file that ends work a client is waiting on.
+It needs the same conjunction plus one more: far enough behind, the stone over its own threshold,
+**and this session holding the oldest record**, sustained for the whole of `pinnedViewGraceSeconds`
+and reset the moment any of the three lapses. On a quiet repository a long call is never ended,
+however long it runs — a router with no request deadline is a supported deployment, and this is not
+that deadline in disguise. `GS_MCP_PINNED_VIEW_GRACE=none` switches it off; the cost of that is one
+long call pinning the backlog for as long as it lasts.
+
+The reaper only ever sets a **flag** for this, never a break. The worker mutex is held by the process
+running the call, and sending a break from the reaper's process would be two processes driving one
+session — which is exactly what that mutex exists to prevent. The ending is done by the process that
+owns it, on its next wait, by the same escalation a timeout or a cancellation uses. The client is
+told which of the four endings happened and why; a cancellation is the one it is deliberately told
+nothing about, because it asked for that one.
 
 The grace is a floor, like every other interval here, and by one more pass than the others need:
 the pass that *discovers* a stuck view is the same pass that would reap it, so the comparison is

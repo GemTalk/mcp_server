@@ -4,7 +4,7 @@ expectvalue /Class
 doit
 McpSession subclass: 'McpStubSession'
   instVarNames: #( wasPrepared fakeWorkerStoneSession fakeRefreshVerdict
-                    fakeRefreshVerdictSet refreshRequests)
+                    fakeRefreshVerdictSet refreshRequests fakeIsBusy viewReleaseRequests)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -50,6 +50,13 @@ beReadOnly
 %
 category: 'testing support'
 method: McpStubSession
+fakeIsBusy: aBoolean
+  "Report this instead of asking the (absent) worker whether a call is in flight. The busy case is
+   the one arm of view hygiene that acts on a RUNNING call, and a stub has no call to run."
+  fakeIsBusy := aBoolean
+%
+category: 'testing support'
+method: McpStubSession
 fakeRefreshVerdict: aStringOrNil
   "What #refreshWorkerView should answer: 'kept', 'doomed', a 'stuck: ...' phrase, or nil for the
    session that could not be asked at all. nil is a real answer here and not 'use the default',
@@ -63,6 +70,11 @@ fakeWorkerStoneSession: anIntegerOrNil
   "Report this as the worker gem's stone session id (nil restores the real one, which for a stub
    that never logged in is also nil)."
   fakeWorkerStoneSession := anIntegerOrNil
+%
+category: 'testing support'
+method: McpStubSession
+isBusy
+  ^fakeIsBusy ifNil: [super isBusy]
 %
 category: 'initialization'
 method: McpStubSession
@@ -86,6 +98,14 @@ refreshWorkerView
   refreshRequests := self refreshRequests + 1.
   ^fakeRefreshVerdictSet == true ifTrue: [fakeRefreshVerdict] ifFalse: ['kept']
 %
+category: 'testing support'
+method: McpStubSession
+requestViewRelease
+  "Record the ask and answer what the shipping implementation would. Counted rather than merely
+   flagged, so a test can tell 'asked once' from 'asked on every pass since'."
+  viewReleaseRequests := self viewReleaseRequests + 1.
+  ^super requestViewRelease
+%
 category: 'initialization'
 method: McpStubSession
 startWithId: anId
@@ -95,6 +115,12 @@ startWithId: anId
   id := anId.
   readOnly := false.
   ^self touch
+%
+category: 'testing support'
+method: McpStubSession
+viewReleaseRequests
+  "How many times the front end has asked this session to give up the view its call is holding."
+  ^viewReleaseRequests ifNil: [0]
 %
 category: 'accessing'
 method: McpStubSession

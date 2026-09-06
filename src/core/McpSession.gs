@@ -10,7 +10,8 @@ Object subclass: 'McpSession'
                     startedAtSeconds expiresAtSeconds quietProbes unansweredProbes
                     streamlessPasses passesSinceProbe streamClosedByClient requestTimeoutSeconds
                     workerAbandoned inFlightRequestId cancelRequested waitAction
-                    commitsBehind maintenanceCallTimeoutSeconds stuckViewPasses stuckViewReason)
+                    commitsBehind maintenanceCallTimeoutSeconds stuckViewPasses stuckViewReason
+                    pinnedViewPasses viewReleaseRequested)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -62,6 +63,31 @@ McpSession category: 'Mcp-Core'
 removeallmethods McpSession
 removeallclassmethods McpSession
 ! ------------------- Class methods for McpSession
+category: 'ended calls'
+classmethod: McpSession
+endedCallKinds
+  "Every reason this server ends a call in flight (McpSession>>endCallBecause:).
+     #timeout      it outran this session's request deadline
+     #cancelled    the client said it no longer wants it
+     #maintenance  the front end's own send into the worker did not answer in time
+     #viewRelease  its view was pinning the repository's oldest commit record under real pressure
+   #maintenance cannot reach a client -- a maintenance send only happens when no client call is in
+   flight -- and is named here anyway, because a list that is the definition of a category should not
+   omit a member on the grounds that one caller cannot see it."
+  ^#( #timeout #cancelled #maintenance #viewRelease )
+%
+category: 'ended calls'
+classmethod: McpSession
+isEndedCallKind: aSymbolOrNil
+  "Whether an McpError of this kind means THIS SERVER ended a call that was in flight, rather than
+   the worker failing at whatever it was doing.
+   Asked rather than enumerated at each catch site, because the answer decides whether the client is
+   owed an explanation of an ending it did not ask for -- and the list has grown three times.
+   Enumerating it at the catch sites meant a new reason silently became a 500 with no message: added
+   after a live run in which a call ended for #viewRelease reached its client as a bare JSON-RPC
+   -32603 Internal error, with the reason the server had just written to its own log nowhere in it."
+  ^self endedCallKinds includes: aSymbolOrNil
+%
 category: 'instance creation'
 classmethod: McpSession
 new
@@ -153,6 +179,8 @@ awaitWorkerResultUntil: aDeadlineOrNil because: aReasonSymbol
     self runWaitAction.
     (worker isCallInProgress and: [cancelRequested == true])
       ifTrue: [^self endCallBecause: #cancelled].
+    (worker isCallInProgress and: [viewReleaseRequested == true])
+      ifTrue: [^self endCallBecause: #viewRelease].
     (worker isCallInProgress and: [aDeadlineOrNil notNil and: [System timeGmt >= aDeadlineOrNil]])
       ifTrue: [^self endCallBecause: aReasonSymbol]].
   ^self
@@ -242,9 +270,11 @@ method: McpSession
 endCallBecause: aReasonSymbol
   "End the in-flight call and raise so the client is told, for the reason named: #timeout where it
    outran this session's deadline, #cancelled where the client said it no longer wants it,
-   #maintenance where the front end's own send into the worker did not answer in time. The
-   escalation is IDENTICAL for all three, and that is the point -- what differs is only who decided,
-   so neither a cancellation nor a maintenance send needed a new mechanism, only a new trigger.
+   #maintenance where the front end's own send into the worker did not answer in time, #viewRelease
+   where the call's view was pinning the repository's oldest commit record under real pressure. The
+   escalation is IDENTICAL for all four, and that is the point -- what differs is only who decided,
+   so none of the three later triggers needed a new mechanism, only a new reason to pull the same
+   one.
    Escalates, because the measures differ in what they cost. A SOFT break ends an ordinary runaway:
    it is taken by a Smalltalk loop between sends and by a blocked #wait alike (both verified on
    3.7.5), and the worker is fully usable straight afterwards -- so the client loses its request and
@@ -275,6 +305,11 @@ endingPhraseFor: aReasonSymbol
   aReasonSymbol == #maintenance ifTrue: [
     ^'This server''s own maintenance call into the worker gem did not finish within '
       , self maintenanceCallTimeoutSeconds printString , ' seconds and was ended. '].
+  aReasonSymbol == #viewRelease ifTrue: [
+    ^'This request was ended because its database view was holding the repository''s oldest commit '
+      , 'record open while the repository was over its commit-record backlog threshold, and no other '
+      , 'session could release it. This is not a limit on how long a request may run: a long call on '
+      , 'a quiet repository is never ended. Re-run the work. '].
   ^'The request exceeded this server''s ' , requestTimeoutSeconds printString
     , '-second request limit and was ended. '
 %
@@ -339,6 +374,9 @@ forward: aRawJsonString lifetimeBounds: anArrayOrNil requestId: anIdOrNil progre
    in an ensure: along with any cancellation that arrived: a flag outliving its call would end the
    NEXT one, which is the whole hazard in letting another GsProcess set it. Cleared on the way IN as
    well, since a cancel can arrive in the instant between a call finishing and this clearing it.
+   The view-release flag (#requestViewRelease) is set by the reaper rather than by a client, and is
+   cleared at both ends for the same reason. Its pass count goes with it: the count is about THIS
+   call holding the repository's oldest commit record, so it means nothing once the call is over.
 
    aCallIdOrNil names this call to the WORKER, so a tool's progress ticks can say which call they
    belong to. It is the front end's own opaque id, never the client's progressToken -- see
@@ -352,10 +390,13 @@ forward: aRawJsonString lifetimeBounds: anArrayOrNil requestId: anIdOrNil progre
   self touch.
   ^[inFlightRequestId := anIdOrNil.
     cancelRequested := false.
+    viewReleaseRequested := false.
+    pinnedViewPasses := 0.
     waitAction := aBlockOrNil.
     self runWorker: (self workerExpressionFor: aRawJsonString lifetimeBounds: anArrayOrNil
       progressCallId: aCallIdOrNil)]
-      ensure: [inFlightRequestId := nil. cancelRequested := false. waitAction := nil]
+      ensure: [inFlightRequestId := nil. cancelRequested := false. viewReleaseRequested := false.
+        pinnedViewPasses := 0. waitAction := nil]
 %
 category: 'accessing'
 method: McpSession
@@ -400,6 +441,8 @@ initialize
   "A count, like everything else the reaper reads, and so zero rather than nil."
   stuckViewPasses := 0.
   stuckViewReason := nil.
+  pinnedViewPasses := 0.
+  viewReleaseRequested := false.
   ^self
 %
 category: 'activity'
@@ -493,6 +536,15 @@ notePassWithStream: aBoolean
     ifFalse: [streamlessPasses := streamlessPasses + 1].
   ^self
 %
+category: 'view hygiene'
+method: McpSession
+notePinnedViewPass
+  "Record a maintenance pass on which this session's RUNNING call was the reason the repository could
+   not dispose of its oldest commit record. Counted, like everything else the reaper reads, so a
+   suspended host simply stops the count."
+  pinnedViewPasses := self pinnedViewPasses + 1.
+  ^self
+%
 category: 'activity'
 method: McpSession
 noteProbeDiscarded
@@ -575,6 +627,16 @@ noteViewMoved
   stuckViewReason := nil.
   ^self
 %
+category: 'view hygiene'
+method: McpSession
+noteViewNotPinned
+  "Record a pass on which this session was NOT pinning the stone's oldest record -- because the
+   pressure lifted, because somebody else is now the oldest, or because the call ended. The run has
+   to be consecutive: a burst of commits by another session must not add up, across the quiet minutes
+   between them, to a reason for ending a call that was never the problem for long."
+  pinnedViewPasses := 0.
+  ^self
+%
 category: 'accessing'
 method: McpSession
 outbox
@@ -586,6 +648,13 @@ category: 'liveness'
 method: McpSession
 passesSinceProbe
   ^passesSinceProbe
+%
+category: 'view hygiene'
+method: McpSession
+pinnedViewPasses
+  "Consecutive maintenance passes on which this session's running call has been pinning the stone's
+   oldest commit record while the stone was over its own backlog threshold."
+  ^pinnedViewPasses ifNil: [0]
 %
 category: 'initialization'
 method: McpSession
@@ -700,6 +769,23 @@ requestTimeoutSeconds: anIntegerOrNil
   "Set the deadline for a single call into this worker (nil = none). Applies from the NEXT call: a
    call already in flight keeps the deadline it started under (#callDeadline)."
   requestTimeoutSeconds := anIntegerOrNil
+%
+category: 'view hygiene'
+method: McpSession
+requestViewRelease
+  "Ask that the call in flight be ended, because its view is holding the repository's oldest commit
+   record open and the stone is suffering for it. Answers whether there was a call to ask about.
+
+   Sets a flag and NOTHING else, exactly as #requestCancel: does and for exactly the same reason:
+   this runs in the reaper's GsProcess while another process is inside #runWorker: holding the worker
+   mutex with a GCI call in progress, and sending a break from here would be a second process driving
+   one session -- which is what that mutex exists to prevent. #awaitWorkerResultUntil:because: picks
+   it up on its next wait and does the ending from the process that owns the mutex.
+   Idempotent: asking twice while the same call runs is the ordinary case, since the pass that asks
+   will very likely run again before the break is taken."
+  self isBusy ifFalse: [^false].
+  viewReleaseRequested := true.
+  ^true
 %
 category: 'view hygiene'
 method: McpSession

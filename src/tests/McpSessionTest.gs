@@ -152,6 +152,57 @@ testADeadlineEndsARunawayCallAndLeavesTheSessionUsable
   w waitsBeforeDone: 1; nextResult: 'AFTER-TIMEOUT'.
   self assert: (sess forward: 'NEXT-REQUEST') equals: 'AFTER-TIMEOUT'
 %
+category: 'tests - view release'
+method: McpSessionTest
+testAViewReleaseEndsTheCallAndKeepsTheSession
+  "The one thing this server does that ends work a client is waiting on. It reaches the call the same
+   way a cancellation does -- a flag set from ANOTHER GsProcess, here the reaper's, acted on by the
+   process that owns the worker mutex -- because sending a break from two processes into one session
+   is what that mutex exists to prevent.
+   What the client is left with matters as much as the ending: an interrupted worker is usable
+   immediately, so it loses the request and not its gem, nor the uncommitted work in it."
+  | sess w raised |
+  sess := McpMockSession startWithId: 'pinned'.
+  w := sess mockWorker.
+  w waitsBeforeDone: 1000000.
+  [(Delay forMilliseconds: 50) wait. sess requestViewRelease] fork.
+  raised := nil.
+  [sess forward: 'LONG-RUNNING'] on: McpError do: [:ex | raised := ex].
+  self assert: raised notNil.
+  self assert: raised kind equals: #viewRelease.
+  self assert: (raised description findString: 'oldest commit record' startingAt: 1) > 0.
+  "and it says what it is NOT, because a client that read this as a time limit would draw the wrong
+   lesson and shorten work that was never the problem"
+  self assert: (raised description findString: 'not a limit on how long' startingAt: 1) > 0.
+  self assert: w softBreakCount equals: 1.
+  self deny: sess workerAbandoned.
+  self deny: sess isBusy.
+  w waitsBeforeDone: 1; nextResult: 'AFTER-RELEASE'.
+  self assert: (sess forward: 'NEXT-REQUEST') equals: 'AFTER-RELEASE'
+%
+category: 'tests - view release'
+method: McpSessionTest
+testAViewReleaseIsForgottenWhenItsCallEnds
+  "Same hazard as a stale cancellation, and the same fix: a flag set by another GsProcess that
+   outlived its call would end the NEXT one -- a request that was never pinning anything."
+  | sess w |
+  sess := McpMockSession startWithId: 'stale-release'.
+  w := sess mockWorker.
+  sess requestViewRelease.
+  w waitsBeforeDone: 1; nextResult: 'UNTOUCHED'.
+  self assert: (sess forward: 'A-CALL') equals: 'UNTOUCHED'.
+  self assert: w softBreakCount equals: 0
+%
+category: 'tests - view release'
+method: McpSessionTest
+testAViewReleaseIsRefusedWhenNothingIsRunning
+  "It answers whether there was a call to ask about, so the reaper can log an ask that landed and say
+   nothing about one that raced the call's own ending."
+  | sess |
+  sess := McpMockSession startWithId: 'idle'.
+  self deny: sess isBusy.
+  self deny: sess requestViewRelease
+%
 category: 'tests - deadline'
 method: McpSessionTest
 testAWorkerThatIgnoresBothBreaksIsStoppedAndFinishesTheSession

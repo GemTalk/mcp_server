@@ -63,6 +63,15 @@
 #                     records piled up behind it, not how old it is -- an idle session on a quiet
 #                     stone costs nothing. THIS BUILD ONLY MEASURES: it logs which sessions are over
 #                     the line and refreshes nothing.
+#   GS_MCP_PINNED_VIEW_GRACE - how long a RUNNING call may hold the repository's oldest commit
+#                     record open, while the repository is over its own backlog threshold, before the
+#                     server ends that call (default 300s; `none` never ends one). This is the ONLY
+#                     rule here that ends work a client is waiting on, and it is not a request
+#                     deadline in disguise: a long call on a quiet repository is never ended, however
+#                     long it runs. It exists because a call in flight cannot be asked to refresh its
+#                     view -- one GCI call per session -- so while it runs nothing else can free the
+#                     record it is holding. `none` is a legitimate choice; its cost is that one long
+#                     call can pin the backlog for as long as it lasts.
 #   GS_MCP_STUCK_VIEW_GRACE - how long a session whose view CANNOT be moved is tolerated, under
 #                     stone pressure, before its gem is released (default 60s; `none` never reaps on
 #                     this ground; `0` reaps on the pass that finds it). A view is stuck when
@@ -110,6 +119,7 @@ GS_MCP_TRACE_LIMIT="${GS_MCP_TRACE_LIMIT:-}"
 GS_MCP_FRONT_END_TX_MODE="${GS_MCP_FRONT_END_TX_MODE:-transactionless}"
 GS_MCP_MAX_COMMITS_BEHIND="${GS_MCP_MAX_COMMITS_BEHIND:-}"
 GS_MCP_STUCK_VIEW_GRACE="${GS_MCP_STUCK_VIEW_GRACE:-}"
+GS_MCP_PINNED_VIEW_GRACE="${GS_MCP_PINNED_VIEW_GRACE:-}"
 
 # Resolve the environment and confirm BOTH the stone and a netldi. The netldi requirement is real
 # and is not about how this script logs in: forkOnPort: creates a GsTsExternalSession for the front
@@ -168,6 +178,18 @@ case "$(printf '%s' "$GS_MCP_STUCK_VIEW_GRACE" | tr 'A-Z' 'a-z')" in
                echo "       and is '$GS_MCP_STUCK_VIEW_GRACE'." >&2
                exit 1 ;;
   *)           SV_LINE="r stuckViewGraceSeconds: $GS_MCP_STUCK_VIEW_GRACE." ;;
+esac
+
+# Pinned-view grace. `none` is an instruction (never end a running call for this), so it has to
+# reach the router as an explicit nil.
+PV_LINE=""
+case "$(printf '%s' "$GS_MCP_PINNED_VIEW_GRACE" | tr 'A-Z' 'a-z')" in
+  '')          ;;
+  none|off)    PV_LINE="r pinnedViewGraceSeconds: nil." ;;
+  ''|*[!0-9]*) echo "error: GS_MCP_PINNED_VIEW_GRACE must be a positive number of seconds, or 'none'," >&2
+               echo "       and is '$GS_MCP_PINNED_VIEW_GRACE'." >&2
+               exit 1 ;;
+  *)           PV_LINE="r pinnedViewGraceSeconds: $GS_MCP_PINNED_VIEW_GRACE." ;;
 esac
 
 # Optional worker-class / toolset configuration, as extra Smalltalk setter sends on the router.
@@ -245,7 +267,7 @@ run
 r := McpRouter new.
 r readOnly: $RO.
 $TX_MODE_LINE
-$CB_LINE$SV_LINE$CONFIG$LIFETIME_LINES
+$CB_LINE$SV_LINE$PV_LINE$CONFIG$LIFETIME_LINES
 r forkOnPort: $GS_MCP_PORT
 %
 logout

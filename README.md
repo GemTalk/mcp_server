@@ -275,6 +275,16 @@ the state of the stone can trigger it — only the session's own distance from t
 refreshing a worker that is not far behind cannot shorten a backlog its view was not pinning.
 `GS_MCP_MAX_COMMITS_BEHIND=none` turns it off.
 
+Two things a view can do that no refresh reaches, and both end the session's current work rather than
+its view. If GemStone refuses to move the view at all — after a commit that failed on conflict, or
+inside a nested transaction — nothing this server sends will free that commit record, so under
+sustained pressure the session is **reaped** (`GS_MCP_STUCK_VIEW_GRACE`); its pending work was
+already un-committable, and a reap is loud where a silent abort would not be. And while a call is in
+flight the view cannot be refreshed at all — GCI allows one call per session — so a call that has
+held the *oldest* record open across `GS_MCP_PINNED_VIEW_GRACE` of real backlog pressure is **ended**,
+with an error saying so. Neither is a time limit: on a quiet repository a long call runs untouched,
+however long it takes.
+
 **Listing**
 
 | Tool | Arguments | Result |
@@ -1181,7 +1191,10 @@ flag, so a missing suite is a skip and not an error:
   client is told exactly once, and what that note may and may not promise. Then the last ground a
   session can be reaped on: that a view which **cannot** be moved is released only when all four
   conditions hold, that a configured grace is a floor rather than a ceiling, that a zero grace means
-  the pass that finds it, and that a pass which could not *ask* proves nothing. Declares
+  the pass that finds it, and that a pass which could not *ask* proves nothing. Last, the arm that
+  ends a **running** call whose view is pinning the repository's oldest commit record: that a quiet
+  repository never ends one however long it runs, that the run must be consecutive, and that every
+  ending this server causes is one the client is told the reason for. Declares
   `movesTheSessionView`: its subject is this gem's view.
 - `McpContractTest` — contract / property tests over the tool surface, all driven through the real
   `McpDispatcher>>handle:` envelope: every tool schema is closed (`additionalProperties:false`),
@@ -1214,14 +1227,14 @@ flag, so a missing suite is a skip and not an error:
 Run a single suite while a server is up via the `run_test_class` tool (e.g. `run_test_class
 McpToolTest`). `./run-unit-tests.sh` runs them all and exits 0 when every test passes: the
 socket-less suites `McpJsonTest` (12), `McpUtf8Test` (7), `McpBlindWriteTest` (41),
-`McpToolTest` (58), `McpDispatcherTest` (18), `McpSessionTest` (19), `McpOutboxTest` (9),
-`McpProgressTest` (19), `McpStreamTest` (18), `McpLifetimeTest` (49), `McpViewHygieneTest` (39),
+`McpToolTest` (58), `McpDispatcherTest` (18), `McpSessionTest` (22), `McpOutboxTest` (9),
+`McpProgressTest` (19), `McpStreamTest` (18), `McpLifetimeTest` (49), `McpViewHygieneTest` (46),
 `McpTransportTest` (43), `McpContractTest` (35) and `McpExtensionTest` (14), plus
 `McpConcurrentEditTest` (15), `McpExternalSessionTest` (5), `McpTransactionTest` (8) and
-`McpWorkerDeadlineTest` (4) — **413 tests**,
+`McpWorkerDeadlineTest` (4) — **423 tests**,
 which is the whole suite on a base install. Where the optional groups are installed the runner picks
-their suites up automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **469
-tests** — and **496 with the 27 in `McpGrailToolsetTest`** on a Grail image.
+their suites up automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **479
+tests** — and **506 with the 27 in `McpGrailToolsetTest`** on a Grail image.
 
 Six suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
 `McpAuthConformanceTest` commit a throwaway JWT user and spawn real worker gems; they are in the

@@ -105,6 +105,19 @@ logLineMatching: aSubstring in: aFixtureRouter
 %
 category: 'helpers'
 method: McpViewHygieneTest
+pinningSessionOn: aRouter
+  "A registered session with a call in flight, far behind, holding the stone's oldest record on a
+   stone that is over its threshold -- the whole conjunction the pinned-view arm needs, minus the
+   passes."
+  | sess |
+  sess := self identifiedSessionOn: aRouter.
+  sess fakeIsBusy: true.
+  aRouter fakeCommitsBehind: 25; fakeBacklogCritical: true;
+    fakeOldestCrSessions: (Array with: sess workerStoneSession).
+  ^sess
+%
+category: 'helpers'
+method: McpViewHygieneTest
 scratchKey
   "A UserGlobals key this suite writes to make its session dirty on purpose. Never committed: every
    test that writes it aborts, and the abort is usually the thing being tested."
@@ -138,6 +151,24 @@ testABadModeInAForkStringFailsInTheChildGem
    #applyFrontEndTransactionMode's error handler, and leave the gem quietly in transaction."
   self should: [McpRouter new applyConfig:
     (Dictionary new at: 'frontEndTransactionMode' put: 'transactionles'; yourself)] raise: Error
+%
+category: 'tests - the pinned-view arm'
+method: McpViewHygieneTest
+testABusySessionIsNeverAskedToRefreshItsView
+  "The other half of the busy case, and the reason this arm exists. GCI allows one call in flight per
+   session, so a running call cannot be asked to refresh -- and must not be, since moving a view out
+   from under a running tool is the corruption the transaction model prevents. The arm ends the call
+   instead, and the ordinary refresh takes over once the session is idle."
+  | r sess |
+  r := McpFixtureRouter new.
+  r maxCommitsBehind: 20; reaperIntervalSeconds: 60; pinnedViewGraceSeconds: 60.
+  sess := self pinningSessionOn: r.
+  sess fakeRefreshVerdict: nil.   "what a busy session really answers"
+  r maintainViewHygiene; maintainViewHygiene.
+  self assert: sess refreshRequests equals: 2.
+  self assert: sess commitsBehind equals: 25.
+  self assert: sess stuckViewPasses equals: 0.
+  self assert: (r reapReasonFor: sess) isNil
 %
 category: 'tests - the bug detector'
 method: McpViewHygieneTest
@@ -311,6 +342,23 @@ testApplyingTheModeChangesThisGemsMode
    self assert: System transactionMode equals: #autoBegin]
      ensure: [System transactionMode: was]
 %
+category: 'tests - the pinned-view arm'
+method: McpViewHygieneTest
+testAQuietRepositoryNeverEndsACallHoweverLongItRuns
+  "This is not a request deadline in disguise, and that distinction is the whole reason the arm is
+   conjunctive. A router with no request timeout is a supported deployment -- an agent running a test
+   suite for hours -- and on a repository nobody else is committing to, that call costs nothing and
+   is left alone for ever."
+  | r sess |
+  r := McpFixtureRouter new.
+  r maxCommitsBehind: 20; reaperIntervalSeconds: 60; pinnedViewGraceSeconds: 60;
+    requestTimeoutSeconds: nil.
+  sess := self pinningSessionOn: r.
+  r fakeBacklogCritical: false.
+  1 to: 20 do: [:i | r maintainViewHygiene].
+  self assert: sess pinnedViewPasses equals: 0.
+  self assert: sess viewReleaseRequests equals: 0
+%
 category: 'tests - the worker'
 method: McpViewHygieneTest
 testARefreshForTheFrontEndIsNewsExactlyOnce
@@ -347,6 +395,25 @@ testARefreshForTheFrontEndKeepsUncommittedWork
    self assert: (globals at: self scratchKey) equals: 7.
    self assert: self commitsBehindOfThisSession equals: 0]
      ensure: [System abortTransaction]
+%
+category: 'tests - the pinned-view arm'
+method: McpViewHygieneTest
+testARunningCallIsEndedOnlyAfterTheWholeGraceOfSustainedPressure
+  "The most disruptive thing this server does, so the bar is sustained measured harm rather than one
+   burst of somebody else's commits: the call must have been pinning the oldest record, on a stone
+   over its own threshold, for MORE passes than the grace allows."
+  | r sess |
+  r := McpFixtureRouter new.
+  r maxCommitsBehind: 20; reaperIntervalSeconds: 60; pinnedViewGraceSeconds: 180.
+  self assert: r pinnedViewGracePasses equals: 3.
+  sess := self pinningSessionOn: r.
+  1 to: 3 do: [:i |
+    r maintainViewHygiene.
+    self assert: sess pinnedViewPasses equals: i.
+    self assert: sess viewReleaseRequests equals: 0].
+  r maintainViewHygiene.
+  self assert: sess viewReleaseRequests equals: 1.
+  self assert: (self logLineMatching: 'ending the call in session' in: r) notNil
 %
 category: 'tests - worker views'
 method: McpViewHygieneTest
@@ -527,6 +594,29 @@ testBecomingStuckIsLoggedOnceNotEveryPassOfTheGrace
   r maintainViewHygiene; maintainViewHygiene.
   self assert: (self hygieneLinesIn: r) size equals: 4
 %
+category: 'tests - the pinned-view arm'
+method: McpViewHygieneTest
+testEveryEndingThisServerCausesIsOneTheClientIsToldTheReasonFor
+  "The defect this test exists for, caught on a live run and not by any unit test: both catch sites
+   on the response path enumerated #cancelled and #timeout and passed everything else, so a call
+   ended for #viewRelease reached its client as a bare JSON-RPC -32603 Internal error, with the
+   reason the server had just written to its own log nowhere in it. The list had grown three times
+   by then.
+   Asking McpSession what an ended call IS, instead of naming the reasons at each catch, is what
+   stops the fourth reason repeating it. A cancellation stays the exception -- the client asked for
+   that ending and the spec says answer nothing."
+  #( #timeout #maintenance #viewRelease ) do: [:kind |
+    self assert: (McpSession isEndedCallKind: kind)].
+  self assert: (McpSession isEndedCallKind: #cancelled).
+  #( #commitConflict #refused #internal #blindWrite nil ) do: [:kind |
+    self deny: (McpSession isEndedCallKind: kind)].
+  "and every reason #endCallBecause: can be given has a phrase of its own, so none of them can reach
+   a client wearing another ending's words"
+  McpSession endedCallKinds do: [:kind | | phrase |
+    phrase := (McpSession new) endingPhraseFor: kind.
+    self assert: phrase notNil.
+    self deny: phrase isEmpty]
+%
 category: 'tests - worker views'
 method: McpViewHygieneTest
 testEveryVerdictIsLoggedAndOnlyAnAnsweredOneCounts
@@ -617,6 +707,23 @@ testTheArmIsOffEntirelyWithNoCeiling
   self assert: (self hygieneLinesIn: r) isEmpty.
   self assert: ((r viewHygieneSummary findString: 'off' startingAt: 1) > 0)
 %
+category: 'tests - the pinned-view arm'
+method: McpViewHygieneTest
+testTheArmIsOffEntirelyWithNoPinnedViewGrace
+  "nil is a deployment instruction -- never end a running call for this, whatever it costs the
+   repository -- and it is the reason the knob exists at all. Its cost is stated rather than hidden:
+   one long call can then pin the backlog for as long as it lasts."
+  | r sess |
+  r := McpFixtureRouter new.
+  r maxCommitsBehind: 20; reaperIntervalSeconds: 60; pinnedViewGraceSeconds: nil.
+  self deny: r hasPinnedViewRelease.
+  self assert: r pinnedViewGracePasses isNil.
+  sess := self pinningSessionOn: r.
+  1 to: 20 do: [:i | r maintainViewHygiene].
+  self assert: sess pinnedViewPasses equals: 0.
+  self assert: sess viewReleaseRequests equals: 0.
+  self assert: (self includesCS: 'none' in: r viewHygieneSummary)
+%
 category: 'tests - stone readings'
 method: McpViewHygieneTest
 testTheCeilingRefusesANumberThatCannotWork
@@ -688,6 +795,30 @@ testTheGraceIsCountedInPassesAndFlooredAtOne
   r stuckViewGraceSeconds: nil.
   self assert: r stuckViewGracePasses isNil.
   self deny: r hasStuckViewReaping
+%
+category: 'tests - the pinned-view arm'
+method: McpViewHygieneTest
+testTheGraceRefusesZeroAndAnythingShorterThanAPass
+  "Zero is meaningful for the two graces that wait before ending something already idle or already
+   doomed. It is not meaningful here: a grace of no time before ending work a client is waiting on is
+   not a coherent request, it is a mistake, and it is refused rather than honoured."
+  | r |
+  r := McpFixtureRouter new.
+  r reaperIntervalSeconds: 60.
+  r pinnedViewGraceSeconds: 0.
+  self should: [r validateTimerConfig] raise: Error.
+  r pinnedViewGraceSeconds: 30.
+  self should: [r validateTimerConfig] raise: Error.
+  r pinnedViewGraceSeconds: 60.
+  r validateTimerConfig.
+  r pinnedViewGraceSeconds: nil.
+  r validateTimerConfig.
+  "and it travels, nil included"
+  r pinnedViewGraceSeconds: 900.
+  self assert: (McpRouter new applyConfigJson: r configJson) pinnedViewGraceSeconds equals: 900.
+  r pinnedViewGraceSeconds: nil.
+  self assert: (McpRouter new applyConfigJson: r configJson) pinnedViewGraceSeconds isNil.
+  self assert: McpRouter new pinnedViewGraceSeconds equals: 300
 %
 category: 'tests - the stuck ground'
 method: McpViewHygieneTest
@@ -775,6 +906,38 @@ testTheRefreshNoteSaysWhoDidItAndWhatItCannotPromise
   self assert: ((note findString: 'commit records open' startingAt: 1) > 0).
   self assert: ((note findString: 'uncommitted changes were kept' startingAt: 1) > 0).
   self assert: ((note findString: 'execute_code are not tracked' startingAt: 1) > 0)
+%
+category: 'tests - the pinned-view arm'
+method: McpViewHygieneTest
+testTheRunMustBeConsecutive
+  "A burst of commits by another session must not add up, across the quiet minutes between bursts,
+   to a reason for ending a call that was never the problem for long. Each of the three ways the
+   conjunction can lapse resets the run, and each is a different fact about the world."
+  | r sess |
+  r := McpFixtureRouter new.
+  r maxCommitsBehind: 20; reaperIntervalSeconds: 60; pinnedViewGraceSeconds: 180.
+  sess := self pinningSessionOn: r.
+  r maintainViewHygiene; maintainViewHygiene.
+  self assert: sess pinnedViewPasses equals: 2.
+  "the pressure lifts"
+  r fakeBacklogCritical: false.
+  r maintainViewHygiene.
+  self assert: sess pinnedViewPasses equals: 0.
+  r fakeBacklogCritical: true.
+  r maintainViewHygiene.
+  self assert: sess pinnedViewPasses equals: 1.
+  "somebody else becomes the oldest"
+  r fakeOldestCrSessions: #().
+  r maintainViewHygiene.
+  self assert: sess pinnedViewPasses equals: 0.
+  r fakeOldestCrSessions: (Array with: sess workerStoneSession).
+  r maintainViewHygiene.
+  self assert: sess pinnedViewPasses equals: 1.
+  "it catches up on its own"
+  r fakeCommitsBehind: 3.
+  r maintainViewHygiene.
+  self assert: sess pinnedViewPasses equals: 0.
+  self assert: sess viewReleaseRequests equals: 0
 %
 category: 'tests - worker views'
 method: McpViewHygieneTest

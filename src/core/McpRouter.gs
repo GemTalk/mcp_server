@@ -12,7 +12,7 @@ McpBase subclass: 'McpRouter'
                     reapOnFailedProbe streamLossGraceSeconds messageTrace messageTraceLimit
                     requestTimeoutSeconds callChannels callMutex callCounter
                     frontEndTransactionMode maxCommitsBehind sessionAccessWarned maintenanceCallTimeoutSeconds
-                    stuckViewGraceSeconds)
+                    stuckViewGraceSeconds pinnedViewGraceSeconds)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -196,6 +196,20 @@ defaultMessageTraceLimit
    reader can tell a long message from a lost one. nil means no cap at all; see
    McpRouter>>messageTraceLimit:."
   ^4096
+%
+category: 'view hygiene'
+classmethod: McpRouter
+defaultPinnedViewGraceSeconds
+  "How long a RUNNING call may go on holding the repository's oldest commit record open, while the
+   stone is over its own backlog threshold, before the call is ended: 300 seconds.
+   Much the longest grace here, because this is the most disruptive thing this server does. Every
+   other ground ends a session that is idle, gone, or already doomed; this one ends work a client is
+   waiting on and may not be able to reproduce. Five minutes of sustained, measured harm -- not one
+   burst of somebody else's commits -- is the bar.
+   nil switches the arm off entirely: no call is ever ended for this reason, whatever it costs the
+   repository. That is a legitimate deployment choice and the reason the knob exists; the cost of it
+   is that one long call can pin the backlog for as long as it runs."
+  ^300
 %
 category: 'session lifetime defaults'
 classmethod: McpRouter
@@ -445,6 +459,7 @@ applyConfig: aConfigDict
   (aConfigDict includesKey: 'maintenanceCallTimeoutSeconds')
     ifTrue: [self maintenanceCallTimeoutSeconds: (aConfigDict at: 'maintenanceCallTimeoutSeconds')].
   stuckViewGraceSeconds := aConfigDict at: 'stuckViewGraceSeconds' ifAbsent: [stuckViewGraceSeconds].
+  pinnedViewGraceSeconds := aConfigDict at: 'pinnedViewGraceSeconds' ifAbsent: [pinnedViewGraceSeconds].
   messageTrace := aConfigDict at: 'messageTrace' ifAbsent: [messageTrace].
   messageTraceLimit := aConfigDict at: 'messageTraceLimit' ifAbsent: [messageTraceLimit].
   ^self
@@ -628,6 +643,7 @@ configDict
   d at: 'maxCommitsBehind' put: maxCommitsBehind.
   d at: 'maintenanceCallTimeoutSeconds' put: maintenanceCallTimeoutSeconds.
   d at: 'stuckViewGraceSeconds' put: stuckViewGraceSeconds.
+  d at: 'pinnedViewGraceSeconds' put: pinnedViewGraceSeconds.
   "Message tracing has to travel, or it is unreachable: forkOnPort: is the only way this server is
    ever started, so a setting the fork string does not carry is one an operator cannot turn on."
   d at: 'messageTrace' put: messageTrace.
@@ -770,6 +786,29 @@ effectiveWorkerClassName
    forwarded request (McpSession>>workerExpressionFor:), so the worker gem is told rather than
    deciding."
   ^workerClassName ifNil: ['McpServer']
+%
+category: 'routing'
+method: McpRouter
+endedCallErrorFor: anError id: anIdOrNil
+  "The JSON-RPC error body for a request this server ENDED, as a JSON String.
+   The code is -32001, in JSON-RPC's implementation-defined server-error range, and `data.kind`
+   carries the same machine-readable classification a worker-raised error would
+   (McpDispatcher>>kindForError:), so a client branches the same way wherever the error was produced.
+   It bears the request's own id, and that is the point: an answer the client cannot match to the
+   request it is waiting on is no better than silence -- it would wait out its own timeout instead,
+   which is the whole thing ending a call early exists to prevent.
+   Built here rather than inside either writer because the two writers differ only in FRAMING: a
+   plain call gets it as the HTTP response body, a streamed one as an SSE frame on the stream already
+   open (#writeEndedCallFrame:forSession:id:on:)."
+  | err |
+  err := Dictionary new.
+  err at: 'jsonrpc' put: '2.0'; at: 'id' put: anIdOrNil.
+  err at: 'error' put: (Dictionary new
+    at: 'code' put: -32001;
+    at: 'message' put: anError description;
+    at: 'data' put: (Dictionary new at: 'kind' put: anError kind asString; yourself);
+    yourself).
+  ^McpJson write: err
 %
 category: 'message trace'
 method: McpRouter
@@ -923,6 +962,13 @@ handleConnection: aConnection
       on: Error do: [:e | nil]].
   aConnection close
 %
+category: 'view hygiene'
+method: McpRouter
+hasPinnedViewRelease
+  "Whether this router will ever end a running call because its view is pinning the repository's
+   oldest commit record. nil grace means never."
+  ^pinnedViewGraceSeconds notNil
+%
 category: 'session lifetime'
 method: McpRouter
 hasSessionIdleDeadline
@@ -1012,6 +1058,7 @@ initialize
   maxCommitsBehind := self class defaultMaxCommitsBehind.
   maintenanceCallTimeoutSeconds := self class defaultMaintenanceCallTimeoutSeconds.
   stuckViewGraceSeconds := self class defaultStuckViewGraceSeconds.
+  pinnedViewGraceSeconds := self class defaultPinnedViewGraceSeconds.
   sessionAccessWarned := false.
   "Message tracing: OFF, because a traced log records every tool argument a client sent, and an
    operator must choose that rather than discover it. The cap is not optional -- a compile_method or
@@ -1250,6 +1297,29 @@ maintainViewHygiene
          waiting on, and reaping a session whose view cannot be moved at all. Both are still to come,
          and both should take pressure as a conjunct with this ground rather than as an alternative
          to it."
+        "The BUSY case, and the only arm here that can end work a client is waiting on. A call in
+         flight cannot be asked to refresh -- GCI allows one call per session -- so while it runs its
+         view is unreachable by every other means in this file. On a quiet repository that costs
+         nobody anything and the call is left alone however long it runs; this is not a request
+         deadline in disguise. What it will not tolerate is a call whose view is holding the OLDEST
+         commit record open while the stone is over its own backlog threshold, sustained across the
+         whole of #pinnedViewGracePasses -- which is why the count is consecutive and why the grace
+         is the longest in the file.
+         The ask only ever sets a flag (McpSession>>requestViewRelease); the ending is done by the
+         GsProcess that owns the worker mutex, on its next wait."
+        (sess isBusy and: [self hasPinnedViewRelease]) ifTrue: [
+          (behind >= limit
+            and: [critical and: [oldest includes: sess workerStoneSession]])
+              ifTrue: [
+                sess notePinnedViewPass.
+                sess pinnedViewPasses > self pinnedViewGracePasses ifTrue: [
+                  (sess requestViewRelease) ifTrue: [
+                    self log: 'view hygiene: ending the call in session ' , sess id printString
+                      , ' -- its view has held the stone''s oldest commit record open for '
+                      , sess pinnedViewPasses printString , ' passes while the backlog was '
+                      , backlog printString , '/' , self stoneCrBacklogThreshold printString
+                      , ' and it is ' , behind printString , ' commits behind.']]]
+              ifFalse: [sess noteViewNotPinned]].
         behind >= limit ifTrue: [ | verdict moved |
           "A session with a call in flight is measured but not touched: GCI allows one call in
            flight, and moving a view out from under a running tool is the corruption the transaction
@@ -1520,6 +1590,38 @@ payloadOfSignal: aSignal
   idx := text findString: marker startingAt: 1.
   idx = 0 ifTrue: [^nil].
   ^text copyFrom: idx + marker size to: text size
+%
+category: 'view hygiene'
+method: McpRouter
+pinnedViewGracePasses
+  "How many consecutive passes a running call may pin the oldest commit record before it is ended.
+   Zero is NOT special-cased here, unlike #stuckViewGracePasses: a grace of no time before ending
+   work a client is waiting on is not a coherent request, it is a mistake, and #validateTimerConfig
+   refuses it. Every value that reaches here is therefore a real interval, and #countCovering:every:
+   rounds it up so the configured number is a floor."
+  pinnedViewGraceSeconds isNil ifTrue: [^nil].
+  ^self countCovering: pinnedViewGraceSeconds every: self reaperIntervalSeconds
+%
+category: 'view hygiene'
+method: McpRouter
+pinnedViewGraceSeconds
+  "How long a running call may hold the repository's oldest commit record open, under real stone
+   pressure, before this server ends it -- or nil never to end one for this reason.
+   THE ONLY RULE HERE THAT ENDS WORK A CLIENT IS WAITING ON, and the only one that acts on a session
+   with a call in flight. It exists because a router with no request deadline is a supported
+   deployment -- an agent running a test suite for hours, with client-initiated interrupt as the stop
+   button -- and while that call runs its view cannot be refreshed by any other means. It is NOT a
+   disguised request timeout: a long call on a quiet repository is never ended, however long it runs.
+   See #maintainViewHygiene for the conjunction, and #requestViewRelease for why the reaper only ever
+   sets a flag."
+  ^pinnedViewGraceSeconds
+%
+category: 'view hygiene'
+method: McpRouter
+pinnedViewGraceSeconds: aSecondsOrNil
+  "Set the pinned-view grace (see #pinnedViewGraceSeconds). Checked at startup, where its relation to
+   #reaperIntervalSeconds can be judged whatever order the two were set in."
+  pinnedViewGraceSeconds := aSecondsOrNil
 %
 category: 'session lifetime'
 method: McpRouter
@@ -1911,8 +2013,8 @@ releaseSessionIfAbandoned: sess
    dropped.
    Does nothing for a session whose worker took a break, which is nearly all of them: there the gem,
    its view and its uncommitted work are all intact and the client lost only the one call.
-   Separate from the two methods that answer the client (#writeTimeoutError:forSession:id:on: and
-   #writeTimeoutFrame:forSession:id:on:) because both owe the client this and they differ only in
+   Separate from the two methods that answer the client (#writeEndedCallError:forSession:id:on: and
+   #writeEndedCallFrame:forSession:id:on:) because both owe the client this and they differ only in
    how the answer is framed."
   sess workerAbandoned ifFalse: [^self].
   mutex critical: [sessions removeKey: sess id ifAbsent: [nil]].
@@ -2143,9 +2245,12 @@ serveCall: body id: anIdOrNil forSession: sess on: conn
   resp := [sess forward: body lifetimeBounds: (self lifetimeBoundsFor: sess) requestId: anIdOrNil]
     on: McpError
     do: [:ex |
+      "A cancellation is the one ending the client is owed SILENCE about -- it asked for it, and the
+       spec tells a receiver not to answer the request it cancelled. Every other ending is one the
+       client did not ask for and cannot see the reason for, so it is owed the reason."
       ex kind = #cancelled ifTrue: [^self acknowledgeCancelledCall: sess on: conn].
-      ex kind = #timeout
-        ifTrue: [^self writeTimeoutError: ex forSession: sess id: anIdOrNil on: conn]
+      (McpSession isEndedCallKind: ex kind)
+        ifTrue: [^self writeEndedCallError: ex forSession: sess id: anIdOrNil on: conn]
         ifFalse: [ex pass]].
   resp isEmpty
     ifTrue: [conn writeStatus: 202 reason: 'Accepted' body: '']
@@ -2388,7 +2493,7 @@ serveStreamedCall: body id: anIdOrNil progressToken: aToken forSession: sess on:
    client behaving the way the spec says it must, and it can be verified without a line of cross-gem
    code.
    Once the headers are written there is no second HTTP response to be had, so every ending has to be
-   a frame on this stream: an ended call gets #writeTimeoutFrame:forSession:id:on:, and any other
+   a frame on this stream: an ended call gets #writeEndedCallFrame:forSession:id:on:, and any other
    error is caught HERE rather than reaching handleConnection:, whose 500 would be appended to a
    stream as if it were a fresh response and read as garbage.
    A nil from a write is the client having gone; nothing more is owed to it."
@@ -2411,8 +2516,8 @@ serveStreamedCall: body id: anIdOrNil progressToken: aToken forSession: sess on:
     on: McpError
     do: [:ex |
       ex kind = #cancelled ifTrue: [^self releaseSessionIfAbandoned: sess].
-      ex kind = #timeout
-        ifTrue: [^self writeTimeoutFrame: ex forSession: sess id: anIdOrNil on: conn]
+      (McpSession isEndedCallKind: ex kind)
+        ifTrue: [^self writeEndedCallFrame: ex forSession: sess id: anIdOrNil on: conn]
         ifFalse: [ex pass]]]
     on: Error
     do: [:ex |
@@ -2649,29 +2754,6 @@ stuckViewGraceSeconds: aSecondsOrNil
    because the rule that matters is a comparison with #reaperIntervalSeconds and the two can be set
    in either order -- #validateTimerConfig is where every such pairing is decided."
   stuckViewGraceSeconds := aSecondsOrNil
-%
-category: 'routing'
-method: McpRouter
-timeoutErrorFor: anError id: anIdOrNil
-  "The JSON-RPC error body for a request this server ENDED, as a JSON String.
-   The code is -32001, in JSON-RPC's implementation-defined server-error range, and `data.kind`
-   carries the same machine-readable classification a worker-raised error would
-   (McpDispatcher>>kindForError:), so a client branches the same way wherever the error was produced.
-   It bears the request's own id, and that is the point: an answer the client cannot match to the
-   request it is waiting on is no better than silence -- it would wait out its own timeout instead,
-   which is the whole thing ending a call early exists to prevent.
-   Built here rather than inside either writer because the two writers differ only in FRAMING: a
-   plain call gets it as the HTTP response body, a streamed one as an SSE frame on the stream already
-   open (#writeTimeoutFrame:forSession:id:on:)."
-  | err |
-  err := Dictionary new.
-  err at: 'jsonrpc' put: '2.0'; at: 'id' put: anIdOrNil.
-  err at: 'error' put: (Dictionary new
-    at: 'code' put: -32001;
-    at: 'message' put: anError description;
-    at: 'data' put: (Dictionary new at: 'kind' put: anError kind asString; yourself);
-    yourself).
-  ^McpJson write: err
 %
 category: 'tls'
 method: McpRouter
@@ -2923,6 +3005,10 @@ validateTimerConfig
     ((stuckViewGraceSeconds isKindOf: Number) and: [stuckViewGraceSeconds >= 0]) ifFalse: [
       ^self error: 'stuckViewGraceSeconds must be nil, or zero, or a positive number of seconds, '
         , 'and is ' , stuckViewGraceSeconds printString , '.']].
+  "Zero is NOT allowed here, where it is for the two graces above, and the difference is what the
+   grace protects. Those wait before ending something already idle or already doomed; this one waits
+   before ending work a client is waiting on, so a grace of no time is not a coherent request."
+  self validateSeconds: pinnedViewGraceSeconds named: 'pinnedViewGraceSeconds' allowingNil: true.
   self validateSeconds: self livenessProbeIntervalSeconds named: 'livenessProbeIntervalSeconds' allowingNil: false.
   self validateSeconds: self reaperIntervalSeconds named: 'reaperIntervalSeconds' allowingNil: false.
   self livenessProbeIntervalSeconds >= self reaperIntervalSeconds ifFalse: [
@@ -2935,6 +3021,12 @@ validateTimerConfig
         , 's) is shorter than reaperIntervalSeconds (' , self reaperIntervalSeconds printString
         , 's), which is the shortest span the maintenance pass can measure, so the grace would be '
         , 'rounded up to one pass and never honoured as written. Use 0 if you mean no grace at all.'].
+  (pinnedViewGraceSeconds notNil
+    and: [pinnedViewGraceSeconds < self reaperIntervalSeconds]) ifTrue: [
+      ^self error: 'pinnedViewGraceSeconds (' , pinnedViewGraceSeconds printString
+        , 's) is shorter than reaperIntervalSeconds (' , self reaperIntervalSeconds printString
+        , 's), which is the shortest span the maintenance pass can measure, so the grace would be '
+        , 'rounded up to one pass and never honoured as written.'].
   self streamlessIdleTimeoutSeconds >= self reaperIntervalSeconds ifFalse: [
     ^self error: 'streamlessIdleTimeoutSeconds (' , self streamlessIdleTimeoutSeconds printString
       , 's) is shorter than reaperIntervalSeconds (' , self reaperIntervalSeconds printString
@@ -3025,6 +3117,12 @@ viewHygieneSummary
       , self stuckViewGracePasses printString , ' pass'
       , (self stuckViewGracePasses = 1 ifTrue: [''] ifFalse: ['es']) , ')']
     ifFalse: ['none -- a session whose view cannot be moved is never reaped for it']).
+  s nextPutAll: ', pinned-view grace '.
+  s nextPutAll: (self hasPinnedViewRelease
+    ifTrue: [self pinnedViewGraceSeconds printString , 's ('
+      , self pinnedViewGracePasses printString , ' pass'
+      , (self pinnedViewGracePasses = 1 ifTrue: [''] ifFalse: ['es']) , ')']
+    ifFalse: ['none -- a running call is never ended for holding the oldest commit record']).
   ^s contents
 %
 category: 'worker class'
@@ -3042,6 +3140,32 @@ workerClassName: aNameOrNil
    validatedClassName:. The class must be visible in the WORKER gem's symbol list, which under
    McpAuthRouter belongs to the authenticated user, so Published rather than UserGlobals."
   workerClassName := aNameOrNil isNil ifTrue: [nil] ifFalse: [self validatedClassName: aNameOrNil]
+%
+category: 'routing'
+method: McpRouter
+writeEndedCallError: anError forSession: sess id: anIdOrNil on: conn
+  "Answer a request this server ended (McpSession>>endCallBecause:) on a call being answered as
+   ordinary JSON.
+   HTTP 200 with a JSON-RPC error, not an HTTP error status: the request was accepted, routed and
+   served, and what failed is the call inside it -- a result the client should match to its request
+   rather than a transport refusal it might not read as JSON-RPC at all. See #endedCallErrorFor:id: for
+   the body, and #releaseSessionIfAbandoned: for the one case where ending the call also ends the
+   session."
+  self releaseSessionIfAbandoned: sess.
+  conn writeJson: (self endedCallErrorFor: anError id: anIdOrNil)
+%
+category: 'routing'
+method: McpRouter
+writeEndedCallFrame: anError forSession: sess id: anIdOrNil on: conn
+  "The same answer as #writeEndedCallError:forSession:id:on:, framed for a call already being answered
+   as a stream: the SSE headers went out before the worker was ever called, so there is no second
+   HTTP response available and the error has to travel as a frame on the stream that is open.
+   Ending the stream afterwards is the caller's business (#serveStreamedCall:id:forSession:on:); what
+   matters here is that the client gets a TERMINATING message. A stream that simply stops leaves a
+   client waiting on a socket that will never say anything again, which is worse than the timeout it
+   was told about -- and the id in the body is what lets it stop waiting on the right request."
+  self releaseSessionIfAbandoned: sess.
+  ^conn writeSseData: (self endedCallErrorFor: anError id: anIdOrNil)
 %
 category: 'routing'
 method: McpRouter
@@ -3067,30 +3191,4 @@ writeSessionError: aMessage code: httpCode reason: reasonString on: conn
   err at: 'jsonrpc' put: '2.0'; at: 'id' put: nil.
   err at: 'error' put: (Dictionary new at: 'code' put: -32600; at: 'message' put: aMessage; yourself).
   conn writeStatus: httpCode reason: reasonString body: (McpJson write: err)
-%
-category: 'routing'
-method: McpRouter
-writeTimeoutError: anError forSession: sess id: anIdOrNil on: conn
-  "Answer a request this server ended (McpSession>>endCallBecause:) on a call being answered as
-   ordinary JSON.
-   HTTP 200 with a JSON-RPC error, not an HTTP error status: the request was accepted, routed and
-   served, and what failed is the call inside it -- a result the client should match to its request
-   rather than a transport refusal it might not read as JSON-RPC at all. See #timeoutErrorFor:id: for
-   the body, and #releaseSessionIfAbandoned: for the one case where ending the call also ends the
-   session."
-  self releaseSessionIfAbandoned: sess.
-  conn writeJson: (self timeoutErrorFor: anError id: anIdOrNil)
-%
-category: 'routing'
-method: McpRouter
-writeTimeoutFrame: anError forSession: sess id: anIdOrNil on: conn
-  "The same answer as #writeTimeoutError:forSession:id:on:, framed for a call already being answered
-   as a stream: the SSE headers went out before the worker was ever called, so there is no second
-   HTTP response available and the error has to travel as a frame on the stream that is open.
-   Ending the stream afterwards is the caller's business (#serveStreamedCall:id:forSession:on:); what
-   matters here is that the client gets a TERMINATING message. A stream that simply stops leaves a
-   client waiting on a socket that will never say anything again, which is worse than the timeout it
-   was told about -- and the id in the body is what lets it stop waiting on the right request."
-  self releaseSessionIfAbandoned: sess.
-  ^conn writeSseData: (self timeoutErrorFor: anError id: anIdOrNil)
 %
