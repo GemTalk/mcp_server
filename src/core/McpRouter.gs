@@ -1448,7 +1448,7 @@ category: 'message trace'
 method: McpRouter
 messageTrace: aBoolean
   "Turn the message trace on or off (see #messageTrace). Travels to a forked front end in the
-   config, so ./run-server.sh GS_MCP_TRACE=1 reaches the gem that actually serves."
+   config, so ./run-server.sh MCP_TRACE=1 reaches the gem that actually serves."
   messageTrace := aBoolean
 %
 category: 'message trace'

@@ -37,11 +37,11 @@ export GEMSTONE=/path/to/GemStone64Bit3.7.x   # product dir
 ./install.sh --auth                 # ...and fail loudly if it cannot, instead of quietly skipping
 ./install.sh --no-auth              # ...or leave the auth group out of an image that could take it
 ./install.sh --grail                # ...plus the optional Grail/Python toolset (Grail image only)
-GS_MCP_PORT=8000 ./run-server.sh    # fork a detached, independent localhost server gem and return
-GS_MCP_READONLY=1 ./run-server.sh   # ...read-only (browse/search only; no accidental mutation)
-GS_MCP_TOOLSETS="McpBrowsingToolset McpSearchToolset" ./run-server.sh   # ...only these tools
-GS_MCP_WORKER_CLASS=MyMcpServer ./run-server.sh                        # ...a subclass as the worker
-GS_MCP_TRACE=1 ./run-server.sh      # ...logging every message a client sends (see Message trace)
+MCP_PORT=8000 ./run-server.sh       # fork a detached, independent localhost server gem and return
+MCP_READONLY=1 ./run-server.sh      # ...read-only (browse/search only; no accidental mutation)
+MCP_TOOLSETS="McpBrowsingToolset McpSearchToolset" ./run-server.sh   # ...only these tools
+MCP_WORKER_CLASS=MyMcpServer ./run-server.sh                         # ...a subclass as the worker
+MCP_TRACE=1 ./run-server.sh         # ...logging every message a client sends (see Message trace)
 ./run-auth-server.sh                # ...the OAuth/OIDC network-facing server (McpAuthRouter)
 ```
 
@@ -49,7 +49,7 @@ GS_MCP_TRACE=1 ./run-server.sh      # ...logging every message a client sends (s
 `GS_PASS` to match your environment — and read **Environment** below before assuming those four are
 enough, because on many machines they are not. `install.sh` files the code in with topaz, one
 group at a time: `src/core` and `src/tests` always, `src/auth` when the image can compile it, and
-`src/grail` on `--grail` (or `GS_MCP_WITH_GRAIL=1`).
+`src/grail` on `--grail` (or `MCP_WITH_GRAIL=1`).
 
 The two optional groups are selected differently on purpose. Loading `McpAuthRouter` is **inert** —
 nothing instantiates it until you fork one with `run-auth-server.sh` — so it can be detected rather
@@ -273,21 +273,21 @@ laundered, because the kernel carries the write set forward and answers whether 
 and the client is **told** on its next result, with the reads that went stale named. Nothing about
 the state of the stone can trigger it — only the session's own distance from the current state, since
 refreshing a worker that is not far behind cannot shorten a backlog its view was not pinning.
-`GS_MCP_MAX_COMMITS_BEHIND=none` turns it off.
+`MCP_MAX_COMMITS_BEHIND=none` turns it off.
 
 Two things a view can do that no refresh reaches, and both end the session's current work rather than
 its view. If GemStone refuses to move the view at all — after a commit that failed on conflict, or
 inside a nested transaction — nothing this server sends will free that commit record, so under
-sustained pressure the session is **reaped** (`GS_MCP_STUCK_VIEW_GRACE`); its pending work was
+sustained pressure the session is **reaped** (`MCP_STUCK_VIEW_GRACE`); its pending work was
 already un-committable, and a reap is loud where a silent abort would not be. And while a call is in
 flight the view cannot be refreshed at all — GCI allows one call per session — so a call that has
-held the *oldest* record open across `GS_MCP_PINNED_VIEW_GRACE` of real backlog pressure is **ended**,
+held the *oldest* record open across `MCP_PINNED_VIEW_GRACE` of real backlog pressure is **ended**,
 with an error saying so. Neither is a time limit: on a quiet repository a long call runs untouched,
 however long it takes.
 
 The **front-end** gem holds no view at all: it runs `#transactionless` and takes a fresh view once
 per maintenance pass, so the one gem that never needs a stable view stops being a commit-record
-hoarder. `GS_MCP_FRONT_END_TX_MODE=autoBegin` restores the older behaviour for front-end code of your
+hoarder. `MCP_FRONT_END_TX_MODE=autoBegin` restores the older behaviour for front-end code of your
 own that does need one. All four knobs are documented, and validated, in
 [session-lifetime.sh](session-lifetime.sh) alongside the session-lifetime family.
 
@@ -442,7 +442,7 @@ an image without Grail. Once loaded the toolset joins the default tool surface a
 > import fails. Name the checkout with the toolset option:
 >
 > ```bash
-> GS_MCP_GRAIL_DIR=/opt/Grail ./run-server.sh
+> MCP_GRAIL_DIR=/opt/Grail ./run-server.sh
 > ```
 >
 > which is shorthand for
@@ -460,7 +460,7 @@ an image without Grail. Once loaded the toolset joins the default tool surface a
 > forking anything, so a typo is one line at launch rather than a wave of import errors later, which
 > is exactly how a misconfigured session comes to read as a broken Python subsystem.
 > `run-auth-server.sh` takes the same variable. See **Toolset options** for the general mechanism and
-> `GS_MCP_TOOLSET_OPTIONS` for other toolsets.
+> `MCP_TOOLSET_OPTIONS` for other toolsets.
 >
 > **Python errors are converted, not propagated.** Grail models its exceptions *outside* the
 > Smalltalk `Error` hierarchy (`NameError` is `Exception < BaseException < Exception <
@@ -502,7 +502,7 @@ each worker read-only at session open, so two routers (one read-only, one not) c
 no shared state. A worker is read-only if **either** applies:
 
 - **The router is read-only** — `(McpRouter new readOnly: true) forkOnPort: 8000`, or the shortcut
-  `GS_MCP_READONLY=1 ./run-server.sh`. Every session that router opens is read-only.
+  `MCP_READONLY=1 ./run-server.sh`. Every session that router opens is read-only.
 - **By OAuth scope (`McpAuthRouter`)** — give the router a `writeScope` (e.g. `./run-auth-server.sh`
   with `MCP_WRITE_SCOPE=mcp:write`): a token carrying that scope gets a read-write worker; a token
   lacking it gets a read-only worker for that session. For a client to actually *request* that scope,
@@ -626,7 +626,7 @@ UTF-8 does not fix that arithmetic so much as never reach it — a surrogate pai
 The writer encodes to **bytes** rather than leaving characters for the transport, and that is
 load-bearing. Three unrelated mechanisms downstream read a response as bytes: `Content-Length` is
 written as `body size`; the worker → front-end hop is measured in bytes by the kernel's result
-fetch, whose buffer is sized in bytes; and `GS_MCP_TRACE` writes bodies to the gem log through
+fetch, whose buffer is sized in bytes; and `MCP_TRACE` writes bodies to the gem log through
 `GsFile`, where a 16-bit string comes out garbled. A byte `String`'s `#size` *is* its byte count
 whatever the bytes are, so all three hold by construction — where under the old ASCII-escaping
 policy they held only because nothing above `0x7E` was ever on the wire.
@@ -811,7 +811,7 @@ untouched. Reconnects landed 3.8s and 4.3s after the close, well inside the wind
 nothing. The grace is kept for the case the protocol actually allows — a client closing one stream
 and opening another on the same session, which a proxy or a network blip can force — and because the
 cost of guessing wrong the other way is a live client losing its gem and its uncommitted work.
-`GS_MCP_STREAM_LOSS_GRACE=0` releases immediately where no client is expected to reattach.
+`MCP_STREAM_LOSS_GRACE=0` releases immediately where no client is expected to reattach.
 
 **An unanswered ping is evidence of death only if it went down the stream the client is still on.**
 A message is written to exactly one stream, and both shipping clients reconnect a dropped standalone
@@ -841,9 +841,9 @@ is thrown away — so they have their own document: **[docs/session-lifetime.md]
 It covers every knob and its default, what actually ends a session, why nothing is measured in
 elapsed time, and why a host suspend needs no handling at all.
 
-From the shell, `GS_MCP_IDLE_TIMEOUT` and friends set all of it on either launcher — see
+From the shell, `MCP_IDLE_TIMEOUT` and friends set all of it on either launcher — see
 [session-lifetime.sh](session-lifetime.sh), which documents each, along with the view-hygiene family
-(`GS_MCP_MAX_COMMITS_BEHIND` and friends) that the two launchers share with it.
+(`MCP_MAX_COMMITS_BEHIND` and friends) that the two launchers share with it.
 
 Not configurable, because they are mechanism rather than policy: `keepaliveIntervalSeconds` 15
 (sized to proxy and NAT idle timeouts, not to sessions), `streamPollMilliseconds` 100,
@@ -866,9 +866,9 @@ message it sent, so when a call goes wrong the arguments are often recorded nowh
 on and the front end writes each message it receives to the **gem log**:
 
 ```bash
-GS_MCP_TRACE=1 ./run-server.sh                        # bodies capped at 4096 chars (the default)
-GS_MCP_TRACE=1 GS_MCP_TRACE_LIMIT=none ./run-server.sh   # whole bodies, no cap
-GS_MCP_TRACE=1 GS_MCP_TRACE_LIMIT=512  ./run-server.sh   # a tighter cap
+MCP_TRACE=1 ./run-server.sh                        # bodies capped at 4096 chars (the default)
+MCP_TRACE=1 MCP_TRACE_LIMIT=none ./run-server.sh   # whole bodies, no cap
+MCP_TRACE=1 MCP_TRACE_LIMIT=512  ./run-server.sh   # a tighter cap
 ```
 
 Both work on either launcher, and both travel to the forked front-end gem in the config
@@ -1279,7 +1279,7 @@ full Streamable HTTP transport with `curl`: it `initialize`s, captures the `MCP-
 sends it on every subsequent request (tools/list of the 31 base tools, every core tool, a
 compile_method/commit round-trip, error paths, the SSE GET stream, DELETE), then shuts the server
 down. It targets the **base** server — run it against a base install. Uses port `8011` by default
-(set `GS_MCP_PORT`). Exit status 0 = all passed.
+(set `MCP_PORT`). Exit status 0 = all passed.
 
 **TLS test (real HTTPS socket)** — `./test-tls.sh` forks a TLS-enabled server and drives the same
 transport over HTTPS with `curl -k`: TLS handshake, the self-signed cert, the SSE GET stream,
@@ -1287,7 +1287,7 @@ transport over HTTPS with `curl -k`: TLS handshake, the self-signed cert, the SS
 refused on the TLS port. It generates a throwaway self-signed `certs/` cert if none exists, and
 sets the cert/key **only in the forked gem's session (never committed)**, so the repository's
 default stays plaintext — nothing to restore even if interrupted. Uses port `8443` by default
-(set `GS_MCP_PORT`). Exit status 0 = all passed.
+(set `MCP_PORT`). Exit status 0 = all passed.
 
 ## Future work
 

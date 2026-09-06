@@ -3,7 +3,7 @@
 # duration vocabulary and both launchers need both -- and because a knob documented in only one of
 # two near-identical launchers is a knob nobody finds.
 #
-# Sourced, not executed. Reads the GS_MCP_* variables below and leaves Smalltalk setter sends for
+# Sourced, not executed. Reads the MCP_* variables below and leaves Smalltalk setter sends for
 # them in $LIFETIME_LINES and $VIEW_HYGIENE_LINES, ready to drop into either launcher's topaz
 # heredoc. Every one is optional: an unset variable emits no line at all, so the router keeps the
 # default it seeds in McpRouter>>initialize. That distinction matters for the idle timeout, where
@@ -11,7 +11,7 @@
 #
 # Durations accept a unit suffix -- 90s, 30m, 4h -- or a bare number of seconds.
 #
-#   GS_MCP_IDLE_TIMEOUT     How long a client may be quiet before its worker gem is released.
+#   MCP_IDLE_TIMEOUT        How long a client may be quiet before its worker gem is released.
 #                           Default 30m. `none` removes the deadline entirely: the session then
 #                           lives as long as its client keeps answering liveness pings on the SSE
 #                           stream it opened, which is what a developer who comes back to a
@@ -21,7 +21,7 @@
 #                           and holds back page reclamation -- a forgotten session is extent growth.
 #                           An authenticated router caps every session at its access token's exp
 #                           regardless, so `none` there means "until the token expires".
-#   GS_MCP_REQUEST_TIMEOUT  How long ONE request may run in a worker gem before the server ends it
+#   MCP_REQUEST_TIMEOUT     How long ONE request may run in a worker gem before the server ends it
 #                           and answers the client an error. Unset = NO LIMIT. It used to default to
 #                           45s, chosen to sit under what an MCP client will wait -- but that number
 #                           was a guess at when nobody is waiting any more, and two things now tell
@@ -37,15 +37,15 @@
 #                           guarantee that a runaway ever ends on its own. Ending a request costs the
 #                           client that request only: the worker is interrupted and stays usable, so
 #                           the session and its uncommitted work survive.
-#   GS_MCP_MAX_LIFETIME     Absolute cap on any session's life, however busy it is. Unset = none.
+#   MCP_MAX_LIFETIME        Absolute cap on any session's life, however busy it is. Unset = none.
 #                           Never forgiven, unlike idleness -- including across a host suspend.
-#   GS_MCP_PROBE_INTERVAL   How often a quiet session is asked whether its client is still there.
+#   MCP_PROBE_INTERVAL      How often a quiet session is asked whether its client is still there.
 #                           Default 2m. This is also the unit idleness is MEASURED in: a session is
-#                           released once it has answered GS_MCP_IDLE_TIMEOUT worth of these pings
+#                           released once it has answered MCP_IDLE_TIMEOUT worth of these pings
 #                           with no work in between (fifteen of them, at the defaults) -- and a
 #                           client that holds its stream open but stops answering is released after
 #                           three, so this interval sets that deadline too.
-#   GS_MCP_STREAM_LOSS_GRACE
+#   MCP_STREAM_LOSS_GRACE
 #                           How long a session survives its client CLOSING the event stream, before
 #                           the worker gem is released. Default 10s. This is the path a shut editor
 #                           tab takes, and the grace exists only to cover a client that closes one
@@ -57,17 +57,17 @@
 #                           `0` and `none` are OPPOSITES here: 0 releases the gem the moment the
 #                           socket closes, with no pause for a reconnect, while `none` turns the
 #                           fast release off altogether and leaves such a client to
-#                           GS_MCP_STREAMLESS_TIMEOUT, as it was before.
-#   GS_MCP_STREAMLESS_TIMEOUT
+#                           MCP_STREAMLESS_TIMEOUT, as it was before.
+#   MCP_STREAMLESS_TIMEOUT
 #                           The floor for a client that never opened an SSE stream AT ALL.
 #                           Default 60s. Such a client can never be pinged, so there is no evidence
 #                           to count and this is the only thing that can free its gem. It bounds the
 #                           gap between such a client's requests, not the life of its session, so
 #                           raise it where streamless clients POST in sequence rather than once.
-#   GS_MCP_REAPER_INTERVAL  How often the maintenance pass runs. Default 60s. The pass is the
+#   MCP_REAPER_INTERVAL     How often the maintenance pass runs. Default 60s. The pass is the
 #                           server's clock -- it ticks only while the front end is running -- so
 #                           every count below is measured in passes, not in elapsed time.
-#   GS_MCP_REAP_ON_FAILED_PROBE
+#   MCP_REAP_ON_FAILED_PROBE
 #                           0 to stop treating an unanswered liveness ping as grounds for releasing
 #                           a gem early. Default 1. Ignored (forced on) with no idle deadline, where
 #                           it is the only thing that would ever end a session.
@@ -107,36 +107,36 @@ r $selector: $secs."
 LIFETIME_LINES=""
 
 # `none` is an instruction, not an absence: it has to reach the router as an explicit nil.
-case "$(printf '%s' "${GS_MCP_IDLE_TIMEOUT:-}" | tr 'A-Z' 'a-z')" in
+case "$(printf '%s' "${MCP_IDLE_TIMEOUT:-}" | tr 'A-Z' 'a-z')" in
   '')          ;;
   none|off|0)  LIFETIME_LINES="$LIFETIME_LINES
 r sessionIdleTimeoutSeconds: nil." ;;
-  *)           mcp_lifetime_line "$GS_MCP_IDLE_TIMEOUT" sessionIdleTimeoutSeconds GS_MCP_IDLE_TIMEOUT ;;
+  *)           mcp_lifetime_line "$MCP_IDLE_TIMEOUT" sessionIdleTimeoutSeconds MCP_IDLE_TIMEOUT ;;
 esac
 
-case "$(printf '%s' "${GS_MCP_REQUEST_TIMEOUT:-}" | tr 'A-Z' 'a-z')" in
+case "$(printf '%s' "${MCP_REQUEST_TIMEOUT:-}" | tr 'A-Z' 'a-z')" in
   '')          ;;
   none|off|0)  LIFETIME_LINES="$LIFETIME_LINES
 r requestTimeoutSeconds: nil." ;;
-  *)           mcp_lifetime_line "$GS_MCP_REQUEST_TIMEOUT" requestTimeoutSeconds GS_MCP_REQUEST_TIMEOUT ;;
+  *)           mcp_lifetime_line "$MCP_REQUEST_TIMEOUT" requestTimeoutSeconds MCP_REQUEST_TIMEOUT ;;
 esac
 
 # `0` is NOT folded in with `none` here, unlike every other knob in this file: for this one they are
 # opposites (see the note above), and folding them made 0 mean the exact thing it documents itself as
 # ruling out -- leave the gem to the streamless floor -- rather than releasing it at once.
-case "$(printf '%s' "${GS_MCP_STREAM_LOSS_GRACE:-}" | tr 'A-Z' 'a-z')" in
+case "$(printf '%s' "${MCP_STREAM_LOSS_GRACE:-}" | tr 'A-Z' 'a-z')" in
   '')          ;;
   none|off)    LIFETIME_LINES="$LIFETIME_LINES
 r streamLossGraceSeconds: nil." ;;
-  *)           mcp_lifetime_line "$GS_MCP_STREAM_LOSS_GRACE" streamLossGraceSeconds GS_MCP_STREAM_LOSS_GRACE ;;
+  *)           mcp_lifetime_line "$MCP_STREAM_LOSS_GRACE" streamLossGraceSeconds MCP_STREAM_LOSS_GRACE ;;
 esac
 
-mcp_lifetime_line "${GS_MCP_MAX_LIFETIME:-}"        maxSessionLifetimeSeconds     GS_MCP_MAX_LIFETIME
-mcp_lifetime_line "${GS_MCP_PROBE_INTERVAL:-}"      livenessProbeIntervalSeconds  GS_MCP_PROBE_INTERVAL
-mcp_lifetime_line "${GS_MCP_STREAMLESS_TIMEOUT:-}"  streamlessIdleTimeoutSeconds  GS_MCP_STREAMLESS_TIMEOUT
-mcp_lifetime_line "${GS_MCP_REAPER_INTERVAL:-}"     reaperIntervalSeconds         GS_MCP_REAPER_INTERVAL
+mcp_lifetime_line "${MCP_MAX_LIFETIME:-}"        maxSessionLifetimeSeconds     MCP_MAX_LIFETIME
+mcp_lifetime_line "${MCP_PROBE_INTERVAL:-}"      livenessProbeIntervalSeconds  MCP_PROBE_INTERVAL
+mcp_lifetime_line "${MCP_STREAMLESS_TIMEOUT:-}"  streamlessIdleTimeoutSeconds  MCP_STREAMLESS_TIMEOUT
+mcp_lifetime_line "${MCP_REAPER_INTERVAL:-}"     reaperIntervalSeconds         MCP_REAPER_INTERVAL
 
-if [ "${GS_MCP_REAP_ON_FAILED_PROBE:-1}" = "0" ]; then
+if [ "${MCP_REAP_ON_FAILED_PROBE:-1}" = "0" ]; then
   LIFETIME_LINES="$LIFETIME_LINES
 r reapOnFailedProbe: false."
 fi
@@ -150,7 +150,7 @@ fi
 # them. Nothing in the session-lifetime family can see that -- a session can be perfectly well
 # behaved, answering every ping, and still be the reason the extent is growing.
 #
-#   GS_MCP_FRONT_END_TX_MODE  GemStone transaction mode for the forked FRONT-END gem:
+#   MCP_FRONT_END_TX_MODE   GemStone transaction mode for the forked FRONT-END gem:
 #                           transactionless (default) or autoBegin. The front end makes no
 #                           repository changes, so transactionless costs it nothing and saves the
 #                           stone a commit record it could otherwise never dispose of -- measured, a
@@ -160,7 +160,7 @@ fi
 #                           only if front-end code of your own needs a stable view (see the McpRouter
 #                           class comment). Workers are unaffected: each client's gem holds a
 #                           transaction because that is what the session IS.
-#   GS_MCP_MAX_COMMITS_BEHIND
+#   MCP_MAX_COMMITS_BEHIND
 #                           How far behind the repository a worker gem's view may fall, in COMMITS,
 #                           before the server refreshes it (default 20 -- the same number the stone
 #                           uses for STN_SIGNAL_ABORT_CR_BACKLOG; the effective limit is the lower of
@@ -170,16 +170,16 @@ fi
 #                           not how old it is, so an idle session on a quiet stone costs nothing and
 #                           is left alone however long it sits. The refresh KEEPS the session's
 #                           uncommitted work, and the client is told on its next result.
-#   GS_MCP_STUCK_VIEW_GRACE How long a session whose view CANNOT be moved is tolerated, while the
+#   MCP_STUCK_VIEW_GRACE    How long a session whose view CANNOT be moved is tolerated, while the
 #                           stone is over its own backlog threshold, before its gem is released.
 #                           Default 60s. A view is stuck when GemStone refuses to move it at all --
 #                           after a commit that failed on conflict, or inside a nested transaction --
 #                           so nothing this server sends will free the record that session is
 #                           holding, and the work it holds is already un-committable. `none` never
 #                           reaps on this ground; `0` reaps on the pass that finds it. Floored at one
-#                           GS_MCP_REAPER_INTERVAL: a positive value shorter than a pass refuses to
+#                           MCP_REAPER_INTERVAL: a positive value shorter than a pass refuses to
 #                           start rather than being silently rounded up.
-#   GS_MCP_PINNED_VIEW_GRACE
+#   MCP_PINNED_VIEW_GRACE
 #                           How long a RUNNING call may hold the repository's oldest commit record
 #                           open, while the repository is over its own backlog threshold, before the
 #                           server ends that call. Default 300s; `none` never ends one. This is the
@@ -201,42 +201,42 @@ r $1: $2."
 
 # Checked here as well as in the setter (which raises), because a launcher that fails in the shell
 # says so in one line instead of from inside a topaz stack.
-case "${GS_MCP_FRONT_END_TX_MODE:-transactionless}" in
+case "${MCP_FRONT_END_TX_MODE:-transactionless}" in
   transactionless|autoBegin)
-      mcp_hygiene_line frontEndTransactionMode "'${GS_MCP_FRONT_END_TX_MODE:-transactionless}'" ;;
-  *)  echo "ERROR: GS_MCP_FRONT_END_TX_MODE must be transactionless or autoBegin (got '$GS_MCP_FRONT_END_TX_MODE')." >&2
+      mcp_hygiene_line frontEndTransactionMode "'${MCP_FRONT_END_TX_MODE:-transactionless}'" ;;
+  *)  echo "ERROR: MCP_FRONT_END_TX_MODE must be transactionless or autoBegin (got '$MCP_FRONT_END_TX_MODE')." >&2
       exit 1 ;;
 esac
 
 # A count, not a duration: no unit suffix, and `none` is an instruction (leave every worker's view
 # alone) that has to reach the router as an explicit nil rather than as an absence.
-case "$(printf '%s' "${GS_MCP_MAX_COMMITS_BEHIND:-}" | tr 'A-Z' 'a-z')" in
+case "$(printf '%s' "${MCP_MAX_COMMITS_BEHIND:-}" | tr 'A-Z' 'a-z')" in
   '')          ;;
   none|off)    mcp_hygiene_line maxCommitsBehind nil ;;
-  *[!0-9]*)    echo "ERROR: GS_MCP_MAX_COMMITS_BEHIND must be a whole number of commits, or 'none' (got '$GS_MCP_MAX_COMMITS_BEHIND')." >&2
+  *[!0-9]*)    echo "ERROR: MCP_MAX_COMMITS_BEHIND must be a whole number of commits, or 'none' (got '$MCP_MAX_COMMITS_BEHIND')." >&2
                exit 1 ;;
-  *)           mcp_hygiene_line maxCommitsBehind "$GS_MCP_MAX_COMMITS_BEHIND" ;;
+  *)           mcp_hygiene_line maxCommitsBehind "$MCP_MAX_COMMITS_BEHIND" ;;
 esac
 
 # `none` and `0` are both instructions here and are not the same one, so each reaches the router as
 # itself. 0 is spelled out rather than passed through mcp_duration_seconds only because `0m` and `0h`
 # would be silly ways to write it.
-case "$(printf '%s' "${GS_MCP_STUCK_VIEW_GRACE:-}" | tr 'A-Z' 'a-z')" in
+case "$(printf '%s' "${MCP_STUCK_VIEW_GRACE:-}" | tr 'A-Z' 'a-z')" in
   '')          ;;
   none|off)    mcp_hygiene_line stuckViewGraceSeconds nil ;;
   0)           mcp_hygiene_line stuckViewGraceSeconds 0 ;;
-  *)           SECS=$(mcp_duration_seconds "$GS_MCP_STUCK_VIEW_GRACE" GS_MCP_STUCK_VIEW_GRACE) || exit 1
+  *)           SECS=$(mcp_duration_seconds "$MCP_STUCK_VIEW_GRACE" MCP_STUCK_VIEW_GRACE) || exit 1
                mcp_hygiene_line stuckViewGraceSeconds "$SECS" ;;
 esac
 
 # Zero is NOT meaningful for this one -- it would end every call the moment the stone went over its
 # threshold, which is a request deadline and not this rule -- so the router refuses it and so does
 # this. `none` is how you turn it off.
-case "$(printf '%s' "${GS_MCP_PINNED_VIEW_GRACE:-}" | tr 'A-Z' 'a-z')" in
+case "$(printf '%s' "${MCP_PINNED_VIEW_GRACE:-}" | tr 'A-Z' 'a-z')" in
   '')          ;;
   none|off)    mcp_hygiene_line pinnedViewGraceSeconds nil ;;
-  0)           echo "ERROR: GS_MCP_PINNED_VIEW_GRACE must be a positive duration, or 'none' to never end a running call (got '0')." >&2
+  0)           echo "ERROR: MCP_PINNED_VIEW_GRACE must be a positive duration, or 'none' to never end a running call (got '0')." >&2
                exit 1 ;;
-  *)           SECS=$(mcp_duration_seconds "$GS_MCP_PINNED_VIEW_GRACE" GS_MCP_PINNED_VIEW_GRACE) || exit 1
+  *)           SECS=$(mcp_duration_seconds "$MCP_PINNED_VIEW_GRACE" MCP_PINNED_VIEW_GRACE) || exit 1
                mcp_hygiene_line pinnedViewGraceSeconds "$SECS" ;;
 esac

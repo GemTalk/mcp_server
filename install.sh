@@ -15,7 +15,7 @@
 #
 #   --grail   ALSO file in the optional GemStone-Python toolset (src/grail). Only valid on an image
 #             that has Grail/ModuleAst -- those methods reference ModuleAst and BaseException and
-#             cannot compile without it. Equivalently, set GS_MCP_WITH_GRAIL=1. Opt-in rather than
+#             cannot compile without it. Equivalently, set MCP_WITH_GRAIL=1. Opt-in rather than
 #             detected, because loading it is NOT inert: the toolset joins the default tool surface
 #             automatically (see McpServer class>>installedDefaultToolsetNames), so whether to have
 #             it is a decision about the server you are running, not about the image.
@@ -64,7 +64,7 @@ for arg in "$@"; do
     *) echo "usage: $0 [--auth|--no-auth] [--grail] [--check]" >&2; exit 2 ;;
   esac
 done
-[ -n "${GS_MCP_WITH_GRAIL:-}" ] && WANT_GRAIL=1
+[ -n "${MCP_WITH_GRAIL:-}" ] && WANT_GRAIL=1
 
 # Resolve GEMSTONE/TOPAZ/GEMSTONE_GLOBAL_DIR and confirm the stone is actually running, so a
 # misconfigured environment is reported in its own terms instead of as a topaz login failure.

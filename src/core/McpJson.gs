@@ -55,7 +55,7 @@ structural one (a byte String''s #size IS its byte count, whatever the bytes are
  - the worker->front-end hop is measured in BYTES by the kernel''s result fetch, whose buffer is
    sized in bytes (see McpExternalSessionTest) -- a wide string crossing it is not safe, which is
    why this writer emits BYTES rather than leaving characters for the transport to encode;
- - GS_MCP_TRACE writes bodies to the gem log through GsFile, where a 16-bit string comes out
+ - MCP_TRACE writes bodies to the gem log through GsFile, where a 16-bit string comes out
    garbled.
 That is the argument for encoding here rather than at the socket: the response leaves the worker
 gem long before it reaches a socket, and the only representation safe across every hop in between

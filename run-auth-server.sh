@@ -13,7 +13,7 @@
 #   --check             - verify the environment and report, without starting anything
 #   GEMSTONE            - GemStone product directory (REQUIRED; no default can be guessed)
 #   GS_STONE/GS_USER/GS_PASS - stone + admin login (defaults: gs64stone/DataCurator/swordfish)
-#   GS_MCP_PORT         - listen port (default: 8443)
+#   MCP_PORT            - listen port (default: 8443)
 #   MCP_ISSUER          - OIDC issuer URL. MUST be https: McpAuthRouter refuses to advertise a
 #                         cleartext authorization server, because "All authorization server endpoints
 #                         MUST be served over HTTPS" (the spec's localhost exemption covers redirect
@@ -53,29 +53,29 @@
 #   MCP_WRITE_SCOPE     - scope granting write; a token lacking it gets a READ-ONLY worker (default: none).
 #                         Advertised automatically so clients can request it -- an unrequestable write
 #                         scope would leave every session read-only.
-#   GS_MCP_READONLY     - 1 to force EVERY session read-only regardless of scope (default: 0)
-#   Session lifetime    - the GS_MCP_IDLE_TIMEOUT family, documented in ./session-lifetime.sh. A
+#   MCP_READONLY        - 1 to force EVERY session read-only regardless of scope (default: 0)
+#   Session lifetime    - the MCP_IDLE_TIMEOUT family, documented in ./session-lifetime.sh. A
 #                         hosted server usually wants a SHORTER idle timeout than the 30-minute
 #                         default, since every live session is a gem holding a transaction view. Note
 #                         that this router additionally caps each session at its access token's own
 #                         `exp`, whatever the idle policy says: the worker gem is logged in as that
 #                         token's GemStone user, so a session outliving its token would leave the
 #                         authorization it was opened with in force after the grant expired.
-#   View hygiene        - the GS_MCP_MAX_COMMITS_BEHIND family, documented in the same file. These
+#   View hygiene        - the MCP_MAX_COMMITS_BEHIND family, documented in the same file. These
 #                         govern the REPOSITORY rather than the client: a worker's view pins the
 #                         commit record it was taken from, and this is what refreshes a view that has
 #                         fallen too far behind, releases a session whose view cannot be moved at
 #                         all, and ends a running call that is holding the repository's oldest record
 #                         while the stone is over its backlog threshold.
-#   GS_MCP_TRACE        - 1 to write every message a client SENDS to the gem log (default 0). Turn
+#   MCP_TRACE           - 1 to write every message a client SENDS to the gem log (default 0). Turn
 #                         this on when a call is going wrong and the client's own UI shows you only
 #                         the tool name: the trace carries the JSON-RPC text, arguments included.
 #                         Headers are never traced, so the bearer token stays out of the log -- but
 #                         everything a client sent does go in, which on a SHARED server is other
 #                         people's work. Off by default for that reason.
-#   GS_MCP_TRACE_LIMIT  - characters of each traced body written before the rest is summarized
+#   MCP_TRACE_LIMIT     - characters of each traced body written before the rest is summarized
 #                         (default 4096). "none" writes whole bodies, with no cap at all.
-#   GS_MCP_TITLE        - human-readable label for THIS INSTANCE, reported as serverInfo.title, e.g.
+#   MCP_TITLE           - human-readable label for THIS INSTANCE, reported as serverInfo.title, e.g.
 #                         "GemStone - geode teststone 3.7.6". Empty means no title at all: the key is
 #                         omitted and clients display the server name. Use this -- not a relabeled
 #                         serverName -- to tell two deployments of the same software apart.
@@ -95,17 +95,17 @@ cd "$(dirname "$0")"
 GS_STONE="${GS_STONE:-gs64stone}"
 GS_USER="${GS_USER:-DataCurator}"
 GS_PASS="${GS_PASS:-swordfish}"
-GS_MCP_PORT="${GS_MCP_PORT:-8443}"
+MCP_PORT="${MCP_PORT:-8443}"
 MCP_ISSUER="${MCP_ISSUER:-https://localhost:8443/realms/gs-mcp}"
 MCP_AUDIENCE="${MCP_AUDIENCE:-https://localhost:8443/mcp}"
 MCP_USERID_CLAIM="${MCP_USERID_CLAIM:-preferred_username}"
 MCP_REQUIRED_SCOPES="${MCP_REQUIRED_SCOPES:-mcp:use}"
 MCP_EXTRA_SCOPES="${MCP_EXTRA_SCOPES:-}"
 MCP_WRITE_SCOPE="${MCP_WRITE_SCOPE:-}"
-GS_MCP_READONLY="${GS_MCP_READONLY:-0}"
-GS_MCP_TITLE="${GS_MCP_TITLE:-}"
-GS_MCP_TRACE="${GS_MCP_TRACE:-0}"
-GS_MCP_TRACE_LIMIT="${GS_MCP_TRACE_LIMIT:-}"
+MCP_READONLY="${MCP_READONLY:-0}"
+MCP_TITLE="${MCP_TITLE:-}"
+MCP_TRACE="${MCP_TRACE:-0}"
+MCP_TRACE_LIMIT="${MCP_TRACE_LIMIT:-}"
 MCP_BIND_ADDRESS="${MCP_BIND_ADDRESS:-}"
 MCP_TLS_CERT="${MCP_TLS_CERT:-}"
 MCP_TLS_KEY="${MCP_TLS_KEY:-}"
@@ -138,8 +138,8 @@ if [ "$HAVE_ROUTER" -ne 0 ]; then
   exit 1
 fi
 
-# Session-lifetime setters (GS_MCP_IDLE_TIMEOUT and friends) -> $LIFETIME_LINES, and the view-hygiene
-# setters (GS_MCP_MAX_COMMITS_BEHIND and friends) -> $VIEW_HYGIENE_LINES. Either is empty when none
+# Session-lifetime setters (MCP_IDLE_TIMEOUT and friends) -> $LIFETIME_LINES, and the view-hygiene
+# setters (MCP_MAX_COMMITS_BEHIND and friends) -> $VIEW_HYGIENE_LINES. Either is empty when none
 # of its variables are set, leaving McpRouter>>initialize's defaults in place. That file documents
 # every one of them, and validates them, so neither launcher repeats either job.
 . ./session-lifetime.sh
@@ -189,47 +189,47 @@ EXTRA_LINE=""
 WRITE_LINE=""
 [ -n "$MCP_WRITE_SCOPE" ] && WRITE_LINE="r writeScope: '$MCP_WRITE_SCOPE'."
 RO_LINE=""
-[ "$GS_MCP_READONLY" = "1" ] && RO_LINE="r readOnly: true."
+[ "$MCP_READONLY" = "1" ] && RO_LINE="r readOnly: true."
 BIND_LINE=""
 [ -n "$MCP_BIND_ADDRESS" ] && BIND_LINE="r bindAddress: '$MCP_BIND_ADDRESS'."
 # Message tracing; both settings travel to the forked gem in the config (McpRouter>>configDict).
 TRACE_LINE=""
-[ "$GS_MCP_TRACE" = "1" ] && TRACE_LINE="r messageTrace: true."
-if [ -n "$GS_MCP_TRACE_LIMIT" ]; then
-  if [ "$GS_MCP_TRACE_LIMIT" = "none" ]; then
+[ "$MCP_TRACE" = "1" ] && TRACE_LINE="r messageTrace: true."
+if [ -n "$MCP_TRACE_LIMIT" ]; then
+  if [ "$MCP_TRACE_LIMIT" = "none" ]; then
     TRACE_LINE="$TRACE_LINE
 r messageTraceLimit: nil."
   else
-    case "$GS_MCP_TRACE_LIMIT" in
-      ''|*[!0-9]*) echo "error: GS_MCP_TRACE_LIMIT must be a positive integer, or 'none'." >&2; exit 1 ;;
+    case "$MCP_TRACE_LIMIT" in
+      ''|*[!0-9]*) echo "error: MCP_TRACE_LIMIT must be a positive integer, or 'none'." >&2; exit 1 ;;
     esac
     TRACE_LINE="$TRACE_LINE
-r messageTraceLimit: $GS_MCP_TRACE_LIMIT."
+r messageTraceLimit: $MCP_TRACE_LIMIT."
   fi
 fi
 # Free-form operator text, unlike every other value here, so double any embedded quote rather than
 # letting it close the literal.
 TITLE_LINE=""
-[ -n "$GS_MCP_TITLE" ] && TITLE_LINE="r serverTitle: '$(printf '%s' "$GS_MCP_TITLE" | sed "s/'/''/g")'."
+[ -n "$MCP_TITLE" ] && TITLE_LINE="r serverTitle: '$(printf '%s' "$MCP_TITLE" | sed "s/'/''/g")'."
 
-# GS_MCP_GRAIL_DIR -- the Grail checkout, on an image carrying the Grail (python) toolset. Same
+# MCP_GRAIL_DIR -- the Grail checkout, on an image carrying the Grail (python) toolset. Same
 # variable, same meaning and same launch-time check as run-server.sh; see its header for why a worker
 # gem cannot work this out for itself. Nothing else about toolsets is configurable from this script,
-# so there is deliberately no general GS_MCP_TOOLSET_OPTIONS here -- an authenticated deployment
+# so there is deliberately no general MCP_TOOLSET_OPTIONS here -- an authenticated deployment
 # choosing a bespoke tool surface should build its router rather than drive it from env vars.
 GRAIL_LINE=""
-if [ -n "${GS_MCP_GRAIL_DIR:-}" ]; then
-  if [ ! -d "$GS_MCP_GRAIL_DIR/src/python/stdlib" ]; then
-    echo "error: GS_MCP_GRAIL_DIR=$GS_MCP_GRAIL_DIR holds no src/python/stdlib," >&2
+if [ -n "${MCP_GRAIL_DIR:-}" ]; then
+  if [ ! -d "$MCP_GRAIL_DIR/src/python/stdlib" ]; then
+    echo "error: MCP_GRAIL_DIR=$MCP_GRAIL_DIR holds no src/python/stdlib," >&2
     echo "       so it is not a Grail checkout." >&2
     exit 1
   fi
   GRAIL_LINE="r toolsetOptions: (Dictionary new at: 'McpGrailToolset' put:
-  (Dictionary new at: 'grailDirectory' put: '$(printf '%s' "$GS_MCP_GRAIL_DIR" | sed "s/'/''/g")'; yourself);
+  (Dictionary new at: 'grailDirectory' put: '$(printf '%s' "$MCP_GRAIL_DIR" | sed "s/'/''/g")'; yourself);
   yourself)."
 fi
 
-echo "Forking McpAuthRouter onto ${MCP_BIND_ADDRESS:-127.0.0.1}:$GS_MCP_PORT (issuer=$MCP_ISSUER; detached; this script returns)..."
+echo "Forking McpAuthRouter onto ${MCP_BIND_ADDRESS:-127.0.0.1}:$MCP_PORT (issuer=$MCP_ISSUER; detached; this script returns)..."
 "$TOPAZ" -l <<TPZ
 set gemstone $GS_STONE
 set username $GS_USER
@@ -253,7 +253,7 @@ $BIND_LINE
 $TRACE_LINE
 $TITLE_LINE
 $GRAIL_LINE$LIFETIME_LINES
-r forkOnPort: $GS_MCP_PORT
+r forkOnPort: $MCP_PORT
 %
 logout
 exit

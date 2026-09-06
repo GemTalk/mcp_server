@@ -192,7 +192,7 @@ testOutputIsAlwaysAByteString
   "THE INVARIANT THE TRANSPORT RESTS ON, and the reason this writer encodes rather than leaving
    characters for the socket. Three unrelated mechanisms read the answer as bytes:
    McpHttpConnection writes Content-Length as `body size`; the worker->front-end hop is measured in
-   bytes by the kernel's result fetch, whose buffer is sized in bytes; and GS_MCP_TRACE writes
+   bytes by the kernel's result fetch, whose buffer is sized in bytes; and MCP_TRACE writes
    bodies to the gem log through GsFile, where a 16-bit string comes out garbled.
    A DoubleByteString of n characters is 2n bytes on the wire and a QuadByteString 4n, so a wide
    answer would break all three -- and `WriteStream on: String new` DOES widen the moment a

@@ -13,7 +13,7 @@
 #   GS_STONE    - stone name        (default: gs64stone)
 #   GS_USER     - GemStone user     (default: DataCurator)
 #   GS_PASS     - GemStone password (default: swordfish)
-#   GS_MCP_PORT - test port         (default: 8011, kept off the usual 8000)
+#   MCP_PORT    - test port         (default: 8011, kept off the usual 8000)
 #
 # Exit status 0 = all checks passed.
 set -uo pipefail
@@ -31,7 +31,7 @@ GS_NEEDS_NETLDI=1
 gs_env_resolve
 gs_env_require_stone
 gs_env_require_netldi
-PORT="${GS_MCP_PORT:-8011}"
+PORT="${MCP_PORT:-8011}"
 URL="http://127.0.0.1:$PORT/mcp"
 SERVER_LOG="$(mktemp -t gsmcp-server.XXXXXX)"
 
@@ -53,10 +53,10 @@ cleanup() {
   # something already listening and tests against it -- and because a router gem does not pick up
   # recompiled code the way worker gems do, that stale front end serves the previous tree's
   # transport code and the run reports failures belonging to a version nobody is testing.
-  GS_MCP_PORT="$PORT" ./stop-server.sh >/dev/null 2>&1
+  MCP_PORT="$PORT" ./stop-server.sh >/dev/null 2>&1
   [ -n "$WRAPPER_PID" ] && kill "$WRAPPER_PID" 2>/dev/null
   # the second, differently-configured front end the lifetime section starts (see [3/4])
-  GS_MCP_PORT="$((PORT + 1))" ./stop-server.sh >/dev/null 2>&1
+  MCP_PORT="$((PORT + 1))" ./stop-server.sh >/dev/null 2>&1
   [ -n "$LIFE_WRAPPER_PID" ] && kill "$LIFE_WRAPPER_PID" 2>/dev/null
   rm -f "$SERVER_LOG" "${LIFE_LOG:-}"
 }
@@ -97,7 +97,7 @@ echo
 
 # ---------------------------------------------------------------------------
 echo "[1/4] Starting server gem (session A) ..."
-GS_MCP_PORT="$PORT" ./run-server.sh > "$SERVER_LOG" 2>&1 &
+MCP_PORT="$PORT" ./run-server.sh > "$SERVER_LOG" 2>&1 &
 WRAPPER_PID=$!
 for i in $(seq 1 60); do nc -z 127.0.0.1 "$PORT" 2>/dev/null && break; sleep 0.5; done
 if ! nc -z 127.0.0.1 "$PORT" 2>/dev/null; then
@@ -655,8 +655,8 @@ echo "[3/4] Session lifetime configuration ..."
 LIFE_PORT=$((PORT + 1))
 LIFE_URL="http://127.0.0.1:$LIFE_PORT/mcp"
 LIFE_LOG="$(mktemp -t gsmcp-life.XXXXXX)"
-GS_MCP_PORT="$LIFE_PORT" GS_MCP_IDLE_TIMEOUT=none GS_MCP_PROBE_INTERVAL=30s GS_MCP_REAPER_INTERVAL=15s \
-  GS_MCP_STREAMLESS_TIMEOUT=20m GS_MCP_MAX_LIFETIME=8h ./run-server.sh > "$LIFE_LOG" 2>&1 &
+MCP_PORT="$LIFE_PORT" MCP_IDLE_TIMEOUT=none MCP_PROBE_INTERVAL=30s MCP_REAPER_INTERVAL=15s \
+  MCP_STREAMLESS_TIMEOUT=20m MCP_MAX_LIFETIME=8h ./run-server.sh > "$LIFE_LOG" 2>&1 &
 LIFE_WRAPPER_PID=$!
 for i in $(seq 1 60); do nc -z 127.0.0.1 "$LIFE_PORT" 2>/dev/null && break; sleep 0.5; done
 if nc -z 127.0.0.1 "$LIFE_PORT" 2>/dev/null; then
@@ -679,7 +679,7 @@ fi
 # message lands where whoever typed it will see it.
 BAD_PORT=$((PORT + 2))
 BAD_LOG="$(mktemp -t gsmcp-bad.XXXXXX)"
-GS_MCP_PORT="$BAD_PORT" GS_MCP_IDLE_TIMEOUT=90s GS_MCP_PROBE_INTERVAL=300s \
+MCP_PORT="$BAD_PORT" MCP_IDLE_TIMEOUT=90s MCP_PROBE_INTERVAL=300s \
   ./run-server.sh > "$BAD_LOG" 2>&1 || true
 check "an unmeasurable idle timeout is refused"  'shorter than'   "$(cat "$BAD_LOG")"
 if nc -z 127.0.0.1 "$BAD_PORT" 2>/dev/null; then
