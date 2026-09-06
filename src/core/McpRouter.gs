@@ -11,7 +11,7 @@ McpBase subclass: 'McpRouter'
                     streamlessIdleTimeoutSeconds livenessProbeIntervalSeconds reaperIntervalSeconds maxSessionLifetimeSeconds
                     reapOnFailedProbe streamLossGraceSeconds messageTrace messageTraceLimit
                     requestTimeoutSeconds callChannels callMutex callCounter
-                    frontEndTransactionMode maxCommitsBehind sessionAccessWarned)
+                    frontEndTransactionMode maxCommitsBehind sessionAccessWarned maintenanceCallTimeoutSeconds)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -156,6 +156,18 @@ defaultLivenessProbeIntervalSeconds
    and a client that is frozen rather than gone is released after #unansweredProbesBeforeGone of
    them, which at the former five minutes meant a quarter of an hour before anyone noticed."
   ^120
+%
+category: 'view hygiene'
+classmethod: McpRouter
+defaultMaintenanceCallTimeoutSeconds
+  "How long the front end waits on its OWN send into a worker gem before ending it: 5 seconds.
+   Deliberately not #requestTimeoutSeconds, and not derived from it. That knob is legitimately nil --
+   a router used to run test suites for hours is a supported deployment, with a client-initiated
+   interrupt as the stop button -- and a hygiene send that inherited nil would wait for ever, which
+   would stall the maintenance pass for every other session.
+   5 seconds because the send is one abort-equivalent (System continueTransaction) into an idle gem.
+   Anything slower is not a slow refresh, it is a gem that is not answering."
+  ^5
 %
 category: 'view hygiene'
 classmethod: McpRouter
@@ -417,6 +429,8 @@ applyConfig: aConfigDict
    floor, so a number that cannot work must fail on arrival in the child gem."
   (aConfigDict includesKey: 'maxCommitsBehind')
     ifTrue: [self maxCommitsBehind: (aConfigDict at: 'maxCommitsBehind')].
+  (aConfigDict includesKey: 'maintenanceCallTimeoutSeconds')
+    ifTrue: [self maintenanceCallTimeoutSeconds: (aConfigDict at: 'maintenanceCallTimeoutSeconds')].
   messageTrace := aConfigDict at: 'messageTrace' ifAbsent: [messageTrace].
   messageTraceLimit := aConfigDict at: 'messageTraceLimit' ifAbsent: [messageTraceLimit].
   ^self
@@ -598,6 +612,7 @@ configDict
   d at: 'maxSessionLifetimeSeconds' put: maxSessionLifetimeSeconds.
   d at: 'reapOnFailedProbe' put: reapOnFailedProbe.
   d at: 'maxCommitsBehind' put: maxCommitsBehind.
+  d at: 'maintenanceCallTimeoutSeconds' put: maintenanceCallTimeoutSeconds.
   "Message tracing has to travel, or it is unreachable: forkOnPort: is the only way this server is
    ever started, so a setting the fork string does not carry is one an operator cannot turn on."
   d at: 'messageTrace' put: messageTrace.
@@ -973,6 +988,7 @@ initialize
   "View hygiene. Seeded rather than left nil, because nil is the OFF setting and could not also mean
    'use the default'. sessionAccessWarned is the once-only latch for the privilege this arm needs."
   maxCommitsBehind := self class defaultMaxCommitsBehind.
+  maintenanceCallTimeoutSeconds := self class defaultMaintenanceCallTimeoutSeconds.
   sessionAccessWarned := false.
   "Message tracing: OFF, because a traced log records every tool argument a client sent, and an
    operator must choose that rather than discover it. The cap is not optional -- a compile_method or
@@ -1157,10 +1173,13 @@ method: McpRouter
 maintainViewHygiene
   "Look at how far behind the repository each worker gem's view has fallen, and answer how many are
    far enough behind to act on.
-   MEASUREMENT ONLY, deliberately, for this first step: it records the number on each session and
-   logs the ones over the line, and it moves nobody's view. The whole point is to find out what the
-   real numbers look like -- and whether this server's user can read them at all -- before anything
-   acts on them.
+   A worker over the line is REFRESHED: the front end sends McpServer refreshViewForFrontEnd into
+   it, which takes a current view and keeps whatever uncommitted work is there
+   (System continueTransaction). Three things can come back, and the front end acts on none of them
+   beyond logging: 'kept' is the ordinary success, 'doomed' means the pending work now conflicts and
+   the WORKER tells its client so on every later call, and 'stuck' means the view did not move at all
+   because continueTransaction was illegal in that session's state -- which is the only case left
+   that a later step will need a reaping rule for.
    THE GROUND IS ONE THING: how far behind this session's own view is. Nothing about the state of
    the stone can put a worker over the line -- see the long note in the body for why a rule that let
    it was measurably wrong. The stone figures are read for the log line, which is what the next
@@ -1208,16 +1227,19 @@ maintainViewHygiene
          waiting on, and reaping a session whose view cannot be moved at all. Both are still to come,
          and both should take pressure as a conjunct with this ground rather than as an alternative
          to it."
-        behind >= limit ifTrue: [
-          acted := acted + 1.
-          "Log a CHANGED number, not a standing one. This step acts on nothing, so a session over
-           the line stays over it, and a line per session per pass is 1440 identical lines a day for
-           one idle client -- measured, three in a row before that session happened to be reaped.
-           Every distinct observation is still recorded, which is what this step is for; only the
-           repeats go. Once the arm acts (the next step) this becomes self-limiting anyway, since a
-           refreshed view reads 0 on the following pass."
-          changed ifTrue: [
-            self log: 'view hygiene (measuring only): session ' , sess id printString
+        behind >= limit ifTrue: [ | verdict |
+          "A session with a call in flight is measured but not touched: GCI allows one call in
+           flight, and moving a view out from under a running tool is the corruption the transaction
+           model exists to prevent. #refreshWorkerView answers nil rather than waiting for it."
+          verdict := sess refreshWorkerView.
+          verdict isNil ifFalse: [acted := acted + 1].
+          "Log the ACT, always -- a view move under a client is not something to leave unrecorded --
+           but a session that could not be asked (busy, and it will be asked again next pass) only
+           when its number has changed. That second rule is what keeps a long call from writing a
+           line a minute: measured before the arm acted at all, three identical lines in a row for
+           one idle client, which at a one-minute pass is 1440 a day."
+          (verdict notNil or: [changed]) ifTrue: [
+            self log: 'view hygiene: session ' , sess id printString
               , ' worker gem ' , sess workerStoneSession printString
               , ' is ' , behind printString , ' commits behind (limit ' , limit printString
               , '), stone backlog ' , backlog printString , '/'
@@ -1225,12 +1247,30 @@ maintainViewHygiene
               , ', stone-critical ' , (critical ifTrue: ['yes'] ifFalse: ['no'])
               , ', holds-oldest-cr ' , ((oldest includes: sess workerStoneSession)
                   ifTrue: ['yes'] ifFalse: ['no'])
-              , ', busy ' , (sess isBusy ifTrue: ['yes'] ifFalse: ['no'])
-              , ' -- would refresh its view.']]]]
+              , ' -- ' , (verdict isNil
+                  ifTrue: ['a call is in flight; left alone this pass']
+                  ifFalse: ['refresh: ' , verdict printString])]]]]
       on: Error
       do: [:e | self log: 'maintainViewHygiene error: ' ,
              ([e description] on: Error do: [:x | e class name asString])]].
   ^acted
+%
+category: 'view hygiene'
+method: McpRouter
+maintenanceCallTimeoutSeconds
+  "How long this router waits on its own maintenance send into a worker gem before ending it. See
+   McpRouter class>>defaultMaintenanceCallTimeoutSeconds for why it is independent of
+   #requestTimeoutSeconds."
+  ^maintenanceCallTimeoutSeconds
+%
+category: 'view hygiene'
+method: McpRouter
+maintenanceCallTimeoutSeconds: aSecondCount
+  "Bound the front end's own sends into a worker (see #maintenanceCallTimeoutSeconds). nil is not
+   accepted: unlike a client's request deadline, 'no limit' here is not a deployment choice but a
+   stalled maintenance pass."
+  self validateSeconds: aSecondCount named: 'maintenanceCallTimeoutSeconds' allowingNil: false.
+  maintenanceCallTimeoutSeconds := aSecondCount
 %
 category: 'running'
 method: McpRouter
@@ -1407,6 +1447,7 @@ openSessionCreating: aOneArgBlock
     serverTitle: self serverTitle;
     serverVersion: self serverVersion;
     requestTimeoutSeconds: self requestTimeoutSeconds;
+    maintenanceCallTimeoutSeconds: self maintenanceCallTimeoutSeconds;
     prepareWorker.
   "An absolute lifetime cap, where one is configured, becomes an expiry the session carries. A
    subclass may tighten it further (McpAuthRouter, from the access token's exp) but never loosen it."
@@ -2841,13 +2882,13 @@ verdictAdmissible: aPendingEntry forSession: sess
 category: 'view hygiene'
 method: McpRouter
 viewHygieneSummary
-  "One line naming the view-hygiene policy in force, for the startup banner. Says which numbers are
-   in play and, since this step acts on nothing, that it is only watching -- a reader must be able to
-   tell a server that found nothing over the line from one that was never going to look."
+  "One line naming the view-hygiene policy in force, for the startup banner. A reader has to be able
+   to tell a server that found nothing over the line from one that was never going to look, which is
+   why the off case says so in words rather than by the absence of anything."
   | s |
   self hasViewHygiene ifFalse: [^'off (maxCommitsBehind nil) -- worker views are left alone'].
   s := WriteStream on: String new.
-  s nextPutAll: 'MEASURING ONLY (nothing is refreshed yet), threshold '.
+  s nextPutAll: 'refresh at '.
   s nextPutAll: self commitsBehindLimit printString.
   s nextPutAll: ' commits behind (configured '; nextPutAll: maxCommitsBehind printString.
   s nextPutAll: ', stone StnSignalAbortCrBacklog '.
@@ -2862,6 +2903,9 @@ viewHygieneSummary
   s nextPutAll: (self stoneCrBacklogThreshold isNil
     ifTrue: ['disabled']
     ifFalse: [self stoneCrBacklogThreshold printString]).
+  s nextPutAll: ', maintenance-call limit '.
+  s nextPutAll: self maintenanceCallTimeoutSeconds printString.
+  s nextPutAll: 's'.
   ^s contents
 %
 category: 'worker class'

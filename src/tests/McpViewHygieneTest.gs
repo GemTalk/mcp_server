@@ -98,6 +98,13 @@ logLineMatching: aSubstring in: aFixtureRouter
 %
 category: 'helpers'
 method: McpViewHygieneTest
+scratchKey
+  "A UserGlobals key this suite writes to make its session dirty on purpose. Never committed: every
+   test that writes it aborts, and the abort is usually the thing being tested."
+  ^#McpViewHygieneTestScratch
+%
+category: 'helpers'
+method: McpViewHygieneTest
 sessionOn: aRouter
   "A registered session with no login: McpStubSession stubs #prepareWorker out, so the router's own
    bookkeeping runs and no gem is forked. Its #workerStoneSession is nil, which is exactly the
@@ -152,11 +159,11 @@ testAFrontEndWithUncommittedChangesIsReportedAsABug
   r := McpFixtureRouter new.
   System abortTransaction.
   globals := System myUserProfile objectNamed: #UserGlobals.
-  globals at: #McpViewHygieneTestScratch put: 42.
+  globals at: self scratchKey put: 42.
   self assert: System needsCommit.
   r refreshFrontEndView.
   self deny: System needsCommit.
-  self deny: (globals includesKey: #McpViewHygieneTestScratch).
+  self deny: (globals includesKey: self scratchKey).
   self assert: (self logLineMatching: 'BUG: the front end gem has uncommitted changes' in: r) notNil
 %
 category: 'tests - the refresh'
@@ -227,6 +234,43 @@ testApplyingTheModeChangesThisGemsMode
    self assert: System transactionMode equals: #autoBegin]
      ensure: [System transactionMode: was]
 %
+category: 'tests - the worker's side'
+method: McpViewHygieneTest
+testARefreshForTheFrontEndIsNewsExactlyOnce
+  "The client has to be told its snapshot moved -- it was told the view moves only when IT moves the
+   view, and a server-initiated refresh makes that false in this one bounded case. Once, though: the
+   note is consumed as it is reported, like the stale-read keys, so it lands on the next result and
+   never again."
+  | srv |
+  System abortTransaction.
+  srv := McpServer new.
+  self deny: srv takeFrontEndRefreshedView.
+  self assert: srv refreshViewForFrontEnd equals: 'kept'.
+  self assert: srv takeFrontEndRefreshedView.
+  self deny: srv takeFrontEndRefreshedView
+%
+category: 'tests - the worker's side'
+method: McpViewHygieneTest
+testARefreshForTheFrontEndKeepsUncommittedWork
+  "THE CLAIM THE WHOLE REDESIGN RESTS ON. System continueTransaction takes a current view and keeps
+   this session's uncommitted changes, so the front end never has to choose between leaving a dirty
+   worker to pin the repository's commit records and destroying the work in it -- which is what the
+   first version of this plan would have done, warning the client and then reaping the session.
+   The scratch key is written on purpose and aborted at the end; between the two, the refresh has to
+   leave it exactly where it was."
+  | srv globals |
+  System abortTransaction.
+  srv := McpServer new.
+  globals := System myUserProfile objectNamed: #UserGlobals.
+  [globals at: self scratchKey put: 7.
+   self assert: System needsCommit.
+   self assert: srv refreshViewForFrontEnd equals: 'kept'.
+   "the view moved AND the work is still here -- neither half is interesting without the other"
+   self assert: System needsCommit.
+   self assert: (globals at: self scratchKey) equals: 7.
+   self assert: self commitsBehindOfThisSession equals: 0]
+     ensure: [System abortTransaction]
+%
 category: 'tests - worker views'
 method: McpViewHygieneTest
 testASessionBehindTheLimitIsRecordedAndLeftAlone
@@ -244,9 +288,11 @@ testASessionBehindTheLimitIsRecordedAndLeftAlone
 %
 category: 'tests - worker views'
 method: McpViewHygieneTest
-testASessionOverTheLimitIsCountedAndLogged
-  "The count answered is the number of sessions the arm would act on, and each one gets a line
-   naming the figures the decision was made on. This step acts on nothing, so the line says so."
+testASessionOverTheLimitIsRefreshedAndLogged
+  "The count answered is the number of sessions actually refreshed, and each gets a line naming the
+   figures the decision was made on and what the worker answered. A view move under a client is not
+   something to leave unrecorded, so this line is written every time the arm acts -- unlike the
+   could-not-ask line, which is suppressed while the number stands still."
   | r sess lines |
   r := McpFixtureRouter new.
   sess := self identifiedSessionOn: r.
@@ -254,11 +300,12 @@ testASessionOverTheLimitIsCountedAndLogged
   r fakeCommitsBehind: 25; fakeBacklogCritical: false;
     fakeOldestCrSessions: (Array with: sess workerStoneSession).
   self assert: r maintainViewHygiene equals: 1.
+  self assert: sess refreshRequests equals: 1.
   self assert: sess commitsBehind equals: 25.
   lines := self hygieneLinesIn: r.
   self assert: lines size equals: 1.
   self assert: ((lines first findString: '25 commits behind' startingAt: 1) > 0).
-  self assert: ((lines first findString: 'measuring only' startingAt: 1) > 0).
+  self assert: ((lines first findString: 'refresh: ''kept''' startingAt: 1) > 0).
   "The stone signals are no longer grounds, but they are still REPORTED -- they are what the next
    step's threshold gets tuned against, and a line that omitted them would make the tuning guesswork.
    holds-oldest-cr is read from an unconditional per-pass reading, so it tells the truth on a quiet
@@ -268,25 +315,47 @@ testASessionOverTheLimitIsCountedAndLogged
 %
 category: 'tests - worker views'
 method: McpViewHygieneTest
-testAStandingMeasurementIsLoggedOnceNotEveryPass
-  "This step acts on nothing, so a session over the line stays over it -- and at one pass a minute
-   an unchanged number would be 1440 identical lines a day for one idle client. Every distinct
-   observation is still recorded: what is dropped is the repeat, not the reading, and the count
-   answered is unaffected because the arm still judged the session over the line."
+testAStandingMeasurementOnABusySessionIsLoggedOnceNotEveryPass
+  "A session that CANNOT be asked -- a call in flight -- stays over the line pass after pass, and at
+   one pass a minute an unchanged number would be 1440 identical lines a day for one client. Every
+   distinct observation is still recorded: what is dropped is the repeat, not the reading.
+   A session that CAN be asked needs no such rule, because refreshing it puts it back under the line;
+   that case is asserted in testASessionOverTheLimitIsRefreshedAndLogged."
   | r sess |
   r := McpFixtureRouter new.
   sess := self identifiedSessionOn: r.
+  sess fakeRefreshVerdict: nil.   "could not be asked"
   r maxCommitsBehind: 20.
   r fakeCommitsBehind: 25; fakeBacklogCritical: false.
-  self assert: r maintainViewHygiene equals: 1.
-  self assert: r maintainViewHygiene equals: 1.
-  self assert: r maintainViewHygiene equals: 1.
+  self assert: r maintainViewHygiene equals: 0.
+  self assert: r maintainViewHygiene equals: 0.
+  self assert: r maintainViewHygiene equals: 0.
   self assert: (self hygieneLinesIn: r) size equals: 1.
+  self assert: ((self hygieneLinesIn: r) first findString: 'call is in flight' startingAt: 1) > 0.
   "a number that MOVED is news again"
   r fakeCommitsBehind: 26.
-  self assert: r maintainViewHygiene equals: 1.
+  self assert: r maintainViewHygiene equals: 0.
   self assert: (self hygieneLinesIn: r) size equals: 2.
   self assert: sess commitsBehind equals: 26
+%
+category: 'tests - worker views'
+method: McpViewHygieneTest
+testEveryVerdictIsLoggedAndOnlyAnAnsweredOneCounts
+  "Three answers come back from a worker and the front end acts on none of them beyond recording it:
+   'kept' is the ordinary success, 'doomed' means the pending work now conflicts and the WORKER tells
+   its client on every later call, 'stuck' means the view did not move at all. All three are a
+   completed ask, so all three count and all three are logged -- only a session that could not be
+   asked is neither."
+  #( 'kept' 'doomed' 'stuck: a commit that failed on conflict' ) do: [:verdict | | r sess |
+    r := McpFixtureRouter new.
+    sess := self identifiedSessionOn: r.
+    sess fakeRefreshVerdict: verdict.
+    r maxCommitsBehind: 20.
+    r fakeCommitsBehind: 25; fakeBacklogCritical: false; fakeOldestCrSessions: #().
+    self assert: r maintainViewHygiene equals: 1.
+    self assert: sess refreshRequests equals: 1.
+    self assert: (self hygieneLinesIn: r) size equals: 1.
+    self assert: ((self hygieneLinesIn: r) first findString: verdict startingAt: 1) > 0]
 %
 category: 'tests - worker views'
 method: McpViewHygieneTest
@@ -311,9 +380,11 @@ testNoStateOfTheStoneRefreshesAWorkerThatIsNotBehind
       r fakeBacklogCritical: pressure; fakeOldestCrSessions: holders.
       self assert: r maintainViewHygiene equals: 0]].
   self assert: (self hygieneLinesIn: r) isEmpty.
+  self assert: sess refreshRequests equals: 0.
   "and the ground itself still works, with the stone as quiet as it gets"
   r fakeBacklogCritical: false; fakeOldestCrSessions: #(); fakeCommitsBehind: 20.
-  self assert: r maintainViewHygiene equals: 1
+  self assert: r maintainViewHygiene equals: 1.
+  self assert: sess refreshRequests equals: 1
 %
 category: 'tests - the refresh'
 method: McpViewHygieneTest
@@ -410,6 +481,26 @@ testTheEffectiveLimitIsTheLowerOfOursAndTheStones
   r maxCommitsBehind: 2.
   self assert: r commitsBehindLimit equals: 2
 %
+category: 'tests - worker views'
+method: McpViewHygieneTest
+testTheMaintenanceTimeoutIsPushedIntoEverySessionAndIsNotTheRequestDeadline
+  "The two clocks are independent on purpose: a router that runs test suites for hours is supposed to
+   be configurable with NO request deadline -- client-initiated interrupt is the stop button -- so
+   there is no client deadline for a hygiene send to borrow. A send that inherited nil would wait for
+   ever and stall the pass for every other session."
+  | r sess |
+  r := McpFixtureRouter new.
+  r requestTimeoutSeconds: nil.
+  self assert: r maintenanceCallTimeoutSeconds equals: 5.
+  sess := self sessionOn: r.
+  self assert: sess requestTimeoutSeconds isNil.
+  self assert: sess maintenanceCallTimeoutSeconds equals: 5.
+  "and it travels, and refuses the nil that is legitimate for the other one"
+  r maintenanceCallTimeoutSeconds: 12.
+  self assert: (McpRouter new applyConfigJson: r configJson) maintenanceCallTimeoutSeconds equals: 12.
+  self should: [McpRouter new maintenanceCallTimeoutSeconds: nil] raise: Error.
+  self should: [McpRouter new maintenanceCallTimeoutSeconds: 0] raise: Error
+%
 category: 'tests - config'
 method: McpViewHygieneTest
 testTheModeTravelsToAForkedChild
@@ -424,6 +515,25 @@ testTheModeTravelsToAForkedChild
   self assert: child frontEndTransactionMode equals: 'autoBegin'.
   "and the default travels as itself rather than as an absence"
   self assert: (McpRouter new configDict at: 'frontEndTransactionMode') equals: 'transactionless'
+%
+category: 'tests - the worker's side'
+method: McpViewHygieneTest
+testTheRefreshNoteSaysWhoDidItAndWhatItCannotPromise
+  "The wording carries the client's only defence against concluding it did this to itself, so it has
+   to name the actor and the reason. It also has to stop short of 'nothing you read has changed':
+   only reads made through a tool are tracked (docs/blind-write-guardrail.md, known limits), so a
+   flat claim about everything the client read would be a claim about a set the guardrail does not
+   fully know."
+  | srv note |
+  System abortTransaction.
+  srv := McpServer new.
+  srv refreshViewForFrontEnd.
+  note := (McpDispatcher withToolRegistry: srv toolRegistry server: srv) viewRefreshedNote.
+  self assert: note notNil.
+  self assert: ((note findString: '[session] The server refreshed your view' startingAt: 1) = 1).
+  self assert: ((note findString: 'commit records open' startingAt: 1) > 0).
+  self assert: ((note findString: 'uncommitted changes were kept' startingAt: 1) > 0).
+  self assert: ((note findString: 'execute_code are not tracked' startingAt: 1) > 0)
 %
 category: 'tests - worker views'
 method: McpViewHygieneTest
@@ -454,6 +564,24 @@ testTheStoneReadingsAnswerRealNumbers
   "critical is exactly the comparison, and false whenever either number is unknown"
   self assert: r stoneBacklogCritical
     equals: (threshold notNil and: [backlog > threshold])
+%
+category: 'tests - the worker's side'
+method: McpViewHygieneTest
+testTheStuckReasonIsAskedOfTheImageNotDecodedFromTheError
+  "Which of the two illegal states a session is in decides the prose the front end logs and, later,
+   the phrase it is reaped with -- so it is asked of the image (the same two questions
+   McpDispatcher already distinguishes) rather than matched against a version's error numbers.
+   Only the fallback is reachable in one gem: a jam needs a real commit conflict, so a second gem,
+   and #transactionLevel does not rise above 1 here -- measured, System beginTransaction in
+   autoBegin mode leaves it at 1, so a nested transaction is not reachable this way either. What is
+   asserted is that a session in NEITHER state says so plainly instead of guessing."
+  | srv |
+  System abortTransaction.
+  srv := McpServer new.
+  self deny: McpToolset commitConflictPending.
+  self assert: System transactionLevel equals: 1.
+  self assert: srv stuckViewReason equals: 'the refresh was refused'.
+  self assert: srv frontEndDoomedSubjects isNil
 %
 category: 'tests - stone readings'
 method: McpViewHygieneTest

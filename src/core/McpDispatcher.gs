@@ -407,10 +407,17 @@ transactionNote
    (staleReadNote). It is a different subject
    from the transaction's state -- what to RE-READ, not what to commit or abort -- it can coincide
    with any of the three states above, and it appears exactly once, so it is appended rather than
-   ranked."
+   ranked.
+
+   That second line has two possible occupants and only ever one at a time. Where the view move was
+   the SERVER's own doing, #viewRefreshedNote says so -- but only when #staleReadNote has nothing to
+   report, because that line already says the view moved and says more besides. Naming one event
+   twice, in two lines, would be the worst of both."
   | state stale |
   state := self transactionStateNote.
-  stale := self staleReadNote.
+  "Order matters, and not only for reading: #staleReadNote CONSUMES the stale keys, so it has to be
+   asked before #viewRefreshedNote can decide whether anything is left to add."
+  stale := self staleReadNote ifNil: [self viewRefreshedNote].
   stale isNil ifTrue: [^state].
   state isNil ifTrue: [^stale].
   ^state , (String with: Character lf) , stale
@@ -420,7 +427,22 @@ method: McpDispatcher
 transactionStateNote
   "The transaction-state line of transactionNote, or nil: failed commit, nested transaction, or
    uncommitted changes, most-blocking first. See transactionNote for why."
-  self commitConflictPending ifTrue: [
+  self commitConflictPending ifTrue: [ | subjects |
+    "Same jam, two possible causes, and the client must not be told the wrong one. 'Your last commit
+     failed' is right only when a commit is what failed; where the SERVER's own view refresh left the
+     pending work un-committable, the client made no commit and would go looking for one.
+     McpServer>>frontEndDoomedSubjects is non-nil in exactly that case, and stays so until the abort
+     that clears the state."
+    subjects := server isNil ifTrue: [nil] ifFalse: [server frontEndDoomedSubjects].
+    subjects ifNotNil: [
+      ^'[session] The server refreshed your view -- it had fallen far enough behind to be holding '
+        , 'the repository''s commit records open -- and your uncommitted changes now CONFLICT with '
+        , 'work another session has committed'
+        , (subjects isEmpty ifTrue: [''] ifFalse: [': it changed '
+            , (McpToolset listPhraseFor: subjects)])
+        , '. They cannot be committed, and abort is the only way out -- save anything you need '
+        , 'first, then abort, re-read and redo it. The conflict was already there: the refresh '
+        , 'revealed it rather than caused it.'].
     ^'[session] Your last commit FAILED: another session changed the same objects since your view '
       , 'was taken (' , McpToolset commitConflictReport , '). Nothing was written. Your changes are '
       , 'still here but cannot be committed and your view cannot move until you call abort, which '
@@ -436,4 +458,35 @@ transactionStateNote
           ifTrue: ['They are lost if this session ends first.']
           ifFalse: ['They are lost when this session ends: ' , note , '.'])].
   ^nil
+%
+category: 'transaction'
+method: McpDispatcher
+viewRefreshedNote
+  "One line telling the client the SERVER moved its view, or nil. Appended by transactionNote, and
+   only where #staleReadNote found nothing to say.
+
+   That silent case is what this exists for. A server-initiated refresh whose read ledger came
+   through clean would otherwise say nothing at all -- the client's snapshot moved under it and
+   nothing anywhere mentioned it -- and a client that has been told its view moves only when it moves
+   it would go on believing something false.
+
+   It gives the REASON, not just the fact, because the reason is the client's only defence against
+   concluding it did this to itself: a view is refreshed only when it has fallen far enough behind to
+   be holding the repository's commit records open, and only when the session has no call in flight.
+
+   It also says what it cannot promise. Only reads made THROUGH A TOOL are tracked, so 'nothing you
+   read has changed' would be a claim about a set the guardrail does not fully know
+   (docs/blind-write-guardrail.md, known limits).
+
+   CONSUMED AS REPORTED (McpServer>>takeFrontEndRefreshedView), like the stale keys: news on the
+   next result and never again."
+  | behind |
+  server isNil ifTrue: [^nil].
+  server takeFrontEndRefreshedView ifFalse: [^nil].
+  behind := server ownCommitsBehind.
+  ^'[session] The server refreshed your view: it had fallen far enough behind the repository to be '
+    , 'holding its commit records open'
+    , (behind isNil ifTrue: [''] ifFalse: [' (now ' , behind printString , ' behind)'])
+    , '. Your uncommitted changes were kept, and none of the reads this session tracks went stale. '
+    , 'Reads made inside execute_code are not tracked, so re-read anything you are about to act on.'
 %

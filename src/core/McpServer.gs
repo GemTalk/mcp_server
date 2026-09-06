@@ -5,7 +5,8 @@ doit
 McpBase subclass: 'McpServer'
   instVarNames: #( dispatcher toolRegistry toolsets
                     serverName serverTitle serverVersion lifetimeBounds
-                    readLedger writeLedger staleReadKeys)
+                    readLedger writeLedger staleReadKeys frontEndRefreshedView
+                    frontEndDoomedSubjects)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -83,6 +84,21 @@ coreReadOnlySafeToolNames
       'list_test_classes' 'list_failing_tests' 'describe_test_failure'
       'run_test_class' 'run_test_method' )
 %
+category: 'worker'
+classmethod: McpServer
+currentServer
+  "This gem's McpServer, built on first use and held in SessionTemps for the gem's life.
+   One place, because there are now two entries into a worker: a client's request, and the FRONT
+   END's own maintenance call (#refreshViewForFrontEnd). Both need the same instance and for the same
+   reason -- the blind-write guardrail's ledgers live on it, so a second instance would be a second
+   set of ledgers, licensing writes on the strength of reads it never saw."
+  | srv |
+  srv := SessionTemps current at: #McpServer otherwise: nil.
+  srv isNil ifTrue: [
+    srv := self new.
+    SessionTemps current at: #McpServer put: srv].
+  ^srv
+%
 category: 'identity'
 classmethod: McpServer
 defaultServerInstructions
@@ -103,10 +119,12 @@ defaultServerInstructions
   lf := String with: Character lf.
   ^'This server is one GemStone session, in one long-running database transaction, for as long as '
     , 'the connection lasts.' , lf , lf
-    , 'YOUR VIEW IS A SNAPSHOT. You see the repository as it was at one instant, and it does not '
-    , 'change under you while you work. It moves only when YOU move it: `commit`, `abort` and '
-    , '`refresh` each take a current view, and nothing else does. So anything you read before your '
-    , 'last one of those may since have been changed by somebody else.' , lf , lf
+    , 'YOUR VIEW IS A SNAPSHOT. You see the repository as it was at one instant. It moves when YOU '
+    , 'move it -- `commit`, `abort` and `refresh` each take a current view -- and in one other case: '
+    , 'if it falls far behind, so that it is holding the repository''s commit records open, the '
+    , 'server refreshes it for you. That happens only BETWEEN your calls, it keeps your uncommitted '
+    , 'changes, and it tells you on your next result. Either way, anything you read before the last '
+    , 'view move may since have been changed by somebody else.' , lf , lf
     , 'THE DATABASE PROTECTS YOU FROM ACTING ON A STALE SNAPSHOT. If you change something that '
     , 'another session has committed a change to since your view was taken, your `commit` FAILS and '
     , 'writes nothing -- it will not silently overwrite their work. This is why the snapshot is '
@@ -127,10 +145,14 @@ defaultServerInstructions
     , '  - uncommitted changes pending -> commit them or abort them. The line names what would end '
     , 'this session first and how long that is; if it ends, they are lost. Commit anything you want '
     , 'to keep rather than leaving it staged.' , lf
-    , '  - your last commit FAILED -> another session changed the same objects since your view was '
-    , 'taken. Nothing was written and your changes are still here, but no commit can succeed and '
-    , 'your view cannot move until you call `abort`, which discards them. Save anything you need, '
-    , 'abort, re-read the current state, and redo the change against it.' , lf , lf
+    , '  - your last commit FAILED, or the server refreshed your view and your pending changes now '
+    , 'CONFLICT -> either way another session has changed the same objects, nothing of yours was '
+    , 'written, and your changes are still here but no commit can succeed until you call `abort`, '
+    , 'which discards them. Save anything you need, abort, re-read the current state, and redo the '
+    , 'change against it. The line says which of the two happened.' , lf
+    , '  - the server refreshed your view -> your snapshot moved, and your uncommitted changes were '
+    , 'kept. Re-read anything you are about to act on: only what you read through a tool is tracked, '
+    , 'so the line can name what it knows went stale and no more.' , lf , lf
     , 'A failed commit is the one failure here you cannot retry your way out of, and the conflict is '
     , 'reported per CLASS rather than per method -- two sessions compiling different methods on one '
     , 'class still collide. If the work matters, save the source before aborting.'
@@ -204,12 +226,7 @@ handleJsonString: aRawJsonString lifetimeBounds: anArrayOrNil
    configuration, and a worker holding its own copy would go stale the moment a credential was
    refreshed. It is passed per request for the same reason, and used only when there is uncommitted
    work to warn about (McpDispatcher>>transactionNote)."
-  | srv |
-  srv := SessionTemps current at: #McpServer otherwise: nil.
-  srv isNil ifTrue: [
-    srv := self new.
-    SessionTemps current at: #McpServer put: srv].
-  ^srv handleJsonString: aRawJsonString lifetimeBounds: anArrayOrNil
+  ^self currentServer handleJsonString: aRawJsonString lifetimeBounds: anArrayOrNil
 %
 category: 'toolsets'
 classmethod: McpServer
@@ -307,6 +324,22 @@ progressCallId: aCallIdOrNil
   ^st at: #McpProgress put: (McpProgressReporter
     frontEndSession: (st at: #McpFrontEndSession otherwise: nil)
     callId: aCallIdOrNil)
+%
+category: 'worker'
+classmethod: McpServer
+refreshViewForFrontEnd
+  "THE MAINTENANCE ENTRY. Take a current view of the repository, KEEPING this session's uncommitted
+   work, and answer what happened as a String the front end can log and act on:
+     'kept'          the view moved and the pending work can still be committed;
+     'doomed'        the view moved and the pending work can no longer be committed;
+     'stuck: WHY'    continueTransaction was illegal, so the view did NOT move.
+   Sent by McpRouter>>maintainViewHygiene when this gem's view has fallen at least maxCommitsBehind
+   commits behind -- never on any other ground, and never while a client's call is in flight.
+   Answers a String because it travels back over GCI as the value of an expression, and never
+   raises, because its caller is a maintenance pass serving every other session too."
+  ^[self currentServer refreshViewForFrontEnd]
+    on: Error
+    do: [:ex | 'stuck: ' , ([ex description] on: Error do: [:x | ex class name asString])]
 %
 category: 'guardrail keys'
 classmethod: McpServer
@@ -505,6 +538,15 @@ dictNamed: aName
    the kernel guards ask the protected dictionaries by name."
   ^McpToolset dictNamed: aName
 %
+category: 'view hygiene'
+method: McpServer
+frontEndDoomedSubjects
+  "The scopes another session had changed when a FRONT-END view refresh left this session's pending
+   work un-committable, or nil if that has not happened. Sticky, unlike #takeFrontEndRefreshedView:
+   the jam it describes lasts until an abort, and the client is told on every call until then
+   (McpDispatcher>>transactionStateNote), so the cause has to last as long as the state does."
+  ^frontEndDoomedSubjects
+%
 category: 'protocol'
 method: McpServer
 handleJsonString: aRawJsonString
@@ -671,7 +713,10 @@ noteAborted
    before it is retried. Until 2026-09-02 both ledgers were cleared here, so an abort after browsing
    twenty methods cost twenty re-reads even when nobody else had committed anything."
   self revalidateReadLedger.
-  writeLedger := Set new
+  writeLedger := Set new.
+  "The abort is the way out of a jam a front-end refresh caused, so it is also where that cause stops
+   being news. Cleared here and not in the note, because reporting a state must not be what ends it."
+  frontEndDoomedSubjects := nil
 %
 category: 'blind-write guardrail'
 method: McpServer
@@ -692,7 +737,10 @@ noteCommitted
    were recorded as written, and a successful commit means nobody else changed them, so the text in
    the new view is the text this session wrote."
   self revalidateReadLedger.
-  writeLedger := Set new
+  writeLedger := Set new.
+  "Unreachable while doomed -- a doomed session cannot commit, which is what doomed means -- and
+   cleared anyway, so that 'no jam' and 'no cause for a jam' cannot come apart."
+  frontEndDoomedSubjects := nil
 %
 category: 'blind-write guardrail'
 method: McpServer
@@ -756,6 +804,16 @@ noteWrite: aKey
   self readLedger at: aKey put: (self stampFor: aKey).
   ^aKey
 %
+category: 'view hygiene'
+method: McpServer
+ownCommitsBehind
+  "How many commits the repository has taken since THIS gem obtained its view
+   (descriptionOfSession: field 16), or nil if it cannot be read.
+   A session may read its own description with no SessionAccess privilege -- which the front end
+   needs for a worker's, and is why this exists here as well as there. Used only to put a number in
+   the note that tells the client its view was refreshed; a nil simply leaves the number out."
+  ^[(System descriptionOfSession: System session) at: 16] on: Error do: [:ex | nil]
+%
 category: 'guards'
 method: McpServer
 protectedDictionaryNames
@@ -785,6 +843,40 @@ readOnlySafeToolNames
   names := OrderedCollection new.
   toolsets do: [:ts | names addAll: ts readOnlySafeToolNames].
   ^names asArray
+%
+category: 'view hygiene'
+method: McpServer
+refreshViewForFrontEnd
+  "See McpServer class>>refreshViewForFrontEnd, which is what the front end actually sends.
+
+   ONE MECHANISM FOR EVERY CASE, and it is System continueTransaction (McpToolset
+   class>>refreshViewResult): it takes a current view and KEEPS this session's uncommitted changes,
+   so there is no clean-or-dirty question to ask first and no needsCommit to read. A pending write is
+   not laundered by it -- the kernel carries the read and write sets forward and answers whether the
+   accumulated modifications would conflict -- so a false answer reports a conflict that was already
+   there, not one this refresh created.
+
+   The order of the false branch is not free: #conflictingSubjects decodes the stone's conflict
+   report through the WRITE LEDGER, and noteRefreshed: false clears that ledger. Read the subjects
+   first. #tool_refresh: observes the same ordering for the same reason.
+
+   Both outcomes move the view, which is what makes this worth doing at all: a false answer releases
+   the commit record just as a true one does (docs/blind-write-guardrail.md, U)."
+  | result ok err |
+  result := McpToolset refreshViewResult.
+  ok := result at: 1.
+  err := result at: 2.
+  err ifNotNil: [:ex | ^'stuck: ' , self stuckViewReason , ' ('
+    , ([ex description] on: Error do: [:x | ex class name asString]) , ')'].
+  ok ifFalse: [
+    frontEndDoomedSubjects := self conflictingSubjects.
+    self noteRefreshed: false.
+    ^'doomed'].
+  self noteRefreshed: true.
+  "One shot, and only for the case the client would otherwise hear nothing about: a doomed session is
+   reported on every call by transactionStateNote until it aborts."
+  frontEndRefreshedView := true.
+  ^'kept'
 %
 category: 'initialization'
 method: McpServer
@@ -1021,6 +1113,30 @@ stampForShapeKey: aKey
   cls := self resolveClass: (aKey copyFrom: 1 to: aKey size - ':shape' size).
   cls isNil ifTrue: [^self class absentStamp].
   ^self class stampOfContent: cls definition
+%
+category: 'view hygiene'
+method: McpServer
+stuckViewReason
+  "Why continueTransaction is illegal in this session's current state, as a prose fragment for the
+   front end's log and for the reap phrase that may follow it.
+   Asked of the IMAGE rather than decoded from the error, so it cannot drift from a version's own
+   error numbers: the two states are exactly the two McpDispatcher already distinguishes, and
+   McpToolset class>>commitConflictPending is the single implementation of the first."
+  McpToolset commitConflictPending ifTrue: [^'a commit that failed on conflict'].
+  ([System transactionLevel > 1] on: Error do: [:ex | false])
+    ifTrue: [^'a nested transaction'].
+  ^'the refresh was refused'
+%
+category: 'view hygiene'
+method: McpServer
+takeFrontEndRefreshedView
+  "Whether the front end has refreshed this session's view since the client was last told, and
+   forget it. One shot, like #takeStaleReadKeys and for the same reason: it is news on the next
+   result and never again."
+  | was |
+  was := frontEndRefreshedView == true.
+  frontEndRefreshedView := false.
+  ^was
 %
 category: 'blind-write guardrail'
 method: McpServer

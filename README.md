@@ -249,17 +249,31 @@ calls. Nothing commits on the client's behalf; a result whose session has uncomm
 carries a one-line `[session]` note saying so, and naming what would end the session before the work
 is committed.
 
-**No tool refreshes the view.** It moves only when the client moves it — `commit`, `abort` and
-`refresh` each take a current view, and nothing else does. That is the guardrail rather than an
-oversight: GemStone's conflict check is write-write *against the view* and does not track what a
-session read, so the view is the only record the stone holds of what this client has seen. A client
-that reads a method, deliberates over several calls, and then rewrites it has its `commit` **refused**
-if someone else changed that class in the meantime — nothing is silently overwritten. Refreshing
-under the client would assert it had seen changes it had not, and turn that refusal into a silent
-overwrite; two earlier designs did exactly that, first with `System abortTransaction` before every
-tool and then briefly with `System continueTransaction`. The same reasoning is why `refresh` is not
-free: it adopts the other version as your starting point, so re-read anything you are about to act
-on.
+**No tool refreshes the view.** The client moves it with `commit`, `abort` and `refresh`, and no tool
+call does it as a side effect. That is the guardrail rather than an oversight: GemStone's conflict
+check is write-write *against the view* and does not track what a session read, so the view is the
+only record the stone holds of what this client has seen. A client that reads a method, deliberates
+over several calls, and then rewrites it has its `commit` **refused** if someone else changed that
+class in the meantime — nothing is silently overwritten. Refreshing *around a call* would assert the
+client had seen changes it had not, and turn that refusal into a silent overwrite; two earlier
+designs did exactly that, first with `System abortTransaction` before every tool and then briefly
+with `System continueTransaction`. The same reasoning is why `refresh` is not free: it adopts the
+other version as your starting point, so re-read anything you are about to act on.
+
+**The one exception is the server's own view hygiene, and it is a different act.** A view is also a
+commit record the stone cannot dispose of, so a session that never moves its view holds the whole
+repository's backlog open — measured on a live stone, one front-end gem sat on the oldest record for
+15 hours, and a worker left idle through an ordinary edit-install-test loop falls *hundreds* of
+commits behind in minutes. So when a worker's view is at least `maxCommitsBehind` commits behind (20
+by default, and the effective limit is the lower of that and the stone's own
+`STN_SIGNAL_ABORT_CR_BACKLOG`), the front end sends it one `System continueTransaction`. Four things
+keep that from being the rejected design over again: it happens **between** calls and never with one
+in flight; it **keeps** the client's uncommitted changes; a pending write is validated rather than
+laundered, because the kernel carries the write set forward and answers whether it now conflicts;
+and the client is **told** on its next result, with the reads that went stale named. Nothing about
+the state of the stone can trigger it — only the session's own distance from the current state, since
+refreshing a worker that is not far behind cannot shorten a backlog its view was not pinning.
+`GS_MCP_MAX_COMMITS_BEHIND=none` turns it off.
 
 **Listing**
 
@@ -1161,8 +1175,10 @@ flag, so a missing suite is a skip and not an error:
   that write *silently* out of transaction, so one log line is all that stands between the defect and
   nobody noticing. Then the **workers'** views: that a session far enough behind the repository is
   noticed and recorded, that pressure on the stone is never on its own a reason to move one
-  particular client's view, that a standing measurement is logged once rather than every pass, and
-  that a reading which cannot be taken is skipped rather than recorded as zero. Declares
+  particular client's view, that a reading which cannot be taken is skipped rather than recorded as
+  zero, and that each of the three verdicts a worker can answer is recorded. Then the worker's own
+  side: that a refresh **keeps** uncommitted work — the claim the whole design rests on — that the
+  client is told exactly once, and what that note may and may not promise. Declares
   `movesTheSessionView`: its subject is this gem's view.
 - `McpContractTest` — contract / property tests over the tool surface, all driven through the real
   `McpDispatcher>>handle:` envelope: every tool schema is closed (`additionalProperties:false`),

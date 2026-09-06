@@ -10,7 +10,7 @@ Object subclass: 'McpSession'
                     startedAtSeconds expiresAtSeconds quietProbes unansweredProbes
                     streamlessPasses passesSinceProbe streamClosedByClient requestTimeoutSeconds
                     workerAbandoned inFlightRequestId cancelRequested waitAction
-                    commitsBehind)
+                    commitsBehind maintenanceCallTimeoutSeconds)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -136,15 +136,25 @@ awaitWorkerResult
    long a call may take: the wait answers the moment the worker does, because it is waiting on the
    session's socket. So a call ends within one wait of the deadline or the cancel rather than exactly
    at it -- and the price of that second is keeping both checks somewhere a reader can find them."
-  | deadline |
-  deadline := self callDeadline.
+  ^self awaitWorkerResultUntil: self callDeadline because: #timeout
+%
+category: 'worker'
+method: McpSession
+awaitWorkerResultUntil: aDeadlineOrNil because: aReasonSymbol
+  "As #awaitWorkerResult, for a caller that supplies its own deadline and its own name for what
+   outrunning it means. Split out so the FRONT END's maintenance sends are bounded separately from a
+   client's requests: #requestTimeoutSeconds is legitimately nil on a router used to run test suites
+   that take hours -- a client-initiated interrupt covers stopping one -- and a hygiene send that
+   inherited that would wait for ever.
+   The deadline is passed in rather than read from config a second time, so the two clocks cannot be
+   mistaken for one another and a reader can see which one bounds a given call."
   [worker isCallInProgress] whileTrue: [
     worker waitForResultForSeconds: self workerWaitSeconds otherwise: [nil].
     self runWaitAction.
     (worker isCallInProgress and: [cancelRequested == true])
       ifTrue: [^self endCallBecause: #cancelled].
-    (worker isCallInProgress and: [deadline notNil and: [System timeGmt >= deadline]])
-      ifTrue: [^self endCallBecause: #timeout]].
+    (worker isCallInProgress and: [aDeadlineOrNil notNil and: [System timeGmt >= aDeadlineOrNil]])
+      ifTrue: [^self endCallBecause: aReasonSymbol]].
   ^self
 %
 category: 'private'
@@ -231,9 +241,10 @@ category: 'private'
 method: McpSession
 endCallBecause: aReasonSymbol
   "End the in-flight call and raise so the client is told, for the reason named: #timeout where it
-   outran this session's deadline, #cancelled where the client said it no longer wants it. The
-   escalation is IDENTICAL for both, and that is the point -- what differs is only who decided, so a
-   cancellation needed no new mechanism, only a new trigger.
+   outran this session's deadline, #cancelled where the client said it no longer wants it,
+   #maintenance where the front end's own send into the worker did not answer in time. The
+   escalation is IDENTICAL for all three, and that is the point -- what differs is only who decided,
+   so neither a cancellation nor a maintenance send needed a new mechanism, only a new trigger.
    Escalates, because the measures differ in what they cost. A SOFT break ends an ordinary runaway:
    it is taken by a Smalltalk loop between sends and by a blocked #wait alike (both verified on
    3.7.5), and the worker is fully usable straight afterwards -- so the client loses its request and
@@ -250,6 +261,22 @@ endCallBecause: aReasonSymbol
   (self breakWorker: [worker hardBreak]) ifTrue: [^self signalCallEnded: aReasonSymbol].
   self abandonWorker.
   ^self signalCallEnded: aReasonSymbol
+%
+category: 'private'
+method: McpSession
+endingPhraseFor: aReasonSymbol
+  "The opening sentence of the error for a call this session ended, naming which ending it was.
+   #maintenance is not a client's request at all: it is the front end's own send into the worker (a
+   view refresh), so nobody is waiting for an answer and the phrase exists for the gem log. It is
+   still raised through the same path, because the escalation needed to get a call out of a gem does
+   not depend on who asked for it."
+  aReasonSymbol == #cancelled ifTrue: [
+    ^'The client cancelled this request, and it was ended. '].
+  aReasonSymbol == #maintenance ifTrue: [
+    ^'This server''s own maintenance call into the worker gem did not finish within '
+      , self maintenanceCallTimeoutSeconds printString , ' seconds and was ended. '].
+  ^'The request exceeded this server''s ' , requestTimeoutSeconds printString
+    , '-second request limit and was ended. '
 %
 category: 'liveness'
 method: McpSession
@@ -397,6 +424,24 @@ category: 'accessing'
 method: McpSession
 lastActivitySeconds
   ^lastActivitySeconds
+%
+category: 'view hygiene'
+method: McpSession
+maintenanceCallTimeoutSeconds
+  "How long the front end waits on its OWN send into this worker before ending it. Five seconds by
+   default (McpRouter class>>defaultMaintenanceCallTimeoutSeconds), and deliberately unrelated to
+   #requestTimeoutSeconds, which is legitimately nil.
+   A view refresh that has not answered in five seconds is not a slow refresh, it is a gem that is
+   not answering -- a different problem, and not one the maintenance pass may wait on, since that
+   pass serves every other session too."
+  ^maintenanceCallTimeoutSeconds ifNil: [McpRouter defaultMaintenanceCallTimeoutSeconds]
+%
+category: 'view hygiene'
+method: McpSession
+maintenanceCallTimeoutSeconds: aSecondCount
+  "Bound the front end's own sends into this worker (see #maintenanceCallTimeoutSeconds). Pushed in
+   at session open by the router, like every other interval."
+  maintenanceCallTimeoutSeconds := aSecondCount
 %
 category: 'initialization'
 method: McpSession
@@ -554,6 +599,16 @@ readOnly
    worker gem by prepareWorker."
   ^readOnly == true
 %
+category: 'view hygiene'
+method: McpSession
+refreshWorkerView
+  "Ask this session's worker gem to take a current view, keeping its uncommitted work, and answer
+   what it says -- 'kept', 'doomed', 'stuck: WHY' -- or nil if it could not be asked at all.
+   The whole decision is the WORKER's, in one round trip, and that is not tidiness: a separate 'are
+   you clean?' call would leave a window in which the client's next request changed the answer
+   between the question and the act."
+  ^self runMaintenanceExpression: 'McpServer refreshViewForFrontEnd'
+%
 category: 'session lifetime'
 method: McpSession
 renewExpiryTo: aSecondOrNil
@@ -612,6 +667,35 @@ requestTimeoutSeconds: anIntegerOrNil
   "Set the deadline for a single call into this worker (nil = none). Applies from the NEXT call: a
    call already in flight keeps the deadline it started under (#callDeadline)."
   requestTimeoutSeconds := anIntegerOrNil
+%
+category: 'view hygiene'
+method: McpSession
+runMaintenanceExpression: anExpressionString
+  "Drive this worker for the FRONT END's own reasons rather than a client's, and answer its result --
+   or nil if the worker was not free. Two differences from #runWorker:, and both matter.
+
+   IT DOES NOT #touch. runWorker: ends with one, and touch resets everything the reaping policy
+   counts: quietProbes, streamlessPasses, streamClosedByClient, the activity stamp. A maintenance
+   send that touched would be an immortality potion -- a session whose client had gone for good would
+   be refreshed every pass and never released. #noteAlive was written around the same trap.
+
+   IT NEVER QUEUES. #tryLock takes the worker mutex or gives up at once, where #critical: would park
+   the REAPER's GsProcess behind a client's tool call for the length of that call, stalling probes
+   and reaps for every other session in the server. Testing #isBusy alone would not do: a call can
+   start between the test and the send, which is what the mutex is for.
+   An ended maintenance call raises out of #awaitWorkerResultUntil:because:, so the ensure: is what
+   guarantees the mutex is released on the way past; the raise itself is the caller's to catch, and
+   its caller is a maintenance pass that must not fail on one session's account."
+  self workerMutex tryLock ifFalse: [^nil].
+  ^[self isBusy
+      ifTrue: [nil]
+      ifFalse: [
+        worker nbExecute: anExpressionString.
+        self
+          awaitWorkerResultUntil: System timeGmt + self maintenanceCallTimeoutSeconds
+          because: #maintenance.
+        worker lastResult]]
+    ensure: [self workerMutex signal]
 %
 category: 'private'
 method: McpSession
@@ -693,10 +777,7 @@ signalCallEnded: aReasonSymbol
    whatever it had already done in that gem's view is still there, uncommitted. That last sentence
    matters more for a cancellation than for a deadline: a user who pressed a key to stop something
    may well assume it did not happen, and it half did."
-  ^McpError signalKind: aReasonSymbol message: (aReasonSymbol == #cancelled
-      ifTrue: ['The client cancelled this request, and it was ended. ']
-      ifFalse: ['The request exceeded this server''s ' , requestTimeoutSeconds printString
-        , '-second request limit and was ended. '])
+  ^McpError signalKind: aReasonSymbol message: (self endingPhraseFor: aReasonSymbol)
     , (workerAbandoned
         ifTrue: ['Its worker gem could not be interrupted and has been stopped, so this session is '
           , 'finished and its uncommitted work is gone: call initialize again to continue.']

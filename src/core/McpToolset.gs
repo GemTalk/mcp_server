@@ -160,6 +160,18 @@ linesFrom: aCollectionOfStrings
     s nextPutAll: n asString; nextPut: Character lf].
   ^s contents
 %
+category: 'blind-write guardrail'
+classmethod: McpToolset
+listPhraseFor: aCollectionOfStrings
+  "'Foo', 'Foo and Bar', 'Foo, Bar and Baz' -- for a message a person or a model reads."
+  | items |
+  items := aCollectionOfStrings asArray.
+  items isEmpty ifTrue: [^''].
+  items size = 1 ifTrue: [^(items at: 1) asString].
+  ^((items copyFrom: 1 to: items size - 1) inject: '' into: [:acc :m |
+      acc isEmpty ifTrue: [m asString] ifFalse: [acc , ', ' , m asString]])
+    , ' and ' , (items at: items size) asString
+%
 category: 'schema building'
 classmethod: McpToolset
 objectSchema: propsDict required: requiredArray
@@ -334,14 +346,9 @@ linesFrom: aCollectionOfStrings
 category: 'blind-write guardrail'
 method: McpToolset
 listPhraseFor: aCollectionOfStrings
-  "'Foo', 'Foo and Bar', 'Foo, Bar and Baz' -- for a message a person or a model reads."
-  | items |
-  items := aCollectionOfStrings asArray.
-  items isEmpty ifTrue: [^''].
-  items size = 1 ifTrue: [^(items at: 1) asString].
-  ^((items copyFrom: 1 to: items size - 1) inject: '' into: [:acc :m |
-      acc isEmpty ifTrue: [m asString] ifFalse: [acc , ', ' , m asString]])
-    , ' and ' , (items at: items size) asString
+  "See McpToolset class>>listPhraseFor:, which is the single implementation -- McpDispatcher needs
+   the same phrase and is not a toolset."
+  ^self class listPhraseFor: aCollectionOfStrings
 %
 category: 'blind-write guardrail'
 method: McpToolset
