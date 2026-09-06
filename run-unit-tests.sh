@@ -51,7 +51,7 @@ GS_PASS="${GS_PASS:-swordfish}"
 # That is not a new burden: gs-mcp gives every client its own worker gem, so it cannot serve a
 # single request without a netldi. What changed is that the test run now says so plainly instead of
 # passing on an image the server could not actually run on.
-gs_mcp_require_netldi_if_forking_suite_installed() {
+mcp_require_netldi_if_forking_suite_installed() {
   local nm have
   for nm in McpExternalSessionTest McpTransactionTest McpWorkerDeadlineTest McpAuthTest McpConcurrentEditTest; do
     gs_env_image_has "$nm" && have=0 || have=$?
@@ -68,11 +68,11 @@ gs_mcp_require_netldi_if_forking_suite_installed() {
 gs_env_resolve
 if [ "${1:-}" = "--check" ]; then
   gs_env_check || exit $?
-  gs_mcp_require_netldi_if_forking_suite_installed || exit 1
+  mcp_require_netldi_if_forking_suite_installed || exit 1
   exit 0
 fi
 gs_env_require_stone
-gs_mcp_require_netldi_if_forking_suite_installed
+mcp_require_netldi_if_forking_suite_installed
 
 # Stream topaz output live AND keep a copy to gate on. Do NOT wrap the heredoc in $( ... ):
 # under `set -e`, a command substitution that exits non-zero aborts the script BEFORE anything

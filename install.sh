@@ -76,7 +76,7 @@ gs_env_resolve
 # load.out and an McpAuthRouter left half-built. JsonWebToken stands in for the whole group: it is
 # the one McpAuthRouter itself names (in tokenRejectionFor:, userIdFromToken: and payloadOf:), and
 # an image with it has JwtSecurityData and jwtPassword: too.
-gs_mcp_select_groups() {
+mcp_select_groups() {
   local have
   if [ "$WANT_AUTH" = "no" ]; then
     AUTH_NOTE="skipped (--no-auth)"
@@ -128,14 +128,14 @@ gs_mcp_select_groups() {
 
 if [ "$CHECK_ONLY" = "1" ]; then
   gs_env_check || exit $?
-  gs_mcp_select_groups || exit 1
+  mcp_select_groups || exit 1
   echo
   echo "auth group   $AUTH_NOTE"
   echo "groups       $MCP_GROUPS"
   exit 0
 fi
 gs_env_require_stone
-gs_mcp_select_groups
+mcp_select_groups
 echo "Filing in: $MCP_GROUPS  (auth: $AUTH_NOTE)"
 
 # The loaders `input` their class files by paths relative to the repository root, so topaz must run
