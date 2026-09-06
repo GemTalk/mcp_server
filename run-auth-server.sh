@@ -70,6 +70,14 @@
 #                         records piled up behind it, not how old it is -- an idle session on a quiet
 #                         stone costs nothing. THIS BUILD ONLY MEASURES: it logs which sessions are over
 #                         the line and refreshes nothing.
+#   GS_MCP_STUCK_VIEW_GRACE - how long a session whose view CANNOT be moved is tolerated, under
+#                         stone pressure, before its gem is released (default 60s; `none` never reaps on
+#                         this ground; `0` reaps on the pass that finds it). A view is stuck when
+#                         GemStone refuses to move it at all -- after a commit that failed on conflict,
+#                         or inside a nested transaction -- so nothing this server sends will free the
+#                         commit record that session is holding, and the work it holds is already
+#                         un-committable. Floored at one reaper interval: a positive value shorter than
+#                         GS_MCP_REAPER_INTERVAL refuses to start rather than being silently rounded up.
 #   GS_MCP_FRONT_END_TX_MODE - GemStone transaction mode for the forked FRONT-END gem:
 #                         transactionless (default) or autoBegin. The front end makes no repository
 #                         changes, so transactionless costs it nothing and saves the stone a commit
@@ -121,6 +129,7 @@ GS_MCP_TRACE="${GS_MCP_TRACE:-0}"
 GS_MCP_TRACE_LIMIT="${GS_MCP_TRACE_LIMIT:-}"
 GS_MCP_FRONT_END_TX_MODE="${GS_MCP_FRONT_END_TX_MODE:-transactionless}"
 GS_MCP_MAX_COMMITS_BEHIND="${GS_MCP_MAX_COMMITS_BEHIND:-}"
+GS_MCP_STUCK_VIEW_GRACE="${GS_MCP_STUCK_VIEW_GRACE:-}"
 MCP_BIND_ADDRESS="${MCP_BIND_ADDRESS:-}"
 MCP_TLS_CERT="${MCP_TLS_CERT:-}"
 MCP_TLS_KEY="${MCP_TLS_KEY:-}"
@@ -223,6 +232,17 @@ case "$(printf '%s' "$GS_MCP_MAX_COMMITS_BEHIND" | tr 'A-Z' 'a-z')" in
                exit 1 ;;
   *)           CB_LINE="r maxCommitsBehind: $GS_MCP_MAX_COMMITS_BEHIND." ;;
 esac
+# Stuck-view grace. `none` and `0` are both instructions and are not the same one, so each has to
+# reach the router as itself rather than as an absence.
+SV_LINE=""
+case "$(printf '%s' "$GS_MCP_STUCK_VIEW_GRACE" | tr 'A-Z' 'a-z')" in
+  '')          ;;
+  none|off)    SV_LINE="r stuckViewGraceSeconds: nil." ;;
+  *[!0-9]*)    echo "error: GS_MCP_STUCK_VIEW_GRACE must be a whole number of seconds, 0, or 'none'," >&2
+               echo "       and is '$GS_MCP_STUCK_VIEW_GRACE'." >&2
+               exit 1 ;;
+  *)           SV_LINE="r stuckViewGraceSeconds: $GS_MCP_STUCK_VIEW_GRACE." ;;
+esac
 BIND_LINE=""
 [ -n "$MCP_BIND_ADDRESS" ] && BIND_LINE="r bindAddress: '$MCP_BIND_ADDRESS'."
 # Message tracing; both settings travel to the forked gem in the config (McpRouter>>configDict).
@@ -283,6 +303,7 @@ $WRITE_LINE
 $RO_LINE
 $TX_MODE_LINE
 $CB_LINE
+$SV_LINE
 $BIND_LINE
 $TRACE_LINE
 $TITLE_LINE

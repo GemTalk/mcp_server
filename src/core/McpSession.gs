@@ -10,7 +10,7 @@ Object subclass: 'McpSession'
                     startedAtSeconds expiresAtSeconds quietProbes unansweredProbes
                     streamlessPasses passesSinceProbe streamClosedByClient requestTimeoutSeconds
                     workerAbandoned inFlightRequestId cancelRequested waitAction
-                    commitsBehind maintenanceCallTimeoutSeconds)
+                    commitsBehind maintenanceCallTimeoutSeconds stuckViewPasses stuckViewReason)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -397,6 +397,9 @@ initialize
   "Nothing measured yet. nil rather than 0 because 'up to date' and 'never asked' are different
    facts, and only one of them is a reason to leave this session alone."
   commitsBehind := nil.
+  "A count, like everything else the reaper reads, and so zero rather than nil."
+  stuckViewPasses := 0.
+  stuckViewReason := nil.
   ^self
 %
 category: 'activity'
@@ -541,6 +544,36 @@ noteStreamSeen
    rather than a whole pass later."
   streamlessPasses := 0.
   streamClosedByClient := false
+%
+category: 'view hygiene'
+method: McpSession
+noteStuckView: aVerdictString
+  "Record a maintenance pass on which this session's view COULD NOT BE MOVED -- the worker answered
+   'stuck: WHY' because System continueTransaction is illegal in the state it is in.
+   Counted rather than timed, like every other ground the reaper reads: a suspended host runs no
+   passes, so the count simply stops, and there is no elapsed time for it to misread.
+   The reason is kept because it is what the reap phrase will say, and it is trimmed at the error
+   detail the worker appended -- 'a commit that failed on conflict', not that plus a stack-flavoured
+   description nobody reads in a log line."
+  | cut |
+  stuckViewPasses := self stuckViewPasses + 1.
+  cut := aVerdictString findString: ' (' startingAt: 1.
+  stuckViewReason := cut > 0
+    ifTrue: [aVerdictString copyFrom: 8 to: cut - 1]
+    ifFalse: [aVerdictString copyFrom: 8 to: aVerdictString size].
+  ^self
+%
+category: 'view hygiene'
+method: McpSession
+noteViewMoved
+  "Record a maintenance pass on which this session's view DID move -- the worker answered 'kept' or
+   'doomed'. Either way it is no longer stuck, so the stuck run resets.
+   'doomed' resets it too, and deliberately: a doomed session's view is current, so it is holding
+   nothing open, and the only thing wrong with it is the client's own un-committable work -- which
+   is the client's to resolve and no reason for this server to end its session."
+  stuckViewPasses := 0.
+  stuckViewReason := nil.
+  ^self
 %
 category: 'accessing'
 method: McpSession
@@ -868,6 +901,23 @@ streamlessPasses
   "Consecutive maintenance passes on which this session had no stream, so nothing could be asked of
    its client at all. The only ground for releasing a session that can never be confirmed."
   ^streamlessPasses
+%
+category: 'view hygiene'
+method: McpSession
+stuckViewPasses
+  "Consecutive maintenance passes on which this session's view could not be moved. Zero unless the
+   worker has actually answered 'stuck' -- a pass that could not ASK, because a call was in flight,
+   advances nothing (see McpRouter>>maintainViewHygiene). Without that, a client running one long
+   call after another would accumulate a grace it never earned."
+  ^stuckViewPasses ifNil: [0]
+%
+category: 'view hygiene'
+method: McpSession
+stuckViewReason
+  "Why this session's view could not be moved, as a prose fragment, or nil if it can. Set by
+   #noteStuckView: from what the worker answered, and read by McpRouter>>reapReasonFor: for the
+   phrase the gem log records."
+  ^stuckViewReason
 %
 category: 'accessing'
 method: McpSession

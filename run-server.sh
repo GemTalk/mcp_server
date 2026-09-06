@@ -63,6 +63,14 @@
 #                     records piled up behind it, not how old it is -- an idle session on a quiet
 #                     stone costs nothing. THIS BUILD ONLY MEASURES: it logs which sessions are over
 #                     the line and refreshes nothing.
+#   GS_MCP_STUCK_VIEW_GRACE - how long a session whose view CANNOT be moved is tolerated, under
+#                     stone pressure, before its gem is released (default 60s; `none` never reaps on
+#                     this ground; `0` reaps on the pass that finds it). A view is stuck when
+#                     GemStone refuses to move it at all -- after a commit that failed on conflict,
+#                     or inside a nested transaction -- so nothing this server sends will free the
+#                     commit record that session is holding, and the work it holds is already
+#                     un-committable. Floored at one reaper interval: a positive value shorter than
+#                     GS_MCP_REAPER_INTERVAL refuses to start rather than being silently rounded up.
 #   GS_MCP_FRONT_END_TX_MODE - GemStone transaction mode for the forked FRONT-END gem:
 #                     transactionless (default) or autoBegin. The front end makes no repository
 #                     changes, so transactionless costs it nothing and saves the stone a commit
@@ -101,6 +109,7 @@ GS_MCP_TRACE="${GS_MCP_TRACE:-0}"
 GS_MCP_TRACE_LIMIT="${GS_MCP_TRACE_LIMIT:-}"
 GS_MCP_FRONT_END_TX_MODE="${GS_MCP_FRONT_END_TX_MODE:-transactionless}"
 GS_MCP_MAX_COMMITS_BEHIND="${GS_MCP_MAX_COMMITS_BEHIND:-}"
+GS_MCP_STUCK_VIEW_GRACE="${GS_MCP_STUCK_VIEW_GRACE:-}"
 
 # Resolve the environment and confirm BOTH the stone and a netldi. The netldi requirement is real
 # and is not about how this script logs in: forkOnPort: creates a GsTsExternalSession for the front
@@ -147,6 +156,18 @@ case "$(printf '%s' "$GS_MCP_MAX_COMMITS_BEHIND" | tr 'A-Z' 'a-z')" in
                echo "       and is '$GS_MCP_MAX_COMMITS_BEHIND'." >&2
                exit 1 ;;
   *)           CB_LINE="r maxCommitsBehind: $GS_MCP_MAX_COMMITS_BEHIND." ;;
+esac
+
+# Stuck-view grace. `none` and `0` are both instructions and are not the same one, so each has to
+# reach the router as itself rather than as an absence.
+SV_LINE=""
+case "$(printf '%s' "$GS_MCP_STUCK_VIEW_GRACE" | tr 'A-Z' 'a-z')" in
+  '')          ;;
+  none|off)    SV_LINE="r stuckViewGraceSeconds: nil." ;;
+  *[!0-9]*)    echo "error: GS_MCP_STUCK_VIEW_GRACE must be a whole number of seconds, 0, or 'none'," >&2
+               echo "       and is '$GS_MCP_STUCK_VIEW_GRACE'." >&2
+               exit 1 ;;
+  *)           SV_LINE="r stuckViewGraceSeconds: $GS_MCP_STUCK_VIEW_GRACE." ;;
 esac
 
 # Optional worker-class / toolset configuration, as extra Smalltalk setter sends on the router.
@@ -224,7 +245,7 @@ run
 r := McpRouter new.
 r readOnly: $RO.
 $TX_MODE_LINE
-$CB_LINE$CONFIG$LIFETIME_LINES
+$CB_LINE$SV_LINE$CONFIG$LIFETIME_LINES
 r forkOnPort: $GS_MCP_PORT
 %
 logout

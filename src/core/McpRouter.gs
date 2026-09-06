@@ -11,7 +11,8 @@ McpBase subclass: 'McpRouter'
                     streamlessIdleTimeoutSeconds livenessProbeIntervalSeconds reaperIntervalSeconds maxSessionLifetimeSeconds
                     reapOnFailedProbe streamLossGraceSeconds messageTrace messageTraceLimit
                     requestTimeoutSeconds callChannels callMutex callCounter
-                    frontEndTransactionMode maxCommitsBehind sessionAccessWarned maintenanceCallTimeoutSeconds)
+                    frontEndTransactionMode maxCommitsBehind sessionAccessWarned maintenanceCallTimeoutSeconds
+                    stuckViewGraceSeconds)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -277,6 +278,18 @@ defaultStreamLossGraceSeconds
    #streamlessIdleTimeoutSeconds as before."
   ^10
 %
+category: 'view hygiene'
+classmethod: McpRouter
+defaultStuckViewGraceSeconds
+  "How long a session whose view CANNOT be moved is tolerated, under stone pressure, before its gem
+   is released: 60 seconds.
+   Sized for the only thing left to wait for. This ground was 600 seconds while it was about a DIRTY
+   view, where the number had to be long enough for an agent to read a warning and commit its work.
+   A stuck session has nothing it can commit -- its transaction is doomed and abort is the only move
+   -- so the grace need only cover a client already on its way to making it.
+   The reaper interval is a floor on this: see McpRouter>>stuckViewGracePasses."
+  ^60
+%
 category: 'transaction mode'
 classmethod: McpRouter
 frontEndTransactionModes
@@ -431,6 +444,7 @@ applyConfig: aConfigDict
     ifTrue: [self maxCommitsBehind: (aConfigDict at: 'maxCommitsBehind')].
   (aConfigDict includesKey: 'maintenanceCallTimeoutSeconds')
     ifTrue: [self maintenanceCallTimeoutSeconds: (aConfigDict at: 'maintenanceCallTimeoutSeconds')].
+  stuckViewGraceSeconds := aConfigDict at: 'stuckViewGraceSeconds' ifAbsent: [stuckViewGraceSeconds].
   messageTrace := aConfigDict at: 'messageTrace' ifAbsent: [messageTrace].
   messageTraceLimit := aConfigDict at: 'messageTraceLimit' ifAbsent: [messageTraceLimit].
   ^self
@@ -613,6 +627,7 @@ configDict
   d at: 'reapOnFailedProbe' put: reapOnFailedProbe.
   d at: 'maxCommitsBehind' put: maxCommitsBehind.
   d at: 'maintenanceCallTimeoutSeconds' put: maintenanceCallTimeoutSeconds.
+  d at: 'stuckViewGraceSeconds' put: stuckViewGraceSeconds.
   "Message tracing has to travel, or it is unreachable: forkOnPort: is the only way this server is
    ever started, so a setting the fork string does not carry is one an operator cannot turn on."
   d at: 'messageTrace' put: messageTrace.
@@ -919,6 +934,13 @@ hasSessionIdleDeadline
 %
 category: 'view hygiene'
 method: McpRouter
+hasStuckViewReaping
+  "Whether this router will ever release a session because its view could not be moved. nil grace
+   means never, and switches the ground off whole rather than leaving a comparison against nothing."
+  ^stuckViewGraceSeconds notNil
+%
+category: 'view hygiene'
+method: McpRouter
 hasViewHygiene
   "Whether this router watches its workers' views at all. Off means off entirely -- neither the
    per-session ceiling nor the stone-pressure trigger applies -- which is the same bargain
@@ -989,6 +1011,7 @@ initialize
    'use the default'. sessionAccessWarned is the once-only latch for the privilege this arm needs."
   maxCommitsBehind := self class defaultMaxCommitsBehind.
   maintenanceCallTimeoutSeconds := self class defaultMaintenanceCallTimeoutSeconds.
+  stuckViewGraceSeconds := self class defaultStuckViewGraceSeconds.
   sessionAccessWarned := false.
   "Message tracing: OFF, because a traced log records every tool argument a client sent, and an
    operator must choose that rather than discover it. The cap is not optional -- a compile_method or
@@ -1227,18 +1250,30 @@ maintainViewHygiene
          waiting on, and reaping a session whose view cannot be moved at all. Both are still to come,
          and both should take pressure as a conjunct with this ground rather than as an alternative
          to it."
-        behind >= limit ifTrue: [ | verdict |
+        behind >= limit ifTrue: [ | verdict moved |
           "A session with a call in flight is measured but not touched: GCI allows one call in
            flight, and moving a view out from under a running tool is the corruption the transaction
            model exists to prevent. #refreshWorkerView answers nil rather than waiting for it."
           verdict := sess refreshWorkerView.
-          verdict isNil ifFalse: [acted := acted + 1].
-          "Log the ACT, always -- a view move under a client is not something to leave unrecorded --
-           but a session that could not be asked (busy, and it will be asked again next pass) only
-           when its number has changed. That second rule is what keeps a long call from writing a
-           line a minute: measured before the arm acted at all, three identical lines in a row for
-           one idle client, which at a one-minute pass is 1440 a day."
-          (verdict notNil or: [changed]) ifTrue: [
+          moved := false.
+          verdict isNil ifFalse: [
+            acted := acted + 1.
+            "A pass that could not ASK advances nothing. Only an answer counts, and only 'stuck' is
+             a stuck one: a client running one long call after another must not accumulate a grace it
+             never earned, and a 'doomed' session is not stuck at all -- its view is current, so it
+             holds nothing open, and its un-committable work is the client's to resolve."
+            ((verdict findString: 'stuck' startingAt: 1) = 1)
+              ifTrue: [sess noteStuckView: verdict]
+              ifFalse: [sess noteViewMoved. moved := true]].
+          "What gets a line is news, and there are three kinds. A view that MOVED, always: that
+           happened under a client and is not to be left unrecorded. A view that has just BECOME
+           stuck, once: the transition is news, the standing state is not. And any pass on which the
+           number changed.
+           Everything else is silence, and both silences were measured rather than guessed. Before
+           the arm acted at all, an idle session over the line wrote three identical lines in a row
+           -- 1440 a day at a one-minute pass. And a stuck session writes one per pass for the whole
+           of its grace, which for a ten-pass grace is nine lines saying what the first already said."
+          (moved or: [changed or: [sess stuckViewPasses = 1]]) ifTrue: [
             self log: 'view hygiene: session ' , sess id printString
               , ' worker gem ' , sess workerStoneSession printString
               , ' is ' , behind printString , ' commits behind (limit ' , limit printString
@@ -1732,7 +1767,23 @@ reapReasonFor: sess
        itself opened and is still holding.
      - IDLENESS is confirmations -- pings the client answered while doing no work. It applies only
        where a deadline is configured.
-     - NO STREAM AT ALL is the give-up rule: liveness cannot speak for a client it cannot reach."
+     - NO STREAM AT ALL is the give-up rule: liveness cannot speak for a client it cannot reach.
+     - A STUCK VIEW is the one ground that is about the REPOSITORY rather than the client. It needs
+       all four of: this server does reap on it at all; the session has been found stuck on MORE
+       passes than the grace allows; it is far enough behind to be part of the problem; and the
+       stone is over its own backlog threshold.
+       The comparison is STRICTLY GREATER, where the other counted grounds use >=, and both reasons
+       matter. It is what makes a configured grace a floor rather than a ceiling: the pass that
+       discovers a stuck view is the same pass that would reap it, so `>= 1` would spend a
+       one-pass grace before a single interval had elapsed and hand a client none of the time the
+       number promised -- the same promise #countCovering:every: rounds up to protect. And it is
+       what makes a grace of ZERO mean what it says without a separate evidence test: `> 0` is
+       false for a session nobody has ever found stuck, and true on the first pass that does. Stuck means System continueTransaction is illegal there -- a commit
+       that failed on conflict, or a nested transaction -- so nothing this server can send will move
+       that view, and the gem will hold a commit record for as long as it lives. The work it holds is
+       already un-committable, which is what makes ending it defensible; it is reaped rather than
+       aborted so that it is LOUD -- logged here, and a 404 on the client's next call -- where a
+       silent abort would leave a live session working from a view it never chose."
   sess isBusy ifTrue: [^nil].
   sess isExpired ifTrue: [^'its access credential expired'].
   (sess streamClosedByClient and: [sess outbox hasStream not])
@@ -1743,6 +1794,15 @@ reapReasonFor: sess
   (self hasSessionIdleDeadline and: [sess quietProbes >= self confirmationsBeforeRelease])
     ifTrue: [^'it was idle for ' , (self phraseForSeconds: self sessionIdleTimeoutSeconds)
       , ' of liveness checks'].
+  (self hasStuckViewReaping
+    and: [sess stuckViewPasses > self stuckViewGracePasses
+    and: [sess commitsBehind notNil
+    and: [sess commitsBehind >= self commitsBehindLimit
+    and: [self stoneBacklogCritical]]]])
+      ifTrue: [^'its view could not be moved (' , sess stuckViewReason
+        , ') while it was ' , sess commitsBehind printString
+        , ' commits behind and the stone''s commit-record backlog was '
+        , self stoneCommitRecordBacklog printString].
   sess streamlessPasses >= self streamlessPassesBeforeRelease
     ifTrue: [^'no event stream was open to ping it for over '
       , (self phraseForSeconds: self streamlessIdleTimeoutSeconds)].
@@ -2551,6 +2611,45 @@ streamPollMilliseconds
    latency/wakeup tradeoff: 100ms puts a notification on the wire promptly without spinning."
   ^100
 %
+category: 'view hygiene'
+method: McpRouter
+stuckViewGracePasses
+  "How many consecutive stuck passes a session is allowed before it is released -- the grace, in the
+   only unit the reaper counts.
+   ZERO IS A REAL ANSWER and cannot come from #countCovering:every:, which answers at least 1 by
+   design. A grace of zero is the coherent request 'release it on the pass that finds it stuck', so
+   it is special-cased here rather than multiplied up to one. #reapReasonFor: compares STRICTLY
+   GREATER against this, so zero reaps on the first stuck pass and one pass of grace costs a whole
+   interval -- see the note there. #streamLossGraceSeconds has the same
+   carve-out for the same reason -- it is a WAIT, and a wait of no time is a thing somebody may
+   legitimately ask for, where nil is the different instruction.
+   Every other value is a ceiling (#countCovering:every:), so a configured grace is a floor on what a
+   deployment gets rather than a ceiling -- and #validateTimerConfig refuses a positive grace shorter
+   than one pass, so the rounding is never doing work the number did not ask for."
+  stuckViewGraceSeconds isNil ifTrue: [^nil].
+  stuckViewGraceSeconds = 0 ifTrue: [^0].
+  ^self countCovering: stuckViewGraceSeconds every: self reaperIntervalSeconds
+%
+category: 'view hygiene'
+method: McpRouter
+stuckViewGraceSeconds
+  "How long a session whose view cannot be moved is tolerated under stone pressure before release.
+   Three settings, all of them instructions: nil never reaps on this ground however loaded the stone;
+   0 reaps on the pass that finds the session stuck; a positive number waits that many seconds' worth
+   of maintenance passes, floored at one (#stuckViewGracePasses).
+   It applies to the two states where System continueTransaction is illegal and NOTHING can move the
+   view -- a commit that failed on conflict, and a nested transaction. A session merely far behind is
+   refreshed instead, and has no grace because it is not heading anywhere."
+  ^stuckViewGraceSeconds
+%
+category: 'view hygiene'
+method: McpRouter
+stuckViewGraceSeconds: aSecondsOrNil
+  "Set the stuck-view grace (see #stuckViewGraceSeconds). Checked at startup rather than here,
+   because the rule that matters is a comparison with #reaperIntervalSeconds and the two can be set
+   in either order -- #validateTimerConfig is where every such pairing is decided."
+  stuckViewGraceSeconds := aSecondsOrNil
+%
 category: 'routing'
 method: McpRouter
 timeoutErrorFor: anError id: anIdOrNil
@@ -2815,12 +2914,27 @@ validateTimerConfig
     ((streamLossGraceSeconds isKindOf: Number) and: [streamLossGraceSeconds >= 0]) ifFalse: [
       ^self error: 'streamLossGraceSeconds must be nil, or zero, or a positive number of seconds, '
         , 'and is ' , streamLossGraceSeconds printString , '.']].
+  "Zero is meaningful for this one too, and for the same reason it is for streamLossGraceSeconds: it
+   is a grace, and a grace of no time is the coherent request 'release it the moment it is found
+   stuck'. nil is the different instruction -- never on this ground at all. What zero must NOT be is
+   silently turned into one pass, which is why it bypasses #countCovering:every: rather than going
+   through it (#stuckViewGracePasses)."
+  stuckViewGraceSeconds isNil ifFalse: [
+    ((stuckViewGraceSeconds isKindOf: Number) and: [stuckViewGraceSeconds >= 0]) ifFalse: [
+      ^self error: 'stuckViewGraceSeconds must be nil, or zero, or a positive number of seconds, '
+        , 'and is ' , stuckViewGraceSeconds printString , '.']].
   self validateSeconds: self livenessProbeIntervalSeconds named: 'livenessProbeIntervalSeconds' allowingNil: false.
   self validateSeconds: self reaperIntervalSeconds named: 'reaperIntervalSeconds' allowingNil: false.
   self livenessProbeIntervalSeconds >= self reaperIntervalSeconds ifFalse: [
     ^self error: 'livenessProbeIntervalSeconds (' , self livenessProbeIntervalSeconds printString
       , 's) is shorter than reaperIntervalSeconds (' , self reaperIntervalSeconds printString
       , 's), so a ping cannot be sent less than one maintenance pass apart.'].
+  (stuckViewGraceSeconds notNil and: [stuckViewGraceSeconds > 0
+    and: [stuckViewGraceSeconds < self reaperIntervalSeconds]]) ifTrue: [
+      ^self error: 'stuckViewGraceSeconds (' , stuckViewGraceSeconds printString
+        , 's) is shorter than reaperIntervalSeconds (' , self reaperIntervalSeconds printString
+        , 's), which is the shortest span the maintenance pass can measure, so the grace would be '
+        , 'rounded up to one pass and never honoured as written. Use 0 if you mean no grace at all.'].
   self streamlessIdleTimeoutSeconds >= self reaperIntervalSeconds ifFalse: [
     ^self error: 'streamlessIdleTimeoutSeconds (' , self streamlessIdleTimeoutSeconds printString
       , 's) is shorter than reaperIntervalSeconds (' , self reaperIntervalSeconds printString
@@ -2905,7 +3019,12 @@ viewHygieneSummary
     ifFalse: [self stoneCrBacklogThreshold printString]).
   s nextPutAll: ', maintenance-call limit '.
   s nextPutAll: self maintenanceCallTimeoutSeconds printString.
-  s nextPutAll: 's'.
+  s nextPutAll: 's, stuck-view grace '.
+  s nextPutAll: (self hasStuckViewReaping
+    ifTrue: [self stuckViewGraceSeconds printString , 's ('
+      , self stuckViewGracePasses printString , ' pass'
+      , (self stuckViewGracePasses = 1 ifTrue: [''] ifFalse: ['es']) , ')']
+    ifFalse: ['none -- a session whose view cannot be moved is never reaped for it']).
   ^s contents
 %
 category: 'worker class'

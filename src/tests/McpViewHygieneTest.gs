@@ -89,6 +89,13 @@ identifiedSessionOn: aRouter
 %
 category: 'helpers'
 method: McpViewHygieneTest
+includesCS: aSubstring in: aString
+  "Case-sensitive substring test. GemStone's String>>includesString: is case-INsensitive, so use
+   findString:startingAt: for assert:/deny: substring checks."
+  ^aString notNil and: [(aString findString: aSubstring startingAt: 1) > 0]
+%
+category: 'helpers'
+method: McpViewHygieneTest
 logLineMatching: aSubstring in: aFixtureRouter
   "The first captured log line containing aSubstring, or nil. McpFixtureRouter captures #log: into
    #loggedLines instead of writing the gem log."
@@ -110,6 +117,17 @@ sessionOn: aRouter
    bookkeeping runs and no gem is forked. Its #workerStoneSession is nil, which is exactly the
    'cannot be measured' case -- a test that wants a measurable one asks for #identifiedSessionOn:."
   ^aRouter openSessionCreating: [:newId | McpStubSession startWithId: newId]
+%
+category: 'helpers'
+method: McpViewHygieneTest
+stuckSessionOn: aRouter behind: anInteger
+  "A registered session that answers 'stuck' and is anInteger commits behind, on a stone reporting
+   pressure -- the whole conjunction the reap ground needs, minus the passes."
+  | sess |
+  sess := self identifiedSessionOn: aRouter.
+  sess fakeRefreshVerdict: 'stuck: a commit that failed on conflict (TransactionError 2409)'.
+  aRouter fakeCommitsBehind: anInteger; fakeBacklogCritical: true; fakeOldestCrSessions: #().
+  ^sess
 %
 category: 'tests - config'
 method: McpViewHygieneTest
@@ -145,6 +163,28 @@ testAConfigThatSaysNothingAboutTheModeKeepsTheDefault
   r applyConfig: (Dictionary new at: 'serverName' put: 'unrelated'; yourself).
   self assert: r frontEndTransactionMode equals: 'transactionless'
 %
+category: 'tests - the stuck ground'
+method: McpViewHygieneTest
+testAConfiguredGraceIsAFloorNotACeiling
+  "The bug this test exists for, caught live: the pass that DISCOVERS a stuck view is the same pass
+   that would reap it, so comparing >= spent a one-pass grace before a single interval had elapsed
+   and handed the client none of the time the number promised. A 20-second grace reaped a session
+   in the same second it was first found stuck.
+   Strictly-greater is what makes the number a floor, which is the same promise #countCovering:every:
+   rounds up to protect: 'rounding down breaks the promise the number was making'."
+  | r sess |
+  r := McpFixtureRouter new.
+  r maxCommitsBehind: 20; reaperIntervalSeconds: 60; stuckViewGraceSeconds: 120.
+  self assert: r stuckViewGracePasses equals: 2.
+  sess := self stuckSessionOn: r behind: 25.
+  1 to: 2 do: [:i |
+    r maintainViewHygiene.
+    self assert: sess stuckViewPasses equals: i.
+    self assert: (r reapReasonFor: sess) isNil].
+  r maintainViewHygiene.
+  self assert: sess stuckViewPasses equals: 3.
+  self assert: (self includesCS: 'could not be moved' in: (r reapReasonFor: sess))
+%
 category: 'tests - the bug detector'
 method: McpViewHygieneTest
 testAFrontEndWithUncommittedChangesIsReportedAsABug
@@ -165,6 +205,27 @@ testAFrontEndWithUncommittedChangesIsReportedAsABug
   self deny: System needsCommit.
   self deny: (globals includesKey: self scratchKey).
   self assert: (self logLineMatching: 'BUG: the front end gem has uncommitted changes' in: r) notNil
+%
+category: 'tests - the stuck ground'
+method: McpViewHygieneTest
+testAGraceShorterThanAPassIsRefusedAtStartup
+  "It would be silently multiplied up to one pass, which is not the number that was written down --
+   exactly what #validateTimerConfig refuses for streamlessIdleTimeoutSeconds and
+   livenessProbeIntervalSeconds. Zero is the one value below a pass that IS honoured, because it
+   bypasses the rounding rather than surviving it, and the error says so."
+  | r |
+  r := McpFixtureRouter new.
+  r reaperIntervalSeconds: 60.
+  r stuckViewGraceSeconds: 30.
+  self should: [r validateTimerConfig] raise: Error.
+  r stuckViewGraceSeconds: 60.
+  r validateTimerConfig.
+  r stuckViewGraceSeconds: 0.
+  r validateTimerConfig.
+  r stuckViewGraceSeconds: nil.
+  r validateTimerConfig.
+  r stuckViewGraceSeconds: -5.
+  self should: [r validateTimerConfig] raise: Error
 %
 category: 'tests - the refresh'
 method: McpViewHygieneTest
@@ -217,6 +278,22 @@ testAModeNobodyImplementsIsRefusedAtTheSetter
   self assert: (McpRouter new frontEndTransactionMode: #autoBegin; yourself)
     frontEndTransactionMode equals: 'autoBegin'
 %
+category: 'tests - the stuck ground'
+method: McpViewHygieneTest
+testAPassThatCouldNotAskAdvancesNothing
+  "The distinction the grace depends on. A session with a call in flight answers nil -- 'could not
+   ask' -- which is not evidence of anything and must not accumulate: a client running one long call
+   after another would otherwise earn a grace it was never judged for, and be reaped for a view
+   nobody ever found stuck."
+  | r sess |
+  r := McpFixtureRouter new.
+  r maxCommitsBehind: 20; stuckViewGraceSeconds: 0; reaperIntervalSeconds: 60.
+  sess := self stuckSessionOn: r behind: 25.
+  sess fakeRefreshVerdict: nil.
+  r maintainViewHygiene; maintainViewHygiene; maintainViewHygiene.
+  self assert: sess stuckViewPasses equals: 0.
+  self assert: (r reapReasonFor: sess) isNil
+%
 category: 'tests - the refresh'
 method: McpViewHygieneTest
 testApplyingTheModeChangesThisGemsMode
@@ -234,7 +311,7 @@ testApplyingTheModeChangesThisGemsMode
    self assert: System transactionMode equals: #autoBegin]
      ensure: [System transactionMode: was]
 %
-category: 'tests - the worker's side'
+category: 'tests - the worker'
 method: McpViewHygieneTest
 testARefreshForTheFrontEndIsNewsExactlyOnce
   "The client has to be told its snapshot moved -- it was told the view moves only when IT moves the
@@ -249,7 +326,7 @@ testARefreshForTheFrontEndIsNewsExactlyOnce
   self assert: srv takeFrontEndRefreshedView.
   self deny: srv takeFrontEndRefreshedView
 %
-category: 'tests - the worker's side'
+category: 'tests - the worker'
 method: McpViewHygieneTest
 testARefreshForTheFrontEndKeepsUncommittedWork
   "THE CLAIM THE WHOLE REDESIGN RESTS ON. System continueTransaction takes a current view and keeps
@@ -337,6 +414,118 @@ testAStandingMeasurementOnABusySessionIsLoggedOnceNotEveryPass
   self assert: r maintainViewHygiene equals: 0.
   self assert: (self hygieneLinesIn: r) size equals: 2.
   self assert: sess commitsBehind equals: 26
+%
+category: 'tests - the stuck ground'
+method: McpViewHygieneTest
+testAStuckRunResetsOnAnyAnswerThatMovedTheView
+  "'kept' and 'doomed' both mean the view moved, so neither leaves anything for this ground to act
+   on. 'doomed' is the one worth stating: that session's work cannot be committed, but its view is
+   CURRENT, so it is holding nothing open and the un-committable work is the client's to resolve --
+   not a reason for this server to end the session."
+  | r sess |
+  r := McpFixtureRouter new.
+  r maxCommitsBehind: 20; stuckViewGraceSeconds: 0; reaperIntervalSeconds: 60.
+  sess := self stuckSessionOn: r behind: 25.
+  r maintainViewHygiene; maintainViewHygiene.
+  self assert: sess stuckViewPasses equals: 2.
+  self assert: sess stuckViewReason equals: 'a commit that failed on conflict'.
+  #( 'kept' 'doomed' ) do: [:answer |
+    sess fakeRefreshVerdict: answer.
+    r maintainViewHygiene.
+    self assert: sess stuckViewPasses equals: 0.
+    self assert: sess stuckViewReason isNil.
+    self assert: (r reapReasonFor: sess) isNil.
+    sess fakeRefreshVerdict: 'stuck: a nested transaction'.
+    r maintainViewHygiene.
+    self assert: sess stuckViewPasses equals: 1]
+%
+category: 'tests - the stuck ground'
+method: McpViewHygieneTest
+testAStuckSessionIsReapedOnlyWhenEveryConditionHolds
+  "Four conditions, and the ground is conjunctive because each rules out a different way of being
+   wrong: reaping is configured at all; the view has been stuck for the whole grace; this session is
+   far enough behind to be part of the problem; and the stone is actually over its own backlog
+   threshold. Drop any one and a session that is merely stuck on a quiet stone -- which costs nobody
+   anything, and whose work is the client's business -- would be ended."
+  | r sess |
+  r := McpFixtureRouter new.
+  r maxCommitsBehind: 20; stuckViewGraceSeconds: 60; reaperIntervalSeconds: 60.
+  sess := self stuckSessionOn: r behind: 25.
+  r maintainViewHygiene.
+  self assert: sess stuckViewPasses equals: 1.
+  "one pass of grace is spent on the pass AFTER the one that found it; see the next test"
+  self assert: (r reapReasonFor: sess) isNil.
+  r maintainViewHygiene.
+  self assert: (self includesCS: 'could not be moved' in: (r reapReasonFor: sess)).
+  "each condition withdrawn on its own puts the session back out of reach"
+  r stuckViewGraceSeconds: nil.
+  self assert: (r reapReasonFor: sess) isNil.
+  r stuckViewGraceSeconds: 60.
+  r fakeBacklogCritical: false.
+  self assert: (r reapReasonFor: sess) isNil.
+  r fakeBacklogCritical: true.
+  "Withdrawn by lowering the session's own distance rather than by raising the ceiling: the
+   effective limit is the LOWER of maxCommitsBehind and the stone's StnSignalAbortCrBacklog, so
+   raising ours alone would not move it."
+  r fakeCommitsBehind: 3.
+  r maintainViewHygiene.
+  self assert: (r reapReasonFor: sess) isNil.
+  r fakeCommitsBehind: 25.
+  r maintainViewHygiene.
+  r maxCommitsBehind: 20.
+  r fakeCommitsBehind: 3.
+  r maintainViewHygiene.
+  self assert: (r reapReasonFor: sess) isNil.
+  r fakeCommitsBehind: 25.
+  r maintainViewHygiene.
+  self assert: (self includesCS: 'could not be moved' in: (r reapReasonFor: sess)).
+  sess noteViewMoved.
+  self assert: (r reapReasonFor: sess) isNil
+%
+category: 'tests - the stuck ground'
+method: McpViewHygieneTest
+testAZeroGraceReapsOnTheVeryPassThatFindsItStuck
+  "Zero is a real setting and not 'use the default': the coherent request 'release it the moment it
+   is found stuck'. It cannot come from #countCovering:every:, which answers at least one by design,
+   so it is special-cased -- the same carve-out #streamLossGraceSeconds already has, and for the same
+   reason: a grace is a WAIT, and a wait of no time is a thing somebody may legitimately ask for."
+  | r sess |
+  r := McpFixtureRouter new.
+  r maxCommitsBehind: 20; stuckViewGraceSeconds: 0; reaperIntervalSeconds: 60.
+  self assert: r stuckViewGracePasses equals: 0.
+  self assert: r hasStuckViewReaping.
+  sess := self stuckSessionOn: r behind: 25.
+  "Before any pass there is no evidence, so no reap even at zero -- and that is a SEPARATE condition
+   from the grace, since stuckViewPasses >= 0 is true of a session nobody has ever asked. Asserted
+   with a reading already recorded, so that the only thing missing is the evidence itself."
+  self assert: sess stuckViewPasses equals: 0.
+  sess noteCommitsBehind: 25.
+  self assert: (r reapReasonFor: sess) isNil.
+  r maintainViewHygiene.
+  self assert: (self includesCS: 'could not be moved' in: (r reapReasonFor: sess))
+%
+category: 'tests - the stuck ground'
+method: McpViewHygieneTest
+testBecomingStuckIsLoggedOnceNotEveryPassOfTheGrace
+  "The transition is news; the standing state is not. Measured live: a stuck session wrote one
+   identical line per pass for the whole of its grace, which for a ten-pass grace is nine lines
+   saying what the first already said. A view that MOVED still logs every time, because that happened
+   under a client and is not to be left unrecorded."
+  | r sess |
+  r := McpFixtureRouter new.
+  r maxCommitsBehind: 20; reaperIntervalSeconds: 60; stuckViewGraceSeconds: 600.
+  sess := self stuckSessionOn: r behind: 25.
+  1 to: 5 do: [:i | r maintainViewHygiene].
+  self assert: sess stuckViewPasses equals: 5.
+  self assert: (self hygieneLinesIn: r) size equals: 1.
+  self assert: (self includesCS: 'stuck' in: (self hygieneLinesIn: r) first).
+  "a view that moves is logged every time, and becoming stuck again is news again"
+  sess fakeRefreshVerdict: 'kept'.
+  r maintainViewHygiene; maintainViewHygiene.
+  self assert: (self hygieneLinesIn: r) size equals: 3.
+  sess fakeRefreshVerdict: 'stuck: a nested transaction'.
+  r maintainViewHygiene; maintainViewHygiene.
+  self assert: (self hygieneLinesIn: r) size equals: 4
 %
 category: 'tests - worker views'
 method: McpViewHygieneTest
@@ -481,6 +670,40 @@ testTheEffectiveLimitIsTheLowerOfOursAndTheStones
   r maxCommitsBehind: 2.
   self assert: r commitsBehindLimit equals: 2
 %
+category: 'tests - the stuck ground'
+method: McpViewHygieneTest
+testTheGraceIsCountedInPassesAndFlooredAtOne
+  "Configuration is in seconds, policy is in counts -- the same bargain #confirmationsBeforeRelease
+   makes -- and #countCovering:every: rounds UP, so a configured grace is a floor on what a
+   deployment gets rather than a ceiling. With a 60s pass, a 60s grace is one pass and a 150s grace
+   is three (2.5 rounded up), which is why a session that becomes stuck just after a pass waits up to
+   one pass longer than the number says."
+  | r |
+  r := McpFixtureRouter new.
+  r reaperIntervalSeconds: 60.
+  r stuckViewGraceSeconds: 60.
+  self assert: r stuckViewGracePasses equals: 1.
+  r stuckViewGraceSeconds: 150.
+  self assert: r stuckViewGracePasses equals: 3.
+  r stuckViewGraceSeconds: nil.
+  self assert: r stuckViewGracePasses isNil.
+  self deny: r hasStuckViewReaping
+%
+category: 'tests - the stuck ground'
+method: McpViewHygieneTest
+testTheGraceTravelsToAForkedChild
+  "All three settings have to survive the fork, since config reaches a detached front end only as
+   JSON in the fork string: nil and 0 are different instructions from each other and from the
+   default, and a value that failed to travel would look exactly like the default."
+  | r |
+  r := McpRouter new.
+  self assert: r stuckViewGraceSeconds equals: 60.
+  #( 0 300 ) do: [:secs |
+    r stuckViewGraceSeconds: secs.
+    self assert: (McpRouter new applyConfigJson: r configJson) stuckViewGraceSeconds equals: secs].
+  r stuckViewGraceSeconds: nil.
+  self assert: (McpRouter new applyConfigJson: r configJson) stuckViewGraceSeconds isNil
+%
 category: 'tests - worker views'
 method: McpViewHygieneTest
 testTheMaintenanceTimeoutIsPushedIntoEverySessionAndIsNotTheRequestDeadline
@@ -516,7 +739,25 @@ testTheModeTravelsToAForkedChild
   "and the default travels as itself rather than as an absence"
   self assert: (McpRouter new configDict at: 'frontEndTransactionMode') equals: 'transactionless'
 %
-category: 'tests - the worker's side'
+category: 'tests - the stuck ground'
+method: McpViewHygieneTest
+testTheReapPhraseNamesTheStateAndBothNumbers
+  "The gem log is the only record of why a session went, and the three facts a reader needs are
+   which state made the view immovable, how far behind that session was, and what the backlog was --
+   the last because it is the difference between this server ending a session and a stone that was
+   in no trouble at all."
+  | r sess phrase |
+  r := McpFixtureRouter new.
+  r maxCommitsBehind: 20; stuckViewGraceSeconds: 0; reaperIntervalSeconds: 60.
+  sess := self stuckSessionOn: r behind: 25.
+  r maintainViewHygiene.
+  phrase := r reapReasonFor: sess.
+  self assert: (self includesCS: 'a commit that failed on conflict' in: phrase).
+  self assert: (self includesCS: '25 commits behind' in: phrase).
+  "and the error detail the worker appended is trimmed off -- it is not for a log line"
+  self deny: (self includesCS: '2409' in: phrase)
+%
+category: 'tests - the worker'
 method: McpViewHygieneTest
 testTheRefreshNoteSaysWhoDidItAndWhatItCannotPromise
   "The wording carries the client's only defence against concluding it did this to itself, so it has
@@ -565,7 +806,7 @@ testTheStoneReadingsAnswerRealNumbers
   self assert: r stoneBacklogCritical
     equals: (threshold notNil and: [backlog > threshold])
 %
-category: 'tests - the worker's side'
+category: 'tests - the worker'
 method: McpViewHygieneTest
 testTheStuckReasonIsAskedOfTheImageNotDecodedFromTheError
   "Which of the two illegal states a session is in decides the prose the front end logs and, later,
