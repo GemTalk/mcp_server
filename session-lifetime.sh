@@ -1,10 +1,13 @@
-# Session-lifetime configuration, shared by run-server.sh and run-auth-server.sh.
+# Router configuration shared by run-server.sh and run-auth-server.sh: SESSION LIFETIME, and the
+# VIEW HYGIENE knobs at the foot of this file. Two subjects, one file, because they share the
+# duration vocabulary and both launchers need both -- and because a knob documented in only one of
+# two near-identical launchers is a knob nobody finds.
 #
-# Sourced, not executed. Reads the GS_MCP_* duration variables below and leaves Smalltalk setter
-# sends for them in $LIFETIME_LINES, ready to drop into either launcher's topaz heredoc. Every one
-# is optional: an unset variable emits no line at all, so the router keeps the default it seeds in
-# McpRouter>>initialize. That distinction matters for the idle timeout, where "unset" (30 minutes)
-# and "none" (no deadline) are different instructions.
+# Sourced, not executed. Reads the GS_MCP_* variables below and leaves Smalltalk setter sends for
+# them in $LIFETIME_LINES and $VIEW_HYGIENE_LINES, ready to drop into either launcher's topaz
+# heredoc. Every one is optional: an unset variable emits no line at all, so the router keeps the
+# default it seeds in McpRouter>>initialize. That distinction matters for the idle timeout, where
+# "unset" (30 minutes) and "none" (no deadline) are different instructions.
 #
 # Durations accept a unit suffix -- 90s, 30m, 4h -- or a bare number of seconds.
 #
@@ -118,9 +121,12 @@ r requestTimeoutSeconds: nil." ;;
   *)           mcp_lifetime_line "$GS_MCP_REQUEST_TIMEOUT" requestTimeoutSeconds GS_MCP_REQUEST_TIMEOUT ;;
 esac
 
+# `0` is NOT folded in with `none` here, unlike every other knob in this file: for this one they are
+# opposites (see the note above), and folding them made 0 mean the exact thing it documents itself as
+# ruling out -- leave the gem to the streamless floor -- rather than releasing it at once.
 case "$(printf '%s' "${GS_MCP_STREAM_LOSS_GRACE:-}" | tr 'A-Z' 'a-z')" in
   '')          ;;
-  none|off|0)  LIFETIME_LINES="$LIFETIME_LINES
+  none|off)    LIFETIME_LINES="$LIFETIME_LINES
 r streamLossGraceSeconds: nil." ;;
   *)           mcp_lifetime_line "$GS_MCP_STREAM_LOSS_GRACE" streamLossGraceSeconds GS_MCP_STREAM_LOSS_GRACE ;;
 esac
@@ -134,3 +140,103 @@ if [ "${GS_MCP_REAP_ON_FAILED_PROBE:-1}" = "0" ]; then
   LIFETIME_LINES="$LIFETIME_LINES
 r reapOnFailedProbe: false."
 fi
+
+# ---------------------------------------------------------------------------------------------
+# VIEW HYGIENE -> $VIEW_HYGIENE_LINES
+#
+# Not about the client at all, unlike everything above: these govern what the server does about the
+# REPOSITORY's commit records. A GemStone session's view pins the commit record it was taken from, so
+# a gem that sits at an old view holds every record behind it and the stone cannot dispose of any of
+# them. Nothing in the session-lifetime family can see that -- a session can be perfectly well
+# behaved, answering every ping, and still be the reason the extent is growing.
+#
+#   GS_MCP_FRONT_END_TX_MODE  GemStone transaction mode for the forked FRONT-END gem:
+#                           transactionless (default) or autoBegin. The front end makes no
+#                           repository changes, so transactionless costs it nothing and saves the
+#                           stone a commit record it could otherwise never dispose of -- measured, a
+#                           front end left in transaction held the OLDEST commit record in the
+#                           repository, its last transaction boundary being its own login 15 hours
+#                           earlier. autoBegin restores that older behaviour, and is worth asking for
+#                           only if front-end code of your own needs a stable view (see the McpRouter
+#                           class comment). Workers are unaffected: each client's gem holds a
+#                           transaction because that is what the session IS.
+#   GS_MCP_MAX_COMMITS_BEHIND
+#                           How far behind the repository a worker gem's view may fall, in COMMITS,
+#                           before the server refreshes it (default 20 -- the same number the stone
+#                           uses for STN_SIGNAL_ABORT_CR_BACKLOG; the effective limit is the lower of
+#                           the two). `none` turns it off and leaves every worker's view alone.
+#                           Counted in commits rather than seconds because that is what the stone
+#                           charges for: what hurts is the number of records piled up behind a view,
+#                           not how old it is, so an idle session on a quiet stone costs nothing and
+#                           is left alone however long it sits. The refresh KEEPS the session's
+#                           uncommitted work, and the client is told on its next result.
+#   GS_MCP_STUCK_VIEW_GRACE How long a session whose view CANNOT be moved is tolerated, while the
+#                           stone is over its own backlog threshold, before its gem is released.
+#                           Default 60s. A view is stuck when GemStone refuses to move it at all --
+#                           after a commit that failed on conflict, or inside a nested transaction --
+#                           so nothing this server sends will free the record that session is
+#                           holding, and the work it holds is already un-committable. `none` never
+#                           reaps on this ground; `0` reaps on the pass that finds it. Floored at one
+#                           GS_MCP_REAPER_INTERVAL: a positive value shorter than a pass refuses to
+#                           start rather than being silently rounded up.
+#   GS_MCP_PINNED_VIEW_GRACE
+#                           How long a RUNNING call may hold the repository's oldest commit record
+#                           open, while the repository is over its own backlog threshold, before the
+#                           server ends that call. Default 300s; `none` never ends one. This is the
+#                           ONLY rule here that ends work a client is waiting on, and it is not a
+#                           request deadline in disguise: a long call on a quiet repository is never
+#                           ended, however long it runs. It exists because a call in flight cannot be
+#                           asked to refresh its view -- one GCI call per session -- so while it runs
+#                           nothing else can free the record it is holding. `none` is a legitimate
+#                           choice; its cost is that one long call can pin the backlog for as long as
+#                           it lasts. Ending a call costs the client that call only: its gem and its
+#                           uncommitted work survive.
+
+VIEW_HYGIENE_LINES=""
+
+mcp_hygiene_line() {
+  VIEW_HYGIENE_LINES="$VIEW_HYGIENE_LINES
+r $1: $2."
+}
+
+# Checked here as well as in the setter (which raises), because a launcher that fails in the shell
+# says so in one line instead of from inside a topaz stack.
+case "${GS_MCP_FRONT_END_TX_MODE:-transactionless}" in
+  transactionless|autoBegin)
+      mcp_hygiene_line frontEndTransactionMode "'${GS_MCP_FRONT_END_TX_MODE:-transactionless}'" ;;
+  *)  echo "ERROR: GS_MCP_FRONT_END_TX_MODE must be transactionless or autoBegin (got '$GS_MCP_FRONT_END_TX_MODE')." >&2
+      exit 1 ;;
+esac
+
+# A count, not a duration: no unit suffix, and `none` is an instruction (leave every worker's view
+# alone) that has to reach the router as an explicit nil rather than as an absence.
+case "$(printf '%s' "${GS_MCP_MAX_COMMITS_BEHIND:-}" | tr 'A-Z' 'a-z')" in
+  '')          ;;
+  none|off)    mcp_hygiene_line maxCommitsBehind nil ;;
+  *[!0-9]*)    echo "ERROR: GS_MCP_MAX_COMMITS_BEHIND must be a whole number of commits, or 'none' (got '$GS_MCP_MAX_COMMITS_BEHIND')." >&2
+               exit 1 ;;
+  *)           mcp_hygiene_line maxCommitsBehind "$GS_MCP_MAX_COMMITS_BEHIND" ;;
+esac
+
+# `none` and `0` are both instructions here and are not the same one, so each reaches the router as
+# itself. 0 is spelled out rather than passed through mcp_duration_seconds only because `0m` and `0h`
+# would be silly ways to write it.
+case "$(printf '%s' "${GS_MCP_STUCK_VIEW_GRACE:-}" | tr 'A-Z' 'a-z')" in
+  '')          ;;
+  none|off)    mcp_hygiene_line stuckViewGraceSeconds nil ;;
+  0)           mcp_hygiene_line stuckViewGraceSeconds 0 ;;
+  *)           SECS=$(mcp_duration_seconds "$GS_MCP_STUCK_VIEW_GRACE" GS_MCP_STUCK_VIEW_GRACE) || exit 1
+               mcp_hygiene_line stuckViewGraceSeconds "$SECS" ;;
+esac
+
+# Zero is NOT meaningful for this one -- it would end every call the moment the stone went over its
+# threshold, which is a request deadline and not this rule -- so the router refuses it and so does
+# this. `none` is how you turn it off.
+case "$(printf '%s' "${GS_MCP_PINNED_VIEW_GRACE:-}" | tr 'A-Z' 'a-z')" in
+  '')          ;;
+  none|off)    mcp_hygiene_line pinnedViewGraceSeconds nil ;;
+  0)           echo "ERROR: GS_MCP_PINNED_VIEW_GRACE must be a positive duration, or 'none' to never end a running call (got '0')." >&2
+               exit 1 ;;
+  *)           SECS=$(mcp_duration_seconds "$GS_MCP_PINNED_VIEW_GRACE" GS_MCP_PINNED_VIEW_GRACE) || exit 1
+               mcp_hygiene_line pinnedViewGraceSeconds "$SECS" ;;
+esac

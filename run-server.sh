@@ -54,41 +54,12 @@
 #                     for a localhost server you come back to hours later is
 #                     GS_MCP_IDLE_TIMEOUT=none, which keeps a session alive for as long as its client
 #                     keeps answering liveness pings.
-#   GS_MCP_MAX_COMMITS_BEHIND - how far behind the repository a worker gem's view may fall, in
-#                     COMMITS, before the server acts on it (default 20 -- the same number the stone
-#                     itself uses for STN_SIGNAL_ABORT_CR_BACKLOG; the effective limit is the lower
-#                     of the two). `none` turns it off and leaves every worker's view alone. Counted
-#                     in commits rather than seconds because that is what the stone charges for: a
-#                     view pins the commit record it was taken from, so what hurts is the number of
-#                     records piled up behind it, not how old it is -- an idle session on a quiet
-#                     stone costs nothing. THIS BUILD ONLY MEASURES: it logs which sessions are over
-#                     the line and refreshes nothing.
-#   GS_MCP_PINNED_VIEW_GRACE - how long a RUNNING call may hold the repository's oldest commit
-#                     record open, while the repository is over its own backlog threshold, before the
-#                     server ends that call (default 300s; `none` never ends one). This is the ONLY
-#                     rule here that ends work a client is waiting on, and it is not a request
-#                     deadline in disguise: a long call on a quiet repository is never ended, however
-#                     long it runs. It exists because a call in flight cannot be asked to refresh its
-#                     view -- one GCI call per session -- so while it runs nothing else can free the
-#                     record it is holding. `none` is a legitimate choice; its cost is that one long
-#                     call can pin the backlog for as long as it lasts.
-#   GS_MCP_STUCK_VIEW_GRACE - how long a session whose view CANNOT be moved is tolerated, under
-#                     stone pressure, before its gem is released (default 60s; `none` never reaps on
-#                     this ground; `0` reaps on the pass that finds it). A view is stuck when
-#                     GemStone refuses to move it at all -- after a commit that failed on conflict,
-#                     or inside a nested transaction -- so nothing this server sends will free the
-#                     commit record that session is holding, and the work it holds is already
-#                     un-committable. Floored at one reaper interval: a positive value shorter than
-#                     GS_MCP_REAPER_INTERVAL refuses to start rather than being silently rounded up.
-#   GS_MCP_FRONT_END_TX_MODE - GemStone transaction mode for the forked FRONT-END gem:
-#                     transactionless (default) or autoBegin. The front end makes no repository
-#                     changes, so transactionless costs it nothing and saves the stone a commit
-#                     record it could otherwise never dispose of -- measured, a front end left in
-#                     transaction held the oldest commit record with its last transaction boundary
-#                     being its own login 15 hours earlier. autoBegin restores that older behaviour,
-#                     and is only worth asking for if front-end code of your own needs a stable view
-#                     (see the McpRouter class comment). Workers are unaffected: each client's gem
-#                     stays in one long transaction, which is the whole product.
+#   View hygiene    - the GS_MCP_MAX_COMMITS_BEHIND family, documented in the same file. These
+#                     govern the REPOSITORY rather than the client: a worker's view pins the commit
+#                     record it was taken from, and this is what refreshes a view that has fallen too
+#                     far behind, releases a session whose view cannot be moved at all, and ends a
+#                     running call that is holding the repository's oldest record while the stone is
+#                     over its backlog threshold.
 #   GS_MCP_TRACE    - 1 to write every message a client SENDS to the gem log (default 0). Turn this
 #                     on when a call is going wrong and the client's own UI shows you only the tool
 #                     name: the trace carries the JSON-RPC text, including the arguments. It is off
@@ -116,10 +87,6 @@ GS_MCP_TOOLSET_OPTIONS="${GS_MCP_TOOLSET_OPTIONS:-}"
 GS_MCP_TITLE="${GS_MCP_TITLE:-}"
 GS_MCP_TRACE="${GS_MCP_TRACE:-0}"
 GS_MCP_TRACE_LIMIT="${GS_MCP_TRACE_LIMIT:-}"
-GS_MCP_FRONT_END_TX_MODE="${GS_MCP_FRONT_END_TX_MODE:-transactionless}"
-GS_MCP_MAX_COMMITS_BEHIND="${GS_MCP_MAX_COMMITS_BEHIND:-}"
-GS_MCP_STUCK_VIEW_GRACE="${GS_MCP_STUCK_VIEW_GRACE:-}"
-GS_MCP_PINNED_VIEW_GRACE="${GS_MCP_PINNED_VIEW_GRACE:-}"
 
 # Resolve the environment and confirm BOTH the stone and a netldi. The netldi requirement is real
 # and is not about how this script logs in: forkOnPort: creates a GsTsExternalSession for the front
@@ -140,57 +107,13 @@ if gs_env_locate_lsof && "$GS_LSOF" -nP -iTCP:"$GS_MCP_PORT" -sTCP:LISTEN -t >/d
   exit 1
 fi
 
-# Session-lifetime setters (GS_MCP_IDLE_TIMEOUT and friends) -> $LIFETIME_LINES; empty when none are
-# set, leaving McpRouter>>initialize's defaults in place.
+# Session-lifetime setters (GS_MCP_IDLE_TIMEOUT and friends) -> $LIFETIME_LINES, and the view-hygiene
+# setters (GS_MCP_MAX_COMMITS_BEHIND and friends) -> $VIEW_HYGIENE_LINES. Either is empty when none
+# of its variables are set, leaving McpRouter>>initialize's defaults in place. That file documents
+# every one of them, and validates them, so neither launcher repeats either job.
 . ./session-lifetime.sh
 
 [ "$GS_MCP_READONLY" = "1" ] && RO="true" || RO="false"
-
-# The front-end gem's transaction mode. Checked here as well as in the setter (which raises), because
-# a launcher that fails in the shell says so in one line instead of inside a topaz stack.
-TX_MODE_LINE=""
-case "$GS_MCP_FRONT_END_TX_MODE" in
-  transactionless|autoBegin) TX_MODE_LINE="r frontEndTransactionMode: '$GS_MCP_FRONT_END_TX_MODE'." ;;
-  *) echo "error: GS_MCP_FRONT_END_TX_MODE must be transactionless or autoBegin," >&2
-     echo "       and is '$GS_MCP_FRONT_END_TX_MODE'." >&2
-     exit 1 ;;
-esac
-
-# View hygiene. `none` is an instruction (leave every worker's view alone), so it has to reach the
-# router as an explicit nil rather than as an absence.
-CB_LINE=""
-case "$(printf '%s' "$GS_MCP_MAX_COMMITS_BEHIND" | tr 'A-Z' 'a-z')" in
-  '')          ;;
-  none|off)    CB_LINE="r maxCommitsBehind: nil." ;;
-  *[!0-9]*)    echo "error: GS_MCP_MAX_COMMITS_BEHIND must be a whole number of commits, or 'none'," >&2
-               echo "       and is '$GS_MCP_MAX_COMMITS_BEHIND'." >&2
-               exit 1 ;;
-  *)           CB_LINE="r maxCommitsBehind: $GS_MCP_MAX_COMMITS_BEHIND." ;;
-esac
-
-# Stuck-view grace. `none` and `0` are both instructions and are not the same one, so each has to
-# reach the router as itself rather than as an absence.
-SV_LINE=""
-case "$(printf '%s' "$GS_MCP_STUCK_VIEW_GRACE" | tr 'A-Z' 'a-z')" in
-  '')          ;;
-  none|off)    SV_LINE="r stuckViewGraceSeconds: nil." ;;
-  *[!0-9]*)    echo "error: GS_MCP_STUCK_VIEW_GRACE must be a whole number of seconds, 0, or 'none'," >&2
-               echo "       and is '$GS_MCP_STUCK_VIEW_GRACE'." >&2
-               exit 1 ;;
-  *)           SV_LINE="r stuckViewGraceSeconds: $GS_MCP_STUCK_VIEW_GRACE." ;;
-esac
-
-# Pinned-view grace. `none` is an instruction (never end a running call for this), so it has to
-# reach the router as an explicit nil.
-PV_LINE=""
-case "$(printf '%s' "$GS_MCP_PINNED_VIEW_GRACE" | tr 'A-Z' 'a-z')" in
-  '')          ;;
-  none|off)    PV_LINE="r pinnedViewGraceSeconds: nil." ;;
-  ''|*[!0-9]*) echo "error: GS_MCP_PINNED_VIEW_GRACE must be a positive number of seconds, or 'none'," >&2
-               echo "       and is '$GS_MCP_PINNED_VIEW_GRACE'." >&2
-               exit 1 ;;
-  *)           PV_LINE="r pinnedViewGraceSeconds: $GS_MCP_PINNED_VIEW_GRACE." ;;
-esac
 
 # Optional worker-class / toolset configuration, as extra Smalltalk setter sends on the router.
 CONFIG=""
@@ -266,8 +189,7 @@ run
 | r |
 r := McpRouter new.
 r readOnly: $RO.
-$TX_MODE_LINE
-$CB_LINE$SV_LINE$PV_LINE$CONFIG$LIFETIME_LINES
+$VIEW_HYGIENE_LINES$CONFIG$LIFETIME_LINES
 r forkOnPort: $GS_MCP_PORT
 %
 logout

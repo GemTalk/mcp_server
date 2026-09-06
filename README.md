@@ -285,6 +285,12 @@ held the *oldest* record open across `GS_MCP_PINNED_VIEW_GRACE` of real backlog 
 with an error saying so. Neither is a time limit: on a quiet repository a long call runs untouched,
 however long it takes.
 
+The **front-end** gem holds no view at all: it runs `#transactionless` and takes a fresh view once
+per maintenance pass, so the one gem that never needs a stable view stops being a commit-record
+hoarder. `GS_MCP_FRONT_END_TX_MODE=autoBegin` restores the older behaviour for front-end code of your
+own that does need one. All four knobs are documented, and validated, in
+[session-lifetime.sh](session-lifetime.sh) alongside the session-lifetime family.
+
 **Listing**
 
 | Tool | Arguments | Result |
@@ -836,7 +842,8 @@ It covers every knob and its default, what actually ends a session, why nothing 
 elapsed time, and why a host suspend needs no handling at all.
 
 From the shell, `GS_MCP_IDLE_TIMEOUT` and friends set all of it on either launcher — see
-[session-lifetime.sh](session-lifetime.sh), which documents each.
+[session-lifetime.sh](session-lifetime.sh), which documents each, along with the view-hygiene family
+(`GS_MCP_MAX_COMMITS_BEHIND` and friends) that the two launchers share with it.
 
 Not configurable, because they are mechanism rather than policy: `keepaliveIntervalSeconds` 15
 (sized to proxy and NAT idle timeouts, not to sessions), `streamPollMilliseconds` 100,

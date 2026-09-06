@@ -124,7 +124,11 @@ diagnosing a reap can find it. See
 what the stream is being kept for: progress on long-running tool calls.
 
 From the shell, `GS_MCP_IDLE_TIMEOUT` and friends set these on either launcher — durations like
-`90s`, `30m`, `4h`, or `none`. See [session-lifetime.sh](../session-lifetime.sh), which documents each.
+`90s`, `30m`, `4h`, or `none`. See [session-lifetime.sh](../session-lifetime.sh), which documents
+each. That file also carries the **view-hygiene** knobs below (`GS_MCP_FRONT_END_TX_MODE`,
+`GS_MCP_MAX_COMMITS_BEHIND`, `GS_MCP_STUCK_VIEW_GRACE`, `GS_MCP_PINNED_VIEW_GRACE`): a different
+subject — the repository's commit records rather than the client — but the same launchers, the same
+duration vocabulary, and one place to read rather than two near-identical copies in the launchers.
 
 **Almost nothing here is measured in elapsed time.** The knobs are seconds because that is how a
 deployment thinks; what the reaper counts is derived from them. Idleness is a count of **liveness
@@ -219,7 +223,8 @@ holds no record for longer than one interval. The cost is that its view moves un
 also why a committed recompile of front-end code takes effect in a running server, within two passes,
 and why front-end code must never read a persistent object graph.
 
-**A worker whose view has fallen at least `maxCommitsBehind` commits behind is refreshed.** The front
+**A worker whose view has fallen at least `maxCommitsBehind` commits behind is refreshed**
+(`GS_MCP_MAX_COMMITS_BEHIND`, `none` to leave every worker's view alone). The front
 end sends it one `System continueTransaction`: a current view, with the client's uncommitted changes
 **kept**. Three things keep that from being the thing this server twice rejected — refreshing a view
 *around* a client's call, which would assert it had seen changes it had not:
@@ -238,9 +243,10 @@ disposing records nobody references.
 exactly two states — after a commit that failed on conflict, and inside a nested transaction — and in
 both the view stays exactly where it was. Nothing this server can send will free that record, and the
 work the session is holding is *already* un-committable, which is what makes ending it defensible. It
-needs all four of: reaping on this ground configured at all; the session found stuck on more passes
-than the grace allows; far enough behind to be part of the problem; and the stone over its own
-`STN_CR_BACKLOG_THRESHOLD`. A stuck session on a quiet stone is left alone.
+needs all four of: reaping on this ground configured at all (`GS_MCP_STUCK_VIEW_GRACE`, `none` to
+switch it off); the session found stuck on more passes than the grace allows; far enough behind to be
+part of the problem; and the stone over its own `STN_CR_BACKLOG_THRESHOLD`. A stuck session on a
+quiet stone is left alone. `GS_MCP_STUCK_VIEW_GRACE=0` reaps on the very pass that finds one.
 
 It is **reaped rather than aborted** deliberately. An abort behind the client's back would destroy
 the same work silently and leave a live session working from a view it never chose; a reap is loud —
