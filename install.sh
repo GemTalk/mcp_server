@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 # Install the native GemStone MCP server classes into the image.
 #
-# Logs in via topaz, ensures the Published dictionary exists, files in the Mcp* classes as plain
+# Logs in via topaz, ensures the Mcp dictionary exists and is in every user's symbol list, clears
+# any stale binding of these classes from another dictionary, files in the Mcp* classes as plain
 # topaz file-outs, and commits. No Rowan, no Tonel: the .gs files are canonical `fileOutClass`
 # output and load into any image topaz can log into.
+#
+# THE CLASSES LIVE IN THEIR OWN DICTIONARY, `Mcp` -- not in Published, where they lived until
+# 2026-09-06. This script migrates an image that has the old bindings; see the two `run` blocks
+# below for what it does and why each step is needed.
 #
 # The code is grouped by area, one directory and one loader per group -- src/core, src/tests,
 # src/auth, src/grail. core and tests are always filed in; the other two are selected below and
@@ -11,7 +16,8 @@
 #
 # NOTE: filing these .gs files over classes a Rowan project had loaded fails at the first method
 # with "Duplicate definition of ... (error 2318)". Install into an image that never loaded the Rowan
-# 'Mcp' project, or remove the Mcp* keys from Published and commit first. See README, Source layout.
+# 'Mcp' project. (The migration block below already clears an ordinary, non-Rowan binding of these
+# names from Published or anywhere else.) See README, Source layout.
 #
 #   --grail   ALSO file in the optional GemStone-Python toolset (src/grail). Only valid on an image
 #             that has Grail/ModuleAst -- those methods reference ModuleAst and BaseException and
@@ -185,20 +191,87 @@ iferr 1 exit 1
 ! Byte-String literals on every image, whatever #StringConfiguration says -- see above.
 set sourcestringclass String
 run
-"Ensure the Published dictionary exists (self-referenced + inserted into the symbol list) so
- the classes' 'inDictionary: Published' resolves during file-in. Create it only if absent --
- Published is standard in most images, so this is usually a no-op."
-| up existing d |
+"Ensure the Mcp dictionary exists, and that every user who might run a gem can see it.
+
+ WHY THIS IS MORE WORK THAN Published WAS. Published is standard: it is already in the default
+ symbol list of every UserProfile in the image, so classes filed into it are visible to every gem
+ whoever it logs in as. Mcp is this project's own, so nothing but this puts it in anybody's symbol
+ list. That matters because a worker gem may log in as a DIFFERENT user than the front end --
+ under McpAuthRouter it logs in as the token's own GemStone user -- and a worker resolves its
+ worker class and its toolsets BY NAME at runtime (McpServer class>>toolsetClassNamed:). A user
+ without Mcp in their symbol list would get 'Toolset not found' on every session.
+
+ The dictionary is created SELF-REFERENCED under #Mcp because that is what names it:
+ SymbolDictionary>>name answers 'self keyAtValue: self'. That is also why the dictionary cannot be
+ called McpServer -- installing the class of that name into it would overwrite the self-reference
+ and leave the dictionary nameless.
+
+ Adding Mcp to other users is best effort. GemStone's own system users (SystemUser, SymbolUser,
+ HostAgentUser) refuse with a SecurityError, which is expected and not fatal: none of them ever
+ runs a worker gem. They are listed so a refusal for a user that DOES matter is visible."
+| up d created touched refused |
 up := System myUserProfile.
-existing := up resolveSymbol: #Published.
-existing isNil
-  ifTrue: [
-    d := SymbolDictionary new.
-    d at: #Published put: d.
-    up insertDictionary: d at: up symbolList size + 1.
-    System commitTransaction.
-    'Published created' ]
-  ifFalse: [ 'Published already exists' ].
+d := up objectNamed: #Mcp.
+created := d isNil.
+created ifTrue: [
+  d := SymbolDictionary new.
+  d at: #Mcp put: d.
+  up insertDictionary: d at: up symbolList size + 1 ].
+touched := OrderedCollection new.
+refused := OrderedCollection new.
+AllUsers do: [:profile | | seen |
+  seen := profile symbolList detect: [:e | e == d] ifNone: [nil].
+  seen isNil ifTrue: [
+    [ profile insertDictionary: d at: profile symbolList size + 1.
+      touched add: profile userId ]
+      on: Error
+      do: [:ex | refused add: profile userId ] ] ].
+System commitTransaction.
+'Mcp ' , (created ifTrue: [ 'created' ] ifFalse: [ 'already exists' ])
+  , '; symbol list added for ' , touched asArray printString
+  , (refused isEmpty
+      ifTrue: [ '' ]
+      ifFalse: [ '; not permitted for ' , refused asArray printString
+        , ' -- expected: those are GemStone system users, and none of them runs a worker gem' ])
+%
+display oops
+errorcount
+run
+"MIGRATION: drop any binding of a class this install defines from a dictionary OTHER than Mcp.
+ These classes lived in Published until 2026-09-06. A leftover binding there would WIN, because
+ Published precedes Mcp in the symbol list, and it would win at COMPILE time -- so every method
+ filed in below would bind to the old class and the install would look clean while being wrong.
+
+ Unbinding is the whole of deleting a class here: GemStone's ClassOrganizer is built from the
+ symbol list, so an unbound class stops being a subclass of its superclass for every purpose that
+ matters (this is also all that delete_class does).
+
+ Only the exact names this install defines are removed. Anything else beginning with 'Mcp' is
+ REPORTED and left alone: it may be a third party's toolset, which is not ours to delete."
+| up mcp names removed shadows |
+up := System myUserProfile.
+mcp := up objectNamed: #Mcp.
+names := OrderedCollection new.
+${CLASS_ADDS}removed := OrderedCollection new.
+shadows := OrderedCollection new.
+up symbolList do: [:d | | where |
+  where := d name asString.
+  d == mcp ifFalse: [
+    names do: [:nm | | sym hit |
+      sym := nm asSymbol.
+      hit := d includesKey: sym.
+      hit ifTrue: [
+        [ d removeKey: sym. removed add: where , '.' , nm ]
+          on: Error
+          do: [:ex | removed add: where , '.' , nm , ' FAILED: ' , ex description ] ] ].
+    d keys do: [:k | | ks isOurs isShadow |
+      ks := k asString.
+      isOurs := names includes: ks.
+      isShadow := isOurs not and: [ ks size > 2 and: [ (ks copyFrom: 1 to: 3) = 'Mcp' ] ].
+      isShadow ifTrue: [ shadows add: where , '.' , ks ] ] ] ].
+System commitTransaction.
+'MCP MIGRATION removed ' , removed size printString , ': ' , removed asArray printString
+  , ' -- other Mcp* keys left alone: ' , shadows asArray printString
 %
 display oops
 errorcount

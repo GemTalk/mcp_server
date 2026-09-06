@@ -7,7 +7,7 @@ McpToolset subclass: 'McpSessionToolset'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %

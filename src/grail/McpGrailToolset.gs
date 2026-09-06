@@ -7,7 +7,7 @@ McpToolset subclass: 'McpGrailToolset'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %

@@ -7,7 +7,7 @@ McpToolset subclass: 'McpTestingToolset'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %

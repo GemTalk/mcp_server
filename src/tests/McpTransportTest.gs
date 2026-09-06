@@ -7,7 +7,7 @@ GsTestCase subclass: 'McpTransportTest'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %

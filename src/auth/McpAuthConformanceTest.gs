@@ -7,7 +7,7 @@ GsTestCase subclass: 'McpAuthConformanceTest'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %
@@ -757,6 +757,13 @@ withJwtUser: aUserId scope: aScopeStringOrNil do: aOneArgBlock
   jwtSec userIdKey: #sub; addUserId: aUserId; addIssuer: #*; addAudience: #*.
   up := AllUsers addNewUserWithId: aUserId password: 'swordfishXYZ'.
   up enableJwtAuthenticationWith: jwtSec.
+  "A worker gem logs in as THIS user and resolves its worker class and its toolsets BY NAME, so the
+   Mcp dictionary has to be in its symbol list. A brand-new UserProfile gets the DEFAULT list
+   (UserGlobals, Globals, Published), which does not have it -- Published is standard and Mcp is
+   ours. install.sh does this for the users that exist when it runs; this is the same step for a
+   user created afterwards, and setup-oidc-users.sh does it for a provisioned JWT user. Without it
+   every initialize here fails with 'undefined symbol McpServer' from the worker bootstrap."
+  up insertDictionary: (System myUserProfile objectNamed: #Mcp) at: up symbolList size + 1.
   System commitTransaction.
   "Clear any leftover of this id first, for the reason #withConformanceKeyDo: already spells out:
    System addJwtKey:withId: RAISES on a duplicate, the register is STONE-wide runtime state, and a

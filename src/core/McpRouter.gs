@@ -16,7 +16,7 @@ McpBase subclass: 'McpRouter'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %
@@ -3052,7 +3052,7 @@ validateWorkerConfig
   ((cls isKindOf: Behavior) and: [cls == McpServer or: [cls inheritsFrom: McpServer]]) ifFalse: [
     ^self error: 'Worker class not usable: ' , self effectiveWorkerClassName
       , ' must be McpServer or a subclass, installed in a symbol dictionary in the worker''s symbol '
-      , 'list (e.g. Published).'].
+      , 'list (e.g. Mcp).'].
   self effectiveToolsetNames do: [:n | McpServer toolsetClassNamed: n].
   "Options were validated against declaredOptionNames when they were SET, but the surface can have
    changed since (toolsetNames: after toolsetOptions:, or a default surface resolved only now), so a
@@ -3138,7 +3138,7 @@ method: McpRouter
 workerClassName: aNameOrNil
   "Name the worker class (nil restores McpServer). Validated as an identifier -- see
    validatedClassName:. The class must be visible in the WORKER gem's symbol list, which under
-   McpAuthRouter belongs to the authenticated user, so Published rather than UserGlobals."
+   McpAuthRouter belongs to the authenticated user, so Mcp rather than UserGlobals."
   workerClassName := aNameOrNil isNil ifTrue: [nil] ifFalse: [self validatedClassName: aNameOrNil]
 %
 category: 'routing'

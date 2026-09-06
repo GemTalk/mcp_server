@@ -7,7 +7,7 @@ Object subclass: 'McpToolset'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %
@@ -29,7 +29,7 @@ inputSchema:do: send per tool, building schemas with the helpers here, each bloc
 own tool_* handlers), implement toolNames, and declare readOnlySafeToolNames -- which defaults to
 NONE, so a tool is gated in a read-only session until it is deliberately listed as unable to persist
 a change. Then name your class in the router''s toolsetNames config. Your class must be visible in the
-WORKER gem''s symbol list (Published, not the operator''s UserGlobals), because the worker may log in
+WORKER gem''s symbol list (Mcp, not the operator''s UserGlobals), because the worker may log in
 as a different user.
 
 DEPLOYMENT OPTIONS. A toolset may also need configuration the core cannot know -- where a vendor''s

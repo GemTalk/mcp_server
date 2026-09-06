@@ -7,7 +7,7 @@ GsTestCase subclass: 'McpUtf8Test'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %

@@ -9,7 +9,7 @@ McpRouter subclass: 'McpAuthRouter'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %

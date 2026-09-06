@@ -7,7 +7,7 @@ Object subclass: 'McpJson'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %

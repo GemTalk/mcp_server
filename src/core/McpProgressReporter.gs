@@ -8,7 +8,7 @@ Object subclass: 'McpProgressReporter'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %

@@ -7,7 +7,7 @@ GsTestCase subclass: 'McpSessionTest'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %

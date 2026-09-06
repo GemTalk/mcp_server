@@ -327,16 +327,16 @@ JSON
 check "list_dictionaries includes UserGlobals" 'UserGlobals'             "$r"
 
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":23,"method":"tools/call","params":{"name":"list_classes","arguments":{"dictionaryName":"Published"}}}
+{"jsonrpc":"2.0","id":23,"method":"tools/call","params":{"name":"list_classes","arguments":{"dictionaryName":"Mcp"}}}
 JSON
 )
-check "list_classes(Published) has McpServer" 'McpServer'            "$r"
+check "list_classes(Mcp) has McpServer" 'McpServer'            "$r"
 
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":24,"method":"tools/call","params":{"name":"list_all_classes","arguments":{}}}
 JSON
 )
-check "list_all_classes tags dictionary"      'McpServer  (Published)' "$r"
+check "list_all_classes tags dictionary"      'McpServer  (Mcp)' "$r"
 
 # --- browsing ---
 r=$(post <<'JSON'
@@ -383,7 +383,7 @@ JSON
 check "find_references_to McpTool"           'McpToolRegistry'       "$r"
 
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":32,"method":"tools/call","params":{"name":"search_method_source","arguments":{"pattern":"writeSseStreamHeaders","dictionaryName":"Published"}}}
+{"jsonrpc":"2.0","id":32,"method":"tools/call","params":{"name":"search_method_source","arguments":{"pattern":"writeSseStreamHeaders","dictionaryName":"Mcp"}}}
 JSON
 )
 check "search_method_source finds usage"       'serveGetStream:'         "$r"

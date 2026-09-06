@@ -15,7 +15,7 @@ Object subclass: 'McpSession'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %

@@ -7,7 +7,7 @@ Object subclass: 'McpHttpConnection'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %

@@ -8,7 +8,7 @@ Object subclass: 'McpMockSocket'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %

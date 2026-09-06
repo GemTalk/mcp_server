@@ -10,7 +10,7 @@ McpBase subclass: 'McpServer'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %
@@ -440,12 +440,12 @@ toolsetClassNamed: aName
   "The McpToolset subclass named aName, resolved in THIS gem's symbol list. Raises naming both the
    toolset and where it has to live if it is missing or is not a toolset: a worker gem may log in as
    a different user than the front end (McpAuthRouter), so a toolset belongs in a dictionary in the
-   WORKER's symbol list -- Published, not the operator's UserGlobals."
+   WORKER's symbol list -- Mcp, not the operator's UserGlobals."
   | cls |
   cls := System myUserProfile objectNamed: aName asSymbol.
   (cls isKindOf: Behavior) ifFalse: [
     ^self error: 'Toolset not found: ' , aName asString
-      , '. It must be installed in a symbol dictionary in this gem''s symbol list (e.g. Published).'].
+      , '. It must be installed in a symbol dictionary in this gem''s symbol list (e.g. Mcp).'].
   (cls inheritsFrom: McpToolset) ifFalse: [
     ^self error: 'Not a toolset: ' , aName asString , ' is not a subclass of McpToolset.'].
   ^cls
@@ -819,7 +819,7 @@ method: McpServer
 protectedDictionaryNames
   "Names of the kernel/system symbol dictionaries that mutation tools must not touch: only Globals,
    which holds the base classes. Everything else is freely mutable -- UserGlobals (the DEFAULT home
-   for new user-created classes) and any application dictionary such as Published."
+   for new user-created classes) and any application dictionary such as Mcp or Published."
   ^#('Globals')
 %
 category: 'blind-write guardrail'

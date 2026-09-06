@@ -7,7 +7,7 @@ McpToolset subclass: 'McpBrowsingToolset'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %

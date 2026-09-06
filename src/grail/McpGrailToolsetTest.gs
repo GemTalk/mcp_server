@@ -7,7 +7,7 @@ GsTestCase subclass: 'McpGrailToolsetTest'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %

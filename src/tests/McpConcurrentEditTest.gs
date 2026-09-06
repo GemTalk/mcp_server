@@ -7,7 +7,7 @@ GsTestCase subclass: 'McpConcurrentEditTest'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %

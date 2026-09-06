@@ -1047,8 +1047,52 @@ means a human deliberately labeled that instance. A product that wants its own d
 
 > **Where your classes must live:** a worker gem may log in as a *different user* than the front end
 > (under `McpAuthRouter`, as the token's own GemStone user), so your toolsets and any worker subclass
-> must be in a symbol dictionary in the **worker's** symbol list — `Published`, not the operator's
-> `UserGlobals`.
+> must be in a symbol dictionary in the **worker's** symbol list — `Mcp` (or another shared
+> application dictionary), not the operator's `UserGlobals`. Note that a dictionary of your own is
+> not in a new user's default symbol list the way `Published` is; `install.sh` puts `Mcp` in every
+> `UserProfile`'s symbol list for exactly this reason.
+
+## The `Mcp` dictionary
+
+Every class in this repository is installed into a symbol dictionary named **`Mcp`** — its own, not
+`Published`, where these classes lived until 2026-09-06. `install.sh` creates it if it is absent and
+appends it to the symbol list.
+
+Two consequences are worth knowing about, because neither applies to `Published`:
+
+- **It is not in anybody's symbol list by default.** `Published` is standard: every `UserProfile` in
+  a stock image already has it, so classes filed into it are visible to every gem whoever it logs in
+  as. `Mcp` is ours, so `install.sh` adds it to the symbol list of **every** `UserProfile` in the
+  image (best effort — a profile it may not edit is reported, not fatal), and
+  `setup-oidc-users.sh` adds it to each JWT user it provisions. This matters because a worker gem
+  may log in as a *different user* than the front end, and it resolves its worker class and its
+  toolsets **by name** at runtime (`McpServer class>>toolsetClassNamed:`); a user without `Mcp` in
+  their symbol list gets `undefined symbol McpServer` from the worker bootstrap, or
+  `Toolset not found`, on every session. Any user provisioned **after** the install needs the same
+  one line —
+
+  ```smalltalk
+  up insertDictionary: (System myUserProfile objectNamed: #Mcp) at: up symbolList size + 1.
+  ```
+
+  which is exactly what the auth suites' own `withJwtUser:` fixtures do for the throwaway users they
+  create.
+
+- **An old binding elsewhere would silently win.** `Published` precedes `Mcp` in the symbol list, so
+  a leftover `Published.McpServer` from an earlier install would shadow the new class *at compile
+  time* — every method filed in afterwards would bind to the old class, and the install would look
+  clean while being wrong. `install.sh` therefore removes the exact names it is about to define from
+  every symbol-list dictionary other than `Mcp`, before filing anything in. Unbinding is the whole
+  of deleting a class here: `ClassOrganizer` is built from the symbol list, so an unbound class
+  stops being a subclass of its superclass for every purpose that matters — which is also all that
+  `delete_class` does. Any *other* key beginning with `Mcp` outside the dictionary is **reported and
+  left alone**: it may be a third party's toolset, which is not ours to delete.
+
+> **Why not name the dictionary `McpServer`?** A `SymbolDictionary`'s name is the key inside it whose
+> value is itself (`SymbolDictionary>>name` is `self keyAtValue: self`). Installing the class
+> `McpServer` into a dictionary named `McpServer` overwrites that self-reference, leaving the
+> dictionary nameless and `inDictionary: McpServer` resolving to the class. A dictionary cannot share
+> a name with a class it holds.
 
 ## Source layout
 
@@ -1083,7 +1127,7 @@ reads it, but it groups the classes in a browser the same way the directories gr
 > directions (`McpDispatcher` asks `McpServer` for its name; `McpServer` builds an `McpDispatcher`),
 > so no file order can put every class ahead of its first mention — the compiler would report
 > `undefined symbol` and the file-in would stop. So each loader first binds its class names to `nil`
-> in `Published`. That is enough, because the compiler binds a global by its **association**, and
+> in `Mcp`. That is enough, because the compiler binds a global by its **association**, and
 > each class definition then fills that same association in; a method compiled before its referent
 > still ends up pointing at the real class. Existing keys are left alone, so re-installing over a
 > loaded image changes nothing.
@@ -1095,8 +1139,9 @@ reads it, but it groups the classes in a browser the same way the directories gr
 > errors. The mechanism is not pinned down (topaz's own `removeallmethods` / `removeallclassmethods`
 > do clear the class when run on their own, and a plain `compileMethod:dictionaries:category:`
 > recompiles happily), so treat it as a property of Rowan-managed classes rather than of the
-> file-outs. Install into an image that never loaded the Rowan `Mcp` project, or remove the `Mcp*`
-> keys from `Published` and commit before running `install.sh`.
+> file-outs. Install into an image that never loaded the Rowan `Mcp` project. (An ordinary,
+> non-Rowan binding of these names in another dictionary is cleared by `install.sh` itself — see
+> *The `Mcp` dictionary* above.)
 
 To regenerate a file-out after changing a class in the image, have topaz write `fileOutClass`
 straight to its file — do not transcribe an `export_class_source` result, which drifts on trailing

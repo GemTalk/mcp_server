@@ -7,7 +7,7 @@ Object subclass: 'McpToolRegistry'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %

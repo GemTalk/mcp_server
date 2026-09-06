@@ -8,7 +8,7 @@ Object subclass: 'McpProgressChannel'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %
