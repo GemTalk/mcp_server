@@ -412,12 +412,20 @@ transactionNote
    That second line has two possible occupants and only ever one at a time. Where the view move was
    the SERVER's own doing, #viewRefreshedNote says so -- but only when #staleReadNote has nothing to
    report, because that line already says the view moved and says more besides. Naming one event
-   twice, in two lines, would be the worst of both."
-  | state stale |
+   twice, in two lines, would be the worst of both -- and the suppressed line is CONSUMED rather
+   than held over, so it cannot name the same event on a later result either."
+  | state stale refreshed |
   state := self transactionStateNote.
   "Order matters, and not only for reading: #staleReadNote CONSUMES the stale keys, so it has to be
    asked before #viewRefreshedNote can decide whether anything is left to add."
-  stale := self staleReadNote ifNil: [self viewRefreshedNote].
+  stale := self staleReadNote.
+  "BOTH are consumed on this result, whichever one is used: suppressed is not deferred. The general
+   note is armed by a flag rather than by a set that empties, so asking it only when the stale line
+   was silent left it armed -- and the client heard the same view move announced a second time on the
+   NEXT result, in words ending 'none of the reads this session tracks went stale', contradicting the
+   line it had just been given. Measured 2026-09-06."
+  refreshed := self viewRefreshedNote.
+  stale isNil ifTrue: [stale := refreshed].
   stale isNil ifTrue: [^state].
   state isNil ifTrue: [^stale].
   ^state , (String with: Character lf) , stale

@@ -177,6 +177,30 @@ tearDown
   other ifNotNil: [:s | [s close] on: Error do: [:e | nil]].
   other := nil
 %
+category: 'tests - server-initiated refresh'
+method: McpConcurrentEditTest
+testAClientWhoseWorkWasDoomedIsNotToldItsOwnCommitFailed
+  "Same jam, two causes, and the client must not be told the wrong one. It made no commit here -- the
+   SERVER moved its view -- so 'Your last commit FAILED' would send it looking for a commit it never
+   made. The doomed-subjects capture is what tells the two apart, so this is the client-facing half
+   of the test above: the note says who moved the view, names what collided, and says abort is the
+   only way out."
+  self fixtureClass.
+  self readAlpha.
+  self compileAlpha: '^#mine'.
+  self otherSessionCompiles: 'alpha' body: '^#theirs'.
+  self assert: self server refreshViewForFrontEnd equals: 'doomed'.
+  self assert: (self includes: 'The server refreshed your view' in: self transactionNote).
+  self assert: (self includes: 'CONFLICT' in: self transactionNote).
+  self assert: (self includes: 'McpCeFixture' in: self transactionNote).
+  self assert: (self includes: 'abort is the only way out' in: self transactionNote).
+  self deny: (self includes: 'Your last commit FAILED' in: self transactionNote)
+    description: 'a client the server doomed is being told to look for a commit it never made'.
+  "and it stops saying it once the client does what it was told"
+  self sessionTools tool_abort: Dictionary new.
+  self assert: self server frontEndDoomedSubjects isNil.
+  self deny: (self includes: 'The server refreshed your view -- it had fallen' in: (self transactionNote ifNil: ['']))
+%
 category: 'tests - re-validation'
 method: McpConcurrentEditTest
 testACommitDropsAReadTheOtherSessionChangedAndSaysSo
@@ -336,6 +360,58 @@ testARefreshLaundersAStaleReadAndTheGuardrailCatchesIt
   self assert: err notNil description: 'the guardrail allowed a write on a laundered read'.
   self assert: err kind equals: #blindWrite
 %
+category: 'tests - server-initiated refresh'
+method: McpConcurrentEditTest
+testAServerRefreshOfDoomedWorkSaysSoAndNamesWhatCollided
+  "The false answer from continueTransaction, reached the way the SERVER reaches it: the front end
+   sends McpServer class>>refreshViewForFrontEnd to a worker that has fallen too far behind, and that
+   worker has a pending write the other gem has since committed over. Only a real second gem produces
+   this, which is why it is pinned here and not in McpViewHygieneTest.
+
+   Three things at once, and the order among them is load-bearing: the verdict is the String 'doomed'
+   rather than a raise (its caller is a maintenance pass serving every other session), the colliding
+   subjects are captured BEFORE noteRefreshed: false clears the write ledger they are decoded
+   through, and the view moved anyway -- which is the entire reason the front end bothered, since a
+   doomed session releases its commit record exactly as a kept one does (docs/blind-write-guardrail.md, U)."
+  self fixtureClass.
+  self readAlpha.
+  self compileAlpha: '^#mine'.
+  self otherSessionCompiles: 'alpha' body: '^#theirs'.
+  self assert: self server refreshViewForFrontEnd equals: 'doomed'.
+  self assert: self server frontEndDoomedSubjects notNil.
+  "The SCOPE, not the method key: the stone reports a GsMethodDictionary, which means nothing to a
+   client, and #conflictingSubjects turns it back into the class name through the write ledger --
+   which is why the capture has to happen before noteRefreshed: false empties that ledger."
+  self assert: (self server frontEndDoomedSubjects includes: 'McpCeFixture')
+    description: 'the colliding subject was not captured before the write ledger was cleared'.
+  self assert: self server writeLedger isEmpty.
+  self assert: McpToolset commitConflictPending
+    description: 'a session doomed by the server''s own refresh is not being detected'.
+  "and the view really did move, which is the point of doing it at all"
+  self assert: self server ownCommitsBehind equals: 0
+%
+category: 'tests - server-initiated refresh'
+method: McpConcurrentEditTest
+testAStaleReadFoundByTheServersRefreshIsWhatTheClientHears
+  "The two server-initiated notes are mutually exclusive, and this is the case that decides which.
+   viewRefreshedNote exists for the SILENT refresh -- the one whose read ledger came through clean,
+   where nothing else would mention that the snapshot moved. Where the refresh found a stale read
+   there is something far more specific to say, and saying both would be the worst of both: the
+   general line would push the naming of the actual stale key down the result.
+   Needs a real second gem, since only a genuine commit over a genuine read produces a stale key."
+  | note |
+  self fixtureClass.
+  self readAlpha. self readBeta.
+  self otherSessionCompiles: 'alpha' body: '^#theirs'.
+  self assert: self server refreshViewForFrontEnd equals: 'kept'.
+  note := self transactionNote.
+  self assert: (self includes: 'stale' in: note).
+  self assert: (self includes: 'alpha' in: note).
+  self deny: (self includes: 'none of the reads this session tracks went stale' in: note)
+    description: 'the general refresh note fired alongside the stale-read line that supersedes it'.
+  "the general note was CONSUMED rather than merely skipped, so it cannot surface on a later result"
+  self deny: self server takeFrontEndRefreshedView
+%
 category: 'tests - re-validation'
 method: McpConcurrentEditTest
 testATrueRefreshKeepsThisSessionsPendingWrite
@@ -388,24 +464,6 @@ testAWriteAlreadyMadeCannotBeLaundered
     description: 'continueTransaction answered true -- a pending write was laundered'.
   self deny: System commitTransaction
 %
-category: 'tests - re-validation'
-method: McpConcurrentEditTest
-testTheStaleNoteArrivesWithTheAbortAndThenStops
-  "Seen from the client: the abort's own result names the read the move invalidated, in proportion
-   to the reads that survived, and the next result says nothing more about it."
-  | abortText next |
-  self fixtureClass.
-  self readAlpha. self readBeta.
-  self otherSessionCompiles: 'alpha' body: '^#theirs'.
-  abortText := self dispatchTool: 'abort'.
-  self assert: (self includes: 'Transaction aborted' in: abortText).
-  self assert: (self includes: '[session] The view moved: 1 of 2 earlier reads is stale' in: abortText)
-    description: abortText.
-  self assert: (self includes: 'McpCeFixture>>alpha' in: abortText).
-  self deny: (self includes: 'McpCeFixture>>beta' in: abortText).
-  next := self dispatchTool: 'status'.
-  self deny: (self includes: 'The view moved' in: next) description: next
-%
 category: 'tests'
 method: McpConcurrentEditTest
 testTheScenarioIsRefusedWhereItUsedToClobber
@@ -434,6 +492,24 @@ testTheScenarioIsRefusedWhereItUsedToClobber
   self assert: err notNil description: 'the beta change was accepted -- this is the clobber'.
   self assert: err kind equals: #blindWrite
 %
+category: 'tests - re-validation'
+method: McpConcurrentEditTest
+testTheStaleNoteArrivesWithTheAbortAndThenStops
+  "Seen from the client: the abort's own result names the read the move invalidated, in proportion
+   to the reads that survived, and the next result says nothing more about it."
+  | abortText next |
+  self fixtureClass.
+  self readAlpha. self readBeta.
+  self otherSessionCompiles: 'alpha' body: '^#theirs'.
+  abortText := self dispatchTool: 'abort'.
+  self assert: (self includes: 'Transaction aborted' in: abortText).
+  self assert: (self includes: '[session] The view moved: 1 of 2 earlier reads is stale' in: abortText)
+    description: abortText.
+  self assert: (self includes: 'McpCeFixture>>alpha' in: abortText).
+  self deny: (self includes: 'McpCeFixture>>beta' in: abortText).
+  next := self dispatchTool: 'status'.
+  self deny: (self includes: 'The view moved' in: next) description: next
+%
 category: 'tests'
 method: McpConcurrentEditTest
 testTheStoneAloneWouldAllowThatClobber
@@ -457,4 +533,10 @@ category: 'helpers'
 method: McpConcurrentEditTest
 toolsetOfClass: aToolsetClass
   ^self server toolsets detect: [:ts | ts class == aToolsetClass]
+%
+category: 'helpers'
+method: McpConcurrentEditTest
+transactionNote
+  "The [session] block the dispatcher would append to the next tool result, or nil."
+  ^(McpDispatcher withToolRegistry: self server toolRegistry server: self server) transactionNote
 %

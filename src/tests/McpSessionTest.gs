@@ -152,6 +152,57 @@ testADeadlineEndsARunawayCallAndLeavesTheSessionUsable
   w waitsBeforeDone: 1; nextResult: 'AFTER-TIMEOUT'.
   self assert: (sess forward: 'NEXT-REQUEST') equals: 'AFTER-TIMEOUT'
 %
+category: 'tests - maintenance'
+method: McpSessionTest
+testAMaintenanceSendCountsAsNoActivityAtAll
+  "The front end drives a worker for its OWN reasons -- a view refresh -- and that send must advance
+   nothing the reaping policy counts. #runWorker: ends with a #touch, which resets the whole idle
+   measure, so routing a maintenance send through it would be an immortality potion: a session whose
+   client had gone for good would be refreshed every pass and never released, by the server's own
+   housekeeping. The contrast at the end of this test is the point of it.
+   Also pins the expression sent, which is evaluated in another gem where a typo answers nil rather
+   than failing."
+  | sess w |
+  sess := McpMockSession startWithId: 'maintenance-is-not-activity'.
+  w := sess mockWorker.
+  w nextResult: 'kept'.
+  sess noteAlive; noteAlive; notePassWithStream: false.
+  self assert: sess quietProbes equals: 2.
+  self assert: sess streamlessPasses equals: 1.
+  self assert: (sess runMaintenanceExpression: 'McpServer refreshViewForFrontEnd') equals: 'kept'.
+  self assert: w expressions size equals: 1.
+  self assert: w expressions last equals: 'McpServer refreshViewForFrontEnd'.
+  self assert: sess quietProbes = 2 description: 'a maintenance send reset the idle count'.
+  self assert: sess streamlessPasses = 1 description: 'a maintenance send reset the streamless count'.
+  "What a CLIENT's call does to the same two counters, which is the difference being pinned."
+  w nextResult: 'DONE'.
+  self assert: (sess forward: 'REAL WORK') equals: 'DONE'.
+  self assert: sess quietProbes equals: 0.
+  self assert: sess streamlessPasses equals: 0
+%
+category: 'tests - maintenance'
+method: McpSessionTest
+testAMaintenanceSendGivesUpRatherThanQueueBehindAClientsCall
+  "#tryLock, not #critical:. The maintenance pass runs on the reaper's GsProcess and serves every
+   other session in the server from it; parking that process behind one client's tool call would
+   stall probes, reaps and hygiene for all of them for as long as the call lasts. So a busy worker is
+   not waited for: the send answers nil, nothing is sent to the gem, and the next pass tries again.
+   Testing #isBusy alone would not do this, since a call can start between the test and the send --
+   which is why the mutex is what is taken."
+  | sess w forked |
+  sess := McpMockSession startWithId: 'maintenance-yields'.
+  w := sess mockWorker.
+  w waitsBeforeDone: 5; waitMs: 20.        "a call takes ~100ms, long enough to overlap"
+  forked := Array new: 1.
+  [forked at: 1 put: (sess forward: 'REQUEST-A')] fork.
+  self assert: (self waitUpTo: 1000 for: [sess isBusy]).
+  self assert: (sess runMaintenanceExpression: 'McpServer refreshViewForFrontEnd') isNil.
+  self deny: w overlapDetected.
+  self assert: (self waitUpTo: 1000 for: [(forked at: 1) notNil]).
+  "the client's call is the only thing that reached the gem, and it answered its own caller"
+  self assert: w expressions size equals: 1.
+  self assert: (self includesCS: 'REQUEST-A' in: (forked at: 1))
+%
 category: 'tests - view release'
 method: McpSessionTest
 testAViewReleaseEndsTheCallAndKeepsTheSession
