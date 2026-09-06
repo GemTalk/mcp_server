@@ -1161,10 +1161,12 @@ maintainViewHygiene
    logs the ones over the line, and it moves nobody's view. The whole point is to find out what the
    real numbers look like -- and whether this server's user can read them at all -- before anything
    acts on them.
-   The two stone-wide figures are read ONCE per pass, not once per session: they are properties of
-   the repository, and asking per session would multiply the cost by the client count for an answer
-   that cannot differ. The session snapshot is taken under the mutex the same way
-   #probeIdleSessions does it, because a session may be reaped or registered while this runs.
+   THE GROUND IS ONE THING: how far behind this session's own view is. Nothing about the state of
+   the stone can put a worker over the line -- see the long note in the body for why a rule that let
+   it was measurably wrong. The stone figures are read for the log line, which is what the next
+   step's threshold will be tuned against.
+   The session snapshot is taken under the mutex the same way #probeIdleSessions does it, because a
+   session may be reaped or registered while this runs.
    A session with a call in flight is MEASURED but never acted on, here or later. The measurement is
    a stone query and cares nothing for the worker's GCI channel; the action would have to go through
    it, and moving a view out from under a running tool is the corruption the transaction model exists
@@ -1173,26 +1175,40 @@ maintainViewHygiene
   self hasViewHygiene ifFalse: [^0].
   limit := self commitsBehindLimit.
   limit isNil ifTrue: [^0].
+  "Read once per pass: properties of the repository, so asking per session would multiply the cost
+   by the client count for an answer that cannot differ. All three are for the LOG LINE -- none of
+   them is part of the decision; see below."
   backlog := self stoneCommitRecordBacklog.
   critical := self stoneBacklogCritical.
-  "Only needed to decide the pressure case, and only when there IS pressure."
-  oldest := critical ifTrue: [self sessionsHoldingOldestCr] ifFalse: [#()].
+  oldest := self sessionsHoldingOldestCr.
   acted := 0.
   (mutex critical: [sessions values asArray]) do: [:sess |
-    [ | behind holdsOldest |
+    [ | behind |
       behind := self commitsBehindFor: sess.
       behind ifNotNil: [ | changed |
         "Read BEFORE recording: whether this is news or a repeat is what decides the log line."
         changed := behind ~= sess commitsBehind.
         sess noteCommitsBehind: behind.
-        holdsOldest := oldest includes: sess workerStoneSession.
-        "Over the line by either route: this session is far enough behind on its own, OR the stone is
-         over its own backlog threshold AND this is a session holding the oldest record open. The
-         second is deliberately conjunctive. Measured on db-1, a stone can sit far above its
-         threshold for hours (backlog 726 against a threshold of 80) because ONE session pinned the
-         oldest record -- so treating pressure alone as a reason would act on every client every
-         pass, when only one of them is the reason. The same predicate governs the busy case."
-        (behind >= limit or: [critical and: [holdsOldest]]) ifTrue: [
+        "ONE GROUND, AND IT IS THIS SESSION'S OWN DISTANCE FROM THE CURRENT STATE. A worker whose
+         view is not far behind is never refreshed, whatever the state of the stone.
+         An earlier version had a second route -- the stone over its own StnCrBacklogThreshold AND
+         this session holding the oldest commit record -- and it was wrong twice over. First, the
+         inequality only runs one way: the backlog is at least the largest commits-behind figure
+         among the sessions, never the reverse, because the stone DEFERS disposing records nobody
+         references (which is the deferral StnCrBacklogThreshold exists to override). So a high
+         backlog is not evidence that anybody is behind. Second, measured on db-1 right after a
+         restart, EVERY session reports holding the oldest record -- they are all sitting on the same
+         current one -- so that flag is no discriminator at all until somebody has fallen behind.
+         Together those two make the second route fire hardest in exactly the state where refreshing
+         achieves nothing: a burst of commits has ended, every view is current, and the backlog
+         number has not caught up yet. It would have refreshed every worker in the server at once,
+         for a backlog none of their views was pinning.
+         Where the pressure signals do belong is the two decisions that are not 'would refreshing
+         help' but 'is this bad enough to justify something disruptive' -- ending a call a client is
+         waiting on, and reaping a session whose view cannot be moved at all. Both are still to come,
+         and both should take pressure as a conjunct with this ground rather than as an alternative
+         to it."
+        behind >= limit ifTrue: [
           acted := acted + 1.
           "Log a CHANGED number, not a standing one. This step acts on nothing, so a session over
            the line stays over it, and a line per session per pass is 1440 identical lines a day for
@@ -1206,7 +1222,9 @@ maintainViewHygiene
               , ' is ' , behind printString , ' commits behind (limit ' , limit printString
               , '), stone backlog ' , backlog printString , '/'
               , self stoneCrBacklogThreshold printString
-              , ', holds-oldest-cr ' , (holdsOldest ifTrue: ['yes'] ifFalse: ['no'])
+              , ', stone-critical ' , (critical ifTrue: ['yes'] ifFalse: ['no'])
+              , ', holds-oldest-cr ' , ((oldest includes: sess workerStoneSession)
+                  ifTrue: ['yes'] ifFalse: ['no'])
               , ', busy ' , (sess isBusy ifTrue: ['yes'] ifFalse: ['no'])
               , ' -- would refresh its view.']]]]
       on: Error

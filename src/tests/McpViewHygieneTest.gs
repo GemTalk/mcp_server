@@ -251,13 +251,20 @@ testASessionOverTheLimitIsCountedAndLogged
   r := McpFixtureRouter new.
   sess := self identifiedSessionOn: r.
   r maxCommitsBehind: 20.
-  r fakeCommitsBehind: 25; fakeBacklogCritical: false.
+  r fakeCommitsBehind: 25; fakeBacklogCritical: false;
+    fakeOldestCrSessions: (Array with: sess workerStoneSession).
   self assert: r maintainViewHygiene equals: 1.
   self assert: sess commitsBehind equals: 25.
   lines := self hygieneLinesIn: r.
   self assert: lines size equals: 1.
   self assert: ((lines first findString: '25 commits behind' startingAt: 1) > 0).
-  self assert: ((lines first findString: 'measuring only' startingAt: 1) > 0)
+  self assert: ((lines first findString: 'measuring only' startingAt: 1) > 0).
+  "The stone signals are no longer grounds, but they are still REPORTED -- they are what the next
+   step's threshold gets tuned against, and a line that omitted them would make the tuning guesswork.
+   holds-oldest-cr is read from an unconditional per-pass reading, so it tells the truth on a quiet
+   stone too; it used to be computed only under pressure and so printed 'no' regardless."
+  self assert: ((lines first findString: 'stone-critical no' startingAt: 1) > 0).
+  self assert: ((lines first findString: 'holds-oldest-cr yes' startingAt: 1) > 0)
 %
 category: 'tests - worker views'
 method: McpViewHygieneTest
@@ -283,22 +290,29 @@ testAStandingMeasurementIsLoggedOnceNotEveryPass
 %
 category: 'tests - worker views'
 method: McpViewHygieneTest
-testPressureAloneIsNotAReasonToMoveASessionsView
-  "The measured correction, and the reason this arm's trigger is conjunctive. A stone can sit far
-   above its own backlog threshold for hours because ONE session pinned the oldest commit record --
-   measured on db-1, a backlog of 726 against a threshold of 80 -- so reading pressure as a reason
-   on its own would move every client's view every pass when only one of them is the cause.
-   Same session, same pressure, and the only difference is whether it holds the oldest record."
+testNoStateOfTheStoneRefreshesAWorkerThatIsNotBehind
+  "The one ground is this session's own distance from the current state. A worker only three commits
+   behind is left alone under every combination of stone pressure and oldest-record holding there
+   is -- which is the whole point, because refreshing such a worker cannot shorten a backlog its
+   view is not pinning.
+   Both stone signals were rejected as grounds on evidence. The backlog is at least the largest
+   commits-behind figure among the sessions and never the reverse (the stone defers disposing
+   records nobody references), so a high backlog is not evidence anybody is behind; and measured on
+   db-1 just after a restart, EVERY session reported holding the oldest record, because they were
+   all on the same current one. A rule using them would have fired hardest in exactly the state
+   where refreshing achieves nothing."
   | r sess |
   r := McpFixtureRouter new.
   sess := self identifiedSessionOn: r.
   r maxCommitsBehind: 20.
-  r fakeCommitsBehind: 3; fakeBacklogCritical: true; fakeOldestCrSessions: #().
-  self assert: r maintainViewHygiene equals: 0.
+  r fakeCommitsBehind: 3.
+  #(false true) do: [:pressure |
+    { #() . (Array with: sess workerStoneSession) } do: [:holders |
+      r fakeBacklogCritical: pressure; fakeOldestCrSessions: holders.
+      self assert: r maintainViewHygiene equals: 0]].
   self assert: (self hygieneLinesIn: r) isEmpty.
-  "and now it is the one holding the record open. The reading has not changed, so the line is
-   suppressed as a repeat -- what is asserted is the DECISION, which is what this test is about."
-  r fakeOldestCrSessions: (Array with: sess workerStoneSession).
+  "and the ground itself still works, with the stone as quiet as it gets"
+  r fakeBacklogCritical: false; fakeOldestCrSessions: #(); fakeCommitsBehind: 20.
   self assert: r maintainViewHygiene equals: 1
 %
 category: 'tests - the refresh'
