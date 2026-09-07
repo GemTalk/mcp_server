@@ -1,6 +1,6 @@
 # The wire is UTF-8
 
-Why gs-mcp writes UTF-8 rather than \u-escaped ASCII, what that cost in code owned, and what the
+Why mcp_server writes UTF-8 rather than \u-escaped ASCII, what that cost in code owned, and what the
 change turned up about the front end that had nothing to do with escapes. Companion to
 [the kernel JSON Unicode report](../../docs/kernel-json-unicode.md), which measures the kernel
 defects this design routes around and the two it does not.
@@ -128,7 +128,7 @@ be seen.
 
 ## The accounting
 
-Code gs-mcp owns forever, excluding comments and excluding test suites [A]:
+Code mcp_server owns forever, excluding comments and excluding test suites [A]:
 
 | Component | Code | With comments |
 |---|---:|---:|
@@ -180,7 +180,7 @@ permanent maintenance surface.
 ## Why the writer encodes, and does not leave it to the socket
 
 The most GemStone-idiomatic reading of "use UTF-8" — work in characters, send `encodeAsUTF8` at the
-socket — would break gs-mcp.
+socket — would break mcp_server.
 
 `WriteStream on: String new` **widens** the moment a character above `0xFF` lands on it: to a
 `QuadByteString` on a stock image, and to a `Unicode32` where `#StringConfiguration` is `Unicode16`

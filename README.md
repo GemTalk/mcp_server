@@ -27,6 +27,24 @@ around: responses over 1024 bytes can come back corrupted (#51438, fixed in 3.7.
 `McpExternalSessionTest` fails there on purpose to say so — see the testing section. The 3.7.6 line
 is a separate matter: earlier releases have a bug connecting to an *external* OIDC IdP.
 
+## Other documentation
+
+This README is the reference for what the server is and how to run it. Alongside it:
+
+* [CHANGELOG.md](CHANGELOG.md) — what changed per release.
+* [docs/Development.md](docs/Development.md) — **start here to contribute**: environment, the
+  per-change loop, canonical file-outs, testing, branches and releases.
+* [docs/GemStone_Notes.md](docs/GemStone_Notes.md) — image and kernel behaviour that has cost this
+  project time, most of it invisible in the source. Its first section is the silent failures.
+* [docs/MCP_Client_Notes.md](docs/MCP_Client_Notes.md) — measured client behaviour, and where the
+  protocol revisions contradict each other.
+* [docs/blind-write-guardrail.md](docs/blind-write-guardrail.md),
+  [docs/session-lifetime.md](docs/session-lifetime.md), [docs/utf8-wire.md](docs/utf8-wire.md) —
+  deep dives on three subsystems.
+* [.claude/CLAUDE.md](.claude/CLAUDE.md) — the same process as `docs/Development.md`, condensed for
+  a coding agent with the traps attached. Machine-specific facts go in a gitignored
+  `.claude/CLAUDE.local.md` (template: `.claude/CLAUDE.local.md.example`).
+
 ## Install & run
 
 ```bash
@@ -588,8 +606,8 @@ Built on existing image facilities: `GsSocket` (TCP), `JsonParser parse:` (JSON 
 
 ### The wire is UTF-8, in both directions
 
-That is what RFC 8259 §8.1 says JSON on a wire is, and gs-mcp holds to it on both sides. It costs
-the kernel parser on the way in and a writer of gs-mcp's own on the way out. Why that trade was
+That is what RFC 8259 §8.1 says JSON on a wire is, and mcp_server holds to it on both sides. It costs
+the kernel parser on the way in and a writer of mcp_server's own on the way out. Why that trade was
 made, what it cost in code owned, and what the change turned up about the front end have their own
 document: **[docs/utf8-wire.md](docs/utf8-wire.md)**.
 
@@ -604,7 +622,7 @@ a `Unicode16`, which is what an accented body compiles to on any Grail image, do
 `decodeFromUTF8` at all. The *trailing* one narrows the `Unicode7`/`16`/`32` that `decodeFromUTF8`
 answers back into the byte/`DoubleByteString`/`QuadByteString` family, since a `Unicode7` compared
 to a `String` raises on a stock image rather than answering false. `combineSurrogateEscapesIn:` is
-the one repair gs-mcp makes to what the parser is handed — see below. A malformed sequence —
+the one repair mcp_server makes to what the parser is handed — see below. A malformed sequence —
 truncated, overlong, an encoded surrogate — refuses the whole body with a `-32700` naming the byte
 offset, rather than being repaired into stored text. Everything else about the kernel parser is
 kept, including the part it gets right that matters most here: a **raw** astral character decodes
@@ -1150,7 +1168,7 @@ whitespace:
 ```smalltalk
 | s f |
 s := McpServer fileOutClass.
-f := GsFile openWriteOnServer: '/path/to/gs-mcp/src/core/McpServer.gs'.  "no mode: argument"
+f := GsFile openWriteOnServer: '/path/to/mcp_server/src/core/McpServer.gs'.  "no mode: argument"
 f nextPutAll: s; close.
 ```
 
@@ -1189,7 +1207,7 @@ flag, so a missing suite is a skip and not an error:
 - `McpExternalSessionTest` — the one thing a mock cannot show: that a result fetched out of a **real**
   worker gem arrives with the bytes the worker sent. It drives a real `McpSession` through the same
   `runWorker:` the forwarding path uses, so it measures the path the server runs on, and it tests the
-  *image* rather than gs-mcp — a failure means the running GemStone carries kernel defect #51438, not
+  *image* rather than mcp_server — a failure means the running GemStone carries kernel defect #51438, not
   that `src/` is wrong. Needs a netldi; see the note below.
 - `McpTransactionTest` — the transaction model across tool calls, and the one state a session can
   get stuck in. It spawns a second worker gem to commit a **conflicting** change, which is the only
@@ -1297,7 +1315,7 @@ this session in the state a failed commit really produces, and `McpWorkerDeadlin
 which outruns the request deadline is really broken in a real one, and `McpConcurrentEditTest` that
 the blind-write guardrail holds against a real second session — so the runner asks for a netldi on
 any image where they are installed, which is every image, since all four are part of the base
-install. That is no new burden in practice: gs-mcp gives every
+install. That is no new burden in practice: mcp_server gives every
 client its own worker gem, so it cannot serve a single request without a netldi either.
 
 Those six also need **spare login slots**, which is the likeliest reason for a failure that is
@@ -1309,7 +1327,7 @@ logged in."* Stop the servers, or raise the limit, before reading such a failure
 > 3.7.4.1 carries kernel defect #51438: `GsTsExternalSession>>resolveResult:` refetches an object
 > only when its 1024-byte fetch buffer has to *grow*, so once one large result has enlarged the
 > buffer, every later result between 1025 bytes and that size arrives as 1024 good bytes followed by
-> the tail of an earlier result — right length, plausible bytes, no error raised. gs-mcp meets this
+> the tail of an earlier result — right length, plausible bytes, no error raised. mcp_server meets this
 > on its main path, since every MCP response is a String of JSON pulled out of a worker gem. Nothing
 > in `src/` can make those two tests pass; the fix is to run on 3.7.4.1 or later. The three that do
 > pass everywhere are controls that localise the failure — see the `McpExternalSessionTest` class

@@ -2,3 +2,9 @@
 *.out
 *.log
 certs/
+
+# Per-machine, per-developer
+.claude/CLAUDE.local.md
+.claude/settings.local.json
+.claude/worktrees/
+.DS_Store

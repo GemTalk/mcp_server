@@ -1,0 +1,65 @@
+# Local notes (template)
+
+Copy to `.claude/CLAUDE.local.md`, which is gitignored, and fill in for **this machine**. Claude
+reads it alongside `.claude/CLAUDE.md`; a human reading it gets the same orientation.
+
+Everything here is environment, not project knowledge. If a fact would be true for another
+contributor on another machine, it belongs in `.claude/CLAUDE.md` or `docs/` instead.
+
+Delete the prompts you do not need — an empty section is worse than an absent one.
+
+## Stones
+
+Which stone is which, and what is loaded in each. Worth recording because it is the thing most
+often assumed wrongly.
+
+| stone | version | netldi | extent / dir | Grail? | Rowan? | what it is for |
+|---|---|---|---|---|---|---|
+| | | | | | | |
+
+* Which one `.setenv` currently points at, and how to switch.
+* `StnMaxSessions` per stone, if it is low enough to matter. `run-unit-tests.sh` holds up to seven
+  logins concurrently, so a stone that also backs a running server can fail the forking suites for
+  reasons that have nothing to do with the code.
+* Any stone that needs native code turned off in its own `gem.conf`, or a non-default
+  `GEMSTONE_NRS_ALL` / `GEMSTONE_SYS_CONF`.
+* Any stone that is safe to break, and any that is not.
+
+## Running servers
+
+* Which ports are in use by a long-running server here, and how to stop and restart them.
+* Whether a client (Claude Code, VS Code, Inspector) is configured against one of them, and under
+  what name.
+* **Confirm which gem actually owns a port before diagnosing odd behaviour** — `ss -ltnp` /
+  `lsof -i`, then check the process's product version. A leftover router from another stone or
+  another GemStone version will answer instead, and it looks exactly like a bug in this code.
+
+## Test / remote hosts
+
+* Any VM or remote host used for versions this machine cannot run, how to reach it, and what is
+  installed there.
+* How code gets there (this repo's tracked files only, never the working tree wholesale).
+* Whether its clone's `origin` is the right remote.
+
+## Identity provider
+
+Only if you run one locally for the OAuth path.
+
+* URL, realm, and where its own configuration and notes live.
+* Which claim is configured as the user id (`MCP_USERID_CLAIM`) and which scope emits it.
+* Anything that has to be re-applied after a stone restart — a registered JWT key, for instance,
+  does not survive one.
+* Anything that has to be re-applied after a client re-registers itself.
+
+## Local paths
+
+* Product trees available on this machine, and their versions.
+* Where extents, logs and certs live.
+* Where this checkout is. Nothing in the repository should depend on that path; if something does,
+  it is a bug worth fixing rather than recording.
+
+## Machine quirks
+
+Things that are true of this computer and would confuse someone else — a shell version with its own
+gotchas, a browser that stops handling URL opens after long uptime, a timezone mismatch between
+logs, an editor that mangles something.
