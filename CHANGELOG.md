@@ -10,7 +10,7 @@ that made it. Development ran on several lines at once during that period (`dev`
 each carrying its own bumps, so attribution to a release is approximate before 0.7.0. The project is
 pre-release: breaking changes are expected and are called out rather than shimmed.
 
-## Unreleased
+## 0.7.0 — 2026-09-07
 
 * **The classes now install into their own symbol dictionary, `Mcp`**, not `Published`. Migration is
   automatic — `install.sh` creates `Mcp` and unbinds the names it is about to define from every
@@ -20,26 +20,6 @@ pre-release: breaking changes are expected and are called out rather than shimme
   the auth fixtures all add it; new provisioning code must too.
 * **Renamed the `GS_MCP_*` environment variables to `MCP_*`**, and the `gs_mcp_*` shell functions to
   `mcp_*`. Breaking for existing launch scripts.
-* **`run-unit-tests.sh` runs each suite in its own topaz session**, so one suite that blows up no
-  longer takes the whole report with it. A Grail `ModuleNotFoundError` reaches `defaultAction`,
-  which SUnit's `on: Error do:` does not catch, and it terminated the doit — printing a stack and no
-  tally, so 484 passing tests were reported as "UNIT TESTS DID NOT RUN". Such a suite is now
-  `ABORTED` and listed under `COULD NOT RUN`; the rest report, and the run still exits non-zero.
-  The runner also accepts **`MCP_GRAIL_DIR`** now, with the same meaning and the same up-front check
-  as `run-server.sh`, so `McpGrailToolsetTest` can find the Grail checkout its Python needs.
-* **View hygiene.** The front-end gem now runs `#transactionless` and refreshes its view at the
-  start of every maintenance pass, so it stops holding a commit record the stone cannot dispose of.
-  Worker views are measured against the repository and refreshed — keeping uncommitted work — when
-  one falls too far behind; a session whose view cannot be moved at all is released once the stone
-  is suffering for it; and a running call whose view pins the oldest commit record is ended, with
-  the client told why. Configured by `maxCommitsBehind` (`MCP_MAX_COMMITS_BEHIND`),
-  `pinnedViewGraceSeconds` and `stuckViewGraceSeconds`, all collected in one place — and `0` no
-  longer means its own opposite. `frontEndTransactionMode: 'autoBegin'` restores the old frozen-view
-  behaviour (`session-lifetime.sh` exposes it as `MCP_FRONT_END_TX_MODE`; `run-server.sh` does not).
-  Note that `maxCommitsBehind` bounds drift *between* calls only. See `McpViewHygieneTest` and the `McpRouter` class comment.
-
-## 0.7.0 — 2026-09-01
-
 * **Blind-write guardrail**: a write tool refuses a subject this session has not read, and the reads
   are re-checked at every view move, so a stale read cannot silently clobber another session's work.
   Checked against a real second session, not only against the rules. See
@@ -50,6 +30,23 @@ pre-release: breaking changes are expected and are called out rather than shimme
 * Cancellation: a call is stopped when its client says it no longer wants it.
 * Two suites stopped moving the caller's transaction; the ones that must now declare
   `movesTheSessionView` and are gated.
+* **View hygiene.** The front-end gem now runs `#transactionless` and refreshes its view at the
+  start of every maintenance pass, so it stops holding a commit record the stone cannot dispose of.
+  Worker views are measured against the repository and refreshed — keeping uncommitted work — when
+  one falls too far behind; a session whose view cannot be moved at all is released once the stone
+  is suffering for it; and a running call whose view pins the oldest commit record is ended, with
+  the client told why. Configured by `maxCommitsBehind` (`MCP_MAX_COMMITS_BEHIND`),
+  `pinnedViewGraceSeconds` and `stuckViewGraceSeconds`, all collected in one place — and `0` no
+  longer means its own opposite. `frontEndTransactionMode: 'autoBegin'` restores the old frozen-view
+  behaviour (`session-lifetime.sh` exposes it as `MCP_FRONT_END_TX_MODE`; `run-server.sh` does not).
+  Note that `maxCommitsBehind` bounds drift *between* calls only. See `McpViewHygieneTest` and the `McpRouter` class comment.
+* **`run-unit-tests.sh` runs each suite in its own topaz session**, so one suite that blows up no
+  longer takes the whole report with it. A Grail `ModuleNotFoundError` reaches `defaultAction`,
+  which SUnit's `on: Error do:` does not catch, and it terminated the doit — printing a stack and no
+  tally, so 484 passing tests were reported as "UNIT TESTS DID NOT RUN". Such a suite is now
+  `ABORTED` and listed under `COULD NOT RUN`; the rest report, and the run still exits non-zero.
+  The runner also accepts **`MCP_GRAIL_DIR`** now, with the same meaning and the same up-front check
+  as `run-server.sh`, so `McpGrailToolsetTest` can find the Grail checkout its Python needs.
 
 ## 0.6.1 — 2026-09-02
 
