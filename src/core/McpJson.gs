@@ -14,7 +14,7 @@ Object subclass: 'McpJson'
 expectvalue /Class
 doit
 McpJson comment: 
-'The JSON WRITER gs-mcp owns, replacing Object>>asJson on every production path. Class-side only;
+'The JSON WRITER mcp_server owns, replacing Object>>asJson on every production path. Class-side only;
 never instantiated. There is deliberately no parser here: kernel JsonParser is kept, and #parseBody:
 hands it a decoded character string (McpBase class>>parseBody:). Owning half the codec rather than
 all of it is the whole point of the UTF-8 design -- see WHY ONLY THE WRITER below.
@@ -42,7 +42,7 @@ path, and it is the only one an application cannot route around:
     body, which is a great deal less than a parser.
  3. An escape JsonParser does not recognize is silently dropped. Left in place: it needs a real
     parser to fix, it is a client-side bug when it happens, and it costs the client one wrong value
-    rather than corrupting anything gs-mcp stores.
+    rather than corrupting anything mcp_server stores.
 Everything the kernel parser does RIGHT is therefore kept, and measured: it decodes a raw astral
 character correctly (widening its accumulator to a QuadByteString), and it launders the Unicode
 family, so a decoded body comes back as String/DoubleByteString/QuadByteString and never as a
@@ -189,7 +189,7 @@ classmethod: McpJson
 writeFloat: aFloat on: aStream
   "Render a Float. Infinity and NaN have no JSON spelling -- GemStone prints them as PlusInfinity
    and the like, which no client can parse -- so they become null. A Float reaches this writer only
-   when a client puts one in a JSON-RPC id and the dispatcher echoes it back; nothing gs-mcp builds
+   when a client puts one in a JSON-RPC id and the dispatcher echoes it back; nothing mcp_server builds
    produces one. Float has no #isFinite here, hence the subtraction: x - x is 0.0 for every finite
    value and NaN for both infinities and NaN itself."
   ((aFloat - aFloat) = 0.0) ifFalse: [^aStream nextPutAll: 'null'].

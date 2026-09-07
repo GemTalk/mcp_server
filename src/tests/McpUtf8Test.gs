@@ -14,7 +14,7 @@ GsTestCase subclass: 'McpUtf8Test'
 expectvalue /Class
 doit
 McpUtf8Test comment: 
-'Unit tests for the INBOUND half of gs-mcp''s wire contract: the UTF-8 decode kernel JsonParser
+'Unit tests for the INBOUND half of mcp_server''s wire contract: the UTF-8 decode kernel JsonParser
 needs, and the surrogate-escape repair it needs alongside it, in McpBase class>>parseBody: --
 `JsonParser parse: (self combineSurrogateEscapesIn: aString asString decodeFromUTF8 asString)`.
 The outbound half -- the writer -- is McpJsonTest.
@@ -27,18 +27,18 @@ compile_method source arrived as two characters and was stored that way.
 Every send but #combineSurrogateEscapesIn: is stock kernel, so these tests pin a POLICY, not an
 algorithm: that the decode happens at all, and that a malformed sequence refuses the whole body
 rather than being repaired in.
-The second is a deliberate choice -- an earlier gs-mcp decoder substituted one U+FFFD per bad
+The second is a deliberate choice -- an earlier mcp_server decoder substituted one U+FFFD per bad
 sequence and kept the call. Refusing tells a client with a broken encoder that it is broken,
 instead of storing text nobody meant.
 
-WHAT THE KERNEL PARSER STILL GETS WRONG, and is deliberately not covered here, because gs-mcp does
+WHAT THE KERNEL PARSER STILL GETS WRONG, and is deliberately not covered here, because mcp_server does
 not work around it: an escape the parser does not recognize is silently dropped rather than refused,
 and trailing content, duplicate keys and raw control characters are all accepted. Those need a real
 parser to fix, they are measured in the kernel JSON Unicode report, and testing them here would only
 pin defects this code does not own.
 Note the two that are NO LONGER on that list, because both halves of the emoji problem are answered
 now. Outbound, an astral codepoint went out as one wrong escape -- the defect an application could
-not route around -- and gs-mcp answers it by writing UTF-8 instead of escapes (McpJson). Inbound, an
+not route around -- and mcp_server answers it by writing UTF-8 instead of escapes (McpJson). Inbound, an
 escaped surrogate pair failed the whole request, which is what Python''s json.dumps sends by
 default, and #combineSurrogateEscapesIn: repairs it before the parser can refuse it. So both client
 styles now round-trip an emoji, and testEscapedSurrogatePairIsCombined is the regression for the
@@ -108,7 +108,7 @@ category: 'tests-utf8'
 method: McpUtf8Test
 testAsciiBodyCostsNothingToDecode
   "There is no all-ASCII fast path and none is needed: #decodeFromUTF8 is a primitive (measured ~30x
-   faster over a 60KB body than the character loop gs-mcp used to run), and #asString answers the
+   faster over a 60KB body than the character loop mcp_server used to run), and #asString answers the
    RECEIVER ITSELF for a String, so an ASCII body is not copied a second time. That identity is the
    property, because it is what licenses sending both unconditionally."
   | body parsed |
@@ -231,7 +231,7 @@ testParsedKeysCompareWithStringLiterals
 category: 'tests-worker-hop'
 method: McpUtf8Test
 testWorkerDecodesABodyItRecompiled
-  "REGRESSION, and the only test in gs-mcp that crosses a real GCI hop with a non-ASCII body.
+  "REGRESSION, and the only test in mcp_server that crosses a real GCI hop with a non-ASCII body.
    McpSession>>forward: embeds the raw body in a Smalltalk expression via printString and the worker
    gem COMPILES that literal, so the string parseBody: sees there is not the byte String the socket
    read -- its class comes from the WORKER session''s #StringConfiguration. Configured for Unicode16

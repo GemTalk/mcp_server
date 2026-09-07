@@ -14,7 +14,7 @@ GsTestCase subclass: 'McpJsonTest'
 expectvalue /Class
 doit
 McpJsonTest comment: 
-'Unit tests for McpJson, the JSON WRITER gs-mcp owns. The inbound half of the wire contract -- the
+'Unit tests for McpJson, the JSON WRITER mcp_server owns. The inbound half of the wire contract -- the
 UTF-8 decode kernel JsonParser needs and the policy on a malformed sequence -- is McpUtf8Test.
 
 THE HEADLINE TEST is #testAstralCharacterSurvivesWhereTheKernelWriterCorruptsIt, which asserts
@@ -84,7 +84,7 @@ refuses: aBlock
 category: 'helpers'
 method: McpJsonTest
 reread: aWireString
-  "Parse aWireString back the way gs-mcp's own request path would, so a round-trip assertion
+  "Parse aWireString back the way mcp_server's own request path would, so a round-trip assertion
    exercises the real inbound pair rather than a convenience. This is also the claim that the wire
    is legal: whatever McpJson writes, McpBase class>>parseBody: -- kernel JsonParser behind a
    #decodeFromUTF8 -- must be able to read."
@@ -122,7 +122,7 @@ testAstralCharacterSurvivesWhereTheKernelWriterCorruptsIt
     equals: #(34 16rF0 16r9F 16r98 16r80 34).
   self assert: (self bytesOf: (McpJson write: astralNonChar))
     equals: #(34 16rF0 16r9D 16rA0 16r80 34).
-  "And it survives a full round trip through gs-mcp's own inbound path."
+  "And it survives a full round trip through mcp_server's own inbound path."
   self assert: (self codePointsOf:
     ((self reread: (McpJson write: (Dictionary new at: 'k' put: grin; yourself))) at: 'k'))
     equals: (Array with: 16r1F600)
@@ -236,7 +236,7 @@ testRefusesExcessiveNesting
 category: 'tests - structure'
 method: McpJsonTest
 testRendersEveryShapeAResponseCanHold
-  "Every value type gs-mcp puts in a response, plus the ones a client can put in a JSON-RPC id.
+  "Every value type mcp_server puts in a response, plus the ones a client can put in a JSON-RPC id.
    A SymbolDictionary is here on purpose: it is NOT a kind of Dictionary (it descends from
    AbstractDictionary by way of IdentityDictionary), so a dictionary test naming the concrete class
    would render it as an array of Associations."
@@ -265,7 +265,7 @@ method: McpJsonTest
 testRendersInfinityAndNaNAsNull
   "Neither has a JSON spelling, and GemStone prints them as PlusInfinity and the like, which no
    client can parse. A Float reaches this writer only when a client puts one in a JSON-RPC id and
-   the dispatcher echoes it back; nothing gs-mcp builds produces one."
+   the dispatcher echoes it back; nothing mcp_server builds produces one."
   self assert: (McpJson write: (1.0 / 0.0)) equals: 'null'.
   self assert: (McpJson write: (-1.0 / 0.0)) equals: 'null'.
   self assert: (McpJson write: (0.0 / 0.0)) equals: 'null'
@@ -273,7 +273,7 @@ testRendersInfinityAndNaNAsNull
 category: 'tests - round trip'
 method: McpJsonTest
 testRoundTripsThroughTheRealInboundPath
-  "What this writer emits, gs-mcp's own request path must be able to read -- which is both a
+  "What this writer emits, mcp_server's own request path must be able to read -- which is both a
    round-trip property and the claim that the wire is legal JSON, since the reader is kernel
    JsonParser behind a #decodeFromUTF8 and not a codec written to match.
    A full JSON-RPC envelope with text at all four sequence lengths in it, asserted on CODEPOINTS
@@ -325,7 +325,7 @@ method: McpJsonTest
 testUtf8IsSmallerOnTheWireThanEscaping
   "Not a correctness property, but a real one and cheap to pin: a \u escape costs 6 bytes for every
    non-ASCII character, where UTF-8 costs 2 for Latin-1, 3 for the rest of the BMP and 4 for astral.
-   That is a third to a half of the bytes for prose in a non-Latin script, and gs-mcp's largest
+   That is a third to a half of the bytes for prose in a non-Latin script, and mcp_server's largest
    responses are method source and error text.
    It also means the wire is readable in a packet capture or a log, which the escaped form is not."
   | text |

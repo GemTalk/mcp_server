@@ -19,9 +19,9 @@ TOPAZ="$GEMSTONE/bin/topaz"
 
 ALICE_TOK=$(~/idp/mint-token.sh alice)
 BOB_TOK=$(~/idp/mint-token.sh bob)
-printf '%s' "$ALICE_TOK" > /tmp/gs-mcp-alice.jwt
-printf '%s' "$BOB_TOK"   > /tmp/gs-mcp-bob.jwt
-trap 'rm -f /tmp/gs-mcp-alice.jwt /tmp/gs-mcp-bob.jwt' EXIT
+printf '%s' "$ALICE_TOK" > /tmp/mcp_server-alice.jwt
+printf '%s' "$BOB_TOK"   > /tmp/mcp_server-bob.jwt
+trap 'rm -f /tmp/mcp_server-alice.jwt /tmp/mcp_server-bob.jwt' EXIT
 
 echo "Verifying JWT logins against $GS_STONE ..."
 
@@ -43,13 +43,13 @@ try := [:userId :tok | | sess r |
   r].
 checks := OrderedCollection new.
 checks add: 'alice token -> login as alice (expect OK)      : ',
-  (try value: 'alice' value: (readTok value: '/tmp/gs-mcp-alice.jwt')).
+  (try value: 'alice' value: (readTok value: '/tmp/mcp_server-alice.jwt')).
 checks add: 'bob   token -> login as bob   (expect OK)      : ',
-  (try value: 'bob' value: (readTok value: '/tmp/gs-mcp-bob.jwt')).
+  (try value: 'bob' value: (readTok value: '/tmp/mcp_server-bob.jwt')).
 checks add: 'bob   token -> login as alice (expect REJECTED): ',
-  (try value: 'alice' value: (readTok value: '/tmp/gs-mcp-bob.jwt')).
+  (try value: 'alice' value: (readTok value: '/tmp/mcp_server-bob.jwt')).
 checks add: 'alice token -> login as bob   (expect REJECTED): ',
-  (try value: 'bob' value: (readTok value: '/tmp/gs-mcp-alice.jwt')).
+  (try value: 'bob' value: (readTok value: '/tmp/mcp_server-alice.jwt')).
 checks do: [:line | GsFile gciLogServer: line].
 %
 logout

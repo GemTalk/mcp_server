@@ -61,11 +61,11 @@
 #                           one, so the harness, which answers pings faithfully, is reaped on the
 #                           first one. The suspend question is only visible with no deadline in the
 #                           way; set one here to test the deadline itself, which needs no sleep.
-#   MCP_SLEEP_STATE       - where the run's state lives (default $TMPDIR/gs-mcp-sleep-test)
+#   MCP_SLEEP_STATE       - where the run's state lives (default $TMPDIR/mcp_server-sleep-test)
 set -uo pipefail
 cd "$(dirname "$0")"
 
-STATE="${MCP_SLEEP_STATE:-${TMPDIR:-/tmp}/gs-mcp-sleep-test}"
+STATE="${MCP_SLEEP_STATE:-${TMPDIR:-/tmp}/mcp_server-sleep-test}"
 PORT="${MCP_PORT:-8020}"
 URL="http://127.0.0.1:$PORT/mcp"
 IDLE="${MCP_IDLE_TIMEOUT:-none}"
@@ -127,7 +127,7 @@ arm() {
     red "Run ./sleep-test.sh clean if it is a previous run, or set MCP_PORT to a free port."; exit 1
   fi
 
-  echo "=== gs-mcp suspend test: arming ==="
+  echo "=== mcp_server suspend test: arming ==="
   echo "Stone=$GS_STONE  Port=$PORT  idle timeout=$IDLE"
   echo
 
@@ -346,7 +346,7 @@ check() {
   now=$(date +%s); elapsed=$((now - ARMED_AT))
   gemlog="${GEMLOG:-}"; [ -f "$gemlog" ] || gemlog="$(find_gem_log || true)"
 
-  echo "=== gs-mcp suspend test: results ==="
+  echo "=== mcp_server suspend test: results ==="
   echo "Armed ${ARMED_AT_HUMAN:-?}, $((elapsed / 60))m$((elapsed % 60))s ago.  Session $SID, idle timeout $IDLE."
   echo
 

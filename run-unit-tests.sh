@@ -14,7 +14,7 @@
 #   McpExternalSessionTest  drives a real worker gem to check that a result comes back with the
 #                           bytes the worker sent. It fails on any image before 3.7.4.1, which
 #                           carries kernel defect #51438 -- that failure is the suite working, not
-#                           a regression in gs-mcp. See its class comment.
+#                           a regression in mcp_server. See its class comment.
 #   McpTransactionTest      spawns a worker gem to commit a CONFLICTING change, which is the only
 #                           way to reach the state a failed commit leaves a session in. Nothing
 #                           short of a real second session can produce it.
@@ -48,7 +48,7 @@ GS_PASS="${GS_PASS:-swordfish}"
 # through a suite run.
 #
 # In practice the first four are always there, so a netldi is in practice always required.
-# That is not a new burden: gs-mcp gives every client its own worker gem, so it cannot serve a
+# That is not a new burden: mcp_server gives every client its own worker gem, so it cannot serve a
 # single request without a netldi. What changed is that the test run now says so plainly instead of
 # passing on an image the server could not actually run on.
 mcp_require_netldi_if_forking_suite_installed() {

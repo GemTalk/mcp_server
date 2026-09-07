@@ -181,7 +181,7 @@ check "get_method_source McpRouter>>stop"   'isRunning := false'       "$r"
 
 # --- compile_method round-trip on a throwaway class, then clean up ---
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"| c | c := (System myUserProfile objectNamed: #McpSmokeClass) ifNil: [Object subclass: 'McpSmokeClass' instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()]. c comment: 'Artifact of an aborted Mcp server test (gs-mcp/test.sh). Safe to remove.'. System commitTransaction. 'ready'"}}}
+{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"| c | c := (System myUserProfile objectNamed: #McpSmokeClass) ifNil: [Object subclass: 'McpSmokeClass' instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()]. c comment: 'Artifact of an aborted Mcp server test (mcp_server/test.sh). Safe to remove.'. System commitTransaction. 'ready'"}}}
 JSON
 )
 check "create throwaway test class"           'ready'                    "$r"

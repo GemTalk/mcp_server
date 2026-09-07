@@ -48,7 +48,7 @@ combineSurrogateEscapesIn: aString
   "Answer aString with each SURROGATE PAIR ESCAPE replaced by the one character it denotes, and the
    RECEIVER ITSELF when there is none -- which is every request from every client that sends
    non-ASCII raw rather than escaped, and so very nearly all of them.
-   THE DEFECT THIS ANSWERS is inbound, and the one kernel JSON defect gs-mcp still meets in the
+   THE DEFECT THIS ANSWERS is inbound, and the one kernel JSON defect mcp_server still meets in the
    wild. RFC 8259 7 gives JSON exactly one way to escape a character above U+FFFF: the UTF-16
    surrogate pair. JsonParser>>string sends `Character codePoint:` to each \uXXXX escape
    separately, with no test for the surrogate range and no lookahead for the second half, and
@@ -59,7 +59,7 @@ combineSurrogateEscapesIn: aString
    WHO SENDS THIS. Any encoder that escapes rather than emitting raw UTF-8 -- notably Python's
    json.dumps, where ensure_ascii=True is the DEFAULT. Such a client cannot put an emoji anywhere
    in a request.
-   FORTY LINES, NOT A PARSER. This is the whole reason gs-mcp can own a writer and still keep
+   FORTY LINES, NOT A PARSER. This is the whole reason mcp_server can own a writer and still keep
    kernel JsonParser: the inbound defect is repairable BEFORE the parse, because the information is
    still there in the escapes. The outbound one is not (McpJson's class comment, and section 7 of
    the kernel JSON Unicode report) -- by the time asJson has answered, the codepoint is gone. So
@@ -149,7 +149,7 @@ parseBody: aString
    request is always an object, so nil here -> a -32700 Parse error.
    aString is WIRE BYTES by origin. By CLASS it is whatever the caller''s image made of those bytes,
    which is not always a byte String -- see THE WORKER RECOMPILES THE BODY below. The four sends
-   around the parse are the whole of gs-mcp''s INBOUND Unicode handling. The outbound half is
+   around the parse are the whole of mcp_server''s INBOUND Unicode handling. The outbound half is
    McpJson.
    The LEADING #asString, because #decodeFromUTF8 is implemented on String and on Unicode7 and on
    nothing else -- not on Unicode16, not on DoubleByteString. Sent to a Unicode16 body it is a bare
@@ -160,7 +160,7 @@ parseBody: aString
    whenever the socket''s bytes reach us unchanged.
    It is exact for a body that came off a socket, and no wider than that: every codepoint in such a
    body is below 256 whatever the bytes go on to mean, so the narrowing always lands on String. A
-   genuinely wide string would narrow to DoubleByteString and raise the same MNU -- gs-mcp never
+   genuinely wide string would narrow to DoubleByteString and raise the same MNU -- mcp_server never
    hands one here, and a decoder rather than a narrowing send would be the answer if it ever did.
    #decodeFromUTF8, because JSON is UTF-8 on the wire (RFC 8259 8.1) while JsonParser takes a
    CHARACTER string, with nothing in its API to say which of the two it wants. Without the decode
@@ -187,7 +187,7 @@ parseBody: aString
    decoder: #StringConfiguration drives BOTH halves of it. Set to Unicode16, it makes strings widen
    to Unicode16 AND has GsCurrentSession>>initialize install unicode-aware #= for String and the
    Unicode classes alike -- so the hostile pairing, Unicode strings plus a comparison that raises,
-   cannot arise in a session. gs-mcp does not depend on that either way.
+   cannot arise in a session. mcp_server does not depend on that either way.
    A MALFORMED SEQUENCE REFUSES THE WHOLE BODY. #decodeFromUTF8 raises on a truncated sequence, a
    bad continuation byte, an overlong encoding (16rC0 16rAF is the classic smuggled ''/'') or an
    encoded surrogate, naming the byte offset, and the catch-all below turns that into the -32700.

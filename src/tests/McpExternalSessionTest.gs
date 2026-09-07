@@ -16,7 +16,7 @@ doit
 McpExternalSessionTest comment: 
 'Checks that a result fetched out of a worker gem arrives with the bytes the worker actually sent.
 
-This suite tests the IMAGE, not gs-mcp. A failure here means the running GemStone carries kernel
+This suite tests the IMAGE, not mcp_server. A failure here means the running GemStone carries kernel
 defect #51438 in GsTsExternalSession>>resolveResult:, fixed in 3.7.4.1. Nothing in src/ can be
 edited to make it pass; the answer is to run on 3.7.4.1 or later.
 
@@ -27,7 +27,7 @@ later result between 1025 bytes and that size skips the refetch and is read out 
 buffer: the first 1024 bytes are this result''s, the rest is the tail of an earlier one. The
 length comes from freshly fetched object info, so it is always right.
 
-WHY IT MATTERS HERE. gs-mcp meets this on its main path, not in a corner: every MCP response is a
+WHY IT MATTERS HERE. mcp_server meets this on its main path, not in a corner: every MCP response is a
 String of JSON pulled out of a worker gem by exactly this mechanism, and responses over 1024 bytes
 are ordinary (a tools/list or a class listing is tens of KB). The damage is silent -- right length,
 plausible bytes -- and surfaces as JSON that fails to parse somewhere in the middle, which reads
@@ -96,7 +96,7 @@ defectExplanation
     , ' stale buffer. The length is taken from fresh object info, so it is always right and nothing'
     , ' announces the damage.' , lf
     , 'Fixed in 3.7.4.1; this image is older. Every MCP response over 1024 bytes is at risk on it,'
-    , ' so the server cannot be trusted here without a workaround. gs-mcp is not at fault and no'
+    , ' so the server cannot be trusted here without a workaround. mcp_server is not at fault and no'
     , ' change to src/ can make this pass.'
 %
 category: 'helpers'

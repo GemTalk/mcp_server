@@ -567,7 +567,7 @@ handleJsonString: aRawJsonString lifetimeBounds: anArrayOrNil
    belongs to THIS call and to no call nested inside it. Both halves of that were learned the hard
    way, end to end, and neither shows up in a unit test of one call.
    This method NESTS: a tool that runs a test suite can run tests which themselves send
-   handleJsonString:, and gs-mcp''s own suites do exactly that. The first version cleared the reporter
+   handleJsonString:, and mcp_server''s own suites do exactly that. The first version cleared the reporter
    on the way out, so the first nested call wiped the reporter its CALLER was still reporting
    through and every later tick vanished. Saving and restoring fixed that and revealed the other
    half: the nested call then reported ITS progress on the outer call''s stream -- observed as a
@@ -578,7 +578,7 @@ handleJsonString: aRawJsonString lifetimeBounds: anArrayOrNil
    which is right: nobody asked to be told about it.
    What this does NOT catch, because nothing at this level can, is code that calls a TOOLSET METHOD
    directly rather than sending a request -- no request, no depth to count. Such a call reports on
-   its caller''s stream, with its own numbers. gs-mcp''s own McpToolTest does this, which is how it
+   its caller''s stream, with its own numbers. mcp_server''s own McpToolTest does this, which is how it
    was found; a deployment''s tools would have to go out of their way to.
    Restored on the way OUT, never cleared on the way in at depth 1: the front end''s expression
    installs the reporter first and calls this second, so clearing on entry would throw away the thing

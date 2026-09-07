@@ -91,7 +91,7 @@ category: 'tests - reporter'
 method: McpProgressTest
 testANestedCallDoesNotDestroyTheOuterReporter
   "The bug this pathway actually had, and the one only an end-to-end run found. A tool that runs a
-   test suite can run tests which themselves send handleJsonString: -- gs-mcp's own suites do -- and
+   test suite can run tests which themselves send handleJsonString: -- mcp_server's own suites do -- and
    while that call CLEARED the progress reporter on its way out, the first nested one wiped the
    reporter its caller was still reporting through. Every later tick vanished, silently, because a
    tick with nowhere to go is indistinguishable from a tool that reports nothing.
