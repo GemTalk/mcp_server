@@ -7,7 +7,7 @@ GsTestCase subclass: 'McpAuthTest'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %
@@ -27,6 +27,15 @@ McpAuthTest category: 'Mcp-Auth-Tests'
 removeallmethods McpAuthTest
 removeallclassmethods McpAuthTest
 ! ------------------- Class methods for McpAuthTest
+category: 'session view'
+classmethod: McpAuthTest
+movesTheSessionView
+  "Why this suite cannot be run from a session that has uncommitted work. See
+   McpTestingToolset class>>sessionViewRefusalFor:, which is what asks.
+   The commit is not incidental: a worker gem logs in as the fixture UserProfile, and one session
+   cannot see another's uncommitted AllUsers entry."
+  ^'it commits a throwaway JWT UserProfile so a real worker gem can log in as it, and a commit takes the whole session with it'
+%
 ! ------------------- Instance methods for McpAuthTest
 category: 'helpers'
 method: McpAuthTest
@@ -660,6 +669,13 @@ withJwtUser: aUserId scope: aScopeStringOrNil do: aOneArgBlock
   jwtSec userIdKey: #sub; addUserId: aUserId; addIssuer: #*; addAudience: #*.
   up := AllUsers addNewUserWithId: aUserId password: 'swordfishXYZ'.
   up enableJwtAuthenticationWith: jwtSec.
+  "A worker gem logs in as THIS user and resolves its worker class and its toolsets BY NAME, so the
+   Mcp dictionary has to be in its symbol list. A brand-new UserProfile gets the DEFAULT list
+   (UserGlobals, Globals, Published), which does not have it -- Published is standard and Mcp is
+   ours. install.sh does this for the users that exist when it runs; this is the same step for a
+   user created afterwards, and setup-oidc-users.sh does it for a provisioned JWT user. Without it
+   every initialize here fails with 'undefined symbol McpServer' from the worker bootstrap."
+  up insertDictionary: (System myUserProfile objectNamed: #Mcp) at: up symbolList size + 1.
   System commitTransaction.
   "Clear the key first, exactly as the user above is cleared first and for the same reason: the key
    register is STONE-wide runtime state, so a run that was interrupted between #addJwtKey: and the

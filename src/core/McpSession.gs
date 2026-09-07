@@ -5,15 +5,17 @@ doit
 Object subclass: 'McpSession'
   instVarNames: #( id worker workerMutex
                     lastActivitySeconds userId readOnly workerClassName
-                    toolsetNames serverName serverTitle serverVersion
-                    workerPid workerStoneSession outbox startedAtSeconds
-                    expiresAtSeconds quietProbes unansweredProbes streamlessPasses
-                    passesSinceProbe streamClosedByClient requestTimeoutSeconds workerAbandoned
-                    inFlightRequestId cancelRequested)
+                    toolsetNames toolsetOptions serverName serverTitle
+                    serverVersion workerPid workerStoneSession outbox
+                    startedAtSeconds expiresAtSeconds quietProbes unansweredProbes
+                    streamlessPasses passesSinceProbe streamClosedByClient requestTimeoutSeconds
+                    workerAbandoned inFlightRequestId cancelRequested waitAction
+                    commitsBehind maintenanceCallTimeoutSeconds stuckViewPasses stuckViewReason
+                    pinnedViewPasses viewReleaseRequested)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %
@@ -61,6 +63,31 @@ McpSession category: 'Mcp-Core'
 removeallmethods McpSession
 removeallclassmethods McpSession
 ! ------------------- Class methods for McpSession
+category: 'ended calls'
+classmethod: McpSession
+endedCallKinds
+  "Every reason this server ends a call in flight (McpSession>>endCallBecause:).
+     #timeout      it outran this session's request deadline
+     #cancelled    the client said it no longer wants it
+     #maintenance  the front end's own send into the worker did not answer in time
+     #viewRelease  its view was pinning the repository's oldest commit record under real pressure
+   #maintenance cannot reach a client -- a maintenance send only happens when no client call is in
+   flight -- and is named here anyway, because a list that is the definition of a category should not
+   omit a member on the grounds that one caller cannot see it."
+  ^#( #timeout #cancelled #maintenance #viewRelease )
+%
+category: 'ended calls'
+classmethod: McpSession
+isEndedCallKind: aSymbolOrNil
+  "Whether an McpError of this kind means THIS SERVER ended a call that was in flight, rather than
+   the worker failing at whatever it was doing.
+   Asked rather than enumerated at each catch site, because the answer decides whether the client is
+   owed an explanation of an ending it did not ask for -- and the list has grown three times.
+   Enumerating it at the catch sites meant a new reason silently became a 500 with no message: added
+   after a live run in which a call ended for #viewRelease reached its client as a bare JSON-RPC
+   -32603 Internal error, with the reason the server had just written to its own log nowhere in it."
+  ^self endedCallKinds includes: aSymbolOrNil
+%
 category: 'instance creation'
 classmethod: McpSession
 new
@@ -104,8 +131,8 @@ abandonWorker
    would queue behind it forever.
    Marking rather than unregistering is deliberate. The id -> session map belongs to the router, and
    a session that removed itself from it would have to reach around the mutex that guards it; the
-   router unmaps it when it answers the client (McpRouter>>writeTimeoutError:forSession:id:on:), and
-   the client's next request then gets the 404 that tells it to initialize again."
+   router unmaps it as it answers the client (McpRouter>>releaseSessionIfAbandoned:), and the
+   client's next request then gets the 404 that tells it to initialize again."
   workerAbandoned := true.
   self stopWorkerGem.
   ^self
@@ -135,14 +162,27 @@ awaitWorkerResult
    long a call may take: the wait answers the moment the worker does, because it is waiting on the
    session's socket. So a call ends within one wait of the deadline or the cancel rather than exactly
    at it -- and the price of that second is keeping both checks somewhere a reader can find them."
-  | deadline |
-  deadline := self callDeadline.
+  ^self awaitWorkerResultUntil: self callDeadline because: #timeout
+%
+category: 'worker'
+method: McpSession
+awaitWorkerResultUntil: aDeadlineOrNil because: aReasonSymbol
+  "As #awaitWorkerResult, for a caller that supplies its own deadline and its own name for what
+   outrunning it means. Split out so the FRONT END's maintenance sends are bounded separately from a
+   client's requests: #requestTimeoutSeconds is legitimately nil on a router used to run test suites
+   that take hours -- a client-initiated interrupt covers stopping one -- and a hygiene send that
+   inherited that would wait for ever.
+   The deadline is passed in rather than read from config a second time, so the two clocks cannot be
+   mistaken for one another and a reader can see which one bounds a given call."
   [worker isCallInProgress] whileTrue: [
     worker waitForResultForSeconds: self workerWaitSeconds otherwise: [nil].
+    self runWaitAction.
     (worker isCallInProgress and: [cancelRequested == true])
       ifTrue: [^self endCallBecause: #cancelled].
-    (worker isCallInProgress and: [deadline notNil and: [System timeGmt >= deadline]])
-      ifTrue: [^self endCallBecause: #timeout]].
+    (worker isCallInProgress and: [viewReleaseRequested == true])
+      ifTrue: [^self endCallBecause: #viewRelease].
+    (worker isCallInProgress and: [aDeadlineOrNil notNil and: [System timeGmt >= aDeadlineOrNil]])
+      ifTrue: [^self endCallBecause: aReasonSymbol]].
   ^self
 %
 category: 'private'
@@ -213,13 +253,28 @@ close
   [worker logout] on: Error do: [:e | nil].
   ^self
 %
+category: 'view hygiene'
+method: McpSession
+commitsBehind
+  "How many commits the repository had taken since this session's worker gem obtained its view, as
+   of the last maintenance pass that could read it -- or nil if it has never been read (no pass yet,
+   or the server's user lacks SessionAccess).
+   A REMEMBERED number, not a live one. Nothing here asks the worker or the stone; the front end
+   measures once per pass (McpRouter>>commitsBehindFor:) and hands the answer over, so the figure
+   quoted in a log line or a client-facing note is the one the decision was made on rather than a
+   second reading that may have moved since."
+  ^commitsBehind
+%
 category: 'private'
 method: McpSession
 endCallBecause: aReasonSymbol
   "End the in-flight call and raise so the client is told, for the reason named: #timeout where it
-   outran this session's deadline, #cancelled where the client said it no longer wants it. The
-   escalation is IDENTICAL for both, and that is the point -- what differs is only who decided, so a
-   cancellation needed no new mechanism, only a new trigger.
+   outran this session's deadline, #cancelled where the client said it no longer wants it,
+   #maintenance where the front end's own send into the worker did not answer in time, #viewRelease
+   where the call's view was pinning the repository's oldest commit record under real pressure. The
+   escalation is IDENTICAL for all four, and that is the point -- what differs is only who decided,
+   so none of the three later triggers needed a new mechanism, only a new reason to pull the same
+   one.
    Escalates, because the measures differ in what they cost. A SOFT break ends an ordinary runaway:
    it is taken by a Smalltalk loop between sends and by a blocked #wait alike (both verified on
    3.7.5), and the worker is fully usable straight afterwards -- so the client loses its request and
@@ -236,6 +291,27 @@ endCallBecause: aReasonSymbol
   (self breakWorker: [worker hardBreak]) ifTrue: [^self signalCallEnded: aReasonSymbol].
   self abandonWorker.
   ^self signalCallEnded: aReasonSymbol
+%
+category: 'private'
+method: McpSession
+endingPhraseFor: aReasonSymbol
+  "The opening sentence of the error for a call this session ended, naming which ending it was.
+   #maintenance is not a client's request at all: it is the front end's own send into the worker (a
+   view refresh), so nobody is waiting for an answer and the phrase exists for the gem log. It is
+   still raised through the same path, because the escalation needed to get a call out of a gem does
+   not depend on who asked for it."
+  aReasonSymbol == #cancelled ifTrue: [
+    ^'The client cancelled this request, and it was ended. '].
+  aReasonSymbol == #maintenance ifTrue: [
+    ^'This server''s own maintenance call into the worker gem did not finish within '
+      , self maintenanceCallTimeoutSeconds printString , ' seconds and was ended. '].
+  aReasonSymbol == #viewRelease ifTrue: [
+    ^'This request was ended because its database view was holding the repository''s oldest commit '
+      , 'record open while the repository was over its commit-record backlog threshold, and no other '
+      , 'session could release it. This is not a limit on how long a request may run: a long call on '
+      , 'a quiet repository is never ended. Re-run the work. '].
+  ^'The request exceeded this server''s ' , requestTimeoutSeconds printString
+    , '-second request limit and was ended. '
 %
 category: 'liveness'
 method: McpSession
@@ -261,27 +337,66 @@ expiresAtSeconds: aSecondOrNil
 category: 'routing'
 method: McpSession
 forward: aRawJsonString
+  "Forward with no lifetime bounds -- the direct form, kept for callers with no router policy to
+   report (the tests, and any embedder driving a session itself)."
+  ^self forward: aRawJsonString lifetimeBounds: nil
+%
+category: 'requests'
+method: McpSession
+forward: aRawJsonString lifetimeBounds: anArrayOrNil
   "Forward without naming the request -- the direct form, for callers with no id to match a
    cancellation against (the tests, and any embedder driving a session itself)."
-  ^self forward: aRawJsonString requestId: nil
+  ^self forward: aRawJsonString lifetimeBounds: anArrayOrNil requestId: nil
 %
 category: 'routing'
 method: McpSession
-forward: aRawJsonString requestId: anIdOrNil
+forward: aRawJsonString lifetimeBounds: anArrayOrNil requestId: anIdOrNil
+  "Forward without progress -- the shape every non-streamed call takes."
+  ^self forward: aRawJsonString lifetimeBounds: anArrayOrNil requestId: anIdOrNil
+      progressCallId: nil whileWaiting: nil
+%
+category: 'routing'
+method: McpSession
+forward: aRawJsonString lifetimeBounds: anArrayOrNil requestId: anIdOrNil progressCallId: aCallIdOrNil whileWaiting: aBlockOrNil
   "Run a JSON-RPC request in this client's worker gem (an isolated session) and answer the JSON
    response string ('' for a notification). Runs WITHOUT stalling the front-end gem -- see
    #runWorker:, which is what keeps one client's long tool call from freezing every other GsProcess
    in the front end. The request is embedded via printString for safe quoting.
+
+   anArrayOrNil is what the ROUTER says bounds this session (McpRouter>>lifetimeBoundsFor:),
+   carried in on the request rather than asked for by the worker, which cannot see the front end's
+   configuration and must not hold a stale copy of it. Values rather than a sentence, because the
+   deadline in it is an instant the worker counts down from when it ANSWERS -- see that method. The
+   worker uses them only when it has uncommitted work to warn about.
+
    anIdOrNil is the JSON-RPC id this request arrived with, remembered for exactly as long as the call
    runs so that a notifications/cancelled naming it can be matched to it (#requestCancel:). Cleared
    in an ensure: along with any cancellation that arrived: a flag outliving its call would end the
    NEXT one, which is the whole hazard in letting another GsProcess set it. Cleared on the way IN as
-   well, since a cancel can arrive in the instant between a call finishing and this clearing it."
+   well, since a cancel can arrive in the instant between a call finishing and this clearing it.
+   The view-release flag (#requestViewRelease) is set by the reaper rather than by a client, and is
+   cleared at both ends for the same reason. Its pass count goes with it: the count is about THIS
+   call holding the repository's oldest commit record, so it means nothing once the call is over.
+
+   aCallIdOrNil names this call to the WORKER, so a tool's progress ticks can say which call they
+   belong to. It is the front end's own opaque id, never the client's progressToken -- see
+   McpProgressChannel.
+
+   aBlockOrNil runs after every wait for the worker, in this GsProcess (#awaitWorkerResult). It is how
+   a progress tick reaches the client's socket: the front end passes a block that drains the channel
+   onto the connection it is answering on. A BLOCK rather than the channel and the connection
+   themselves, deliberately -- a session's business is driving one worker gem, and it has no reason to
+   learn what an SSE frame is."
   self touch.
   ^[inFlightRequestId := anIdOrNil.
     cancelRequested := false.
-    self runWorker: (self workerExpressionFor: aRawJsonString)]
-      ensure: [inFlightRequestId := nil. cancelRequested := false]
+    viewReleaseRequested := false.
+    pinnedViewPasses := 0.
+    waitAction := aBlockOrNil.
+    self runWorker: (self workerExpressionFor: aRawJsonString lifetimeBounds: anArrayOrNil
+      progressCallId: aCallIdOrNil)]
+      ensure: [inFlightRequestId := nil. cancelRequested := false. viewReleaseRequested := false.
+        pinnedViewPasses := 0. waitAction := nil]
 %
 category: 'accessing'
 method: McpSession
@@ -320,6 +435,14 @@ initialize
    a script -- waits for its worker as long as it takes."
   requestTimeoutSeconds := nil.
   workerAbandoned := false.
+  "Nothing measured yet. nil rather than 0 because 'up to date' and 'never asked' are different
+   facts, and only one of them is a reason to leave this session alone."
+  commitsBehind := nil.
+  "A count, like everything else the reaper reads, and so zero rather than nil."
+  stuckViewPasses := 0.
+  stuckViewReason := nil.
+  pinnedViewPasses := 0.
+  viewReleaseRequested := false.
   ^self
 %
 category: 'activity'
@@ -348,6 +471,24 @@ method: McpSession
 lastActivitySeconds
   ^lastActivitySeconds
 %
+category: 'view hygiene'
+method: McpSession
+maintenanceCallTimeoutSeconds
+  "How long the front end waits on its OWN send into this worker before ending it. Five seconds by
+   default (McpRouter class>>defaultMaintenanceCallTimeoutSeconds), and deliberately unrelated to
+   #requestTimeoutSeconds, which is legitimately nil.
+   A view refresh that has not answered in five seconds is not a slow refresh, it is a gem that is
+   not answering -- a different problem, and not one the maintenance pass may wait on, since that
+   pass serves every other session too."
+  ^maintenanceCallTimeoutSeconds ifNil: [McpRouter defaultMaintenanceCallTimeoutSeconds]
+%
+category: 'view hygiene'
+method: McpSession
+maintenanceCallTimeoutSeconds: aSecondCount
+  "Bound the front end's own sends into this worker (see #maintenanceCallTimeoutSeconds). Pushed in
+   at session open by the router, like every other interval."
+  maintenanceCallTimeoutSeconds := aSecondCount
+%
 category: 'initialization'
 method: McpSession
 newWorkerSession
@@ -373,6 +514,16 @@ noteAlive
   unansweredProbes := 0.
   quietProbes := quietProbes + 1
 %
+category: 'view hygiene'
+method: McpSession
+noteCommitsBehind: anIntegerOrNil
+  "Record what the maintenance pass measured of this session's view (see #commitsBehind).
+   Deliberately not a #touch and deliberately not a probe: this is the front end writing down what
+   it saw, and it must advance nothing the reaping policy counts. A session that has stopped calling
+   tools is measured every pass like any other, and must still be released on schedule."
+  commitsBehind := anIntegerOrNil.
+  ^self
+%
 category: 'liveness'
 method: McpSession
 notePassWithStream: aBoolean
@@ -383,6 +534,15 @@ notePassWithStream: aBoolean
   aBoolean
     ifTrue: [self noteStreamSeen]
     ifFalse: [streamlessPasses := streamlessPasses + 1].
+  ^self
+%
+category: 'view hygiene'
+method: McpSession
+notePinnedViewPass
+  "Record a maintenance pass on which this session's RUNNING call was the reason the repository could
+   not dispose of its oldest commit record. Counted, like everything else the reaper reads, so a
+   suspended host simply stops the count."
+  pinnedViewPasses := self pinnedViewPasses + 1.
   ^self
 %
 category: 'activity'
@@ -437,6 +597,46 @@ noteStreamSeen
   streamlessPasses := 0.
   streamClosedByClient := false
 %
+category: 'view hygiene'
+method: McpSession
+noteStuckView: aVerdictString
+  "Record a maintenance pass on which this session's view COULD NOT BE MOVED -- the worker answered
+   'stuck: WHY' because System continueTransaction is illegal in the state it is in.
+   Counted rather than timed, like every other ground the reaper reads: a suspended host runs no
+   passes, so the count simply stops, and there is no elapsed time for it to misread.
+   The reason is kept because it is what the reap phrase will say, and it is trimmed at the error
+   detail the worker appended -- 'a commit that failed on conflict', not that plus a stack-flavoured
+   description nobody reads in a log line."
+  | cut |
+  stuckViewPasses := self stuckViewPasses + 1.
+  cut := aVerdictString findString: ' (' startingAt: 1.
+  stuckViewReason := cut > 0
+    ifTrue: [aVerdictString copyFrom: 8 to: cut - 1]
+    ifFalse: [aVerdictString copyFrom: 8 to: aVerdictString size].
+  ^self
+%
+category: 'view hygiene'
+method: McpSession
+noteViewMoved
+  "Record a maintenance pass on which this session's view DID move -- the worker answered 'kept' or
+   'doomed'. Either way it is no longer stuck, so the stuck run resets.
+   'doomed' resets it too, and deliberately: a doomed session's view is current, so it is holding
+   nothing open, and the only thing wrong with it is the client's own un-committable work -- which
+   is the client's to resolve and no reason for this server to end its session."
+  stuckViewPasses := 0.
+  stuckViewReason := nil.
+  ^self
+%
+category: 'view hygiene'
+method: McpSession
+noteViewNotPinned
+  "Record a pass on which this session was NOT pinning the stone's oldest record -- because the
+   pressure lifted, because somebody else is now the oldest, or because the call ended. The run has
+   to be consecutive: a burst of commits by another session must not add up, across the quiet minutes
+   between them, to a reason for ending a call that was never the problem for long."
+  pinnedViewPasses := 0.
+  ^self
+%
 category: 'accessing'
 method: McpSession
 outbox
@@ -448,6 +648,13 @@ category: 'liveness'
 method: McpSession
 passesSinceProbe
   ^passesSinceProbe
+%
+category: 'view hygiene'
+method: McpSession
+pinnedViewPasses
+  "Consecutive maintenance passes on which this session's running call has been pinning the stone's
+   oldest commit record while the stone was over its own backlog threshold."
+  ^pinnedViewPasses ifNil: [0]
 %
 category: 'initialization'
 method: McpSession
@@ -493,6 +700,16 @@ readOnly
   "Whether this client's worker is read-only. Recorded when the session starts and applied to the
    worker gem by prepareWorker."
   ^readOnly == true
+%
+category: 'view hygiene'
+method: McpSession
+refreshWorkerView
+  "Ask this session's worker gem to take a current view, keeping its uncommitted work, and answer
+   what it says -- 'kept', 'doomed', 'stuck: WHY' -- or nil if it could not be asked at all.
+   The whole decision is the WORKER's, in one round trip, and that is not tidiness: a separate 'are
+   you clean?' call would leave a window in which the client's next request changed the answer
+   between the question and the act."
+  ^self runMaintenanceExpression: 'McpServer refreshViewForFrontEnd'
 %
 category: 'session lifetime'
 method: McpSession
@@ -552,6 +769,68 @@ requestTimeoutSeconds: anIntegerOrNil
   "Set the deadline for a single call into this worker (nil = none). Applies from the NEXT call: a
    call already in flight keeps the deadline it started under (#callDeadline)."
   requestTimeoutSeconds := anIntegerOrNil
+%
+category: 'view hygiene'
+method: McpSession
+requestViewRelease
+  "Ask that the call in flight be ended, because its view is holding the repository's oldest commit
+   record open and the stone is suffering for it. Answers whether there was a call to ask about.
+
+   Sets a flag and NOTHING else, exactly as #requestCancel: does and for exactly the same reason:
+   this runs in the reaper's GsProcess while another process is inside #runWorker: holding the worker
+   mutex with a GCI call in progress, and sending a break from here would be a second process driving
+   one session -- which is what that mutex exists to prevent. #awaitWorkerResultUntil:because: picks
+   it up on its next wait and does the ending from the process that owns the mutex.
+   Idempotent: asking twice while the same call runs is the ordinary case, since the pass that asks
+   will very likely run again before the break is taken."
+  self isBusy ifFalse: [^false].
+  viewReleaseRequested := true.
+  ^true
+%
+category: 'view hygiene'
+method: McpSession
+runMaintenanceExpression: anExpressionString
+  "Drive this worker for the FRONT END's own reasons rather than a client's, and answer its result --
+   or nil if the worker was not free. Two differences from #runWorker:, and both matter.
+
+   IT DOES NOT #touch. runWorker: ends with one, and touch resets everything the reaping policy
+   counts: quietProbes, streamlessPasses, streamClosedByClient, the activity stamp. A maintenance
+   send that touched would be an immortality potion -- a session whose client had gone for good would
+   be refreshed every pass and never released. #noteAlive was written around the same trap.
+
+   IT NEVER QUEUES. #tryLock takes the worker mutex or gives up at once, where #critical: would park
+   the REAPER's GsProcess behind a client's tool call for the length of that call, stalling probes
+   and reaps for every other session in the server. Testing #isBusy alone would not do: a call can
+   start between the test and the send, which is what the mutex is for.
+   An ended maintenance call raises out of #awaitWorkerResultUntil:because:, so the ensure: is what
+   guarantees the mutex is released on the way past; the raise itself is the caller's to catch, and
+   its caller is a maintenance pass that must not fail on one session's account."
+  self workerMutex tryLock ifFalse: [^nil].
+  ^[self isBusy
+      ifTrue: [nil]
+      ifFalse: [
+        worker nbExecute: anExpressionString.
+        self
+          awaitWorkerResultUntil: System timeGmt + self maintenanceCallTimeoutSeconds
+          because: #maintenance.
+        worker lastResult]]
+    ensure: [self workerMutex signal]
+%
+category: 'private'
+method: McpSession
+runWaitAction
+  "Run whatever the caller asked to have done between waits for the worker -- draining a progress
+   tick onto the client's socket, in the only case that passes one (#forward:...whileWaiting:).
+   Runs in THIS GsProcess, which is the one answering the request, and that is the point: the socket
+   belongs to this connection and exactly one process may write to it. A forked writer would have to
+   be joined before the final response could go out, for no gain.
+   Cannot fail the call. A progress tick is a courtesy; a tool's answer is not, and an error while
+   reporting on work must not destroy the work. The failure is logged nowhere here because there is
+   nothing to log it to -- a session has no log of its own -- and the front end already notices a dead
+   socket by other means."
+  waitAction isNil ifTrue: [^self].
+  [waitAction value] on: Error do: [:ex | ex return: nil].
+  ^self
 %
 category: 'private'
 method: McpSession
@@ -617,10 +896,7 @@ signalCallEnded: aReasonSymbol
    whatever it had already done in that gem's view is still there, uncommitted. That last sentence
    matters more for a cancellation than for a deadline: a user who pressed a key to stop something
    may well assume it did not happen, and it half did."
-  ^McpError signalKind: aReasonSymbol message: (aReasonSymbol == #cancelled
-      ifTrue: ['The client cancelled this request, and it was ended. ']
-      ifFalse: ['The request exceeded this server''s ' , requestTimeoutSeconds printString
-        , '-second request limit and was ended. '])
+  ^McpError signalKind: aReasonSymbol message: (self endingPhraseFor: aReasonSymbol)
     , (workerAbandoned
         ifTrue: ['Its worker gem could not be interrupted and has been stopped, so this session is '
           , 'finished and its uncommitted work is gone: call initialize again to continue.']
@@ -712,12 +988,37 @@ streamlessPasses
    its client at all. The only ground for releasing a session that can never be confirmed."
   ^streamlessPasses
 %
+category: 'view hygiene'
+method: McpSession
+stuckViewPasses
+  "Consecutive maintenance passes on which this session's view could not be moved. Zero unless the
+   worker has actually answered 'stuck' -- a pass that could not ASK, because a call was in flight,
+   advances nothing (see McpRouter>>maintainViewHygiene). Without that, a client running one long
+   call after another would accumulate a grace it never earned."
+  ^stuckViewPasses ifNil: [0]
+%
+category: 'view hygiene'
+method: McpSession
+stuckViewReason
+  "Why this session's view could not be moved, as a prose fragment, or nil if it can. Set by
+   #noteStuckView: from what the worker answered, and read by McpRouter>>reapReasonFor: for the
+   phrase the gem log records."
+  ^stuckViewReason
+%
 category: 'accessing'
 method: McpSession
 toolsetNames: aCollectionOfNamesOrNil
   "The toolsets this worker should register, as resolved by the front end
    (McpRouter>>effectiveToolsetNames)."
   toolsetNames := aCollectionOfNamesOrNil
+%
+category: 'accessing'
+method: McpSession
+toolsetOptions: aDictOrNil
+  "The deployment's options for those toolsets, keyed by toolset name, as resolved and VALIDATED by
+   the front end (McpRouter>>effectiveToolsetOptions). nil when nothing is configured, which is the
+   ordinary case."
+  toolsetOptions := aDictOrNil
 %
 category: 'activity'
 method: McpSession
@@ -765,13 +1066,23 @@ workerBootstrapExpression
    identifiers (McpRouter validated them when the router was configured) and the strings are embedded
    via printString, so this cannot smuggle anything into the worker's compiler. That printString is
    load-bearing for the title in particular: unlike a name or a version it is free-form operator prose,
-   so quotes in it must be doubled rather than closing the literal."
+   so quotes in it must be doubled rather than closing the literal.
+
+   The toolset options travel as ONE printString-quoted JSON string, which the worker parses
+   (McpServer class>>prepareWorkerWithToolsets:options:...). They are the only argument here whose
+   shape the core does not know -- a nested map a vendor defines -- so encoding them as JSON rather
+   than building a Smalltalk literal keeps this method free of that shape entirely, and gives them
+   the same one-quoted-literal safety property every other argument has."
   ^self workerClassName
     , ' prepareWorkerWithToolsets: ' , (self quotedNameArrayFor: toolsetNames)
+    , ' options: ' , ((toolsetOptions isNil or: [toolsetOptions isEmpty])
+        ifTrue: ['nil']
+        ifFalse: [(McpJson write: toolsetOptions) printString])
     , ' readOnly: ' , self readOnly printString
     , ' serverName: ' , (serverName isNil ifTrue: ['nil'] ifFalse: [serverName printString])
     , ' title: ' , (serverTitle isNil ifTrue: ['nil'] ifFalse: [serverTitle printString])
     , ' version: ' , (serverVersion isNil ifTrue: ['nil'] ifFalse: [serverVersion printString])
+    , ' frontEnd: ' , System session printString
 %
 category: 'accessing'
 method: McpSession
@@ -789,10 +1100,43 @@ workerClassName: aNameOrNil
 category: 'routing'
 method: McpSession
 workerExpressionFor: aRawJsonString
+  ^self workerExpressionFor: aRawJsonString lifetimeBounds: nil
+%
+category: 'private'
+method: McpSession
+workerExpressionFor: aRawJsonString lifetimeBounds: anArrayOrNil
   "The expression forward: runs in the worker gem: the NAMED worker class handles the request, so the
    worker never decides which server class to build. The request body is embedded via printString for
-   safe quoting."
-  ^self workerClassName , ' handleJsonString: ' , aRawJsonString printString
+   safe quoting, and so is every element of the bounds -- which is what makes an apostrophe in a
+   phrase, or a nil in any slot, safe to send.
+
+   The lifetimeBounds: keyword is appended ONLY when there are bounds, so a deployment that bounds
+   nothing sends the expression it always sent, and the one-argument entry point stays the form
+   documented for a direct call. The worker's one-argument handleJsonString: clears bounds left by a
+   previous request, so an omitted keyword means 'nothing bounds this session' rather than 'no news'."
+  | base s |
+  base := self workerClassName , ' handleJsonString: ' , aRawJsonString printString.
+  anArrayOrNil isNil ifTrue: [^base].
+  s := WriteStream on: String new.
+  s nextPutAll: base , ' lifetimeBounds: (Array'.
+  anArrayOrNil do: [:e | s nextPutAll: ' with: ' , e printString].
+  s nextPutAll: ')'.
+  ^s contents
+%
+category: 'private'
+method: McpSession
+workerExpressionFor: aRawJsonString lifetimeBounds: anArrayOrNil progressCallId: aCallIdOrNil
+  "As #workerExpressionFor:lifetimeBounds:, with a progress reporter installed FIRST where this call
+   is being reported on.
+   Two statements in one expression, not another keyword on handleJsonString:. executeString: runs a
+   sequence and answers the last value, so the cost is a '. ' and the gain is not having four entry
+   points on the worker for two independent facts -- bounds and progress have nothing to do with each
+   other, and a client can ask for either, both or neither. The teardown is handleJsonString:'s
+   ensure:, so the reporter cannot outlive the call it was made for."
+  | base |
+  base := self workerExpressionFor: aRawJsonString lifetimeBounds: anArrayOrNil.
+  aCallIdOrNil isNil ifTrue: [^base].
+  ^self workerClassName , ' progressCallId: ' , aCallIdOrNil printString , '. ' , base
 %
 category: 'private'
 method: McpSession

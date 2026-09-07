@@ -7,7 +7,7 @@ GsTestCase subclass: 'McpDispatcherTest'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %
@@ -19,6 +19,16 @@ McpDispatcherTest category: 'Mcp-Tests'
 removeallmethods McpDispatcherTest
 removeallclassmethods McpDispatcherTest
 ! ------------------- Class methods for McpDispatcherTest
+category: 'session view'
+classmethod: McpDispatcherTest
+movesTheSessionView
+  "Why this suite cannot be run from a session that has uncommitted work. See
+   McpTestingToolset class>>sessionViewRefusalFor:, which is what asks.
+   Most of the aborts here are removable, but not the one in
+   #testCleanSessionGetsNoTransactionNote: a test that a CLEAN session gets no note has no way to
+   run except from a clean session."
+  ^'it aborts to reach the clean session one of its tests is about, and to clear the probes the others plant'
+%
 ! ------------------- Instance methods for McpDispatcherTest
 category: 'helpers'
 method: McpDispatcherTest
@@ -47,6 +57,30 @@ request: methodName params: paramsDict
   paramsDict ifNotNil: [d at: 'params' put: paramsDict].
   ^d
 %
+category: 'helpers'
+method: McpDispatcherTest
+resultTextOf: aResponse
+  "The text of a tools/call response's first content item."
+  ^(((aResponse at: 'result') at: 'content') at: 1) at: 'text'
+%
+category: 'running'
+method: McpDispatcherTest
+tearDown
+  "The transaction tests below deliberately leave the session dirty. Nothing they plant is ever
+   committed, so one abort undoes all of it -- and leaving a dirty session behind would change what
+   the NEXT suite's tools/call sees, now that a call no longer aborts on the way in."
+  System abortTransaction
+%
+category: 'tests'
+method: McpDispatcherTest
+testCleanSessionGetsNoTransactionNote
+  "The note is for state the model must act on, so a clean session gets none: a warning on every
+   single call would be noise the model learns to skip past."
+  | text |
+  System abortTransaction.
+  text := self resultTextOf: (self dispatch: (self toolCall: 'status')).
+  self deny: (text includesString: '[session]')
+%
 category: 'tests'
 method: McpDispatcherTest
 testHandleJsonString
@@ -72,6 +106,20 @@ testInitialize
   "no title unless a deployment set one: the key is absent, not null, so a client displays the name"
   self deny: ((result at: 'serverInfo') includesKey: 'title').
   self assert: ((result at: 'capabilities') includesKey: 'tools')
+%
+category: 'tests'
+method: McpDispatcherTest
+testInitializeCarriesTransactionInstructions
+  "initialize carries `instructions`, the spec's hint to the model. What it must contain is the
+   part no tool description can carry on its own: that work survives from one call to the next,
+   that only `commit` commits, and how to read the [session] line the server appends to results."
+  | result text |
+  result := (self dispatch: (self request: 'initialize' params: Dictionary new)) at: 'result'.
+  self assert: (result includesKey: 'instructions').
+  text := result at: 'instructions'.
+  self assert: (text includesString: 'Only the `commit` tool commits').
+  self assert: (text includesString: '[session]').
+  self assert: (text includesString: 'abort')
 %
 category: 'tests'
 method: McpDispatcherTest
@@ -123,6 +171,44 @@ testNotificationReturnsNil
 %
 category: 'tests'
 method: McpDispatcherTest
+testToolCallKeepsUncommittedWork
+  "The 10.11 regression test, at the seam where it went wrong. handleToolsCall:id: sent
+   System abortTransaction before every tool until 2026-08-28, so a value planted by one call was
+   gone by the next -- which is why `commit` committed a transaction emptied a microsecond earlier
+   and reported success. The pre-call refresh must take a current view WITHOUT destroying work."
+  System abortTransaction.
+  UserGlobals at: #McpDispatcherTxnProbe put: 'planted'.
+  self dispatch: (self toolCall: 'status').
+  self assert: (UserGlobals at: #McpDispatcherTxnProbe ifAbsent: [nil]) equals: 'planted'.
+  self assert: System needsCommit
+%
+category: 'tests'
+method: McpDispatcherTest
+testToolErrorIsAnnotatedToo
+  "A tool that RAISED is exactly when pending work most needs reporting -- the call the model just
+   made did not do what it asked, and it has to decide what to do with what it already had. The
+   error envelope's structuredContent is left alone, so a client branching on the kind is
+   unaffected by prose meant for the model."
+  | response text |
+  System abortTransaction.
+  UserGlobals at: #McpDispatcherTxnProbe put: 'planted'.
+  response := self dispatch: (self request: 'tools/call' params:
+    (Dictionary new
+      at: 'name' put: 'compile_method';
+      at: 'arguments' put: (Dictionary new
+        at: 'className' put: 'Object';
+        at: 'source' put: 'mcpProbeSelector ^1';
+        yourself);
+      yourself)).
+  self assert: ((response at: 'result') at: 'isError').
+  text := self resultTextOf: response.
+  self assert: (text includesString: 'Refused').
+  self assert: (text includesString: '[session] You have uncommitted changes').
+  self assert: ((((response at: 'result') at: 'structuredContent') at: 'error') at: 'kind')
+    equals: 'refused'
+%
+category: 'tests'
+method: McpDispatcherTest
 testToolsCallSuccessEnvelope
   | result |
   result := (self dispatch: (self toolCall: 'execute_code' args: (Dictionary new at: 'code' put: '3 + 4'; yourself))) at: 'result'.
@@ -148,6 +234,38 @@ testToolsListIsAlphabeticalAnd31
 %
 category: 'tests'
 method: McpDispatcherTest
+testUncommittedWorkIsReportedInTheResult
+  "A dirty session is reported on every result until it is resolved, because the two moves that
+   resolve it (commit, abort) are the model's to make and nothing else will make them."
+  | text |
+  System abortTransaction.
+  UserGlobals at: #McpDispatcherTxnProbe put: 'planted'.
+  text := self resultTextOf: (self dispatch: (self toolCall: 'status')).
+  self assert: (text includesString: '[session] You have uncommitted changes').
+  self assert: (text includesString: 'commit')
+%
+category: 'tests'
+method: McpDispatcherTest
+testUncommittedWorkWarningNamesTheDeadlineWhenOneIsKnown
+  "The warning is worth more when it says WHICH deadline is coming and how long is left, and only
+   the front end knows that -- so it arrives with the request and the worker renders it. Without one
+   the warning keeps its unqualified form rather than guessing."
+  | srv text |
+  System abortTransaction.
+  srv := McpServer new.
+  UserGlobals at: #McpDispatcherTxnProbe put: 'planted'.
+  text := ((((McpDispatcher withToolRegistry: srv toolRegistry server: srv) handle:
+    (self toolCall: 'status')) at: 'result') at: 'content') first at: 'text'.
+  self assert: (text includesString: 'lost if this session ends first').
+  srv handleJsonString: '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+    lifetimeBounds: (Array with: System timeGmt + 240 with: 'your access credential'
+      with: nil with: nil).
+  text := ((((McpDispatcher withToolRegistry: srv toolRegistry server: srv) handle:
+    (self toolCall: 'status')) at: 'result') at: 'content') first at: 'text'.
+  self assert: (text includesString: 'lost when this session ends: 4 minutes left on your access credential')
+%
+category: 'tests'
+method: McpDispatcherTest
 testUnknownMethodReturns32601
   | resp |
   resp := self dispatch: (self request: 'no/such/method' params: nil).
@@ -159,6 +277,16 @@ testUnknownToolReturns32602
   | resp |
   resp := self dispatch: (self toolCall: 'does_not_exist' args: Dictionary new).
   self assert: ((resp at: 'error') at: 'code') equals: -32602
+%
+category: 'helpers'
+method: McpDispatcherTest
+toolCall: aToolName
+  "A tools/call request for a no-argument tool."
+  | params |
+  params := Dictionary new.
+  params at: 'name' put: aToolName.
+  params at: 'arguments' put: Dictionary new.
+  ^self request: 'tools/call' params: params
 %
 category: 'helpers'
 method: McpDispatcherTest

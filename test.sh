@@ -13,7 +13,7 @@
 #   GS_STONE    - stone name        (default: gs64stone)
 #   GS_USER     - GemStone user     (default: DataCurator)
 #   GS_PASS     - GemStone password (default: swordfish)
-#   GS_MCP_PORT - test port         (default: 8011, kept off the usual 8000)
+#   MCP_PORT    - test port         (default: 8011, kept off the usual 8000)
 #
 # Exit status 0 = all checks passed.
 set -uo pipefail
@@ -31,7 +31,7 @@ GS_NEEDS_NETLDI=1
 gs_env_resolve
 gs_env_require_stone
 gs_env_require_netldi
-PORT="${GS_MCP_PORT:-8011}"
+PORT="${MCP_PORT:-8011}"
 URL="http://127.0.0.1:$PORT/mcp"
 SERVER_LOG="$(mktemp -t gsmcp-server.XXXXXX)"
 
@@ -53,10 +53,10 @@ cleanup() {
   # something already listening and tests against it -- and because a router gem does not pick up
   # recompiled code the way worker gems do, that stale front end serves the previous tree's
   # transport code and the run reports failures belonging to a version nobody is testing.
-  GS_MCP_PORT="$PORT" ./stop-server.sh >/dev/null 2>&1
+  MCP_PORT="$PORT" ./stop-server.sh >/dev/null 2>&1
   [ -n "$WRAPPER_PID" ] && kill "$WRAPPER_PID" 2>/dev/null
   # the second, differently-configured front end the lifetime section starts (see [3/4])
-  GS_MCP_PORT="$((PORT + 1))" ./stop-server.sh >/dev/null 2>&1
+  MCP_PORT="$((PORT + 1))" ./stop-server.sh >/dev/null 2>&1
   [ -n "$LIFE_WRAPPER_PID" ] && kill "$LIFE_WRAPPER_PID" 2>/dev/null
   rm -f "$SERVER_LOG" "${LIFE_LOG:-}"
 }
@@ -74,6 +74,20 @@ check() {
   fi
 }
 
+# deny NAME FORBIDDEN-SUBSTRING ACTUAL  -- the mirror of check, for a property whose whole point is
+# an ABSENCE. The Unicode section needs it: "the emoji arrived" and "it did not arrive as an escape"
+# are different claims, and only the second one fails if the escaping policy comes back.
+deny() {
+  if printf '%s' "$3" | grep -qF -- "$2"; then
+    printf '  \033[31m✗\033[0m %s\n' "$1"
+    printf '      expected NOT to contain: %s\n' "$2"
+    printf '      got: %s\n' "$3"
+    FAIL=$((FAIL+1))
+  else
+    printf '  \033[32m✓\033[0m %s\n' "$1"; PASS=$((PASS+1))
+  fi
+}
+
 # post  -- reads a JSON-RPC body from stdin, returns the response body (carries the session id)
 post() { curl -s -m 10 "$URL" -H "MCP-Session-Id: $SID" --data-binary @-; }
 
@@ -83,7 +97,7 @@ echo
 
 # ---------------------------------------------------------------------------
 echo "[1/4] Starting server gem (session A) ..."
-GS_MCP_PORT="$PORT" ./run-server.sh > "$SERVER_LOG" 2>&1 &
+MCP_PORT="$PORT" ./run-server.sh > "$SERVER_LOG" 2>&1 &
 WRAPPER_PID=$!
 for i in $(seq 1 60); do nc -z 127.0.0.1 "$PORT" 2>/dev/null && break; sleep 0.5; done
 if ! nc -z 127.0.0.1 "$PORT" 2>/dev/null; then
@@ -136,13 +150,13 @@ r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"3 + 4"}}}
 JSON
 )
-check "execute_code 3+4 => 7"                 '"text":"7"'               "$r"
+check "execute_code 3+4 => 7"                 '"text":"7'                "$r"
 
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"| x | x := 6. x * 7"}}}
 JSON
 )
-check "execute_code multi-statement => 42"    '"text":"42"'              "$r"
+check "execute_code multi-statement => 42"    '"text":"42'               "$r"
 
 # --- status (prints the server gem's session id) ---
 r=$(post <<'JSON'
@@ -167,7 +181,7 @@ check "get_method_source McpRouter>>stop"   'isRunning := false'       "$r"
 
 # --- compile_method round-trip on a throwaway class, then clean up ---
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"| c | c := (System myUserProfile objectNamed: #McpSmokeClass) ifNil: [Object subclass: 'McpSmokeClass' instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()]. c comment: 'Artifact of an aborted Mcp server test (gs-mcp/test.sh). Safe to remove.'. System commitTransaction. 'ready'"}}}
+{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"| c | c := (System myUserProfile objectNamed: #McpSmokeClass) ifNil: [Object subclass: 'McpSmokeClass' instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()]. c comment: 'Artifact of an aborted Mcp server test (mcp_server/test.sh). Safe to remove.'. System commitTransaction. 'ready'"}}}
 JSON
 )
 check "create throwaway test class"           'ready'                    "$r"
@@ -176,13 +190,55 @@ r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"compile_method","arguments":{"className":"McpSmokeClass","source":"answer\n  ^42","category":"smoke"}}}
 JSON
 )
-check "compile_method commits"                'and committed'            "$r"
+check "compile_method compiles"               'Compiled McpSmokeClass'   "$r"
+# No tool commits any more except `commit` -- see docs/server-to-client-messaging.md 14.4 -- so the
+# result says the work is PENDING rather than saved, and the method is visible in this session only.
+check "...and says the work is pending"        'uncommitted changes'      "$r"
 
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"McpSmokeClass new answer"}}}
 JSON
 )
-check "compiled method runs => 42"            '"text":"42"'              "$r"
+# The value is matched WITHOUT its closing quote here and in the two execute_code checks above,
+# because a tool result may carry a trailing [session] note (McpDispatcher>>annotateContent:) and it
+# appears only when that session happens to have uncommitted work -- so an assertion that closed the
+# quote passed or failed by run order rather than by behaviour.
+check "compiled method runs => 42"            '"text":"42'               "$r"
+
+# --- Unicode on the wire: UTF-8 in BOTH directions, for BOTH kinds of client ---
+# The only over-the-wire coverage of either half, and what would catch a return to the old
+# ASCII-escaping policy. Outbound is McpJson (which exists because kernel printJsonOn: writes a
+# codepoint above U+FFFF as one WRONG escape); inbound is the decode in McpBase class>>parseBody:
+# plus its surrogate-escape repair. Both spelled as bytes, so nothing depends on this file's own
+# encoding surviving an editor.
+EMOJI=$(printf '\360\237\230\200')   # U+1F600, as its four UTF-8 bytes
+EACUTE=$(printf '\303\251')            # U+00E9, as its two
+
+# A raw-UTF-8 client -- JSON.stringify, and therefore most of them. Store non-ASCII text in a method
+# comment and read it back: the round trip that used to store Latin-1 mojibake in the image to stay.
+r=$(printf '%s' '{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"compile_method","arguments":{"className":"McpSmokeClass","source":"greet\n  \"caf'"$EACUTE"' '"$EMOJI"'\"\n  ^1","category":"smoke"}}}' | post)
+check "compile_method accepts raw UTF-8"      'Compiled McpSmokeClass'   "$r"
+
+r=$(post <<'JSON'
+{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"get_method_source","arguments":{"className":"McpSmokeClass","selector":"greet"}}}
+JSON
+)
+check "...and the emoji comes back as UTF-8"  "$EMOJI"                   "$r"
+check "...and the e-acute with it"            "$EACUTE"                  "$r"
+deny  "...not as a surrogate-pair escape"     'uD83D'                    "$r"
+deny  "...and not as a BMP escape"            'u00E9'                    "$r"
+
+# An ESCAPING client -- Python's json.dumps, where ensure_ascii=True is the default. The pair below
+# is the only way JSON can spell U+1F600 as an escape, and kernel JsonParser refuses each half on
+# its own (OutOfRange 2723), so this whole request used to come back -32700. describe_class echoes
+# the name it was given, and changes nothing.
+r=$(post <<'JSON'
+{"jsonrpc":"2.0","id":14,"method":"tools/call","params":{"name":"describe_class","arguments":{"className":"Zz\uD83D\uDE00"}}}
+JSON
+)
+deny  "an escaped emoji is not a parse error" '-32700'                   "$r"
+check "...it is repaired on the way in"       'Class not found: Zz'      "$r"
+check "...and echoed back as UTF-8"           "$EMOJI"                   "$r"
 
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"UserGlobals removeKey: #McpSmokeClass ifAbsent: [nil]. System commitTransaction. 'cleaned'"}}}
@@ -242,7 +298,17 @@ JSON
 )
 # count name fields that are string values (tool names), not nested 'name' properties
 n=$(printf '%s' "$r" | grep -o '"name":"' | wc -l | tr -d ' ')
-check "tools/list reports 31 tools (got $n)"  "31"                       "$n"
+# Compare against what the SERVER's toolsets declare, not a number written here. A literal has to be
+# edited every time a tool is added or a group is loaded -- it already read 31 while a --grail image
+# served 33 -- and editing it says nothing about whether the surface is right. Asking the server how
+# many tools its toolsets declare, and checking tools/list agrees, is a real assertion (everything
+# declared is registered, and nothing else is) and it cannot go stale.
+declared=$(post <<'JSON' | sed -n 's/.*"text":"\([0-9][0-9]*\)".*/\1/p'
+{"jsonrpc":"2.0","id":19,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"(McpServer newWithToolsetNames: McpServer installedDefaultToolsetNames) allToolNames size"}}}
+JSON
+)
+check "tools/list matches the toolsets' declared count (got $n, declared $declared)" \
+                                              "$declared"                "$n"
 
 # --- session/transaction ---
 for t in abort commit refresh; do
@@ -261,16 +327,16 @@ JSON
 check "list_dictionaries includes UserGlobals" 'UserGlobals'             "$r"
 
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":23,"method":"tools/call","params":{"name":"list_classes","arguments":{"dictionaryName":"Published"}}}
+{"jsonrpc":"2.0","id":23,"method":"tools/call","params":{"name":"list_classes","arguments":{"dictionaryName":"Mcp"}}}
 JSON
 )
-check "list_classes(Published) has McpServer" 'McpServer'            "$r"
+check "list_classes(Mcp) has McpServer" 'McpServer'            "$r"
 
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":24,"method":"tools/call","params":{"name":"list_all_classes","arguments":{}}}
 JSON
 )
-check "list_all_classes tags dictionary"      'McpServer  (Published)' "$r"
+check "list_all_classes tags dictionary"      'McpServer  (Mcp)' "$r"
 
 # --- browsing ---
 r=$(post <<'JSON'
@@ -317,7 +383,7 @@ JSON
 check "find_references_to McpTool"           'McpToolRegistry'       "$r"
 
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":32,"method":"tools/call","params":{"name":"search_method_source","arguments":{"pattern":"writeSseStreamHeaders","dictionaryName":"Published"}}}
+{"jsonrpc":"2.0","id":32,"method":"tools/call","params":{"name":"search_method_source","arguments":{"pattern":"writeSseStreamHeaders","dictionaryName":"Mcp"}}}
 JSON
 )
 check "search_method_source finds usage"       'serveGetStream:'         "$r"
@@ -337,16 +403,16 @@ check "run_test_class SUnitTest reports passed" 'passed'                 "$r"
 
 # --- mutation + failing-test path on a throwaway TestCase, then clean up ---
 r=$(post <<'JSON'
-{"jsonrpc":"2.0","id":35,"method":"tools/call","params":{"name":"compile_class_definition","arguments":{"source":"TestCase subclass: 'McpParityTest' instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()"}}}
+{"jsonrpc":"2.0","id":35,"method":"tools/call","params":{"name":"compile_class_definition","arguments":{"className":"McpParityTest","superclassName":"TestCase","dictionary":"UserGlobals"}}}
 JSON
 )
-check "compile_class_definition creates class" 'committed class: McpParityTest' "$r"
+check "compile_class_definition creates class" 'Compiled class: McpParityTest' "$r"
 
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":36,"method":"tools/call","params":{"name":"compile_method","arguments":{"className":"McpParityTest","source":"testWillFail self assert: 1 = 2","category":"tests"}}}
 JSON
 )
-check "compile_method onto parity class"       'and committed'           "$r"
+check "compile_method onto parity class"       'Compiled McpParityTest'  "$r"
 
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":37,"method":"tools/call","params":{"name":"run_test_method","arguments":{"className":"McpParityTest","selector":"testWillFail"}}}
@@ -366,11 +432,21 @@ JSON
 )
 check "list_failing_tests lists the failure"   'McpParityTest'          "$r"
 
+# The blind-write guardrail requires the CURRENT comment to have been read in this session before
+# one can be written over it, so the describe_class is part of the call sequence a real client must
+# make and not a redundant check -- delete it and set_class_comment goes back to being refused with
+# kind 'blindWrite'. See docs/blind-write-guardrail.md.
+r=$(post <<'JSON'
+{"jsonrpc":"2.0","id":39,"method":"tools/call","params":{"name":"describe_class","arguments":{"className":"McpParityTest"}}}
+JSON
+)
+check "describe_class reads the comment first" 'McpParityTest'          "$r"
+
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":40,"method":"tools/call","params":{"name":"set_class_comment","arguments":{"className":"McpParityTest","comment":"throwaway parity test"}}}
 JSON
 )
-check "set_class_comment commits"              'and committed'           "$r"
+check "set_class_comment sets the comment"     'Comment set on McpParityTest' "$r"
 
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":41,"method":"tools/call","params":{"name":"delete_method","arguments":{"className":"McpParityTest","selector":"testWillFail"}}}
@@ -396,6 +472,55 @@ check "GET /mcp with a dead session id => 404" 'HTTP/1.1 404'            "$r"
 r=$(curl -s -i -N -m 3 "$URL" -H "MCP-Session-Id: $SID" 2>&1 | head -12)
 check "GET /mcp => text/event-stream"         'text/event-stream'        "$r"
 check "GET /mcp sends 'connected' comment"    ': connected'              "$r"
+
+# --- transport: a tools/call answered as a request-scoped SSE stream ---
+# A client that puts a progressToken in params._meta has asked to be kept informed while the call
+# runs, so its answer comes back on a stream instead of as one JSON object: frames first, then the
+# response as the last frame. Claude Code sends such a token on EVERY tools/call, measured, and this
+# server discarded all of them until now. The regression that matters is the second check: every
+# other request in this file must still get plain JSON, because none of them asks for a stream.
+r=$(curl -s -i -N -m 10 "$URL" -H "MCP-Session-Id: $SID" \
+  -H 'Accept: application/json, text/event-stream' \
+  --data-binary '{"jsonrpc":"2.0","id":77,"method":"tools/call","params":{"name":"status","arguments":{},"_meta":{"progressToken":77}}}' 2>&1)
+check "progressToken => text/event-stream"    'text/event-stream'        "$r"
+check "...with proxy buffering turned off"    'X-Accel-Buffering: no'    "$r"
+check "...the answer arrives as an SSE frame" 'event: message'           "$r"
+check "...carrying this request's own id"     '"id":77'                  "$r"
+echo "$r" | grep -qi 'content-length' && verdict='has Content-Length' || verdict='no Content-Length'
+check "...and no Content-Length"              'no Content-Length'        "$verdict"
+# The same call without the token: the shape every other check here relies on.
+r=$(curl -s -i -m 10 "$URL" -H "MCP-Session-Id: $SID" \
+  -H 'Accept: application/json, text/event-stream' \
+  --data-binary '{"jsonrpc":"2.0","id":78,"method":"tools/call","params":{"name":"status","arguments":{}}}' 2>&1)
+check "no progressToken => application/json"  'Content-Type: application/json' "$r"
+
+# --- progress: a real tick from a real worker gem, over the wire ---
+# The whole cross-gem pathway in one check. A tool in the WORKER gem calls #progress:of:message:,
+# which rings a doorbell the front end is polling (System sendSignal:to:withMessage: ->
+# InterSessionSignal poll), and the front end turns it into a notifications/progress addressed by the
+# CLIENT's token and writes it onto the response stream of the very call producing the ticks.
+# list_failing_tests is the emitter, reporting per test class -- the slowest thing this server can be
+# asked to do, and the reason progress exists. McpToolTest is deliberately NOT in the list: it calls
+# toolset methods DIRECTLY rather than sending requests, so its own progress ticks land on this
+# call's stream (see McpServer>>handleJsonString:lifetimeBounds:). Only the count of frames varies
+# run to run -- ticks are rate-limited at 250ms, so a fast suite contributes none.
+r=$(curl -s -N -m 120 "$URL" -H "MCP-Session-Id: $SID" \
+  -H 'Accept: application/json, text/event-stream' \
+  --data-binary '{"jsonrpc":"2.0","id":80,"method":"tools/call","params":{"name":"list_failing_tests","arguments":{"classNames":["McpOutboxTest","McpProgressTest","McpStreamTest","McpLifetimeTest","McpContractTest","McpTransportTest"]},"_meta":{"progressToken":80}}}' 2>&1)
+n=$(printf '%s' "$r" | grep -c 'notifications/progress')
+[ "$n" -ge 1 ] && verdict="got $n" || verdict="got none"
+check "a worker's progress reaches the client"  "got $n"                  "$verdict"
+check "...as notifications/progress"            'notifications/progress'  "$r"
+check "...addressed by the client's token"      '"progressToken":80'      "$r"
+check "...with a real denominator"              '"total":6'               "$r"
+check "...and the callId never leaves the server" 'no callId'             "$(printf '%s' "$r" | grep -q '"call-' && echo 'leaked a callId' || echo 'no callId')"
+# progress MUST increase strictly, and MUST stop at completion: the response is the last frame.
+first=$(printf '%s' "$r" | grep -o '"progress":[0-9]*' | head -1 | cut -d: -f2)
+last=$(printf '%s' "$r" | grep -o '"progress":[0-9]*' | tail -1 | cut -d: -f2)
+[ "${last:-0}" -ge "${first:-0}" ] && verdict="increases ($first..$last)" || verdict="went backwards ($first..$last)"
+check "...increasing"                           'increases'               "$verdict"
+printf '%s' "$r" | tail -3 | grep -q '"id":80' && verdict='response is last' || verdict='response is not last'
+check "...and the answer comes after them"      'response is last'        "$verdict"
 
 # --- transport: cancelling a call in flight ---
 # Measured 2026-08-31: Claude Code sends notifications/cancelled within seconds of the user pressing
@@ -476,7 +601,7 @@ check "second client is served during a slow call" 'MCP-Session-Id'       "$r"
 [ "$elapsed" -lt 6 ] && verdict="concurrent" || verdict="serialized after ${elapsed}s"
 check "...concurrently, not queued behind it (${elapsed}s)" 'concurrent'   "$verdict"
 wait "$slow_pid" || true
-check "the slow call still returned its own result" '"text":"4321"'        "$(cat "$SLOW_OUT")"
+check "the slow call still returned its own result" '"text":"4321'         "$(cat "$SLOW_OUT")"
 rm -f "$SLOW_OUT"
 
 # --- transport: ending a session closes its open stream ---
@@ -530,8 +655,8 @@ echo "[3/4] Session lifetime configuration ..."
 LIFE_PORT=$((PORT + 1))
 LIFE_URL="http://127.0.0.1:$LIFE_PORT/mcp"
 LIFE_LOG="$(mktemp -t gsmcp-life.XXXXXX)"
-GS_MCP_PORT="$LIFE_PORT" GS_MCP_IDLE_TIMEOUT=none GS_MCP_PROBE_INTERVAL=30s GS_MCP_REAPER_INTERVAL=15s \
-  GS_MCP_STREAMLESS_TIMEOUT=20m GS_MCP_MAX_LIFETIME=8h ./run-server.sh > "$LIFE_LOG" 2>&1 &
+MCP_PORT="$LIFE_PORT" MCP_IDLE_TIMEOUT=none MCP_PROBE_INTERVAL=30s MCP_REAPER_INTERVAL=15s \
+  MCP_STREAMLESS_TIMEOUT=20m MCP_MAX_LIFETIME=8h ./run-server.sh > "$LIFE_LOG" 2>&1 &
 LIFE_WRAPPER_PID=$!
 for i in $(seq 1 60); do nc -z 127.0.0.1 "$LIFE_PORT" 2>/dev/null && break; sleep 0.5; done
 if nc -z 127.0.0.1 "$LIFE_PORT" 2>/dev/null; then
@@ -554,7 +679,7 @@ fi
 # message lands where whoever typed it will see it.
 BAD_PORT=$((PORT + 2))
 BAD_LOG="$(mktemp -t gsmcp-bad.XXXXXX)"
-GS_MCP_PORT="$BAD_PORT" GS_MCP_IDLE_TIMEOUT=90s GS_MCP_PROBE_INTERVAL=300s \
+MCP_PORT="$BAD_PORT" MCP_IDLE_TIMEOUT=90s MCP_PROBE_INTERVAL=300s \
   ./run-server.sh > "$BAD_LOG" 2>&1 || true
 check "an unmeasurable idle timeout is refused"  'shorter than'   "$(cat "$BAD_LOG")"
 if nc -z 127.0.0.1 "$BAD_PORT" 2>/dev/null; then

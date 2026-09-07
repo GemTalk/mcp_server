@@ -27,6 +27,24 @@ around: responses over 1024 bytes can come back corrupted (#51438, fixed in 3.7.
 `McpExternalSessionTest` fails there on purpose to say so — see the testing section. The 3.7.6 line
 is a separate matter: earlier releases have a bug connecting to an *external* OIDC IdP.
 
+## Other documentation
+
+This README is the reference for what the server is and how to run it. Alongside it:
+
+* [CHANGELOG.md](CHANGELOG.md) — what changed per release.
+* [docs/Development.md](docs/Development.md) — **start here to contribute**: environment, the
+  per-change loop, canonical file-outs, testing, branches and releases.
+* [docs/GemStone_Notes.md](docs/GemStone_Notes.md) — image and kernel behaviour that has cost this
+  project time, most of it invisible in the source. Its first section is the silent failures.
+* [docs/MCP_Client_Notes.md](docs/MCP_Client_Notes.md) — measured client behaviour, and where the
+  protocol revisions contradict each other.
+* [docs/blind-write-guardrail.md](docs/blind-write-guardrail.md),
+  [docs/session-lifetime.md](docs/session-lifetime.md), [docs/utf8-wire.md](docs/utf8-wire.md) —
+  deep dives on three subsystems.
+* [.claude/CLAUDE.md](.claude/CLAUDE.md) — the same process as `docs/Development.md`, condensed for
+  a coding agent with the traps attached. Machine-specific facts go in a gitignored
+  `.claude/CLAUDE.local.md` (template: `.claude/CLAUDE.local.md.example`).
+
 ## Install & run
 
 ```bash
@@ -37,11 +55,11 @@ export GEMSTONE=/path/to/GemStone64Bit3.7.x   # product dir
 ./install.sh --auth                 # ...and fail loudly if it cannot, instead of quietly skipping
 ./install.sh --no-auth              # ...or leave the auth group out of an image that could take it
 ./install.sh --grail                # ...plus the optional Grail/Python toolset (Grail image only)
-GS_MCP_PORT=8000 ./run-server.sh    # fork a detached, independent localhost server gem and return
-GS_MCP_READONLY=1 ./run-server.sh   # ...read-only (browse/search only; no accidental mutation)
-GS_MCP_TOOLSETS="McpBrowsingToolset McpSearchToolset" ./run-server.sh   # ...only these tools
-GS_MCP_WORKER_CLASS=MyMcpServer ./run-server.sh                        # ...a subclass as the worker
-GS_MCP_TRACE=1 ./run-server.sh      # ...logging every message a client sends (see Message trace)
+MCP_PORT=8000 ./run-server.sh       # fork a detached, independent localhost server gem and return
+MCP_READONLY=1 ./run-server.sh      # ...read-only (browse/search only; no accidental mutation)
+MCP_TOOLSETS="McpBrowsingToolset McpSearchToolset" ./run-server.sh   # ...only these tools
+MCP_WORKER_CLASS=MyMcpServer ./run-server.sh                         # ...a subclass as the worker
+MCP_TRACE=1 ./run-server.sh         # ...logging every message a client sends (see Message trace)
 ./run-auth-server.sh                # ...the OAuth/OIDC network-facing server (McpAuthRouter)
 ```
 
@@ -49,7 +67,7 @@ GS_MCP_TRACE=1 ./run-server.sh      # ...logging every message a client sends (s
 `GS_PASS` to match your environment — and read **Environment** below before assuming those four are
 enough, because on many machines they are not. `install.sh` files the code in with topaz, one
 group at a time: `src/core` and `src/tests` always, `src/auth` when the image can compile it, and
-`src/grail` on `--grail` (or `GS_MCP_WITH_GRAIL=1`).
+`src/grail` on `--grail` (or `MCP_WITH_GRAIL=1`).
 
 The two optional groups are selected differently on purpose. Loading `McpAuthRouter` is **inert** —
 nothing instantiates it until you fork one with `run-auth-server.sh` — so it can be detected rather
@@ -112,9 +130,9 @@ by construction and points at a port nothing is listening on.
 **Which scripts need a netldi.** `install.sh` talks only to the stone, so it runs fine on a host
 with no netldi at all. The `run-*.sh` scripts need one — not because of how they log in, but
 because `McpRouter>>forkOnPort:` and every per-client worker create a `GsTsExternalSession`, and
-netldi is what forks those gems. `run-unit-tests.sh` needs one too: three of
-its suites spawn a real worker gem (`McpExternalSessionTest` and `McpWorkerDeadlineTest` always,
-`McpAuthTest` where the auth group is installed). It asks the image which are present rather than
+netldi is what forks those gems. `run-unit-tests.sh` needs one too: four of
+its suites spawn a real worker gem (`McpExternalSessionTest`, `McpTransactionTest` and
+`McpWorkerDeadlineTest` always, `McpAuthTest` where the auth group is installed). It asks the image which are present rather than
 insisting unconditionally. Each script checks for what it actually needs, and says which is missing.
 
 **Linked vs RPC.** These scripts run `topaz -l` (linked). That is deliberate, and it is not the
@@ -225,7 +243,7 @@ GET stream, per-request `_meta`, and a mandatory `server/discover`. It is not im
 supporting it will need a decision about how per-client worker-gem isolation survives a protocol
 with no session id to key it on.
 
-## Tools (31 base + 2 optional Grail)
+## Tools (31 base + 7 optional Grail)
 
 **Execution**
 
@@ -237,10 +255,59 @@ with no session id to key it on.
 
 | Tool | Arguments | Result |
 |------|-----------|--------|
-| `abort` | – | abort the transaction, refresh the view |
-| `commit` | – | commit the transaction |
-| `refresh` | – | refresh the view to see other sessions' commits |
+| `abort` | – | discard uncommitted changes and refresh the view *(destructive)* |
+| `commit` | – | persist this session's changes. **The only tool that commits** |
+| `refresh` | – | refresh the view to see other sessions' commits, **keeping** uncommitted changes |
 | `status` | – | session user, id, stone, uncommitted-changes flag |
+
+A worker gem sits in one long-lived GemStone transaction and sees **one consistent snapshot** of the
+repository. A change made by one tool call is still there for the next one, so the ordinary
+Smalltalk loop — compile, run the tests against what you compiled, *then* commit — works across
+calls. Nothing commits on the client's behalf; a result whose session has uncommitted changes
+carries a one-line `[session]` note saying so, and naming what would end the session before the work
+is committed.
+
+**No tool refreshes the view.** The client moves it with `commit`, `abort` and `refresh`, and no tool
+call does it as a side effect. That is the guardrail rather than an oversight: GemStone's conflict
+check is write-write *against the view* and does not track what a session read, so the view is the
+only record the stone holds of what this client has seen. A client that reads a method, deliberates
+over several calls, and then rewrites it has its `commit` **refused** if someone else changed that
+class in the meantime — nothing is silently overwritten. Refreshing *around a call* would assert the
+client had seen changes it had not, and turn that refusal into a silent overwrite; two earlier
+designs did exactly that, first with `System abortTransaction` before every tool and then briefly
+with `System continueTransaction`. The same reasoning is why `refresh` is not free: it adopts the
+other version as your starting point, so re-read anything you are about to act on.
+
+**The one exception is the server's own view hygiene, and it is a different act.** A view is also a
+commit record the stone cannot dispose of, so a session that never moves its view holds the whole
+repository's backlog open — measured on a live stone, one front-end gem sat on the oldest record for
+15 hours, and a worker left idle through an ordinary edit-install-test loop falls *hundreds* of
+commits behind in minutes. So when a worker's view is at least `maxCommitsBehind` commits behind (20
+by default, and the effective limit is the lower of that and the stone's own
+`STN_SIGNAL_ABORT_CR_BACKLOG`), the front end sends it one `System continueTransaction`. Four things
+keep that from being the rejected design over again: it happens **between** calls and never with one
+in flight; it **keeps** the client's uncommitted changes; a pending write is validated rather than
+laundered, because the kernel carries the write set forward and answers whether it now conflicts;
+and the client is **told** on its next result, with the reads that went stale named. Nothing about
+the state of the stone can trigger it — only the session's own distance from the current state, since
+refreshing a worker that is not far behind cannot shorten a backlog its view was not pinning.
+`MCP_MAX_COMMITS_BEHIND=none` turns it off.
+
+Two things a view can do that no refresh reaches, and both end the session's current work rather than
+its view. If GemStone refuses to move the view at all — after a commit that failed on conflict, or
+inside a nested transaction — nothing this server sends will free that commit record, so under
+sustained pressure the session is **reaped** (`MCP_STUCK_VIEW_GRACE`); its pending work was
+already un-committable, and a reap is loud where a silent abort would not be. And while a call is in
+flight the view cannot be refreshed at all — GCI allows one call per session — so a call that has
+held the *oldest* record open across `MCP_PINNED_VIEW_GRACE` of real backlog pressure is **ended**,
+with an error saying so. Neither is a time limit: on a quiet repository a long call runs untouched,
+however long it takes.
+
+The **front-end** gem holds no view at all: it runs `#transactionless` and takes a fresh view once
+per maintenance pass, so the one gem that never needs a stable view stops being a commit-record
+hoarder. `MCP_FRONT_END_TX_MODE=autoBegin` restores the older behaviour for front-end code of your
+own that does need one. All four knobs are documented, and validated, in
+[session-lifetime.sh](session-lifetime.sh) alongside the session-lifetime family.
 
 **Listing**
 
@@ -273,15 +340,21 @@ with no session id to key it on.
 
 **Mutation**
 
+None of these commit — call `commit` when you want the change to outlive the session, or `abort` to
+throw it away. Every one of them is undone by `abort`, including the two that look like they would
+not be: a shape-changing class redefinition (the previous class comes back with its methods, and the
+class history shrinks back with it) and a symbol dictionary added to or removed from the user's
+symbol list.
+
 | Tool | Arguments | Result |
 |------|-----------|--------|
-| `add_dictionary` | `dictionaryName` | create + append a dictionary, commit |
-| `compile_class_definition` | `source`, `recompileMethods?` | evaluate a class-definition expression, commit; the source must evaluate to a class (other expressions are rejected — use `execute_code`); on a shape change, by default recompiles the class's methods onto the new version and reports any that fail (refused if it has subclasses) |
-| `compile_method` | `className`, `source`, `category?`, `meta?` | compile a method, commit |
-| `delete_class` | `className` | remove a class, commit *(destructive)* |
-| `delete_method` | `className`, `selector`, `meta?` | remove a method, commit *(destructive)* |
-| `remove_dictionary` | `dictionaryName` | remove a dictionary, commit *(destructive)* |
-| `set_class_comment` | `className`, `comment` | set the class comment, commit |
+| `add_dictionary` | `dictionaryName` | create + append a dictionary |
+| `compile_class_definition` | `className`, `superclassName?`, `instVarNames?`, `classVars?`, `classInstVars?`, `poolDictionaries?`, `dictionary?`, `options?`, `recompileMethods?` | define or redefine a class from named parts; the server builds the definition itself and evaluates nothing, so this tool cannot run arbitrary code (use `execute_code` for that); on a shape change, by default recompiles the class's methods onto the new version and reports any that fail (refused if it has subclasses) |
+| `compile_method` | `className`, `source`, `category?`, `meta?` | compile a method |
+| `delete_class` | `className` | remove a class *(destructive)* |
+| `delete_method` | `className`, `selector`, `meta?` | remove a method *(destructive)* |
+| `remove_dictionary` | `dictionaryName` | remove a dictionary *(destructive)* |
+| `set_class_comment` | `className`, `comment` | set the class comment |
 
 **Testing (SUnit)**
 
@@ -304,10 +377,108 @@ an image without Grail. Once loaded the toolset joins the default tool surface a
 | Tool | Arguments | Result |
 |------|-----------|--------|
 | `compile_python` | `code` | transpile Python source to Smalltalk via Grail (`ModuleAst`), return the generated source |
-| `eval_python` | `code` | evaluate Python source via Grail (`ModuleAst`), return the `printString` of the result |
+| `eval_python` | `code` | evaluate Python in this session's persistent namespace; returns anything printed, then the value's `repr`, or the Python traceback on failure |
+| `get_python_source` | `name` | source of a module, class or function named dotted (`gemdb.transaction`), read from the `.py` it was loaded from |
+| `run_python_tests` | `classNames` *(optional)* | run Grail's `PythonTestCase` classes **in a fresh gem** and report the result structurally |
+| `describe_python_class` | `name` | a Python class: backing Smalltalk class, storage base, `__bases__`/`__mro__`, `__slots__`, class attributes, method names |
+| `list_python_methods` | `name` | its methods with real signatures (parameter names *and* defaults) and the `.py` line each was defined at, in source order |
+| `python_module_state` | `name` | what a module **is** here — native or `.py`, canonical, committed, current or stale, in `sys.modules` — and what the next import would do |
+
+> **Why a Python class needs its own describe tool.** Grail creates every user Python class
+> **anonymously** (`inDictionary: nil`), so nothing in any symbol dictionary names it: `list_classes`
+> cannot see it and `describe_class` cannot be pointed at it. It has to be asked for by its *Python*
+> name, and the answer has to say which Smalltalk class is underneath — because that is the one every
+> other tool here takes. The **storage base** is the line to read closely: a Python class does not
+> wrap its data, it *is* a GemStone object, so `class X(str)` is backed by `Unicode32` and
+> `class Y(list)` by `OrderedCollection`, and that is what decides which env-0 protocol its instances
+> already answer. Names resolve through Python (importing as needed) rather than through the
+> `GrailCanonicalClasses` registry, which records module-scope classes only and is emptied wholesale
+> by the generation guard after a Grail install.
+>
+> **`list_python_methods` carries what a selector cannot.** `pop(key, default=None)` compiles to the
+> Smalltalk selector `_pop:kw:`, and `__setitem__(key, value)` to `__setitem__:_:` — arity survives,
+> names and defaults do not. So signatures come from the class's own signature table, and the
+> selector is only a fallback (the tool says so when it had to use one). Reading a name *off* a
+> selector is done by recognising the whole encoding: truncating at the first colon is a documented
+> way to invent attributes that do not exist — it manufactured `perform`, `value` and `with` on 40 of
+> 42 subjects in Grail's own `dir()` census.
+>
+> **`python_module_state` answers a question CPython has no vocabulary for.** A Grail module is a
+> compiled artifact in the *database*. It can be committed (deployed) or merely session-built; its
+> committed compile can be current or **stale** against the `.py`; and it can be absent from this
+> session's `sys.modules` *having once been in it* — a state in which the next import **raises**
+> rather than rebuilding. The tool reports each fact and then the line that matters: what
+> `import <name>` would actually do from here. It only reads — it deliberately does not import the
+> module it describes, which is what makes it safe to ask about one you have not decided to import,
+> and read-only-safe.
+
+> **`run_python_tests` runs somewhere else on purpose.** Pointing the generic `run_test_class` at
+> Grail's SUnit classes reported roughly **3,410 errors**, and not one of them was a defect in Grail.
+> Two causes, both about the *session* rather than the code: a worker gem's working directory is the
+> stone's, so Grail could not find its `.py` stdlib; and Grail's suite isolates tests by evicting
+> framework modules from `sys.modules`, which *raises* when the module is committed. Measured on the
+> same three classes: **132 defects** in a long-lived worker session, **386 run / 386 passed / 0
+> failed / 0 errors** in a fresh one.
+>
+> So this tool logs in a new gem, runs there, and throws it away. That also settles three other
+> things: the caller's transaction is untouched (running in-session dirtied it with 31 modified
+> objects for a *seven-test* class, because a cold Grail import **is** a database write), nothing is
+> ever committed, and it is therefore the one tool here that is **read-only-safe**. The price is that
+> every run is fully cold — `FlaskScaffoldingTestCase` alone takes ~262s — which is why `classNames`
+> exists and why the tool reports progress.
+>
+> Defects come back with their **message and stack**, via Grail's own `GrailTestResult`; stock SUnit
+> keeps only the failing `TestCase`, so a report could otherwise say no more than
+> `SomeTest debug: #testThing`. A class name that does not resolve is listed as `NOT FOUND` rather
+> than skipped — "ran nothing" and "you misspelled it" must not look alike.
+
+> **`eval_python` is a REPL, not a series of one-shot evaluations.** Names bound by one call are
+> visible to the next — `counter = 41`, then `counter + 1` → `42` — because the toolset keeps one
+> module scope per worker gem, and a worker gem is one client. Before that, every call was a blank
+> slate *while imports persisted* (`sys.modules` is session-local), so the surface looked stateful
+> and was not.
+>
+> It reports three things rather than one, because they answer different questions: what the code
+> **printed** (discarding it meant `print(x)` answered `None` and the output was simply gone), the
+> **value** as Python's `repr` (not a Smalltalk `printString`, which shows an `OrderedCollection`
+> where the caller asked for a list), and on failure the **traceback** — Grail computes a full
+> multi-frame one with real line numbers, and reporting only `KeyError: 'missing'` threw away the
+> part that says where.
+>
+> **`get_python_source` exists because the image loses this.** A compiled `def`'s `__doc__` reads
+> `None` and `inspect.getsource` answers an *empty string* — not an error, the wrong answer quietly.
+> What is reliable is `__code__`: its `co_filename` / `co_firstlineno` are correct, and the `.py`
+> they name is on disk under the Grail checkout, so the tool reads it and recovers both the body and
+> the docstring. It needs to know where that checkout is — see the `grailDirectory` option below.
 
 > **Requirement:** these tools call Grail's `ModuleAst` directly with no capability check, so they
 > need an image with GemStone-Python installed.
+>
+> **Configuration — `grailDirectory`.** Grail's Python lives in the image, but its `.py` stdlib and
+> its test fixtures live on **disk** under the checkout. A worker gem cannot work out where: its own
+> working directory is the *stone's*, which holds no `src/python/stdlib`, so every `.py`-backed
+> import fails. Name the checkout with the toolset option:
+>
+> ```bash
+> MCP_GRAIL_DIR=/opt/Grail ./run-server.sh
+> ```
+>
+> which is shorthand for
+>
+> ```smalltalk
+> (McpRouter new
+>    toolsetOptions: (Dictionary new
+>      at: 'McpGrailToolset' put: (Dictionary new at: 'grailDirectory' put: '/opt/Grail'; yourself);
+>      yourself))
+>   forkOnPort: 8000
+> ```
+>
+> Use the **same checkout the image was installed from** — a different one resolves names against
+> source the image did not compile. `run-server.sh` checks the path holds `src/python/stdlib` before
+> forking anything, so a typo is one line at launch rather than a wave of import errors later, which
+> is exactly how a misconfigured session comes to read as a broken Python subsystem.
+> `run-auth-server.sh` takes the same variable. See **Toolset options** for the general mechanism and
+> `MCP_TOOLSET_OPTIONS` for other toolsets.
 >
 > **Python errors are converted, not propagated.** Grail models its exceptions *outside* the
 > Smalltalk `Error` hierarchy (`NameError` is `Exception < BaseException < Exception <
@@ -349,7 +520,7 @@ each worker read-only at session open, so two routers (one read-only, one not) c
 no shared state. A worker is read-only if **either** applies:
 
 - **The router is read-only** — `(McpRouter new readOnly: true) forkOnPort: 8000`, or the shortcut
-  `GS_MCP_READONLY=1 ./run-server.sh`. Every session that router opens is read-only.
+  `MCP_READONLY=1 ./run-server.sh`. Every session that router opens is read-only.
 - **By OAuth scope (`McpAuthRouter`)** — give the router a `writeScope` (e.g. `./run-auth-server.sh`
   with `MCP_WRITE_SCOPE=mcp:write`): a token carrying that scope gets a read-write worker; a token
   lacking it gets a read-only worker for that session. For a client to actually *request* that scope,
@@ -420,7 +591,7 @@ forbidden here" from "no such tool". A tool absent because its toolset was never
 | `McpServer` | per-client worker: the single-client MCP server that runs inside each worker gem — registry, dispatcher, the kernel guards, read-only gating, identity. The tools themselves belong to its toolsets, and which of those it registers is not fixed by the class. No socket |
 | `McpToolset` | abstract tool pack: `registerOn:` (its tools + schemas), its `tool_*` handlers, `toolNames`, `readOnlySafeToolNames` (empty by default — fail closed), plus the shared schema builders, image-lookup helpers, and the kernel guards (which forward to the server's policy). **Subclass this to add tools**; a deployment picks the list |
 | `McpBrowsingToolset`, `McpExecutionToolset`, `McpListingToolset`, `McpMutationToolset`, `McpSearchToolset`, `McpSessionToolset`, `McpTestingToolset` | the seven core toolsets, one per tool family. A deployment can expose any subset — or none of them, alongside its own |
-| `McpGrailToolset` | optional Python toolset (`eval_python`, `compile_python`), filed in only on a Grail image. Needs nothing from the server, so it doubles as the worked example for a third-party toolset |
+| `McpGrailToolset` | optional Python toolset (7 tools: eval, transpile, source, class + method browsing, module state, tests), filed in only on a Grail image. Needs nothing from the server, so it doubles as the worked example for a third-party toolset |
 | `McpSession` | one client's isolated worker handle: a `GsTsExternalSession` gem + session id + last-activity + the worker class/toolsets/identity the front end resolved, plus the front-end-side outbox, log level and liveness state. `prepareWorker` sets the gem up in one call; `forward:` runs a request in it (`<workerClass> handleJsonString: …`) without blocking the front end (`runWorker:`); `close` stops it |
 | `McpOutbox` | one session's queue of server-initiated messages waiting for its SSE stream. Front-end-only and never committed; owns the bound/overflow policy, the closing handshake, and the latest-GET-wins rule |
 | `McpHttpConnection` | reads one HTTP/1.1 request, writes one JSON response (incl. `MCP-Session-Id`), and writes the SSE stream — every frame gated on the socket being writable, plus a non-blocking read-side disconnect check |
@@ -428,9 +599,76 @@ forbidden here" from "no such tool". A tool absent because its toolset was never
 | `McpToolRegistry` | name → `McpTool` map; produces `tools/list` descriptors |
 | `McpTool` | one tool: name, description, JSON Schema, handler block; validates arguments against the schema |
 | `McpError` | an error carrying a machine-readable `kind` (e.g. `refused`, `readOnly`) that the dispatcher surfaces in the tool-call error envelope |
+| `McpJson` | the JSON writer: renders a response as a byte `String` of UTF-8, replacing `Object>>asJson`, whose escaping corrupts every codepoint above U+FFFF |
 
-Built on existing image facilities: `GsSocket` (TCP), `JsonParser parse:` and
-`Object>>asJson` (JSON), and `String>>evaluate` (the `execute_code` engine).
+Built on existing image facilities: `GsSocket` (TCP), `JsonParser parse:` (JSON in) and
+`String>>evaluate` (the `execute_code` engine).
+
+### The wire is UTF-8, in both directions
+
+That is what RFC 8259 §8.1 says JSON on a wire is, and mcp_server holds to it on both sides. It costs
+the kernel parser on the way in and a writer of mcp_server's own on the way out. Why that trade was
+made, what it cost in code owned, and what the change turned up about the front end have their own
+document: **[docs/utf8-wire.md](docs/utf8-wire.md)**.
+
+**In**, `McpBase class>>parseBody:` reads
+`JsonParser parse: (self combineSurrogateEscapesIn: aString asString decodeFromUTF8 asString)`.
+`JsonParser` wants characters and a socket delivers bytes, with nothing in its API to say which;
+without the decode a `£` or a `°` arrives as two Latin-1 characters and `compile_method` stores it
+that way. The *leading* `asString` is there because the body does not reach the worker gem as the
+bytes the socket read: the front end forwards it embedded in an expression and the worker
+**compiles** that literal, so its class comes from the worker session's `#StringConfiguration` — and
+a `Unicode16`, which is what an accented body compiles to on any Grail image, does not understand
+`decodeFromUTF8` at all. The *trailing* one narrows the `Unicode7`/`16`/`32` that `decodeFromUTF8`
+answers back into the byte/`DoubleByteString`/`QuadByteString` family, since a `Unicode7` compared
+to a `String` raises on a stock image rather than answering false. `combineSurrogateEscapesIn:` is
+the one repair mcp_server makes to what the parser is handed — see below. A malformed sequence —
+truncated, overlong, an encoded surrogate — refuses the whole body with a `-32700` naming the byte
+offset, rather than being repaired into stored text. Everything else about the kernel parser is
+kept, including the part it gets right that matters most here: a **raw** astral character decodes
+correctly.
+
+**Out**, `McpJson class>>write:` replaces `Object>>asJson`, and answers a byte `String` of UTF-8. A
+character above `0x7F` is written as its 2–4 UTF-8 bytes; only what RFC 8259 §7 actually requires
+is escaped — the quote, the backslash, and the C0 controls.
+
+Owning the writer is not a preference. `CharacterCollection>>printJsonOn:` keeps only bits 12–15 of
+a codepoint above U+FFFF instead of emitting a surrogate pair, so `asJson` renders U+1F600 as
+`"\uF600"` — silently the wrong character — and for some codepoints emits a **lone surrogate**,
+which is not well-formed JSON. By the time `asJson` has answered, the codepoint is gone, so no
+post-pass can repair it: the only choices are to patch a kernel method (lost on an extent reload,
+and it changes behaviour for every other consumer in the image) or to write JSON directly. Writing
+UTF-8 does not fix that arithmetic so much as never reach it — a surrogate pair is an artefact of
+`\u` escapes and of UTF-16, and UTF-8 spells an astral codepoint directly in four bytes.
+
+The writer encodes to **bytes** rather than leaving characters for the transport, and that is
+load-bearing. Three unrelated mechanisms downstream read a response as bytes: `Content-Length` is
+written as `body size`; the worker → front-end hop is measured in bytes by the kernel's result
+fetch, whose buffer is sized in bytes; and `MCP_TRACE` writes bodies to the gem log through
+`GsFile`, where a 16-bit string comes out garbled. A byte `String`'s `#size` *is* its byte count
+whatever the bytes are, so all three hold by construction — where under the old ASCII-escaping
+policy they held only because nothing above `0x7E` was ever on the wire.
+
+`McpJson writeUtf8CodePoint:on:` is checked against an oracle: `McpJsonTest` requires it to agree
+with the kernel primitive `String>>encodeAsUTF8` for every codepoint, including both sides of all
+three sequence-length boundaries. Nothing in the kernel emits a *correct* JSON escape for an astral
+codepoint, so an escaping writer's surrogate arithmetic has no second opinion available to it.
+
+The inbound half needs one repair of its own, and gets it before the parse rather than inside a
+parser. Kernel `JsonParser` sends `Character codePoint:` to each `\uXXXX` escape separately and
+3.7.x refuses to build a surrogate, so an emoji written as the surrogate **pair** RFC 8259 §7
+prescribes failed the whole request with a `-32700`. That is a real client, not a hypothetical one:
+Python's `json.dumps` escapes by default. `McpBase class>>combineSurrogateEscapesIn:` folds a pair
+into the one codepoint it spells before the parser can see either half — forty lines at the edge,
+where the outbound defect needed a writer, because inbound the information is still there in the
+escapes. A body with no escape in it is answered as the receiver itself. So both client styles
+round-trip an emoji now: raw UTF-8 (`JSON.stringify`, and therefore most of them) and escaped.
+
+What the kernel parser still gets wrong is left in place, because working around it needs a real
+parser, and it is measured in the defect report (`docs/kernel-json-unicode.md`): an escape it does
+not recognize is silently dropped rather than refused, and trailing content, duplicate keys and raw
+control characters are all accepted. None of those corrupts text — the worst a client gets is one
+wrong value from a request its own encoder built wrong.
 
 ## Why a dedicated gem
 
@@ -515,7 +753,8 @@ in flight per session, so each `McpSession` holds a mutex — a client with two 
 queues rather than colliding. And the idle reaper, which previously could not run during a forward at
 all, now skips any session with a call in flight (`McpSession>>isBusy`) instead of logging a worker
 out mid-request. And a forwarded request *can* have a **deadline** — `requestTimeoutSeconds`, off by
-default, since a client that stops waiting now says so — which only a non-blocking forward makes possible: the
+default, since a client that carries a progressToken pushes its own deadline out as it reports and a
+client that stops waiting now says so — which only a non-blocking forward makes possible: the
 front end is awake in the wait loop, so it can notice the call has outrun it and break the worker,
 answering the client a `-32001` error bearing the request's own id. The break leaves the gem usable,
 so the cost is that request and not the session. See
@@ -590,7 +829,7 @@ untouched. Reconnects landed 3.8s and 4.3s after the close, well inside the wind
 nothing. The grace is kept for the case the protocol actually allows — a client closing one stream
 and opening another on the same session, which a proxy or a network blip can force — and because the
 cost of guessing wrong the other way is a live client losing its gem and its uncommitted work.
-`GS_MCP_STREAM_LOSS_GRACE=0` releases immediately where no client is expected to reattach.
+`MCP_STREAM_LOSS_GRACE=0` releases immediately where no client is expected to reattach.
 
 **An unanswered ping is evidence of death only if it went down the stream the client is still on.**
 A message is written to exactly one stream, and both shipping clients reconnect a dropped standalone
@@ -620,8 +859,9 @@ is thrown away — so they have their own document: **[docs/session-lifetime.md]
 It covers every knob and its default, what actually ends a session, why nothing is measured in
 elapsed time, and why a host suspend needs no handling at all.
 
-From the shell, `GS_MCP_IDLE_TIMEOUT` and friends set all of it on either launcher — see
-[session-lifetime.sh](session-lifetime.sh), which documents each.
+From the shell, `MCP_IDLE_TIMEOUT` and friends set all of it on either launcher — see
+[session-lifetime.sh](session-lifetime.sh), which documents each, along with the view-hygiene family
+(`MCP_MAX_COMMITS_BEHIND` and friends) that the two launchers share with it.
 
 Not configurable, because they are mechanism rather than policy: `keepaliveIntervalSeconds` 15
 (sized to proxy and NAT idle timeouts, not to sessions), `streamPollMilliseconds` 100,
@@ -644,9 +884,9 @@ message it sent, so when a call goes wrong the arguments are often recorded nowh
 on and the front end writes each message it receives to the **gem log**:
 
 ```bash
-GS_MCP_TRACE=1 ./run-server.sh                        # bodies capped at 4096 chars (the default)
-GS_MCP_TRACE=1 GS_MCP_TRACE_LIMIT=none ./run-server.sh   # whole bodies, no cap
-GS_MCP_TRACE=1 GS_MCP_TRACE_LIMIT=512  ./run-server.sh   # a tighter cap
+MCP_TRACE=1 ./run-server.sh                        # bodies capped at 4096 chars (the default)
+MCP_TRACE=1 MCP_TRACE_LIMIT=none ./run-server.sh   # whole bodies, no cap
+MCP_TRACE=1 MCP_TRACE_LIMIT=512  ./run-server.sh   # a tighter cap
 ```
 
 Both work on either launcher, and both travel to the forked front-end gem in the config
@@ -743,6 +983,53 @@ it):
 (McpRouter new workerClassName: 'AcmeDbServer'; toolsetNames: #('AcmeDbToolset')) forkOnPort: 8000
 ```
 
+### Toolset options
+
+Sooner or later your toolset needs something the core cannot know — where your data directory is,
+which host a subsystem talks to, which tenant this deployment serves. Adding an ivar to `McpRouter`
+per vendor does not scale and puts your domain knowledge in the core, so a toolset **declares what it
+can be configured with**, alongside what it provides and what is safe read-only:
+
+```smalltalk
+AcmeDbToolset class >> declaredOptionNames
+  ^#( 'dataDirectory' 'tenant' )
+```
+
+and reads them where it needs them:
+
+```smalltalk
+^self optionNamed: 'dataDirectory' ifAbsent: ['/var/acme']
+```
+
+An operator sets them on the router, keyed by toolset name:
+
+```smalltalk
+(McpRouter new
+   toolsetNames: #('AcmeDbToolset');
+   toolsetOptions: (Dictionary new
+     at: 'AcmeDbToolset' put: (Dictionary new
+       at: 'dataDirectory' put: '/srv/acme'; at: 'tenant' put: 'eu-1'; yourself);
+     yourself))
+  forkOnPort: 8000
+```
+
+Three things are worth knowing about how this behaves:
+
+* **`declaredOptionNames` is an allow-list, checked when the option is set.** An undeclared name is
+  refused there and then, in a message naming what your toolset *does* accept. That is the same
+  choice `additionalProperties: false` makes for tool arguments, for the same reason: a mistyped
+  setting that is silently ignored costs far more to find than one that refuses to start.
+  `validateWorkerConfig` catches the other half — options configured for a toolset that is not in
+  the surface — before the port is bound.
+* **Each toolset sees only its own options.** They are keyed by toolset name and handed out at build
+  time, so two toolsets can neither read nor collide with each other's configuration.
+* **Values must be JSON-safe**, because they travel to the worker gem as JSON in the fork string.
+  Every option is optional by construction, which is why `optionNamed:ifAbsent:` has no bare variant
+  — a handler reading one has to say what it does without it, at the point it reads it.
+
+`ifAbsent:` and an empty `declaredOptionNames` are the defaults, so a toolset that needs no
+configuration says nothing and behaves exactly as it did before options existed.
+
 ### Server identity
 
 The `initialize` result's `serverInfo` carries three fields, and they answer different questions:
@@ -778,8 +1065,52 @@ means a human deliberately labeled that instance. A product that wants its own d
 
 > **Where your classes must live:** a worker gem may log in as a *different user* than the front end
 > (under `McpAuthRouter`, as the token's own GemStone user), so your toolsets and any worker subclass
-> must be in a symbol dictionary in the **worker's** symbol list — `Published`, not the operator's
-> `UserGlobals`.
+> must be in a symbol dictionary in the **worker's** symbol list — `Mcp` (or another shared
+> application dictionary), not the operator's `UserGlobals`. Note that a dictionary of your own is
+> not in a new user's default symbol list the way `Published` is; `install.sh` puts `Mcp` in every
+> `UserProfile`'s symbol list for exactly this reason.
+
+## The `Mcp` dictionary
+
+Every class in this repository is installed into a symbol dictionary named **`Mcp`** — its own, not
+`Published`, where these classes lived until 2026-09-06. `install.sh` creates it if it is absent and
+appends it to the symbol list.
+
+Two consequences are worth knowing about, because neither applies to `Published`:
+
+- **It is not in anybody's symbol list by default.** `Published` is standard: every `UserProfile` in
+  a stock image already has it, so classes filed into it are visible to every gem whoever it logs in
+  as. `Mcp` is ours, so `install.sh` adds it to the symbol list of **every** `UserProfile` in the
+  image (best effort — a profile it may not edit is reported, not fatal), and
+  `setup-oidc-users.sh` adds it to each JWT user it provisions. This matters because a worker gem
+  may log in as a *different user* than the front end, and it resolves its worker class and its
+  toolsets **by name** at runtime (`McpServer class>>toolsetClassNamed:`); a user without `Mcp` in
+  their symbol list gets `undefined symbol McpServer` from the worker bootstrap, or
+  `Toolset not found`, on every session. Any user provisioned **after** the install needs the same
+  one line —
+
+  ```smalltalk
+  up insertDictionary: (System myUserProfile objectNamed: #Mcp) at: up symbolList size + 1.
+  ```
+
+  which is exactly what the auth suites' own `withJwtUser:` fixtures do for the throwaway users they
+  create.
+
+- **An old binding elsewhere would silently win.** `Published` precedes `Mcp` in the symbol list, so
+  a leftover `Published.McpServer` from an earlier install would shadow the new class *at compile
+  time* — every method filed in afterwards would bind to the old class, and the install would look
+  clean while being wrong. `install.sh` therefore removes the exact names it is about to define from
+  every symbol-list dictionary other than `Mcp`, before filing anything in. Unbinding is the whole
+  of deleting a class here: `ClassOrganizer` is built from the symbol list, so an unbound class
+  stops being a subclass of its superclass for every purpose that matters — which is also all that
+  `delete_class` does. Any *other* key beginning with `Mcp` outside the dictionary is **reported and
+  left alone**: it may be a third party's toolset, which is not ours to delete.
+
+> **Why not name the dictionary `McpServer`?** A `SymbolDictionary`'s name is the key inside it whose
+> value is itself (`SymbolDictionary>>name` is `self keyAtValue: self`). Installing the class
+> `McpServer` into a dictionary named `McpServer` overwrites that self-reference, leaving the
+> dictionary nameless and `inDictionary: McpServer` resolving to the class. A dictionary cannot share
+> a name with a class it holds.
 
 ## Source layout
 
@@ -787,8 +1118,8 @@ The classes live on disk as plain **topaz file-outs** — canonical `Class>>file
 grouped by area, with one loader per group:
 
 ```
-src/core/    18 classes  the server itself: protocol, transport, dispatch, toolsets   (always)
-src/tests/   17 classes  the SUnit suites and their fixtures                          (always)
+src/core/    21 classes  the server itself: protocol, transport, dispatch, toolsets   (always)
+src/tests/   24 classes  the SUnit suites and their fixtures                          (always)
 src/auth/     3 classes  the OAuth/OIDC front end McpAuthRouter + its two suites      (3.7.5+)
 src/grail/    2 classes  the optional GemStone-Python toolset + its suite             (--grail)
 load.gs                  files in core + tests, then commits
@@ -814,7 +1145,7 @@ reads it, but it groups the classes in a browser the same way the directories gr
 > directions (`McpDispatcher` asks `McpServer` for its name; `McpServer` builds an `McpDispatcher`),
 > so no file order can put every class ahead of its first mention — the compiler would report
 > `undefined symbol` and the file-in would stop. So each loader first binds its class names to `nil`
-> in `Published`. That is enough, because the compiler binds a global by its **association**, and
+> in `Mcp`. That is enough, because the compiler binds a global by its **association**, and
 > each class definition then fills that same association in; a method compiled before its referent
 > still ends up pointing at the real class. Existing keys are left alone, so re-installing over a
 > loaded image changes nothing.
@@ -826,8 +1157,9 @@ reads it, but it groups the classes in a browser the same way the directories gr
 > errors. The mechanism is not pinned down (topaz's own `removeallmethods` / `removeallclassmethods`
 > do clear the class when run on their own, and a plain `compileMethod:dictionaries:category:`
 > recompiles happily), so treat it as a property of Rowan-managed classes rather than of the
-> file-outs. Install into an image that never loaded the Rowan `Mcp` project, or remove the `Mcp*`
-> keys from `Published` and commit before running `install.sh`.
+> file-outs. Install into an image that never loaded the Rowan `Mcp` project. (An ordinary,
+> non-Rowan binding of these names in another dictionary is cleared by `install.sh` itself — see
+> *The `Mcp` dictionary* above.)
 
 To regenerate a file-out after changing a class in the image, have topaz write `fileOutClass`
 straight to its file — do not transcribe an `export_class_source` result, which drifts on trailing
@@ -836,7 +1168,7 @@ whitespace:
 ```smalltalk
 | s f |
 s := McpServer fileOutClass.
-f := GsFile openWriteOnServer: '/path/to/gs-mcp/src/core/McpServer.gs'.  "no mode: argument"
+f := GsFile openWriteOnServer: '/path/to/mcp_server/src/core/McpServer.gs'.  "no mode: argument"
 f nextPutAll: s; close.
 ```
 
@@ -875,8 +1207,17 @@ flag, so a missing suite is a skip and not an error:
 - `McpExternalSessionTest` — the one thing a mock cannot show: that a result fetched out of a **real**
   worker gem arrives with the bytes the worker sent. It drives a real `McpSession` through the same
   `runWorker:` the forwarding path uses, so it measures the path the server runs on, and it tests the
-  *image* rather than gs-mcp — a failure means the running GemStone carries kernel defect #51438, not
+  *image* rather than mcp_server — a failure means the running GemStone carries kernel defect #51438, not
   that `src/` is wrong. Needs a netldi; see the note below.
+- `McpTransactionTest` — the transaction model across tool calls, and the one state a session can
+  get stuck in. It spawns a second worker gem to commit a **conflicting** change, which is the only
+  way to reach a *failed* commit — nothing short of a real second session produces one. That state
+  is sticky (the per-call `continueTransaction` then raises `TransactionError` 2409 on every later
+  call), so the suite pins what the client is told and how it gets out: that the conflict is raised
+  rather than quietly reported as success, that the jammed session still reports the failed commit
+  and keeps its uncommitted work, that `refresh` is refused while jammed, and that `abort` is the
+  way out. Plus the ordinary-case guarantees the jam is measured against: no tool moves the view,
+  and a stale write is refused rather than silently overwriting. Needs a netldi.
 - `McpTransportTest` — `handleConnection:` driven over a **`McpMockSocket`** wrapped in a
   real `McpHttpConnection`, so the genuine HTTP parsing/writing runs with no TCP. Covers the
   paths that spawn **no** worker gem: a session-less GET→`400`, DELETE→`400`/`404`, unknown verb→405,
@@ -905,6 +1246,26 @@ flag, so a missing suite is a skip and not an error:
   that an indefinite session lives while it answers and goes when it stops — with a floor for
   the client that opens no stream — that an expiry is absolute, and that a wildly late maintenance
   pass is read as a host suspend and forgiven instead of reaping every live client at once.
+- `McpViewHygieneTest` — what the front end does about database **views**. Which transaction mode a
+  detached front end asks for (`transactionless`, so it stops holding a commit record the stone
+  cannot dispose of), that a mode nobody implements is refused where the router is configured rather
+  than in the gem serving clients, that the setting survives the trip into a forked gem, that the
+  refresh takes a whole new view without disturbing the transaction mode, that a maintenance pass
+  begins with it — and the bug detector, since a front end that ever writes to the repository loses
+  that write *silently* out of transaction, so one log line is all that stands between the defect and
+  nobody noticing. Then the **workers'** views: that a session far enough behind the repository is
+  noticed and recorded, that pressure on the stone is never on its own a reason to move one
+  particular client's view, that a reading which cannot be taken is skipped rather than recorded as
+  zero, and that each of the three verdicts a worker can answer is recorded. Then the worker's own
+  side: that a refresh **keeps** uncommitted work — the claim the whole design rests on — that the
+  client is told exactly once, and what that note may and may not promise. Then the last ground a
+  session can be reaped on: that a view which **cannot** be moved is released only when all four
+  conditions hold, that a configured grace is a floor rather than a ceiling, that a zero grace means
+  the pass that finds it, and that a pass which could not *ask* proves nothing. Last, the arm that
+  ends a **running** call whose view is pinning the repository's oldest commit record: that a quiet
+  repository never ends one however long it runs, that the run must be consecutive, and that every
+  ending this server causes is one the client is told the reason for. Declares
+  `movesTheSessionView`: its subject is this gem's view.
 - `McpContractTest` — contract / property tests over the tool surface, all driven through the real
   `McpDispatcher>>handle:` envelope: every tool schema is closed (`additionalProperties:false`),
   unknown/missing arguments → an `isError` tool execution error while a missing tool name / unknown
@@ -935,23 +1296,29 @@ flag, so a missing suite is a skip and not an error:
 
 Run a single suite while a server is up via the `run_test_class` tool (e.g. `run_test_class
 McpToolTest`). `./run-unit-tests.sh` runs them all and exits 0 when every test passes: the
-socket-less suites `McpJsonTest` (20), `McpToolTest` (52), `McpDispatcherTest` (12),
-`McpSessionTest` (18), `McpOutboxTest` (9), `McpStreamTest` (18), `McpLifetimeTest` (43),
-`McpTransportTest` (36), `McpContractTest` (36) and `McpExtensionTest` (9), plus
-`McpExternalSessionTest` (5) and `McpWorkerDeadlineTest` (4) — **262 tests**, which is the whole
-suite on a base install. Where the optional groups are installed the runner picks their suites up
-automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **318 tests** — and
-**345 with the 27 in `McpGrailToolsetTest`** on a Grail image.
+socket-less suites `McpJsonTest` (12), `McpUtf8Test` (7), `McpBlindWriteTest` (41),
+`McpToolTest` (58), `McpDispatcherTest` (18), `McpSessionTest` (22), `McpOutboxTest` (9),
+`McpProgressTest` (19), `McpStreamTest` (18), `McpLifetimeTest` (49), `McpViewHygieneTest` (46),
+`McpTransportTest` (43), `McpContractTest` (35) and `McpExtensionTest` (14), plus
+`McpConcurrentEditTest` (15), `McpExternalSessionTest` (5), `McpTransactionTest` (8) and
+`McpWorkerDeadlineTest` (4) — **423 tests**,
+which is the whole suite on a base install. Where the optional groups are installed the runner picks
+their suites up automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **479
+tests** — and **506 with the 27 in `McpGrailToolsetTest`** on a Grail image.
 
-All but two of those run with no netldi. The exceptions are `McpExternalSessionTest`, which drives a
-real worker gem because it is asking about the *image* — whether a result comes back with the bytes
-the worker sent — and `McpWorkerDeadlineTest`, which drives one because the question it asks — does a
-break really stop a running call in THIS image — cannot be asked of a mock. The two **auth**
-suites need one for the same reason: `McpAuthTest` and `McpAuthConformanceTest` commit a throwaway
-JWT user and spawn real worker gems, and they are in the runner anyway, because they are the only
-cover for the token → session path. They are not installed on 3.7.2.
+Six suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
+`McpAuthConformanceTest` commit a throwaway JWT user and spawn real worker gems; they are in the
+runner anyway, because they are the only cover for the token → session path.
+`McpExternalSessionTest` checks that a result arrives out of a real worker gem carrying the bytes
+the worker sent, `McpTransactionTest` that a *second* gem committing a conflicting change leaves
+this session in the state a failed commit really produces, and `McpWorkerDeadlineTest` that a call
+which outruns the request deadline is really broken in a real one, and `McpConcurrentEditTest` that
+the blind-write guardrail holds against a real second session — so the runner asks for a netldi on
+any image where they are installed, which is every image, since all four are part of the base
+install. That is no new burden in practice: mcp_server gives every
+client its own worker gem, so it cannot serve a single request without a netldi either.
 
-Those four also need **spare login slots**, which is the likeliest reason for a failure that is
+Those six also need **spare login slots**, which is the likeliest reason for a failure that is
 nothing to do with the code: each spawns worker gems of its own, so a stone whose `StnMaxSessions`
 is already consumed by running servers fails them with *"the maximum number of users are already
 logged in."* Stop the servers, or raise the limit, before reading such a failure as a regression.
@@ -960,7 +1327,7 @@ logged in."* Stop the servers, or raise the limit, before reading such a failure
 > 3.7.4.1 carries kernel defect #51438: `GsTsExternalSession>>resolveResult:` refetches an object
 > only when its 1024-byte fetch buffer has to *grow*, so once one large result has enlarged the
 > buffer, every later result between 1025 bytes and that size arrives as 1024 good bytes followed by
-> the tail of an earlier result — right length, plausible bytes, no error raised. gs-mcp meets this
+> the tail of an earlier result — right length, plausible bytes, no error raised. mcp_server meets this
 > on its main path, since every MCP response is a String of JSON pulled out of a worker gem. Nothing
 > in `src/` can make those two tests pass; the fix is to run on 3.7.4.1 or later. The three that do
 > pass everywhere are controls that localise the failure — see the `McpExternalSessionTest` class
@@ -975,7 +1342,7 @@ full Streamable HTTP transport with `curl`: it `initialize`s, captures the `MCP-
 sends it on every subsequent request (tools/list of the 31 base tools, every core tool, a
 compile_method/commit round-trip, error paths, the SSE GET stream, DELETE), then shuts the server
 down. It targets the **base** server — run it against a base install. Uses port `8011` by default
-(set `GS_MCP_PORT`). Exit status 0 = all passed.
+(set `MCP_PORT`). Exit status 0 = all passed.
 
 **TLS test (real HTTPS socket)** — `./test-tls.sh` forks a TLS-enabled server and drives the same
 transport over HTTPS with `curl -k`: TLS handshake, the self-signed cert, the SSE GET stream,
@@ -983,7 +1350,7 @@ transport over HTTPS with `curl -k`: TLS handshake, the self-signed cert, the SS
 refused on the TLS port. It generates a throwaway self-signed `certs/` cert if none exists, and
 sets the cert/key **only in the forked gem's session (never committed)**, so the repository's
 default stays plaintext — nothing to restore even if interrupted. Uses port `8443` by default
-(set `GS_MCP_PORT`). Exit status 0 = all passed.
+(set `MCP_PORT`). Exit status 0 = all passed.
 
 ## Future work
 

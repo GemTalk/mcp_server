@@ -12,7 +12,7 @@ Object subclass: 'McpMockWorker'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %

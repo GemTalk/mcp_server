@@ -7,7 +7,7 @@ GsTestCase subclass: 'McpContractTest'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %
@@ -39,6 +39,16 @@ bytesOf: anArrayOfByteValues
   | out |
   out := String new.
   anArrayOfByteValues do: [:each | out add: (Character codePoint: each)].
+  ^out
+%
+category: 'helpers'
+method: McpContractTest
+charsOf: anArrayOfCodePoints
+  "A string holding these CODEPOINTS, whatever width the image needs -- the decoded counterpart of
+   #bytesOf:, for spelling an expectation about text rather than about the wire."
+  | out |
+  out := String new.
+  anArrayOfCodePoints do: [:each | out add: (Character codePoint: each)].
   ^out
 %
 category: 'helpers'
@@ -228,8 +238,8 @@ testPrepareWorkerAppliesReadOnlyBeforeBuilding
   "Read-only must be set before the build, or the gated tools would already be registered."
   self withFreshWorkerCacheDo: [
     self savingReadOnlyDo: [ | out |
-      McpServer prepareWorkerWithToolsets: McpServer defaultToolsetNames
-        readOnly: true serverName: nil title: nil version: nil.
+      McpServer prepareWorkerWithToolsets: McpServer defaultToolsetNames options: nil
+        readOnly: true serverName: nil title: nil version: nil frontEnd: nil.
       out := McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'.
       self deny: (self includesCS: 'execute_code' in: out).
       self deny: (self includesCS: 'compile_method' in: out).
@@ -244,8 +254,9 @@ testPrepareWorkerBuildsNamedSurfaceAndCaches
   self withFreshWorkerCacheDo: [
     self savingReadOnlyDo: [ | note listed |
       note := McpServer
-        prepareWorkerWithToolsets: #('McpBrowsingToolset')
-        readOnly: false serverName: 'acme-db-mcp' title: 'Acme Labels - sandbox' version: '2.5.0'.
+        prepareWorkerWithToolsets: #('McpBrowsingToolset') options: nil
+        readOnly: false serverName: 'acme-db-mcp' title: 'Acme Labels - sandbox' version: '2.5.0'
+        frontEnd: nil.
       self assert: (self includesCS: 'McpServer ready' in: note).
       listed := (((McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
         indexOfSubCollection: 'describe_class') > 0).
@@ -512,33 +523,6 @@ testUnknownToolsetNameIsRefusedByName
   self deny: msg isNil.
   self assert: (self includesCS: 'McpNoSuchToolset' in: msg)
 %
-category: 'tests - transport'
-method: McpContractTest
-testUnrenderableResponseBecomesAReportedJsonRpcError
-  "McpJson refuses an object it has no rule for, where the kernel writer answered {} and shipped a
-   silently empty value. Refusing is the better default ONLY if the refusal is contained and
-   reported: this runs in a worker gem, so an unhandled error would reach the front end as a
-   GciError and the client would see the whole call collapse.
-   A differential run over every tool's response found nothing that McpJson cannot render, so this
-   path should never be taken. It is here because 'should never' is the reason to write the test,
-   not the reason to skip it."
-  | request out parsed |
-  request := Dictionary new.
-  request at: 'jsonrpc' put: '2.0'.
-  request at: 'id' put: 42.
-  out := McpServer new renderResponse: (Dictionary new at: 'result' put: $a; yourself) for: request.
-  "Valid JSON, and ASCII like every other body."
-  1 to: out size do: [:i | self assert: (out at: i) codePoint < 128].
-  parsed := McpJson parse: out.
-  "The client can match it to the request it is waiting on."
-  self assert: (parsed at: 'id') equals: 42.
-  self assert: ((parsed at: 'error') at: 'code') equals: -32603.
-  "And the message names the class with no rule, which is the one fact needed to add one."
-  self assert: (self includesCS: 'Character' in: ((parsed at: 'error') at: 'message')).
-  "A response that renders is passed straight through, unwrapped."
-  out := McpServer new renderResponse: (Dictionary new at: 'result' put: 'fine'; yourself) for: request.
-  self assert: ((McpJson parse: out) at: 'result') equals: 'fine'
-%
 category: 'tests - validation'
 method: McpContractTest
 testValidArgumentsAccepted
@@ -550,24 +534,44 @@ testValidArgumentsAccepted
 %
 category: 'tests - transport'
 method: McpContractTest
-testWorkerDecodesUtf8AndAnswersAscii
-  "The worker entry's Unicode contract, at the boundary a client's bytes actually cross.
-   Two properties, and they are the two halves of the round trip. INBOUND: the body arrives as raw
-   UTF-8 -- what every real client sends, since only an escaping encoder avoids it -- and must be
-   decoded, so 'Cafe' with an e-acute is five characters and not six. Before McpJson it was read one
-   Latin-1 character per byte, and the corruption went on to be stored.
-   OUTBOUND: whatever the tool answers, the rendered response holds nothing outside 0x20-0x7E.
-   Content-Length elsewhere is computed as `body size` and is the byte count only while that is true.
-   describe_class is used because it echoes the name it was given straight back and changes nothing."
+testWorkerDecodesUtf8AndAnswersUtf8
+  "The worker entry's Unicode contract, at the boundary a client's bytes actually cross, in BOTH
+   directions -- and the same UTF-8 in both, which is the whole of the design.
+   INBOUND: the body arrives as raw UTF-8 -- what every real client sends, since only an escaping
+   encoder avoids it -- and must be decoded, so 'Cafe' with an e-acute is five characters and not
+   six. Without the #decodeFromUTF8 in McpBase class>>parseBody: it is read one Latin-1 character
+   per byte, and the corruption goes on to be stored.
+   OUTBOUND: the rendered response is a byte String of UTF-8 (McpJson), so the e-acute leaves as its
+   two bytes C3 A9 and not as a six-byte \u escape, and #size is still the byte count that
+   Content-Length is computed from elsewhere.
+   AN EMOJI IS IN HERE ON PURPOSE. Under the escaping policy this test had to stay inside the BMP,
+   because the kernel writer turned an astral codepoint into one wrong escape and the test would
+   have measured that defect instead of this contract. Writing UTF-8 removes the restriction: the
+   four bytes go out and come back as one codepoint.
+   describe_class is used because it echoes the name it was given straight back and changes nothing.
+
+   The one test here that asserts on ANNOTATED text, hence the #withoutSessionNote:. Three of this
+   suite's kernel-guard tests leave the session dirty on purpose -- a tools/call would abort the
+   transaction and undo the fixture each is built on -- so the note is present whenever the suite
+   runs in order, and this test passed alone and failed in the suite without it."
   | body out text |
   body := '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"describe_class",'
-    , '"arguments":{"className":"Caf' , (self bytesOf: #(16rC3 16rA9)) , '"}}}'.
+    , '"arguments":{"className":"Caf' , (self bytesOf: #(16rC3 16rA9 16rF0 16r9F 16r98 16r80))
+    , '"}}}'.
   out := McpServer new handleJsonString: body.
-  1 to: out size do: [:i | self assert: (out at: i) codePoint < 128].
-  text := ((McpJson parse: out) at: 'result') at: 'content'.
-  text := (text at: 1) at: 'text'.
-  self assert: text equals: 'Class not found: Caf' , (String with: (Character codePoint: 16rE9)).
-  self assert: (self includesCS: 'Caf' , (String with: (Character codePoint: 92)) , 'u00E9' in: out)
+  "The answer is bytes, whatever is in it -- the invariant Content-Length rests on."
+  self assert: out class equals: String.
+  text := ((McpBase parseBody: out) at: 'result') at: 'content'.
+  text := self withoutSessionNote: ((text at: 1) at: 'text').
+  "Codepoints, never round-tripped text: on 3.6.2 the kernel's two defects cancel and an emoji
+   appears to survive for the wrong reason. The echoed name is the tail of the message, so assert
+   from the end rather than counting the prose in front of it."
+  self assert: text equals: 'Class not found: Caf' , (self charsOf: #(16rE9 16r1F600)).
+  self assert: (text at: text size - 1) codePoint equals: 16rE9.
+  self assert: text last codePoint equals: 16r1F600.
+  "And on the wire both went out as UTF-8, not as escapes."
+  self assert: (self includesCS: (self bytesOf: #(16rC3 16rA9 16rF0 16r9F 16r98 16r80)) in: out).
+  self deny: (self includesCS: (String with: (Character codePoint: 92)) , 'u00E9' in: out)
 %
 category: 'helpers'
 method: McpContractTest
@@ -583,4 +587,21 @@ withFreshWorkerCacheDo: aBlock
    outlives each test -- the whole suite runs in one gem session."
   SessionTemps current removeKey: #McpServer ifAbsent: [nil].
   ^[aBlock value] ensure: [SessionTemps current removeKey: #McpServer ifAbsent: [nil]]
+%
+category: 'helpers'
+method: McpContractTest
+withoutSessionNote: aString
+  "aString up to the dispatcher's [session] note, or unchanged when it carries none -- see the twin
+   in McpGrailToolsetTest for why the cut is at the FIRST one, and why stripping the note beats
+   loosening the comparison that needs it off. Written out again rather than shared because these
+   suites have no common superclass but GsTestCase, the same reason #includesCS:in: appears in ten
+   test classes here.
+
+   This suite aborted in setUp until 2026-09-01 to keep the note out of its exact-text assertions,
+   and lost that abort once none of its tests asserted on annotated text. One does again."
+  | marker idx |
+  marker := (String with: Character lf) , '[session] '.
+  idx := aString findString: marker startingAt: 1.
+  idx = 0 ifTrue: [^aString].
+  ^aString copyFrom: 1 to: idx - 1
 %

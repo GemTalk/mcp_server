@@ -8,7 +8,7 @@ Object subclass: 'McpOutbox'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %

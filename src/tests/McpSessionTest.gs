@@ -7,7 +7,7 @@ GsTestCase subclass: 'McpSessionTest'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %
@@ -96,7 +96,7 @@ testACancelFromAnotherProcessEndsTheCallAndLeavesTheSessionUsable
   w waitsBeforeDone: 1000000.        "a call that never finishes on its own"
   [(Delay forMilliseconds: 50) wait. sess requestCancel: 7] fork.
   raised := nil.
-  [sess forward: 'LONG-RUNNING' requestId: 7] on: McpError do: [:ex | raised := ex].
+  [sess forward: 'LONG-RUNNING' lifetimeBounds: nil requestId: 7] on: McpError do: [:ex | raised := ex].
   self assert: raised notNil.
   self assert: raised kind equals: #cancelled.
   self assert: (raised description findString: 'cancelled' startingAt: 1) > 0.
@@ -119,11 +119,11 @@ testACancelIsForgottenWhenItsCallEnds
   sess := McpMockSession startWithId: 'stale-flag'.
   w := sess mockWorker.
   w waitsBeforeDone: 1; nextResult: 'FIRST'.
-  self assert: (sess forward: 'FIRST-REQUEST' requestId: 1) equals: 'FIRST'.
+  self assert: (sess forward: 'FIRST-REQUEST' lifetimeBounds: nil requestId: 1) equals: 'FIRST'.
   "the call is over, so this names nothing and must not be remembered"
   self deny: (sess requestCancel: 1).
   w waitsBeforeDone: 1; nextResult: 'SECOND'.
-  self assert: (sess forward: 'SECOND-REQUEST' requestId: 2) equals: 'SECOND'.
+  self assert: (sess forward: 'SECOND-REQUEST' lifetimeBounds: nil requestId: 2) equals: 'SECOND'.
   self assert: w softBreakCount equals: 0
 %
 category: 'tests - deadline'
@@ -151,6 +151,108 @@ testADeadlineEndsARunawayCallAndLeavesTheSessionUsable
    ending a session"
   w waitsBeforeDone: 1; nextResult: 'AFTER-TIMEOUT'.
   self assert: (sess forward: 'NEXT-REQUEST') equals: 'AFTER-TIMEOUT'
+%
+category: 'tests - maintenance'
+method: McpSessionTest
+testAMaintenanceSendCountsAsNoActivityAtAll
+  "The front end drives a worker for its OWN reasons -- a view refresh -- and that send must advance
+   nothing the reaping policy counts. #runWorker: ends with a #touch, which resets the whole idle
+   measure, so routing a maintenance send through it would be an immortality potion: a session whose
+   client had gone for good would be refreshed every pass and never released, by the server's own
+   housekeeping. The contrast at the end of this test is the point of it.
+   Also pins the expression sent, which is evaluated in another gem where a typo answers nil rather
+   than failing."
+  | sess w |
+  sess := McpMockSession startWithId: 'maintenance-is-not-activity'.
+  w := sess mockWorker.
+  w nextResult: 'kept'.
+  sess noteAlive; noteAlive; notePassWithStream: false.
+  self assert: sess quietProbes equals: 2.
+  self assert: sess streamlessPasses equals: 1.
+  self assert: (sess runMaintenanceExpression: 'McpServer refreshViewForFrontEnd') equals: 'kept'.
+  self assert: w expressions size equals: 1.
+  self assert: w expressions last equals: 'McpServer refreshViewForFrontEnd'.
+  self assert: sess quietProbes = 2 description: 'a maintenance send reset the idle count'.
+  self assert: sess streamlessPasses = 1 description: 'a maintenance send reset the streamless count'.
+  "What a CLIENT's call does to the same two counters, which is the difference being pinned."
+  w nextResult: 'DONE'.
+  self assert: (sess forward: 'REAL WORK') equals: 'DONE'.
+  self assert: sess quietProbes equals: 0.
+  self assert: sess streamlessPasses equals: 0
+%
+category: 'tests - maintenance'
+method: McpSessionTest
+testAMaintenanceSendGivesUpRatherThanQueueBehindAClientsCall
+  "#tryLock, not #critical:. The maintenance pass runs on the reaper's GsProcess and serves every
+   other session in the server from it; parking that process behind one client's tool call would
+   stall probes, reaps and hygiene for all of them for as long as the call lasts. So a busy worker is
+   not waited for: the send answers nil, nothing is sent to the gem, and the next pass tries again.
+   Testing #isBusy alone would not do this, since a call can start between the test and the send --
+   which is why the mutex is what is taken."
+  | sess w forked |
+  sess := McpMockSession startWithId: 'maintenance-yields'.
+  w := sess mockWorker.
+  w waitsBeforeDone: 5; waitMs: 20.        "a call takes ~100ms, long enough to overlap"
+  forked := Array new: 1.
+  [forked at: 1 put: (sess forward: 'REQUEST-A')] fork.
+  self assert: (self waitUpTo: 1000 for: [sess isBusy]).
+  self assert: (sess runMaintenanceExpression: 'McpServer refreshViewForFrontEnd') isNil.
+  self deny: w overlapDetected.
+  self assert: (self waitUpTo: 1000 for: [(forked at: 1) notNil]).
+  "the client's call is the only thing that reached the gem, and it answered its own caller"
+  self assert: w expressions size equals: 1.
+  self assert: (self includesCS: 'REQUEST-A' in: (forked at: 1))
+%
+category: 'tests - view release'
+method: McpSessionTest
+testAViewReleaseEndsTheCallAndKeepsTheSession
+  "The one thing this server does that ends work a client is waiting on. It reaches the call the same
+   way a cancellation does -- a flag set from ANOTHER GsProcess, here the reaper's, acted on by the
+   process that owns the worker mutex -- because sending a break from two processes into one session
+   is what that mutex exists to prevent.
+   What the client is left with matters as much as the ending: an interrupted worker is usable
+   immediately, so it loses the request and not its gem, nor the uncommitted work in it."
+  | sess w raised |
+  sess := McpMockSession startWithId: 'pinned'.
+  w := sess mockWorker.
+  w waitsBeforeDone: 1000000.
+  [(Delay forMilliseconds: 50) wait. sess requestViewRelease] fork.
+  raised := nil.
+  [sess forward: 'LONG-RUNNING'] on: McpError do: [:ex | raised := ex].
+  self assert: raised notNil.
+  self assert: raised kind equals: #viewRelease.
+  self assert: (raised description findString: 'oldest commit record' startingAt: 1) > 0.
+  "and it says what it is NOT, because a client that read this as a time limit would draw the wrong
+   lesson and shorten work that was never the problem"
+  self assert: (raised description findString: 'not a limit on how long' startingAt: 1) > 0.
+  self assert: w softBreakCount equals: 1.
+  self deny: sess workerAbandoned.
+  self deny: sess isBusy.
+  w waitsBeforeDone: 1; nextResult: 'AFTER-RELEASE'.
+  self assert: (sess forward: 'NEXT-REQUEST') equals: 'AFTER-RELEASE'
+%
+category: 'tests - view release'
+method: McpSessionTest
+testAViewReleaseIsForgottenWhenItsCallEnds
+  "Same hazard as a stale cancellation, and the same fix: a flag set by another GsProcess that
+   outlived its call would end the NEXT one -- a request that was never pinning anything."
+  | sess w |
+  sess := McpMockSession startWithId: 'stale-release'.
+  w := sess mockWorker.
+  sess requestViewRelease.
+  w waitsBeforeDone: 1; nextResult: 'UNTOUCHED'.
+  self assert: (sess forward: 'A-CALL') equals: 'UNTOUCHED'.
+  self assert: w softBreakCount equals: 0
+%
+category: 'tests - view release'
+method: McpSessionTest
+testAViewReleaseIsRefusedWhenNothingIsRunning
+  "It answers whether there was a call to ask about, so the reaper can log an ask that landed and say
+   nothing about one that raced the call's own ending."
+  | sess |
+  sess := McpMockSession startWithId: 'idle'.
+  self deny: sess isBusy.
+  self deny: sess requestViewRelease
 %
 category: 'tests - deadline'
 method: McpSessionTest
@@ -190,7 +292,7 @@ testAWorkerThatIgnoresBothBreaksIsStoppedOnACancelToo
   w waitsBeforeDone: 1000000; resistSoftBreak: true; resistHardBreak: true.
   [(Delay forMilliseconds: 50) wait. sess requestCancel: 3] fork.
   raised := nil.
-  [sess forward: 'STUBBORN' requestId: 3] on: McpError do: [:ex | raised := ex].
+  [sess forward: 'STUBBORN' lifetimeBounds: nil requestId: 3] on: McpError do: [:ex | raised := ex].
   self assert: raised notNil.
   self assert: raised kind equals: #cancelled.
   self assert: w softBreakCount equals: 1.
@@ -390,6 +492,25 @@ testWorkerErrorPropagatesAndLeavesTheSessionUsable
   self deny: sess isBusy.
   w nextResult: 'AFTER-ERROR'.
   self assert: (sess forward: 'NEXT-REQUEST') equals: 'AFTER-ERROR'
+%
+category: 'tests - forwarding'
+method: McpSessionTest
+testWorkerExpressionCarriesLifetimeBoundsOnlyWhenThereAreSome
+  "The bounds ride in on the request because the worker cannot see the front end's configuration.
+   The keyword is omitted when there are none, so a deployment that bounds nothing sends exactly the
+   expression it always sent -- and the one-argument entry point stays the documented direct call.
+   Every element is embedded via printString, so a nil slot and an apostrophe in a phrase are both
+   safe to send."
+  | sess |
+  sess := McpMockSession startWithId: 'expr'.
+  self assert: (sess workerExpressionFor: '{}')
+    equals: 'McpServer handleJsonString: ''{}'''.
+  self assert: (sess workerExpressionFor: '{}' lifetimeBounds: nil)
+    equals: 'McpServer handleJsonString: ''{}'''.
+  self assert: (sess workerExpressionFor: '{}'
+      lifetimeBounds: (Array with: 1756400000 with: 'your credential, it''s yours' with: nil with: nil))
+    equals: 'McpServer handleJsonString: ''{}'' lifetimeBounds: (Array with: 1756400000'
+      , ' with: ''your credential, it''''s yours'' with: nil with: nil)'
 %
 category: 'helpers'
 method: McpSessionTest

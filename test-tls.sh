@@ -18,7 +18,7 @@
 #   GS_STONE    - stone name        (default: gs64stone)
 #   GS_USER     - GemStone user     (default: DataCurator)
 #   GS_PASS     - GemStone password (default: swordfish)
-#   GS_MCP_PORT - test port         (default: 8443, kept off the usual 8000)
+#   MCP_PORT    - test port         (default: 8443, kept off the usual 8000)
 #
 # Exit status 0 = all checks passed.
 set -uo pipefail
@@ -28,7 +28,7 @@ cd "$(dirname "$0")"
 export GS_STONE="${GS_STONE:-gs64stone}"
 export GS_USER="${GS_USER:-DataCurator}"
 export GS_PASS="${GS_PASS:-swordfish}"
-PORT="${GS_MCP_PORT:-8443}"
+PORT="${MCP_PORT:-8443}"
 HOST=127.0.0.1
 URL="https://$HOST:$PORT/mcp"
 CERT="$(pwd)/certs/server.crt"
@@ -47,7 +47,7 @@ cleanup() {
   # only a process that looks like a gem, and escalates SIGTERM -> SIGKILL with a wait rather than
   # firing and letting the shell exit. A leaked front end here keeps the TLS port, so the next run
   # tests against it -- and a router gem does not pick up recompiled code the way workers do.
-  GS_MCP_PORT="$PORT" ./stop-server.sh >/dev/null 2>&1
+  MCP_PORT="$PORT" ./stop-server.sh >/dev/null 2>&1
   rm -f "$SERVER_LOG"
 }
 trap cleanup EXIT

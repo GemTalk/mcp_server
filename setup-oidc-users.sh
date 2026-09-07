@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Link a local Keycloak realm to GemStone: trust its JWT signing key, and provision a
-# JWT-authenticated UserProfile per user.
+# JWT-authenticated UserProfile per user, each with the Mcp dictionary in its symbol list.
+#
+# Run install.sh FIRST: this script only adds the Mcp dictionary to the users it provisions if the
+# dictionary already exists, and a worker gem that cannot see it fails with 'Toolset not found'.
 #
 # Run this AFTER Keycloak is up (~/idp/keycloak-up.sh) and AGAIN after every Stone restart --
 # `System addJwtKey:` is in-memory only, so the trusted key does NOT survive a restart. (The
@@ -96,7 +99,7 @@ System addJwtKey: key withId: kid.
 "One JWT-authenticated UserProfile per user. userIdKey names the claim carrying the GemStone
  userId: Keycloak's 'sub' is an opaque UUID, so preferred_username is the usable one."
 provisioned := OrderedCollection new.
-#( $USER_LIST ) do: [:uid | | jwtSec up |
+#( $USER_LIST ) do: [:uid | | jwtSec up mcpDict |
   (AllUsers userWithId: uid ifAbsent: [nil]) ifNotNil: [:u |
     AllUsers removeAndCleanupUserWithId: uid ifAbsent: [nil]].
   jwtSec := JwtSecurityData new.
@@ -114,6 +117,15 @@ provisioned := OrderedCollection new.
 
   up := AllUsers addNewUserWithId: uid password: 'jwtOnly_', uid, '_99'.
   up enableJwtAuthenticationWith: jwtSec.
+
+  "The MCP classes live in the Mcp dictionary, which -- unlike Published -- is NOT in a new
+   profile's default symbol list. A worker gem logs in as THIS user and resolves its worker class
+   and toolsets by name, so without this the user's very first session answers 'Toolset not found'.
+   install.sh does the same for users that already exist; this covers the ones created here, which
+   is the case that matters because this script deletes and recreates each user on every run."
+  mcpDict := System myUserProfile objectNamed: #Mcp.
+  mcpDict ifNotNil: [:md | up insertDictionary: md at: up symbolList size + 1].
+
   provisioned add: uid].
 System commitTransaction.
 GsFile gciLogServer: 'Provisioned JWT users: ', provisioned asArray printString.

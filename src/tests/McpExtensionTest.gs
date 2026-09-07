@@ -7,7 +7,7 @@ GsTestCase subclass: 'McpExtensionTest'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %
@@ -40,6 +40,14 @@ dispatchOn: aServer request: requestDict
 %
 category: 'helpers'
 method: McpExtensionTest
+fixtureOptions: aPrefix
+  "The router-shaped options map that configures McpFixtureToolset's echoPrefix."
+  ^Dictionary new
+    at: 'McpFixtureToolset' put: (Dictionary new at: 'echoPrefix' put: aPrefix; yourself);
+    yourself
+%
+category: 'helpers'
+method: McpExtensionTest
 includesCS: aSubstring in: aString
   "Case-sensitive substring test (String>>includesString: is case-INsensitive in GemStone)."
   ^(aString findString: aSubstring startingAt: 1) > 0
@@ -62,8 +70,8 @@ testBootstrapBuildsTheNamedSubclassWithItsNamedToolsets
    built, with the named TOOLSETS and nothing else, cached for the first request."
   self withFreshWorkerCacheDo: [ | note out |
     note := McpFixtureServer
-      prepareWorkerWithToolsets: #('McpFixtureToolset')
-      readOnly: false serverName: nil title: nil version: nil.
+      prepareWorkerWithToolsets: #('McpFixtureToolset') options: nil
+      readOnly: false serverName: nil title: nil version: nil frontEnd: nil.
     self assert: (self includesCS: 'McpFixtureServer ready' in: note).
     out := McpFixtureServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'.
     self assert: (self includesCS: 'fixture_echo' in: out).
@@ -74,8 +82,9 @@ testBootstrapBuildsTheNamedSubclassWithItsNamedToolsets
     self assert: (self includesCS: 'fixture-mcp' in: out)].
   "...and a deployment that DOES name the server in config relabels it, through the same bootstrap"
   self withFreshWorkerCacheDo: [ | out |
-    McpFixtureServer prepareWorkerWithToolsets: #('McpFixtureToolset')
-      readOnly: false serverName: 'billing-mcp' title: 'Billing - staging' version: '1.1.1'.
+    McpFixtureServer prepareWorkerWithToolsets: #('McpFixtureToolset') options: nil
+      readOnly: false serverName: 'billing-mcp' title: 'Billing - staging' version: '1.1.1'
+      frontEnd: nil.
     out := McpFixtureServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'.
     self assert: (self includesCS: 'billing-mcp' in: out).
     self assert: (self includesCS: 'Billing - staging' in: out).
@@ -105,7 +114,8 @@ testFixtureToolsetRunsThroughTheRealEnvelope
   result := (self dispatchOn: server request: (self toolCall: 'fixture_echo'
     args: (Dictionary new at: 'text' put: 'hello'; yourself))) at: 'result'.
   self deny: (result at: 'isError').
-  self assert: ((result at: 'content') first at: 'text') equals: 'echo: hello'.
+  self assert: (self withoutSessionNote: ((result at: 'content') first at: 'text'))
+    equals: 'echo: hello'.
   "and its schema is closed like every other tool's, since it was built with the shared helper"
   self assert: ((((server toolRegistry at: 'fixture_echo') descriptor at: 'inputSchema')
     at: 'additionalProperties') == false)
@@ -119,6 +129,78 @@ testNamedSubclassAnswersTheWorkerEntry
     out := McpFixtureServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'.
     self assert: (self includesCS: 'fixture-mcp' in: out).
     self assert: (self includesCS: '9.9.9' in: out)]
+%
+category: 'tests - toolset options'
+method: McpExtensionTest
+testOptionsAreNarrowedToTheToolsetsInTheSurface
+  "A worker is never handed configuration for a toolset it does not have. This matters most where the
+   surface is chosen PER SESSION -- a subclass narrowing effectiveToolsetNames by principal serves
+   different surfaces from one router, and the options have to follow the surface rather than the
+   router. Narrowing to nothing answers nil, which is what an unconfigured deployment answers too."
+  | r |
+  r := McpRouter new toolsetNames: #('McpFixtureToolset'); yourself.
+  r toolsetOptions: (self fixtureOptions: 'A: ').
+  self assert: (r effectiveToolsetOptions at: 'McpFixtureToolset') notNil.
+  "the same options, with the toolset no longer in the surface"
+  r toolsetNames: #('McpBrowsingToolset').
+  self assert: r effectiveToolsetOptions isNil.
+  "...and that mismatch is a STARTUP failure, not a silent drop"
+  self should: [r validateWorkerConfig] raise: Error
+%
+category: 'tests - toolset options'
+method: McpExtensionTest
+testOptionsReachAToolsetHandler
+  "The point of the whole mechanism: a value an operator configured on the ROUTER is readable by the
+   toolset's handler, without the core knowing what it means. Checked at the two ends that matter --
+   the server build, and the tool result seen through the real envelope."
+  | srv out |
+  srv := McpServer newWithToolsetNames: #('McpFixtureToolset')
+    toolsetOptions: (self fixtureOptions: 'vendor> ').
+  out := ((self dispatchOn: srv request: (self request: 'tools/call' params:
+    (Dictionary new at: 'name' put: 'fixture_echo';
+      at: 'arguments' put: (Dictionary new at: 'text' put: 'hi'; yourself); yourself)))
+    at: 'result').
+  self deny: (out at: 'isError').
+  self assert: (self withoutSessionNote: ((out at: 'content') first at: 'text'))
+    equals: 'vendor> hi'
+%
+category: 'tests - toolset options'
+method: McpExtensionTest
+testOptionsRefuseAnUndeclaredName
+  "declaredOptionNames is an ALLOW-LIST, checked when the option is SET. A mistyped option that is
+   silently ignored costs far more to find than one that refuses to start, which is the same choice
+   additionalProperties: false makes for tool arguments. The refusal names what the toolset does
+   accept, so the message carries the fix."
+  | r ok |
+  r := McpRouter new.
+  ok := [r toolsetOptions: (Dictionary new
+      at: 'McpFixtureToolset' put: (Dictionary new at: 'echoPrefixx' put: 'x'; yourself);
+      yourself).
+    false] on: Error do: [:ex |
+      (self includesCS: 'echoPrefix' in: ex messageText) and: [
+        self includesCS: 'McpFixtureToolset' in: ex messageText]].
+  self assert: ok.
+  "and the refusal left nothing behind"
+  self assert: r toolsetOptions isNil
+%
+category: 'tests - toolset options'
+method: McpExtensionTest
+testOptionsSurviveTheConfigRoundTripAndTheForkString
+  "Options must cross two boundaries intact: the router's config serialization (forkOnPort: rebuilds
+   a router in the child gem from configJson) and the worker bootstrap expression. They travel as
+   JSON inside ONE printString-quoted literal, because their shape is the vendor's rather than the
+   core's -- so this checks the value arrives, not merely that some key did."
+  | r rebuilt sess expr |
+  r := McpRouter new toolsetNames: #('McpFixtureToolset'); yourself.
+  r toolsetOptions: (self fixtureOptions: 'thru> ').
+  rebuilt := McpRouter new applyConfigJson: r configJson.
+  self assert: ((rebuilt toolsetOptions at: 'McpFixtureToolset') at: 'echoPrefix') equals: 'thru> '.
+  sess := McpSession new.
+  sess toolsetNames: #('McpFixtureToolset'); toolsetOptions: rebuilt effectiveToolsetOptions.
+  expr := sess workerBootstrapExpression.
+  self assert: (self includesCS: 'options: ' in: expr).
+  self assert: (self includesCS: 'echoPrefix' in: expr).
+  self assert: (self includesCS: 'thru> ' in: expr)
 %
 category: 'tests - worker class'
 method: McpExtensionTest
@@ -207,6 +289,21 @@ testToolsetDecidesItsOwnReadOnlySafety
     self deny: (names includes: 'execute_code').
     self deny: (names includes: 'compile_method')]
 %
+category: 'tests - toolset options'
+method: McpExtensionTest
+testUnconfiguredToolsetIsUnchanged
+  "An option nobody set must leave the toolset exactly as it was before options existed -- nil and an
+   absent entry mean the same thing, and #options answers an empty Dictionary rather than nil so a
+   caller needs no guard."
+  | ts |
+  ts := McpFixtureToolset on: nil.
+  self assert: ts options isEmpty.
+  self assert: (ts optionNamed: 'echoPrefix' ifAbsent: ['(default)']) equals: '(default)'.
+  self assert: (ts tool_fixture_echo: (Dictionary new at: 'text' put: 'hi'; yourself))
+    equals: 'echo: hi'.
+  "a toolset that declares nothing says so, which is what refuses configuration for it"
+  self assert: McpToolset declaredOptionNames isEmpty
+%
 category: 'tests - composition'
 method: McpExtensionTest
 testVendorServerExposesOnlyItsOwnTools
@@ -237,6 +334,23 @@ withFreshWorkerCacheDo: aBlock
    server cached by one test would answer for another -- with a different class and surface."
   SessionTemps current removeKey: #McpServer ifAbsent: [nil].
   ^[aBlock value] ensure: [SessionTemps current removeKey: #McpServer ifAbsent: [nil]]
+%
+category: 'helpers'
+method: McpExtensionTest
+withoutSessionNote: aString
+  "aString up to the dispatcher's [session] note, or unchanged when it carries none -- see the twin
+   in McpGrailToolsetTest for why the cut is at the FIRST one. Written out again rather than shared
+   because these suites have no common superclass but GsTestCase, the same reason #includesCS:in:
+   appears in ten test classes here.
+
+   This is what replaced this suite's setUp abort on 2026-09-01. That abort existed to keep the note
+   out of an exact-text assertion, and it bought that by discarding the CALLER's uncommitted work --
+   a real cost, paid on every run of all nine tests, to tidy the text of one assertion in one."
+  | marker idx |
+  marker := (String with: Character lf) , '[session] '.
+  idx := aString findString: marker startingAt: 1.
+  idx = 0 ifTrue: [^aString].
+  ^aString copyFrom: 1 to: idx - 1
 %
 category: 'helpers'
 method: McpExtensionTest

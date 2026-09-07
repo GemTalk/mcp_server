@@ -9,7 +9,7 @@ McpRouter subclass: 'McpAuthRouter'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %
@@ -577,7 +577,8 @@ serveInitialize: req on: conn
       nil].
   sess isNil ifTrue: [^self writeAuthError: 401 oauthError: 'invalid_token'
     description: 'Authentication failed' on: conn].
-  conn writeJson: (sess forward: (req at: 'body' ifAbsent: [''])) sessionId: sess id
+  conn writeJson: (sess forward: (req at: 'body' ifAbsent: [''])
+    lifetimeBounds: (self lifetimeBoundsFor: sess)) sessionId: sess id
 %
 category: 'routing'
 method: McpAuthRouter

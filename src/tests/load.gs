@@ -4,19 +4,29 @@
 ! McpToolset.
 
 run
-"Pre-declare these class names in Published BEFORE filing in any of them. The classes reference
- each other in both directions (McpDispatcher asks McpServer for its name; McpServer builds a
- McpDispatcher), so no file order can put every class ahead of its first mention -- without a
- declaration the compiler reports `undefined symbol` and the file-in stops. A nil-valued binding
- is enough: the compiler binds a global by its ASSOCIATION, and each class definition below fills
- that same association in, so methods compiled before their referent still see the real class.
+"Pre-declare these class names in the Mcp dictionary BEFORE filing in any of them. The classes
+ reference each other in both directions (McpDispatcher asks McpServer for its name; McpServer
+ builds a McpDispatcher), so no file order can put every class ahead of its first mention --
+ without a declaration the compiler reports `undefined symbol` and the file-in stops. A nil-valued
+ binding is enough: the compiler binds a global by its ASSOCIATION, and each class definition below
+ fills that same association in, so methods compiled before their referent still see the real class.
  Existing keys are left alone, so re-installing over a loaded image changes nothing."
-| d names |
-d := System myUserProfile objectNamed: #Published.
+| up d names |
+up := System myUserProfile.
+d := up objectNamed: #Mcp.
+d isNil ifTrue: [
+  "Mcp is this project's own dictionary, so -- unlike Published -- it is not standard in any image.
+   Create it self-referenced, because a SymbolDictionary's name IS the key inside it whose value is
+   itself (SymbolDictionary>>name is `self keyAtValue: self`), and append it to the symbol list.
+   install.sh does this too; repeated here so a loader run by hand on a fresh image still works."
+  d := SymbolDictionary new.
+  d at: #Mcp put: d.
+  up insertDictionary: d at: up symbolList size + 1 ].
 names := #( #McpMockSocket #McpMockWorker #McpMockSession #McpStubSession #McpFixtureToolset
-  #McpFixtureServer #McpFixtureRouter #McpJsonTest #McpToolTest #McpDispatcherTest
+  #McpFixtureServer #McpFixtureRouter #McpJsonTest #McpUtf8Test #McpToolTest #McpDispatcherTest
   #McpTransportTest #McpContractTest #McpExtensionTest #McpSessionTest #McpOutboxTest
-  #McpStreamTest #McpLifetimeTest #McpExternalSessionTest #McpWorkerDeadlineTest ).
+  #McpProgressTest #McpStreamTest #McpLifetimeTest #McpViewHygieneTest #McpExternalSessionTest #McpTransactionTest
+  #McpWorkerDeadlineTest #McpBlindWriteTest #McpConcurrentEditTest ).
 names do: [:s | (d includesKey: s) ifFalse: [ d at: s put: nil ] ].
 names size
 %
@@ -31,8 +41,12 @@ input src/tests/McpFixtureToolset.gs
 input src/tests/McpFixtureServer.gs
 input src/tests/McpFixtureRouter.gs
 
-! The suites themselves.
+! The suites themselves. The two Unicode suites first: McpJsonTest owns the outbound half of the
+! wire contract (the writer) and McpUtf8Test the inbound half (the decode kernel JsonParser needs).
 input src/tests/McpJsonTest.gs
+input src/tests/McpUtf8Test.gs
+input src/tests/McpBlindWriteTest.gs
+input src/tests/McpConcurrentEditTest.gs
 input src/tests/McpToolTest.gs
 input src/tests/McpDispatcherTest.gs
 input src/tests/McpTransportTest.gs
@@ -40,10 +54,13 @@ input src/tests/McpContractTest.gs
 input src/tests/McpExtensionTest.gs
 input src/tests/McpSessionTest.gs
 input src/tests/McpOutboxTest.gs
+input src/tests/McpProgressTest.gs
 input src/tests/McpStreamTest.gs
 input src/tests/McpLifetimeTest.gs
+input src/tests/McpViewHygieneTest.gs
 
-! Needs a real worker gem, so it needs a NETLDI -- see the class comment and
-! run-unit-tests.sh. It is the only suite here that is not purely in-image.
+! Need a real worker gem, so they need a NETLDI -- see their class comments and run-unit-tests.sh.
+! These are the only suites here that are not purely in-image.
 input src/tests/McpExternalSessionTest.gs
+input src/tests/McpTransactionTest.gs
 input src/tests/McpWorkerDeadlineTest.gs

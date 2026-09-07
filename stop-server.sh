@@ -11,11 +11,11 @@
 # GemStone session; this script is the OS-level equivalent of `kill <pid>`.)
 #
 # Configure (or export before running):
-#   GS_MCP_PORT - listen port (default: 8000)
+#   MCP_PORT - listen port (default: 8000)
 set -euo pipefail
 cd "$(dirname "$0")"
 
-GS_MCP_PORT="${GS_MCP_PORT:-8000}"
+MCP_PORT="${MCP_PORT:-8000}"
 
 # Find lsof before trusting its silence. Everything below infers "no server is running" from an
 # empty result, so an lsof that is merely NOT ON PATH would make this script report success while
@@ -24,9 +24,9 @@ GS_MCP_PORT="${GS_MCP_PORT:-8000}"
 gs_env_require_lsof
 
 # -t: pids only;  -sTCP:LISTEN: only the listener, not connected clients.
-pids=$("$GS_LSOF" -nP -iTCP:"$GS_MCP_PORT" -sTCP:LISTEN -t 2>/dev/null || true)
+pids=$("$GS_LSOF" -nP -iTCP:"$MCP_PORT" -sTCP:LISTEN -t 2>/dev/null || true)
 if [ -z "$pids" ]; then
-  echo "Nothing listening on 127.0.0.1:$GS_MCP_PORT -- no MCP server to stop."
+  echo "Nothing listening on 127.0.0.1:$MCP_PORT -- no MCP server to stop."
   exit 0
 fi
 
@@ -35,7 +35,7 @@ for pid in $pids; do
   comm=$(ps -p "$pid" -o comm= 2>/dev/null || true)
   case "$(basename "$comm")" in
     *gem*|*topaz*)
-      echo "Stopping MCP server: pid $pid ($comm) on port $GS_MCP_PORT ..."
+      echo "Stopping MCP server: pid $pid ($comm) on port $MCP_PORT ..."
       kill "$pid" 2>/dev/null || true
       # Wait up to ~5s for a graceful exit, then force it.
       for _ in $(seq 1 10); do
@@ -50,9 +50,9 @@ for pid in $pids; do
       ;;
     *)
       echo "Refusing to kill pid $pid: '$comm' is not a GemStone gem/topaz process."
-      echo "  Something else may be using port $GS_MCP_PORT; stop it manually if intended."
+      echo "  Something else may be using port $MCP_PORT; stop it manually if intended."
       ;;
   esac
 done
 
-echo "Stopped $stopped MCP server process(es) on port $GS_MCP_PORT."
+echo "Stopped $stopped MCP server process(es) on port $MCP_PORT."

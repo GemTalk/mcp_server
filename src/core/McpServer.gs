@@ -4,11 +4,13 @@ expectvalue /Class
 doit
 McpBase subclass: 'McpServer'
   instVarNames: #( dispatcher toolRegistry toolsets
-                    serverName serverTitle serverVersion)
+                    serverName serverTitle serverVersion lifetimeBounds
+                    readLedger writeLedger staleReadKeys frontEndRefreshedView
+                    frontEndDoomedSubjects)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %
@@ -29,8 +31,8 @@ session routing live in McpRouter.
 Which tools a server offers is NOT fixed by its class: each server registers a list of McpToolset
 instances (see McpToolset), so a deployment -- or a vendor shipping only their own tools -- chooses the
 surface. The front end resolves both the worker class and the toolset list per session and pushes them
-into the worker gem in one call (prepareWorkerWithToolsets:readOnly:serverName:title:version:), so a
-worker
+into the worker gem in one call (prepareWorkerWithToolsets:options:readOnly:serverName:title:version:),
+so a worker
 never decides what it is. Subclass this to change BEHAVIOR (the kernel guards, the worker entry,
 dispatcher wiring, the advertised identity); write a toolset to add tools. A subclass is used only when
 it is NAMED in the router''s workerClassName config.
@@ -45,6 +47,23 @@ McpServer category: 'Mcp-Core'
 removeallmethods McpServer
 removeallclassmethods McpServer
 ! ------------------- Class methods for McpServer
+category: 'guardrail stamps'
+classmethod: McpServer
+absentStamp
+  "The stamp recorded for a subject that does not exist in the current view -- a method the class
+   does not implement, a class or dictionary that does not resolve, a class with no comment. Distinct
+   from every content stamp (those are hex digests), so 'absent, then present' and 'present, then
+   absent' both read as a change in revalidateReadLedger."
+  ^'absent'
+%
+category: 'guardrail keys'
+classmethod: McpServer
+commentKeyFor: aClassName
+  "The readLedger key standing for 'I have seen this class's COMMENT'. Separate from the shape key
+   because the two are read by different tools: get_class_definition answers the subclass: message
+   and shows no comment, so it must not license set_class_comment."
+  ^aClassName asString , ':comment'
+%
 category: 'read-only'
 classmethod: McpServer
 coreReadOnlySafeToolNames
@@ -64,6 +83,79 @@ coreReadOnlySafeToolNames
       'status' 'refresh' 'abort'
       'list_test_classes' 'list_failing_tests' 'describe_test_failure'
       'run_test_class' 'run_test_method' )
+%
+category: 'worker'
+classmethod: McpServer
+currentServer
+  "This gem's McpServer, built on first use and held in SessionTemps for the gem's life.
+   One place, because there are now two entries into a worker: a client's request, and the FRONT
+   END's own maintenance call (#refreshViewForFrontEnd). Both need the same instance and for the same
+   reason -- the blind-write guardrail's ledgers live on it, so a second instance would be a second
+   set of ledgers, licensing writes on the strength of reads it never saw."
+  | srv |
+  srv := SessionTemps current at: #McpServer otherwise: nil.
+  srv isNil ifTrue: [
+    srv := self new.
+    SessionTemps current at: #McpServer put: srv].
+  ^srv
+%
+category: 'identity'
+classmethod: McpServer
+defaultServerInstructions
+  "The `instructions` a stock GemStone MCP server sends in its initialize result, and the hook A
+   PRODUCT OVERRIDES to describe its own surface. MCP calls this a hint to the model rather than
+   documentation for a person, so it says the things a model cannot work out by reading tool
+   descriptions one at a time: what a session IS here, and which of its properties outlive a call.
+
+   It is deliberately about the transaction and nothing else. A per-tool fact belongs in that
+   tool's description, where it is read at the moment it matters; what does not fit there is the
+   part that spans calls, because no single tool's description is the right place to explain that a
+   change made by one call is still there for the next -- and the terse '[session]' line the server
+   appends to results (McpDispatcher>>transactionNote) is unintelligible without it.
+
+   Kept short on purpose: it is prepended to the model's context for the whole conversation, so
+   every sentence competes with the client's own prompt for attention."
+  | lf |
+  lf := String with: Character lf.
+  ^'This server is one GemStone session, in one long-running database transaction, for as long as '
+    , 'the connection lasts.' , lf , lf
+    , 'YOUR VIEW IS A SNAPSHOT. You see the repository as it was at one instant. It moves when YOU '
+    , 'move it -- `commit`, `abort` and `refresh` each take a current view -- and in one other case: '
+    , 'if it falls far behind, so that it is holding the repository''s commit records open, the '
+    , 'server refreshes it for you. That happens only BETWEEN your calls, it keeps your uncommitted '
+    , 'changes, and it tells you on your next result. Either way, anything you read before the last '
+    , 'view move may since have been changed by somebody else.' , lf , lf
+    , 'THE DATABASE PROTECTS YOU FROM ACTING ON A STALE SNAPSHOT. If you change something that '
+    , 'another session has committed a change to since your view was taken, your `commit` FAILS and '
+    , 'writes nothing -- it will not silently overwrite their work. This is why the snapshot is '
+    , 'worth having, and it is also why a `refresh` in the middle of a plan is not free: refreshing '
+    , 'adopts their version as your starting point, so a change you then make on the strength of '
+    , 'what you read EARLIER will commit cleanly and erase what they did. If you read something, '
+    , 'thought about it, and are only now acting, re-read it first.' , lf , lf
+    , 'WHAT SURVIVES A CALL. Every change you make stays in your session until you commit or abort '
+    , 'it -- so you can compile a method, run its tests against what you just compiled, and only '
+    , 'then decide to keep it. Nobody else can see any of it until you commit.' , lf , lf
+    , 'NOTHING COMMITS FOR YOU. Only the `commit` tool commits. The tools that change the image '
+    , '(compile_method, compile_class_definition, delete_class, delete_method, set_class_comment, '
+    , 'add_dictionary, remove_dictionary) leave their work uncommitted. `abort` discards everything '
+    , 'uncommitted; `refresh` takes a current view and keeps your uncommitted changes.' , lf , lf
+    , 'THE [session] LINE. A result may end with one line starting "[session]". It describes your '
+    , 'session, not the tool you just called, and it appears only when there is something to do:'
+    , lf
+    , '  - uncommitted changes pending -> commit them or abort them. The line names what would end '
+    , 'this session first and how long that is; if it ends, they are lost. Commit anything you want '
+    , 'to keep rather than leaving it staged.' , lf
+    , '  - your last commit FAILED, or the server refreshed your view and your pending changes now '
+    , 'CONFLICT -> either way another session has changed the same objects, nothing of yours was '
+    , 'written, and your changes are still here but no commit can succeed until you call `abort`, '
+    , 'which discards them. Save anything you need, abort, re-read the current state, and redo the '
+    , 'change against it. The line says which of the two happened.' , lf
+    , '  - the server refreshed your view -> your snapshot moved, and your uncommitted changes were '
+    , 'kept. Re-read anything you are about to act on: only what you read through a tool is tracked, '
+    , 'so the line can name what it knows went stale and no more.' , lf , lf
+    , 'A failed commit is the one failure here you cannot retry your way out of, and the conflict is '
+    , 'reported per CLASS rather than per method -- two sessions compiling different methods on one '
+    , 'class still collide. If the work matters, save the source before aborting.'
 %
 category: 'identity'
 classmethod: McpServer
@@ -94,7 +186,7 @@ category: 'identity'
 classmethod: McpServer
 defaultServerVersion
   "See defaultServerName."
-  ^'0.6.1'
+  ^'0.7.0'
 %
 category: 'toolsets'
 classmethod: McpServer
@@ -103,6 +195,11 @@ defaultToolsetNames
    A deployment that wants a different surface names its own (see McpToolset)."
   ^#( 'McpBrowsingToolset' 'McpExecutionToolset' 'McpListingToolset' 'McpMutationToolset'
       'McpSearchToolset' 'McpSessionToolset' 'McpTestingToolset' )
+%
+category: 'guardrail keys'
+classmethod: McpServer
+dictionaryKeyFor: aDictionaryName
+  ^'#' , aDictionaryName asString
 %
 category: 'worker'
 classmethod: McpServer
@@ -114,13 +211,22 @@ handleJsonString: aRawJsonString
    class the sender named. It no longer looks for the Grail subclass: which server class and which
    toolsets a worker uses is the front end's decision, pushed down per session, and Grail is a toolset
    now rather than a rung in the hierarchy. A direct `McpServer handleJsonString:` therefore gets the
-   base tool surface; ask for a different one by name, or via McpServer installedDefaultToolsetNames."
-  | srv |
-  srv := SessionTemps current at: #McpServer otherwise: nil.
-  srv isNil ifTrue: [
-    srv := self new.
-    SessionTemps current at: #McpServer put: srv].
-  ^srv handleJsonString: aRawJsonString
+   base tool surface; ask for a different one by name, or via McpServer installedDefaultToolsetNames.
+
+   Answers as if nothing bounds this session's lifetime -- see the lifetimeBounds: variant, which
+   the front end uses. Routing through it rather than duplicating the lookup is what CLEARS bounds
+   left by an earlier request, so a stale one is never reported after the deadline that set it."
+  ^self handleJsonString: aRawJsonString lifetimeBounds: nil
+%
+category: 'worker'
+classmethod: McpServer
+handleJsonString: aRawJsonString lifetimeBounds: anArrayOrNil
+  "As handleJsonString:, plus what the FRONT END says bounds this session
+   (McpRouter>>lifetimeBoundsFor:). The worker cannot work this out: reaping policy is the router's
+   configuration, and a worker holding its own copy would go stale the moment a credential was
+   refreshed. It is passed per request for the same reason, and used only when there is uncommitted
+   work to warn about (McpDispatcher>>transactionNote)."
+  ^self currentServer handleJsonString: aRawJsonString lifetimeBounds: anArrayOrNil
 %
 category: 'toolsets'
 classmethod: McpServer
@@ -134,6 +240,15 @@ installedDefaultToolsetNames
   ^(System myUserProfile objectNamed: #McpGrailToolset) isNil
     ifTrue: [names]
     ifFalse: [names , (Array with: 'McpGrailToolset')]
+%
+category: 'guardrail keys'
+classmethod: McpServer
+methodKeyFor: aClassName selector: aSelector meta: aBoolean
+  "The readLedger key for one method. The class-side form embeds ' class' before the '>>', so the key
+   also names the SIDE -- which scopeOfMethodKey: reads back for conflictingSubjects, because
+   instance and class side have separate method dictionaries and so conflict separately in the
+   stone."
+  ^aClassName asString , (aBoolean == true ifTrue: [' class>>'] ifFalse: ['>>']) , aSelector asString
 %
 category: 'instance creation'
 classmethod: McpServer
@@ -150,9 +265,16 @@ newWithToolsetNames: anArrayOfNames
    of the Smalltalk-development surface. Raises if a name does not resolve (toolsetClassNamed:)."
   ^super new initializeWithToolsetNames: anArrayOfNames
 %
+category: 'instance creation'
+classmethod: McpServer
+newWithToolsetNames: anArrayOfNames toolsetOptions: aDictOrNil
+  "As newWithToolsetNames:, with this deployment's options for those toolsets (keyed by toolset name;
+   see McpToolset's class comment). What the front end builds a worker through."
+  ^super new initializeWithToolsetNames: anArrayOfNames toolsetOptions: aDictOrNil
+%
 category: 'worker'
 classmethod: McpServer
-prepareWorkerWithToolsets: anArrayOfNames readOnly: aBoolean serverName: aNameOrNil title: aTitleOrNil version: aVersionOrNil
+prepareWorkerWithToolsets: anArrayOfNames options: anOptionsJsonOrNil readOnly: aBoolean serverName: aNameOrNil title: aTitleOrNil version: aVersionOrNil frontEnd: aFrontEndSessionOrNil
   "Prepare THIS worker gem for one client, in the single call the front end makes at session open
    (McpSession>>prepareWorker). Sent to the class the front end NAMED, so `self` is the server class to
    build -- a worker never chooses.
@@ -160,14 +282,73 @@ prepareWorkerWithToolsets: anArrayOfNames readOnly: aBoolean serverName: aNameOr
    registry entirely (McpServer>>registerToolsets). Then the instance is built with the given toolsets
    and identity and cached where handleJsonString: looks for it, which moves tool registration off the
    client's first request and makes an unresolvable toolset fail here, at session open, rather than
-   mid-conversation. Answers a short line for the log."
+   mid-conversation. Answers a short line for the log.
+   aFrontEndSessionOrNil is the value System session answers IN THE ROUTER'S GEM -- where to ring the
+   doorbell when a tool reports progress. It is constant for this worker's whole life, so it is pushed
+   once here rather than repeated on every request; only the per-call id travels with the request
+   (class>>progressCallId:). nil means no front end is listening, which is what a worker driven
+   directly from topaz or a test gets.
+
+   anOptionsJsonOrNil is the deployment's toolset options (McpToolset's class comment) as a JSON
+   STRING, parsed here. JSON rather than a Smalltalk literal because the options are a nested,
+   open-ended map whose shape the core does not know, and because both ends already have
+   McpBase>>parseBody: -- so nothing new has to be written, and a value that cannot be represented
+   as JSON cannot travel, which is exactly the constraint the fork string needs anyway. nil means no
+   toolset was configured, which is the ordinary case."
   | srv |
   self sessionReadOnly: aBoolean.
-  srv := self newWithToolsetNames: anArrayOfNames.
+  SessionTemps current at: #McpFrontEndSession put: aFrontEndSessionOrNil.
+  srv := self newWithToolsetNames: anArrayOfNames
+    toolsetOptions: (anOptionsJsonOrNil isNil ifTrue: [nil] ifFalse: [self parseBody: anOptionsJsonOrNil]).
   srv serverName: aNameOrNil; serverTitle: aTitleOrNil; serverVersion: aVersionOrNil.
   SessionTemps current at: #McpServer put: srv.
   ^self name asString , ' ready: ' , srv toolRegistry descriptors size printString , ' tool(s)'
     , (aBoolean ifTrue: [' (read-only)'] ifFalse: [''])
+%
+category: 'progress'
+classmethod: McpServer
+progressCallId: aCallIdOrNil
+  "Install a progress reporter for the call about to run, or clear any left over when there is none.
+   Sent by the front end as the FIRST statement of the expression that runs a request
+   (McpSession>>workerExpressionFor:lifetimeBounds:progressCallId:), so it is set up before the tool
+   it serves and torn down by the handleJsonString: that follows it.
+   Two statements rather than another keyword on handleJsonString: deliberately -- bounds and progress
+   are independent, and folding both in would mean four entry points to keep in step for no gain.
+   The front-end session came down at session open and is read from SessionTemps rather than passed
+   again, because it cannot change while this gem lives. With none there is nobody to signal, so no
+   reporter is made and every tick a tool sends becomes a no-op."
+  | st |
+  st := SessionTemps current.
+  (aCallIdOrNil isNil or: [(st at: #McpFrontEndSession otherwise: nil) isNil])
+    ifTrue: [^st removeKey: #McpProgress otherwise: nil].
+  ^st at: #McpProgress put: (McpProgressReporter
+    frontEndSession: (st at: #McpFrontEndSession otherwise: nil)
+    callId: aCallIdOrNil)
+%
+category: 'worker'
+classmethod: McpServer
+refreshViewForFrontEnd
+  "THE MAINTENANCE ENTRY. Take a current view of the repository, KEEPING this session's uncommitted
+   work, and answer what happened as a String the front end can log and act on:
+     'kept'          the view moved and the pending work can still be committed;
+     'doomed'        the view moved and the pending work can no longer be committed;
+     'stuck: WHY'    continueTransaction was illegal, so the view did NOT move.
+   Sent by McpRouter>>maintainViewHygiene when this gem's view has fallen at least maxCommitsBehind
+   commits behind -- never on any other ground, and never while a client's call is in flight.
+   Answers a String because it travels back over GCI as the value of an expression, and never
+   raises, because its caller is a maintenance pass serving every other session too."
+  ^[self currentServer refreshViewForFrontEnd]
+    on: Error
+    do: [:ex | 'stuck: ' , ([ex description] on: Error do: [:x | ex class name asString])]
+%
+category: 'guardrail keys'
+classmethod: McpServer
+scopeOfMethodKey: aKey
+  "The 'Class' or 'Class class' part of a method key, or nil if aKey is not a method key. One method
+   dictionary per scope, so this is exactly the grain the stone validates at."
+  | idx |
+  idx := aKey indexOfSubCollection: '>>'.
+  ^idx = 0 ifTrue: [nil] ifFalse: [aKey copyFrom: 1 to: idx - 1]
 %
 category: 'read-only'
 classmethod: McpServer
@@ -180,28 +361,94 @@ sessionReadOnly: aBoolean
    can run at once with no shared state."
   SessionTemps current at: #McpReadOnly put: aBoolean
 %
+category: 'guardrail keys'
+classmethod: McpServer
+shapeKeyFor: aClassName
+  "The readLedger key standing for 'I have seen this class's DEFINITION' -- its superclass and
+   variable names. See commentKeyFor: for why the comment is a separate key."
+  ^aClassName asString , ':shape'
+%
+category: 'guardrail keys'
+classmethod: McpServer
+staleReadSummaryFor: aCollectionOfKeys
+  "The stale keys summarised BY CLASS, for the one-time [session] line (McpDispatcher>>staleReadNote)
+   -- a shape a model can act on at a glance rather than a list it has to scan.
+
+   Keys are grouped by the class they belong to: method keys of both sides under the class, the shape
+   and comment keys as that class's definition and comment, a dictionary key as a group of its own
+   named after the dictionary. Per group, up to three method keys are named in full
+   ('Foo>>bar:, Foo class>>baz:'), more are counted ('5 methods from Foo'), and the definition and
+   comment are mentioned alongside as 'Foo (definition)' and 'Foo (comment)'. More than four groups,
+   and the whole list gives way to a count -- 'changes to 7 classes; re-check what you depend on
+   before writing' -- because at that point the honest advice is to re-check everything one depends
+   on, not to tick off names. Groups are sorted by name, so the same keys always render the same way."
+  | groups names parts |
+  groups := Dictionary new.
+  aCollectionOfKeys do: [:k | | key name group |
+    key := k asString.
+    name := nil.
+    (key size > 0 and: [(key at: 1) = $#])
+      ifTrue: [name := key copyFrom: 2 to: key size]
+      ifFalse: [
+        (self scopeOfMethodKey: key) ifNotNil: [:scope |
+          name := (scope size > 6 and: [(scope copyFrom: scope size - 5 to: scope size) = ' class'])
+            ifTrue: [scope copyFrom: 1 to: scope size - 6]
+            ifFalse: [scope]].
+        (key endsWith: ':shape') ifTrue: [name := key copyFrom: 1 to: key size - ':shape' size].
+        (key endsWith: ':comment') ifTrue: [name := key copyFrom: 1 to: key size - ':comment' size]].
+    name isNil ifTrue: [name := key].
+    group := groups at: name ifAbsent: [
+      groups at: name put: (Dictionary new
+        at: #methods put: OrderedCollection new;
+        at: #definition put: false; at: #comment put: false; at: #dictionary put: false;
+        yourself)].
+    (key size > 0 and: [(key at: 1) = $#]) ifTrue: [group at: #dictionary put: true] ifFalse: [
+      (key endsWith: ':shape') ifTrue: [group at: #definition put: true] ifFalse: [
+        (key endsWith: ':comment') ifTrue: [group at: #comment put: true] ifFalse: [
+          (group at: #methods) add: key]]]].
+  names := groups keys asSortedCollection asArray.
+  names size > 4 ifTrue: [
+    ^'changes to ' , names size printString , ' classes; re-check what you depend on before writing'].
+  parts := OrderedCollection new.
+  names do: [:name | | group methods |
+    group := groups at: name.
+    methods := (group at: #methods) asSortedCollection asArray.
+    methods size > 3
+      ifTrue: [parts add: methods size printString , ' methods from ' , name]
+      ifFalse: [methods do: [:m | parts add: m]].
+    (group at: #definition) ifTrue: [parts add: name , ' (definition)'].
+    (group at: #comment) ifTrue: [parts add: name , ' (comment)'].
+    (group at: #dictionary) ifTrue: [parts add: name , ' (dictionary)']].
+  ^parts inject: '' into: [:acc :part | acc isEmpty ifTrue: [part] ifFalse: [acc , ', ' , part]]
+%
+category: 'guardrail stamps'
+classmethod: McpServer
+stampOfContent: aStringOrNil
+  "The content stamp of one subject's canonical text: its SHA-256 digest as a hex String, or
+   absentStamp for nil. The stamp is what the read ledger stores against a key (McpServer>>stampFor:)
+   and what a view move compares against (revalidateReadLedger), so it has to mean 'the same text'
+   and nothing weaker -- String>>hash is a small integer and would let a change hide behind a
+   collision. The kernel supplies the digest (CharacterCollection>>asSha256String, present at least
+   since 3.7.2 -- String inherits it, so looking for implementors on String alone finds none), so
+   nothing here is home-made, and the method source of an ordinary class hashes in microseconds."
+  aStringOrNil isNil ifTrue: [^self absentStamp].
+  ^aStringOrNil asString asSha256String
+%
 category: 'toolsets'
 classmethod: McpServer
 toolsetClassNamed: aName
   "The McpToolset subclass named aName, resolved in THIS gem's symbol list. Raises naming both the
    toolset and where it has to live if it is missing or is not a toolset: a worker gem may log in as
    a different user than the front end (McpAuthRouter), so a toolset belongs in a dictionary in the
-   WORKER's symbol list -- Published, not the operator's UserGlobals."
+   WORKER's symbol list -- Mcp, not the operator's UserGlobals."
   | cls |
   cls := System myUserProfile objectNamed: aName asSymbol.
   (cls isKindOf: Behavior) ifFalse: [
     ^self error: 'Toolset not found: ' , aName asString
-      , '. It must be installed in a symbol dictionary in this gem''s symbol list (e.g. Published).'].
+      , '. It must be installed in a symbol dictionary in this gem''s symbol list (e.g. Mcp).'].
   (cls inheritsFrom: McpToolset) ifFalse: [
     ^self error: 'Not a toolset: ' , aName asString , ' is not a subclass of McpToolset.'].
   ^cls
-%
-category: 'constants'
-classmethod: McpServer
-unrenderableResponseJson
-  "The last-resort response body: valid JSON-RPC, no id, used only if even the structured
-   render-failure envelope could not be rendered. See McpServer>>renderResponse:for:."
-  ^'{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Internal error: the response could not be rendered as JSON."}}'
 %
 ! ------------------- Instance methods for McpServer
 category: 'read-only'
@@ -245,12 +492,60 @@ assertRemovableDictionaryNamed: aName
       'Refused: ' , aName asString , ' is a protected system dictionary and cannot be removed.'].
   ^aName
 %
+category: 'blind-write guardrail'
+method: McpServer
+behaviorForScope: aScopeString
+  "The Behavior a method key's scope names: 'Foo' answers Foo, 'Foo class' answers Foo's metaclass.
+   nil if the name no longer resolves."
+  | meta base cls |
+  meta := aScopeString size > 6
+    and: [(aScopeString copyFrom: aScopeString size - 5 to: aScopeString size) = ' class'].
+  base := meta ifTrue: [aScopeString copyFrom: 1 to: aScopeString size - 6] ifFalse: [aScopeString].
+  cls := self resolveClass: base.
+  cls isNil ifTrue: [^nil].
+  ^meta ifTrue: [cls class] ifFalse: [cls]
+%
+category: 'blind-write guardrail'
+method: McpServer
+conflictingSubjects
+  "The scopes ('Foo', 'Foo class') this session wrote whose method dictionary the stone named in the
+   last conflict report. An empty Array when nothing matches.
+
+   System transactionConflicts answers the conflicting OBJECTS, but for a method edit those are a
+   GsMethodDictionary and a per-class SymbolSet, which mean nothing to a client. A method dictionary
+   has no back-pointer to its class and none is needed: this session's own write ledger already
+   names every scope it touched, so matching each candidate's dictionary against the conflict set by
+   identity turns the report back into names the client can act on."
+  | conflicts objs names |
+  conflicts := [System transactionConflicts] on: Error do: [:e | nil].
+  conflicts isNil ifTrue: [^Array new].
+  objs := IdentitySet new.
+  #( #'Write-Write' #'Read-Write' #'Write-Dependency' ) do: [:k |
+    (conflicts at: k ifAbsent: [Array new]) do: [:o | objs add: o]].
+  objs isEmpty ifTrue: [^Array new].
+  names := Set new.
+  self writeLedger do: [:key |
+    (self class scopeOfMethodKey: key) ifNotNil: [:scope |
+      (self behaviorForScope: scope) ifNotNil: [:beh |
+        ([objs includes: (beh persistentMethodDictForEnv: 0)] on: Error do: [:e | false])
+          ifTrue: [names add: scope]]]].
+  ^names asSortedCollection asArray
+%
 category: 'private'
 method: McpServer
 dictNamed: aName
   "See McpToolset class>>dictNamed:, the single implementation both roles share. Kept here because
    the kernel guards ask the protected dictionaries by name."
   ^McpToolset dictNamed: aName
+%
+category: 'view hygiene'
+method: McpServer
+frontEndDoomedSubjects
+  "The scopes another session had changed when a FRONT-END view refresh left this session's pending
+   work un-committable, or nil if that has not happened. Sticky, unlike #takeFrontEndRefreshedView:
+   the jam it describes lasts until an abort, and the client is told on every call until then
+   (McpDispatcher>>transactionStateNote), so the cause has to last as long as the state does."
+  ^frontEndDoomedSubjects
 %
 category: 'protocol'
 method: McpServer
@@ -260,10 +555,58 @@ handleJsonString: aRawJsonString
    response). No mutex: a worker gem serves one client, whose requests the front end already
    serializes onto it. The class-side handleJsonString: (invoked by McpRouter via
    McpSession>>forward:) relays this answer to the client."
-  | parsed response |
-  parsed := self parseBody: aRawJsonString.
-  response := dispatcher handle: parsed.
-  ^response isNil ifTrue: [''] ifFalse: [self renderResponse: response for: parsed]
+  ^self handleJsonString: aRawJsonString lifetimeBounds: nil
+%
+category: 'protocol'
+method: McpServer
+handleJsonString: aRawJsonString lifetimeBounds: anArrayOrNil
+  "As handleJsonString:, recording what the front end says bounds this session before dispatching.
+   ALWAYS assigns, including nil: this instance is cached for the life of the gem, so bounds left by
+   an earlier request would otherwise outlive the deadline that produced them.
+   A progress reporter, where the front end installed one for this call (class>>progressCallId:),
+   belongs to THIS call and to no call nested inside it. Both halves of that were learned the hard
+   way, end to end, and neither shows up in a unit test of one call.
+   This method NESTS: a tool that runs a test suite can run tests which themselves send
+   handleJsonString:, and mcp_server''s own suites do exactly that. The first version cleared the reporter
+   on the way out, so the first nested call wiped the reporter its CALLER was still reporting
+   through and every later tick vanished. Saving and restoring fixed that and revealed the other
+   half: the nested call then reported ITS progress on the outer call''s stream -- observed as a
+   client told `1/1 test classes` by a call working through six of them, with the outer call''s own
+   ticks refused afterwards for not increasing.
+   So the depth counter. At depth 1 the reporter is the front end''s and is left alone; deeper, it is
+   taken away for the duration and given back on the way out. A nested tool call reports nothing,
+   which is right: nobody asked to be told about it.
+   What this does NOT catch, because nothing at this level can, is code that calls a TOOLSET METHOD
+   directly rather than sending a request -- no request, no depth to count. Such a call reports on
+   its caller''s stream, with its own numbers. mcp_server''s own McpToolTest does this, which is how it
+   was found; a deployment''s tools would have to go out of their way to.
+   Restored on the way OUT, never cleared on the way in at depth 1: the front end''s expression
+   installs the reporter first and calls this second, so clearing on entry would throw away the thing
+   just installed. An ensure:, so a raising tool or a break cannot leave a reporter behind to report
+   the next call''s work under a callId nobody is listening to."
+  | parsed response outer temps depth |
+  lifetimeBounds := anArrayOrNil.
+  temps := SessionTemps current.
+  depth := (temps at: #McpCallDepth otherwise: 0) + 1.
+  temps at: #McpCallDepth put: depth.
+  outer := temps at: #McpProgress otherwise: nil.
+  depth > 1 ifTrue: [temps removeKey: #McpProgress otherwise: nil].
+  ^[parsed := self parseBody: aRawJsonString.
+    response := dispatcher handle: parsed.
+    response isNil ifTrue: [''] ifFalse: [McpJson write: response]]
+      ensure: [
+        temps at: #McpCallDepth put: depth - 1.
+        outer isNil
+          ifTrue: [temps removeKey: #McpProgress otherwise: nil]
+          ifFalse: [temps at: #McpProgress put: outer]]
+%
+category: 'blind-write guardrail'
+method: McpServer
+hasRead: aKey
+  "Whether aKey is in the read ledger -- the whole test requireRead:... makes. The stamp stored
+   against it is not consulted here: a key is present exactly as long as its read still holds,
+   because every view move re-checks or drops it (revalidateReadLedger)."
+  ^self readLedger includesKey: aKey
 %
 category: 'initialization'
 method: McpServer
@@ -275,11 +618,23 @@ initialize
 category: 'initialization'
 method: McpServer
 initializeWithToolsetNames: anArrayOfNames
+  "As initialize, but with an explicit tool surface, and no deployment options for any of them."
+  ^self initializeWithToolsetNames: anArrayOfNames toolsetOptions: nil
+%
+category: 'initialization'
+method: McpServer
+initializeWithToolsetNames: anArrayOfNames toolsetOptions: aDictOrNil
   "As initialize, but with an explicit tool surface: resolve each named toolset (raising if one is
-   missing -- see McpServer class>>toolsetClassNamed:) and register it, in the order given."
+   missing -- see McpServer class>>toolsetClassNamed:) and register it, in the order given.
+   aDictOrNil maps a TOOLSET NAME to that toolset's own options Dictionary, so each is built knowing
+   only its own configuration -- one toolset can neither read nor collide with another's. A toolset
+   with no entry is built exactly as it was before options existed."
   toolRegistry := McpToolRegistry new.
   dispatcher := McpDispatcher withToolRegistry: toolRegistry server: self.
-  toolsets := anArrayOfNames collect: [:n | (self class toolsetClassNamed: n) on: self].
+  toolsets := anArrayOfNames collect: [:n |
+    (self class toolsetClassNamed: n)
+      on: self
+      options: (aDictOrNil isNil ifTrue: [nil] ifFalse: [aDictOrNil at: n asString ifAbsent: [nil]])].
   self registerToolsets.
   ^self
 %
@@ -315,13 +670,168 @@ isToolAllowed: aToolName
    own declaration is honored."
   ^self isReadOnly not or: [self readOnlySafeToolNames includes: aToolName]
 %
+category: 'session lifetime'
+method: McpServer
+lifetimeNote
+  "What would end this session before uncommitted work is committed, as the clause
+   McpDispatcher>>transactionNote appends -- or nil if nothing bounds it or no front end said.
+
+   RENDERED NOW, not when the request arrived, which is the whole reason the front end sends values
+   rather than a sentence (McpRouter>>lifetimeBoundsFor:). A countdown rendered on arrival is wrong
+   by the length of the call by the time the client reads it, and wrong in the dangerous direction:
+   it would promise 24 minutes to a client a six-minute tool call has left 18.
+
+   Both bounds are reported when both exist, NEARER FIRST -- 'nearer' meaning which would release
+   this session first if the client stopped calling now, which is the question the client is
+   actually deciding. The order is not fixed, because it inverts: a credential outlasting the idle
+   rule on arrival can undercut it by the time a long call returns."
+  | now deadlineAt source inactivity label deadlineClause inactivityClause |
+  lifetimeBounds isNil ifTrue: [^nil].
+  now := System timeGmt.
+  deadlineAt := lifetimeBounds at: 1.
+  source := lifetimeBounds at: 2.
+  inactivity := lifetimeBounds at: 3.
+  label := lifetimeBounds at: 4.
+  deadlineAt ifNotNil: [:at |
+    deadlineClause := (self phraseForSeconds: ((at - now) max: 0)) , ' left on ' , source].
+  inactivity ifNotNil: [:secs |
+    inactivityClause := (self phraseForSeconds: secs) , ' ' , label].
+  deadlineClause isNil ifTrue: [^inactivityClause].
+  inactivityClause isNil ifTrue: [^deadlineClause].
+  ^deadlineAt <= (now + inactivity)
+    ifTrue: [deadlineClause , ', or ' , inactivityClause]
+    ifFalse: [inactivityClause , ', or ' , deadlineClause]
+%
+category: 'blind-write guardrail'
+method: McpServer
+noteAborted
+  "An abort took a new view AND discarded every uncommitted change. No pending write is licensed any
+   more, so the write ledger empties -- which also keeps writeLedger subseteq readLedger
+   unconditional. The reads are re-checked against the new view rather than forgotten
+   (revalidateReadLedger): a write this session had made and just discarded fails that check, since
+   its stamp is of the text as written and the abort restored the old text, so it must be re-read
+   before it is retried. Until 2026-09-02 both ledgers were cleared here, so an abort after browsing
+   twenty methods cost twenty re-reads even when nobody else had committed anything."
+  self revalidateReadLedger.
+  writeLedger := Set new.
+  "The abort is the way out of a jam a front-end refresh caused, so it is also where that cause stops
+   being news. Cleared here and not in the note, because reporting a state must not be what ends it."
+  frontEndDoomedSubjects := nil
+%
+category: 'blind-write guardrail'
+method: McpServer
+noteCommitFailed
+  "A commit refused on conflict. BOTH ledgers are kept, because a failed commit does NOT move the
+   view -- measured; see docs/blind-write-guardrail.md (V). The other session's work is still
+   invisible, so every read in this window is still current and every pending write is still
+   licensed. The transaction is doomed and must be aborted, but that is a different fact from
+   whether the reads are stale, and they are not."
+  ^self
+%
+category: 'blind-write guardrail'
+method: McpServer
+noteCommitted
+  "A commit succeeded, and the view moved. The reads get the same re-check every view move gives
+   them (revalidateReadLedger); the write ledger then empties, because those changes are now
+   everyone's. This session's own writes need no special case to survive the re-check: their stamps
+   were recorded as written, and a successful commit means nobody else changed them, so the text in
+   the new view is the text this session wrote."
+  self revalidateReadLedger.
+  writeLedger := Set new.
+  "Unreachable while doomed -- a doomed session cannot commit, which is what doomed means -- and
+   cleared anyway, so that 'no jam' and 'no cause for a jam' cannot come apart."
+  frontEndDoomedSubjects := nil
+%
+category: 'blind-write guardrail'
+method: McpServer
+noteRead: aKey
+  "Record that this session has SEEN aKey in the current view window, together with a stamp of what
+   it saw (stampFor:) -- the content of the subject as this view has it, which is what the browsing
+   tool that calls this has just shown. Called by the browsing tools that show a subject's current
+   contents -- never by a listing or search tool, which show where things are rather than what they
+   say. The stamp is what lets a later view move tell a read that still holds from one that does
+   not (revalidateReadLedger)."
+  self readLedger at: aKey put: (self stampFor: aKey).
+  ^aKey
+%
+category: 'blind-write guardrail'
+method: McpServer
+noteReads: aCollectionOfKeys
+  aCollectionOfKeys do: [:k | self noteRead: k].
+  ^aCollectionOfKeys
+%
+category: 'blind-write guardrail'
+method: McpServer
+noteRefreshed: aBoolean
+  "A refresh took a new view and KEPT this session's uncommitted work. aBoolean is what
+   System continueTransaction answered. Either way the view moved, so either way the reads are
+   re-checked against it (revalidateReadLedger); what the Boolean decides is the write ledger.
+   true means the stone validated the write set and found no conflict: the writes are still pending
+   and still licensed, so the write ledger is kept -- and each of them passes the re-check too, since
+   the uncommitted text is still in place and is what its stamp records.
+   false is the one genuinely bad state in the system: the view moved ANYWAY (measured; see
+   docs/blind-write-guardrail.md, U) and the pending writes cannot commit. No licensed writes remain,
+   so the write ledger is cleared, which keeps writeLedger subseteq readLedger unconditional. The
+   caller captures the conflicting classes first, for the message that tells the client to abort,
+   because that message is decoded from the write ledger."
+  self revalidateReadLedger.
+  aBoolean ifFalse: [writeLedger := Set new]
+%
+category: 'blind-write guardrail'
+method: McpServer
+noteWrite: aKey
+  "Record that this session has CHANGED aKey and not yet committed it.
+   Callers must send this on the branch that actually performed the write, never on entry to the
+   tool. A write ledger entry is also a read ledger entry, so an entry recorded for something that
+   was never written would license a change to it on the strength of nothing shown to the client,
+   and conflictingSubjects would decode the stone's conflict report through a scope this session
+   never touched -- which is a live case, not a hypothetical: re-evaluating an identical class
+   definition is a true no-op (measured; see docs/blind-write-guardrail.md, S).
+
+   A WRITE IMPLIES A READ, so this records both. Having just written something is knowing its
+   current content -- better than having read it -- so it licenses a follow-up change without a
+   re-read: creating a dictionary licenses removing it, compiling a method licenses recompiling it.
+   Nothing is put at risk, because another session's change to the same thing is still caught by the
+   stone's own write-write check. It also makes writeLedger subseteq readLedger true at every
+   instant rather than only across a view move.
+
+   The read stamp recorded is of the content AS JUST WRITTEN: that is what this session now knows.
+   It follows that an abort, which restores the previous content, finds the stamp moved and drops
+   the entry -- so a write that was aborted needs a fresh read before it is retried, even when nobody
+   else touched the subject. That is the conservative answer and the honest one: what the client
+   last saw of that method is a version that no longer exists."
+  self writeLedger add: aKey.
+  self readLedger at: aKey put: (self stampFor: aKey).
+  ^aKey
+%
+category: 'view hygiene'
+method: McpServer
+ownCommitsBehind
+  "How many commits the repository has taken since THIS gem obtained its view
+   (descriptionOfSession: field 16), or nil if it cannot be read.
+   A session may read its own description with no SessionAccess privilege -- which the front end
+   needs for a worker's, and is why this exists here as well as there. Used only to put a number in
+   the note that tells the client its view was refreshed; a nil simply leaves the number out."
+  ^[(System descriptionOfSession: System session) at: 16] on: Error do: [:ex | nil]
+%
 category: 'guards'
 method: McpServer
 protectedDictionaryNames
   "Names of the kernel/system symbol dictionaries that mutation tools must not touch: only Globals,
    which holds the base classes. Everything else is freely mutable -- UserGlobals (the DEFAULT home
-   for new user-created classes) and any application dictionary such as Published."
+   for new user-created classes) and any application dictionary such as Mcp or Published."
   ^#('Globals')
+%
+category: 'blind-write guardrail'
+method: McpServer
+readLedger
+  "What this session has SEEN in the current view window: a Dictionary from key (the subject a
+   mutating tool must find before it may write -- 'Foo>>bar:', 'Foo:shape', 'Foo:comment',
+   '#UserGlobals') to the stamp of its content when it was read (stampFor:). Membership is the
+   guardrail's test (hasRead:); the stamps are what a view move re-checks (revalidateReadLedger).
+   See docs/blind-write-guardrail.md."
+  readLedger isNil ifTrue: [readLedger := Dictionary new].
+  ^readLedger
 %
 category: 'read-only'
 method: McpServer
@@ -333,6 +843,40 @@ readOnlySafeToolNames
   names := OrderedCollection new.
   toolsets do: [:ts | names addAll: ts readOnlySafeToolNames].
   ^names asArray
+%
+category: 'view hygiene'
+method: McpServer
+refreshViewForFrontEnd
+  "See McpServer class>>refreshViewForFrontEnd, which is what the front end actually sends.
+
+   ONE MECHANISM FOR EVERY CASE, and it is System continueTransaction (McpToolset
+   class>>refreshViewResult): it takes a current view and KEEPS this session's uncommitted changes,
+   so there is no clean-or-dirty question to ask first and no needsCommit to read. A pending write is
+   not laundered by it -- the kernel carries the read and write sets forward and answers whether the
+   accumulated modifications would conflict -- so a false answer reports a conflict that was already
+   there, not one this refresh created.
+
+   The order of the false branch is not free: #conflictingSubjects decodes the stone's conflict
+   report through the WRITE LEDGER, and noteRefreshed: false clears that ledger. Read the subjects
+   first. #tool_refresh: observes the same ordering for the same reason.
+
+   Both outcomes move the view, which is what makes this worth doing at all: a false answer releases
+   the commit record just as a true one does (docs/blind-write-guardrail.md, U)."
+  | result ok err |
+  result := McpToolset refreshViewResult.
+  ok := result at: 1.
+  err := result at: 2.
+  err ifNotNil: [:ex | ^'stuck: ' , self stuckViewReason , ' ('
+    , ([ex description] on: Error do: [:x | ex class name asString]) , ')'].
+  ok ifFalse: [
+    frontEndDoomedSubjects := self conflictingSubjects.
+    self noteRefreshed: false.
+    ^'doomed'].
+  self noteRefreshed: true.
+  "One shot, and only for the case the client would otherwise hear nothing about: a doomed session is
+   reported on every call by transactionStateNote until it aborts."
+  frontEndRefreshedView := true.
+  ^'kept'
 %
 category: 'initialization'
 method: McpServer
@@ -356,46 +900,82 @@ registerToolsets
         do: [:n | toolRegistry removeToolNamed: n]]].
   ^self
 %
-category: 'protocol'
+category: 'blind-write guardrail'
 method: McpServer
-renderFailureFor: aRequestOrNil because: anException
-  "The JSON-RPC error a client is answered with when its response could not be RENDERED. Not the
-   call failing -- the call succeeded, and what it answered could not be turned into JSON.
-   McpJson refuses an object it has no rule for, where the kernel writer answered {} and shipped a
-   silently empty value to the client. Refusing is the better default, but only if the refusal is
-   REPORTED: it says which class has no rule, which is the one fact needed to add one.
-   The id is carried over so the client can match this to the request it is waiting on; without it
-   the client waits out its own timeout instead."
-  | err payload |
-  err := Dictionary new.
-  err at: 'code' put: -32603.
-  err at: 'message' put: 'Internal error: this response could not be rendered as JSON. '
-    , (anException description ifNil: ['(no detail available)']).
-  payload := Dictionary new.
-  payload at: 'jsonrpc' put: '2.0'.
-  payload at: 'id' put:
-    (aRequestOrNil isNil ifTrue: [nil] ifFalse: [aRequestOrNil at: 'id' ifAbsent: [nil]]).
-  payload at: 'error' put: err.
-  ^payload
+requireRead: aKey subject: aSubjectString tool: aToolName hint: aHintString
+  "Refuse a blind write. Raises kind 'blindWrite' unless aKey is in the read ledger, naming the
+   subject and the exact call that would license it -- the message is the whole point, because the
+   client can always satisfy it in one cheap call."
+  (self hasRead: aKey) ifTrue: [^self].
+  McpError signalKind: #blindWrite message:
+    aToolName , ' refused: this session has not read ' , aSubjectString
+      , ' since its view last moved, so replacing it could silently discard another session''s work. '
+      , aHintString
 %
-category: 'protocol'
+category: 'private'
 method: McpServer
-renderResponse: aResponse for: aRequestOrNil
-  "Render a response to JSON, and make sure SOMETHING valid comes back even if that fails.
-   Why this is wrapped at all: an error here would otherwise leave #handleJsonString: unhandled, and
-   this method runs in a worker gem -- so it would reach the front end as a GciError, which the
-   client sees as the whole call collapsing rather than as one response it could not be given. The
-   front end already has this protection for its own rendering (McpRouter>>handleConnection: answers
-   500 on any error); the worker gem had none.
-   The second guard is not paranoia about the first: the fallback is built from literal strings and
-   integers and cannot fail, so if it somehow does, the only honest thing left is a constant. A
-   client must never be handed a partial body or nothing at all -- it is waiting on this id."
-  ^[McpJson write: aResponse]
-    on: Error
-    do: [:ex |
-      [McpJson write: (self renderFailureFor: aRequestOrNil because: ex)]
-        on: Error
-        do: [:inner | self class unrenderableResponseJson]]
+resolveClass: aName
+  "See McpToolset class>>resolveClass:, the single implementation both roles share. Kept here for
+   the same reason dictNamed: is: a server-level method should not have to know it lives on the
+   toolset class."
+  ^McpToolset resolveClass: aName
+%
+category: 'blind-write guardrail'
+method: McpServer
+revalidateReadLedger
+  "Re-check every read against the CURRENT view and drop the ones that no longer hold. Called at
+   EVERY view move -- abort, commit, and refresh whichever way it answered (noteAborted,
+   noteCommitted, noteRefreshed:) -- and the only transition the read ledger has.
+
+   A read is a statement about content -- 'Foo>>bar: says this' -- and moving the view does not make
+   it false; another session having committed a different Foo>>bar: does. So each key's stamp is
+   recomputed in the new view (stampFor:). Equal, and the read is as true now as when it was made,
+   so it keeps its licence. Different, and it is dropped and remembered in staleReadKeys, for the
+   one-time line the dispatcher appends to the result of the call that moved the view
+   (McpDispatcher>>staleReadNote) -- so the client learns WHICH reads to redo in one pass, instead
+   of discovering them one blindWrite refusal at a time. Answers the keys dropped this time, sorted.
+
+   There is no special case for what this session wrote. A write's stamp is of the text as written;
+   after a successful commit nobody else changed it, and after a true refresh the uncommitted text
+   is still in place, so it matches. After an abort it does not, and that is right: the text the
+   client last knew is gone. So the invariant the guardrail rests on holds by construction -- a key
+   is licensed exactly when the current text is what this session read or wrote.
+
+   Until 2026-09-02 a commit or a true refresh kept only the write set plus 'the widening' (the
+   unwritten methods of a written class, proven unchanged at the stone's method-dictionary grain)
+   and dropped every other read unexamined; an abort or a false refresh dropped everything. Both
+   rules are subsumed: a proof that the content did not change is weaker than looking at it.
+
+   COST. One sourceCodeAt: (or definition, comment, or entry list) and one SHA-256 per ledger entry
+   per view move -- tens of microseconds each, so a ledger of a few hundred reads costs milliseconds
+   against a commit that costs more. If a session's ledger ever grows to where this shows, the
+   fallback is to check lazily in requireRead:, re-stamping the one key being written against a
+   recorded view generation, at the price of the one-time note, which can only come from checking
+   everything. What 'the same content' means per grain is stampFor:'s business."
+  | kept stale |
+  kept := Dictionary new.
+  stale := SortedCollection new.
+  self readLedger keysAndValuesDo: [:key :stamp |
+    (self stampFor: key) = stamp
+      ifTrue: [kept at: key put: stamp]
+      ifFalse: [stale add: key]].
+  readLedger := kept.
+  staleReadKeys := (self staleReadKeys , stale asArray) asSortedCollection asArray.
+  ^stale asArray
+%
+category: 'identity'
+method: McpServer
+serverInstructions
+  "The instructions to send in the initialize result, or nil to send none. Answers the class
+   default (defaultServerInstructions), which is where a product overrides them -- there is no
+   router-config path for these the way there is for serverName/serverTitle, because they describe
+   how the SOFTWARE behaves rather than which instance this is.
+
+   Answers nil for a READ-ONLY session, whose whole point is that it cannot write: telling it to
+   commit its changes, or how to recover a commit that failed, would be a page of instructions
+   about tools it does not have. Such a session never has uncommitted changes and so never sees a
+   [session] line either, which is the thing they exist to explain."
+  ^self isReadOnly ifTrue: [nil] ifFalse: [self class defaultServerInstructions]
 %
 category: 'identity'
 method: McpServer
@@ -447,6 +1027,127 @@ serverVersion: aStringOrNil
   "See serverName:."
   serverVersion := aStringOrNil
 %
+category: 'blind-write guardrail'
+method: McpServer
+staleReadKeys
+  "The keys the last re-validation dropped because their content had changed under a view move --
+   sorted, and held until the dispatcher reports them (takeStaleReadKeys). Empty when nothing is
+   pending. See revalidateReadLedger."
+  staleReadKeys isNil ifTrue: [staleReadKeys := Array new].
+  ^staleReadKeys
+%
+category: 'blind-write guardrail'
+method: McpServer
+stampFor: aKey
+  "The content stamp of whatever aKey names, AS IT STANDS IN THE CURRENT VIEW: what noteRead: and
+   noteWrite: record, and what revalidateReadLedger recomputes to see whether a read still holds.
+   Dispatches on the key's shape to one method per grain, so what counts as 'the content' of each
+   kind of subject is stated in exactly one place:
+
+     'Foo>>bar:'  'Foo class>>bar:'   the installed method's source          stampForMethodKey:
+     'Foo:shape'                      the class definition message           stampForShapeKey:
+     'Foo:comment'                    the class comment                      stampForCommentKey:
+     '#UserGlobals'                   the entries, as list_dictionary_entries shows them
+                                                                             stampForDictionaryKey:
+
+   Each answers absentStamp when the subject does not exist in this view, so appearing and
+   disappearing both count as change. A key of no known grain stamps as absent too, and so can
+   never survive a view move -- the fail-closed default."
+  | key |
+  key := aKey asString.
+  key isEmpty ifTrue: [^self class absentStamp].
+  (key at: 1) = $# ifTrue: [^self stampForDictionaryKey: key].
+  (self class scopeOfMethodKey: key) notNil ifTrue: [^self stampForMethodKey: key].
+  (key endsWith: ':shape') ifTrue: [^self stampForShapeKey: key].
+  (key endsWith: ':comment') ifTrue: [^self stampForCommentKey: key].
+  ^self class absentStamp
+%
+category: 'blind-write guardrail'
+method: McpServer
+stampForCommentKey: aKey
+  "'Foo:comment' -> the stamp of Foo's comment, the text describe_class and export_class_source show.
+   Absent when the class does not resolve or has no comment -- set_class_comment treats the latter
+   as creation, so nothing is licensed by it either way."
+  | cls |
+  cls := self resolveClass: (aKey copyFrom: 1 to: aKey size - ':comment' size).
+  cls isNil ifTrue: [^self class absentStamp].
+  ^self class stampOfContent: cls comment
+%
+category: 'blind-write guardrail'
+method: McpServer
+stampForDictionaryKey: aKey
+  "'#UserGlobals' -> the stamp of the dictionary's entries as list_dictionary_entries renders them:
+   each key with whether it binds a class or a global, sorted. The VALUES are deliberately not
+   hashed -- that tool shows none of them, and remove_dictionary, the write this licenses, destroys
+   the bindings rather than the objects. Absent when no dictionary of that name is in the symbol
+   list."
+  | dict lines |
+  dict := self dictNamed: (aKey copyFrom: 2 to: aKey size).
+  dict isNil ifTrue: [^self class absentStamp].
+  lines := OrderedCollection new.
+  dict keysAndValuesDo: [:k :v |
+    lines add: k asString , ((v isKindOf: Behavior) ifTrue: [' (class)'] ifFalse: [' (global)'])].
+  ^self class stampOfContent: (McpToolset linesFrom: lines)
+%
+category: 'blind-write guardrail'
+method: McpServer
+stampForMethodKey: aKey
+  "'Foo>>bar:' or 'Foo class>>bar:' -> the stamp of that method's source as installed on that side
+   -- read the way get_method_source reads it (sourceCodeAt:), so the stamp is of exactly the text
+   the client was shown. Absent when the class does not resolve or the side does not implement the
+   selector."
+  | idx beh src |
+  idx := aKey indexOfSubCollection: '>>'.
+  beh := self behaviorForScope: (aKey copyFrom: 1 to: idx - 1).
+  beh isNil ifTrue: [^self class absentStamp].
+  src := [beh sourceCodeAt: (aKey copyFrom: idx + 2 to: aKey size) asSymbol] on: Error do: [:ex | nil].
+  ^self class stampOfContent: src
+%
+category: 'blind-write guardrail'
+method: McpServer
+stampForShapeKey: aKey
+  "'Foo:shape' -> the stamp of Foo's definition message, the string get_class_definition answers and
+   compile_class_definition compares against (Class>>definition: superclass, variables, dictionary,
+   options). Absent when the class does not resolve."
+  | cls |
+  cls := self resolveClass: (aKey copyFrom: 1 to: aKey size - ':shape' size).
+  cls isNil ifTrue: [^self class absentStamp].
+  ^self class stampOfContent: cls definition
+%
+category: 'view hygiene'
+method: McpServer
+stuckViewReason
+  "Why continueTransaction is illegal in this session's current state, as a prose fragment for the
+   front end's log and for the reap phrase that may follow it.
+   Asked of the IMAGE rather than decoded from the error, so it cannot drift from a version's own
+   error numbers: the two states are exactly the two McpDispatcher already distinguishes, and
+   McpToolset class>>commitConflictPending is the single implementation of the first."
+  McpToolset commitConflictPending ifTrue: [^'a commit that failed on conflict'].
+  ([System transactionLevel > 1] on: Error do: [:ex | false])
+    ifTrue: [^'a nested transaction'].
+  ^'the refresh was refused'
+%
+category: 'view hygiene'
+method: McpServer
+takeFrontEndRefreshedView
+  "Whether the front end has refreshed this session's view since the client was last told, and
+   forget it. One shot, like #takeStaleReadKeys and for the same reason: it is news on the next
+   result and never again."
+  | was |
+  was := frontEndRefreshedView == true.
+  frontEndRefreshedView := false.
+  ^was
+%
+category: 'blind-write guardrail'
+method: McpServer
+takeStaleReadKeys
+  "Answer staleReadKeys and forget them: the dispatcher's note reports them on the result of the
+   call that moved the view and then never again."
+  | keys |
+  keys := self staleReadKeys.
+  staleReadKeys := Array new.
+  ^keys
+%
 category: 'accessing'
 method: McpServer
 toolRegistry
@@ -457,4 +1158,11 @@ method: McpServer
 toolsets
   "My toolsets, in registration order -- this server's tool surface (see McpToolset)."
   ^toolsets
+%
+category: 'blind-write guardrail'
+method: McpServer
+writeLedger
+  "What this session has CHANGED and not yet committed. See docs/blind-write-guardrail.md."
+  writeLedger isNil ifTrue: [writeLedger := Set new].
+  ^writeLedger
 %

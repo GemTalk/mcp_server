@@ -18,13 +18,17 @@ against the others before a port is bound.
 | `livenessProbeIntervalSeconds` | 120 | how often a quiet session is re-asked |
 | `reaperIntervalSeconds` | 60 | how often the maintenance pass runs |
 | `maxSessionLifetimeSeconds` | `nil` | absolute cap, however busy the session is |
+| `maxCommitsBehind` | 20 | how far behind a worker's **view** may fall before the server refreshes it. `nil` = never |
+| `maintenanceCallTimeoutSeconds` | 5 | how long the front end waits on its **own** send into a worker |
+| `stuckViewGraceSeconds` | 60 | how long a view that **cannot** be moved is tolerated under stone pressure. `0` = release on the pass that finds it; `nil` = never on this ground |
+| `pinnedViewGraceSeconds` | 300 | how long a **running call** may hold the oldest commit record open under pressure before it is ended. `nil` = never end one |
 | `reapOnFailedProbe` | `true` | whether an unanswered ping frees a gem early. Forced on with no deadline |
 | `requestTimeoutSeconds` | `nil` | how long **one request** may run before it is ended. `nil` = no limit |
 
 **What actually ends a session**, in one place: a **deadline counts calls**; **`none` counts pings**;
 a client that **closed its stream** is released after `streamLossGraceSeconds`, whatever the idle
 policy says; and a client that opens **no stream at all** gets `streamlessIdleTimeoutSeconds`, because
-a ping can only be sent down a stream the client itself opened. So `GS_MCP_IDLE_TIMEOUT=none` does not
+a ping can only be sent down a stream the client itself opened. So `MCP_IDLE_TIMEOUT=none` does not
 mean "no limit" — it means the client's own answers are the limit, and a client that stops answering,
 that hangs up, or that never opened a stream, is still released.
 
@@ -38,17 +42,21 @@ It was 45 seconds, chosen against the CLIENT's patience rather than the server's
 far give up around a minute, and a server limit above the client's is no limit at all, because the
 client abandons the request first and the gem goes on computing an answer nobody is waiting for. What
 that number really was, though, is a *guess* at the moment nobody is waiting any more, made by a
-server with no way to find out — and a client that stops waiting now **says so**, by a
-`notifications/cancelled`, which ends the call at the moment it stops being wanted. A deadline
-approximates that; a cancel signal knows it.
+server with no way to find out. Two things now tell it instead. A call that carries a `progressToken`
+is answered as a stream and pushes its own deadline out as it reports, so a client watching progress
+is never told its job took too long. And a client that stops waiting says so — by a
+`notifications/cancelled`, or by closing the response stream — which ends the call at the moment it
+stops being wanted. A deadline approximates that; a cancel signal knows it.
 
-The guess was not conservative in the direction it was meant to be, either: measured 2026-08-31,
-Claude Code ran a **150-second** tool call to completion and took delivery of the answer, so the
-client patience the number was fitted to is not what it was taken to be — while the limit itself was
-real. And its cost fell in the wrong place: a 45-second limit cut off legitimate slow work — a full
-suite run, a large fileIn, a broad search — far more often than a runaway. Set
-`GS_MCP_REQUEST_TIMEOUT=45` (or any number of seconds) where the clients are unknown or cannot be
-trusted to cancel; what no limit gives up is the guarantee that a runaway ever ends on its own.
+The cost of the guess also fell in the wrong place: a 45-second limit cut off legitimate slow work —
+a full suite run, a large fileIn, a broad search — far more often than a runaway, and that is exactly
+the work progress notifications exist to make watchable. The guess was not even conservative in the
+direction it was meant to be: measured 2026-08-31, Claude Code ran a **150-second** tool call to
+completion, with no progress notifications on it, and took delivery of the answer — so the client
+patience the number was fitted to is not what it was taken to be, while the limit itself was real.
+Set `MCP_REQUEST_TIMEOUT=45` (or any
+number of seconds) where the clients are unknown or cannot be trusted to cancel; what `none` gives up
+is the guarantee that a runaway ever ends on its own.
 
 It costs the client that request and, almost always, nothing else. A soft break reaches both shapes
 a runaway takes — a Smalltalk loop, and a call blocked in a wait — and leaves the worker gem
@@ -89,7 +97,7 @@ ten-second delay before a release that was already certain.
 It is kept because the case it covers is real in the protocol — MCP lets a client close one stream and
 open another on the same session, and a proxy or a network blip can force exactly that — and because
 the cost of being wrong in the other direction is a client losing a live gem and its uncommitted work
-to a transport hiccup. Set `GS_MCP_STREAM_LOSS_GRACE=0` where every client is known to behave like
+to a transport hiccup. Set `MCP_STREAM_LOSS_GRACE=0` where every client is known to behave like
 this one, and the release becomes immediate. Do not read the default as a claim that reconnection is
 what editors do; on the evidence here, it is not.
 
@@ -103,7 +111,7 @@ stream, and one that is calling tools is alive on far better evidence than the t
 
 **The client is not warned before either deadline, and is not told when one arrives.** It was until
 2026-08-27, on its SSE stream, in a `notifications/message`. That warning is gone, and with it
-`expiryWarningLeadSeconds`, `GS_MCP_EXPIRY_WARNING_LEAD`, and the `logging` capability that licensed
+`expiryWarningLeadSeconds`, `MCP_EXPIRY_WARNING_LEAD`, and the `logging` capability that licensed
 the carrier: `notifications/message` is the MCP *logging* utility, which the draft revision both
 deprecates and — for anything unsolicited — prohibits outright. Measurement, separately, said the
 warning was not being read: no client in the captured logs surfaced one to its model.
@@ -115,8 +123,12 @@ diagnosing a reap can find it. See
 [server-to-client-messaging.md](server-to-client-messaging.md) §2.1 for the retirement, and §2.2 for
 what the stream is being kept for: progress on long-running tool calls.
 
-From the shell, `GS_MCP_IDLE_TIMEOUT` and friends set these on either launcher — durations like
-`90s`, `30m`, `4h`, or `none`. See [session-lifetime.sh](../session-lifetime.sh), which documents each.
+From the shell, `MCP_IDLE_TIMEOUT` and friends set these on either launcher — durations like
+`90s`, `30m`, `4h`, or `none`. See [session-lifetime.sh](../session-lifetime.sh), which documents
+each. That file also carries the **view-hygiene** knobs below (`MCP_FRONT_END_TX_MODE`,
+`MCP_MAX_COMMITS_BEHIND`, `MCP_STUCK_VIEW_GRACE`, `MCP_PINNED_VIEW_GRACE`): a different
+subject — the repository's commit records rather than the client — but the same launchers, the same
+duration vocabulary, and one place to read rather than two near-identical copies in the launchers.
 
 **Almost nothing here is measured in elapsed time.** The knobs are seconds because that is how a
 deployment thinks; what the reaper counts is derived from them. Idleness is a count of **liveness
@@ -140,7 +152,7 @@ was written — a probe interval shorter than a pass, or an idle timeout shorter
 — before binding a port, and `forkOnPort:` checks too, so the message reaches whoever typed the
 command rather than a detached gem's log.
 
-**Sessions with no deadline.** `GS_MCP_IDLE_TIMEOUT=none` is the localhost case: a developer who
+**Sessions with no deadline.** `MCP_IDLE_TIMEOUT=none` is the localhost case: a developer who
 comes back hours later resumes rather than re-initializing. The session then lives exactly as long
 as its client keeps answering liveness pings on the stream it opened — the client asserting it still
 wants that gem and the uncommitted work in it. What keeps it from being a leak is the ring around
@@ -187,3 +199,79 @@ subtracting time removed the failure and the mechanism together.
 
 [sleep-test.sh](../sleep-test.sh) brackets a real sleep and checks the outcome that now matters: the
 session is still there, the gem still works, and the front end logged nothing about the sleep at all.
+
+
+## The view, and the one ground that is not about the client
+
+Every other rule here asks whether a client is still there. This one asks what its worker gem is
+costing the repository, and it is the only ground on which a session with a live, attentive client
+can be ended.
+
+A GemStone view is also a **commit record the stone cannot dispose of**. A session that never moves
+its view holds every record taken since, for the whole repository — and this server is built out of
+sessions that deliberately sit still. Measured on a live stone: the front-end gem had been on the
+oldest commit record for 15 hours, its last transaction boundary its own login, and no stone-side
+mechanism could ever have moved it (an in-transaction gem is immune to `sigAbort` unless it asked not
+to be, and the workers are in transaction by design). The backlog was bounded only by how often the
+server was restarted.
+
+So two things happen, on the same maintenance pass everything else is counted in.
+
+**The front end refreshes its own view every pass.** It is `#transactionless`
+(`MCP_FRONT_END_TX_MODE`), makes no repository changes, and aborts at the top of each pass, so it
+holds no record for longer than one interval. The cost is that its view moves under it — which is
+also why a committed recompile of front-end code takes effect in a running server, within two passes,
+and why front-end code must never read a persistent object graph.
+
+**A worker whose view has fallen at least `maxCommitsBehind` commits behind is refreshed**
+(`MCP_MAX_COMMITS_BEHIND`, `none` to leave every worker's view alone). The front
+end sends it one `System continueTransaction`: a current view, with the client's uncommitted changes
+**kept**. Three things keep that from being the thing this server twice rejected — refreshing a view
+*around* a client's call, which would assert it had seen changes it had not:
+
+- it happens **between** calls, never with one in flight;
+- a pending write is validated rather than laundered — the kernel carries the write set forward and
+  answers whether it now conflicts, so a refusal that was owed is still owed;
+- the client is **told**, on its next result, with the reads that went stale named.
+
+Nothing about the state of the stone can trigger it. Only the session's own distance from the current
+state counts, because refreshing a worker that is *not* far behind cannot shorten a backlog its view
+was not pinning — and a high backlog is not evidence that anybody is behind, since the stone defers
+disposing records nobody references.
+
+**When the view cannot be moved at all, the session is reaped.** `continueTransaction` is illegal in
+exactly two states — after a commit that failed on conflict, and inside a nested transaction — and in
+both the view stays exactly where it was. Nothing this server can send will free that record, and the
+work the session is holding is *already* un-committable, which is what makes ending it defensible. It
+needs all four of: reaping on this ground configured at all (`MCP_STUCK_VIEW_GRACE`, `none` to
+switch it off); the session found stuck on more passes than the grace allows; far enough behind to be
+part of the problem; and the stone over its own `STN_CR_BACKLOG_THRESHOLD`. A stuck session on a
+quiet stone is left alone. `MCP_STUCK_VIEW_GRACE=0` reaps on the very pass that finds one.
+
+It is **reaped rather than aborted** deliberately. An abort behind the client's back would destroy
+the same work silently and leave a live session working from a view it never chose; a reap is loud —
+logged here, and a `404` on the client's next call, which is the mechanism the transport already
+defines for a session that is gone.
+
+**While a call is in flight, nothing can refresh that view** — GCI allows one call per session, and
+moving a view out from under a running tool is the corruption the whole model prevents. So the last
+arm ends the call itself, and it is the only rule in this file that ends work a client is waiting on.
+It needs the same conjunction plus one more: far enough behind, the stone over its own threshold,
+**and this session holding the oldest record**, sustained for the whole of `pinnedViewGraceSeconds`
+and reset the moment any of the three lapses. On a quiet repository a long call is never ended,
+however long it runs — a router with no request deadline is a supported deployment, and this is not
+that deadline in disguise. `MCP_PINNED_VIEW_GRACE=none` switches it off; the cost of that is one
+long call pinning the backlog for as long as it lasts.
+
+The reaper only ever sets a **flag** for this, never a break. The worker mutex is held by the process
+running the call, and sending a break from the reaper's process would be two processes driving one
+session — which is exactly what that mutex exists to prevent. The ending is done by the process that
+owns it, on its next wait, by the same escalation a timeout or a cancellation uses. The client is
+told which of the four endings happened and why; a cancellation is the one it is deliberately told
+nothing about, because it asked for that one.
+
+The grace is a floor, like every other interval here, and by one more pass than the others need:
+the pass that *discovers* a stuck view is the same pass that would reap it, so the comparison is
+strictly greater. `stuckViewGraceSeconds=0` therefore means what it says — released on the pass that
+finds it — and 60 seconds against a 60-second reaper means one whole interval of grace, not none. A
+positive grace shorter than one pass is refused at startup rather than silently rounded up.

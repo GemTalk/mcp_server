@@ -6,14 +6,17 @@ McpBase subclass: 'McpRouter'
   instVarNames: #( isRunning mutex routesTable
                     serverSocket sessions allowedOriginHosts tlsCertificateFile
                     tlsPrivateKeyFile readOnly workerClassName toolsetNames
-                    serverName serverTitle serverVersion pendingRequests
-                    pendingMutex serverRequestCounter sessionIdleTimeoutSeconds streamlessIdleTimeoutSeconds
-                    livenessProbeIntervalSeconds reaperIntervalSeconds maxSessionLifetimeSeconds reapOnFailedProbe
-                    streamLossGraceSeconds messageTrace messageTraceLimit requestTimeoutSeconds)
+                    toolsetOptions serverName serverTitle serverVersion
+                    pendingRequests pendingMutex serverRequestCounter sessionIdleTimeoutSeconds
+                    streamlessIdleTimeoutSeconds livenessProbeIntervalSeconds reaperIntervalSeconds maxSessionLifetimeSeconds
+                    reapOnFailedProbe streamLossGraceSeconds messageTrace messageTraceLimit
+                    requestTimeoutSeconds callChannels callMutex callCounter
+                    frontEndTransactionMode maxCommitsBehind sessionAccessWarned maintenanceCallTimeoutSeconds
+                    stuckViewGraceSeconds pinnedViewGraceSeconds)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %
@@ -52,6 +55,19 @@ IMPORTANT: runOnPort: is BLOCKING and is meant to be the main activity of a dedi
 GsProcesses only run while the gem is actively executing Smalltalk, so a background fork in an idle
 GCI session would never serve requests.
 
+IMPORTANT: FRONT-END CODE MUST NOT READ PERSISTENT OBJECT GRAPHS. A detached front-end gem runs
+#transactionless (frontEndTransactionMode), so it holds no view worth the name: the view moves under
+it once per maintenance pass, by design (#refreshFrontEndView). That is deliberate -- this class
+makes no repository changes at all, and one left in transaction was measured holding the stone''s
+oldest commit record with its last transaction boundary being its own login 15 hours earlier, which
+nothing stone-side could ever have cleared. The price is the mode''s documented one: a transactionless
+session "may scan database objects, but is at risk of obtaining inconsistent views". Everything here
+today is safe under that rule -- stone primitives, lookups by name, and the worker gems'' own state
+asked for over GCI -- and new front-end code must stay so: walk no committed collection, and cache no
+persistent object across statements. Anything that needs a stable view belongs in a worker gem.
+The corollary, and it cuts both ways: a COMMITTED recompile of a front-end method does take effect in
+a running front end, within one maintenance pass.
+
 Configure a router INSTANCE and run or fork it. Config lives on the instance (no class/committed
 state); forkOnPort: carries it to the detached child gem as JSON embedded in the fork string (paths
 + identifiers only, never key material -- see configDict), so nothing is committed and multiple
@@ -85,6 +101,10 @@ transport and credential gates, so a refused request is traced too. Headers are 
 of them is a bearer token:
     (McpRouter new messageTrace: true) forkOnPort: 8000
     (McpRouter new messageTrace: true; messageTraceLimit: nil) forkOnPort: 8000   "no body cap"
+Keep the detached front end IN TRANSACTION, the way it behaved before view hygiene existed. It will
+pin a commit record for as long as it runs, and nothing on the stone can push its view along; the
+reason to want it is the paragraph above, if front-end code of your own needs a stable view:
+    (McpRouter new frontEndTransactionMode: ''autoBegin'') forkOnPort: 8000
 
 This class CANNOT be made reachable from another host: bindAddress answers loopback and has no
 setter, because a base McpRouter performs no authentication and a reachable port would be an open
@@ -109,6 +129,22 @@ defaultAllowedOriginHosts
   "Loopback hosts only -- a page served from any other origin is a DNS-rebinding attempt."
   ^#('localhost' '127.0.0.1' '[::1]')
 %
+category: 'transaction mode'
+classmethod: McpRouter
+defaultFrontEndTransactionMode
+  "The GemStone transaction mode a DETACHED front-end gem puts itself in: 'transactionless'.
+   A front end has no use for a view. It owns the socket, the session map and the reaper; it makes no
+   repository changes (no committed state of any kind, and no commit/abort/begin anywhere in this
+   class before this one); and every database thing it does is a stone primitive or a lookup by name.
+   A view it never moves is not neutral, though -- it is a commit record the stone cannot dispose of.
+   Measured on a live stone: a front end in transaction was the sole holder of the oldest commit
+   record, its last transaction boundary its own login 15.4 hours earlier, and nothing was ever going
+   to move it (an IN-transaction gem is immune to sigAbort unless it has called
+   #enableSignaledFinishTransactionError, and the workers are in transaction by design too).
+   'autoBegin' is the escape hatch; see the class comment for the constraint this default puts on
+   front-end code."
+  ^'transactionless'
+%
 category: 'session lifetime defaults'
 classmethod: McpRouter
 defaultLivenessProbeIntervalSeconds
@@ -122,6 +158,34 @@ defaultLivenessProbeIntervalSeconds
    them, which at the former five minutes meant a quarter of an hour before anyone noticed."
   ^120
 %
+category: 'view hygiene'
+classmethod: McpRouter
+defaultMaintenanceCallTimeoutSeconds
+  "How long the front end waits on its OWN send into a worker gem before ending it: 5 seconds.
+   Deliberately not #requestTimeoutSeconds, and not derived from it. That knob is legitimately nil --
+   a router used to run test suites for hours is a supported deployment, with a client-initiated
+   interrupt as the stop button -- and a hygiene send that inherited nil would wait for ever, which
+   would stall the maintenance pass for every other session.
+   5 seconds because the send is one abort-equivalent (System continueTransaction) into an idle gem.
+   Anything slower is not a slow refresh, it is a gem that is not answering."
+  ^5
+%
+category: 'view hygiene'
+classmethod: McpRouter
+defaultMaxCommitsBehind
+  "How far behind the repository a worker gem's view may fall before this server refreshes it: 20
+   commits.
+   The number is borrowed rather than invented. StnSignalAbortCrBacklog, the stone's own trigger for
+   sigAborting a gem that is holding the oldest commit record, defaults to 20 -- so this says 'as
+   patient as the stone is, and no more'. It is a PROXY and not the same quantity: the stone counts
+   the whole repository's backlog, where this counts one session's distance from the current state
+   (descriptionOfSession: field 16). What licenses reading one as the other is the practical
+   observation that a session 20 commits behind is plausibly the reason the backlog is 20.
+   For scale, measured on db-1 the moment view hygiene was first deployed: the front end that had
+   never moved its view was 489 commits behind, with a stone backlog of 490. 20 is not a
+   conservative number."
+  ^20
+%
 category: 'message trace'
 classmethod: McpRouter
 defaultMessageTraceLimit
@@ -132,6 +196,20 @@ defaultMessageTraceLimit
    reader can tell a long message from a lost one. nil means no cap at all; see
    McpRouter>>messageTraceLimit:."
   ^4096
+%
+category: 'view hygiene'
+classmethod: McpRouter
+defaultPinnedViewGraceSeconds
+  "How long a RUNNING call may go on holding the repository's oldest commit record open, while the
+   stone is over its own backlog threshold, before the call is ended: 300 seconds.
+   Much the longest grace here, because this is the most disruptive thing this server does. Every
+   other ground ends a session that is idle, gone, or already doomed; this one ends work a client is
+   waiting on and may not be able to reproduce. Five minutes of sustained, measured harm -- not one
+   burst of somebody else's commits -- is the bar.
+   nil switches the arm off entirely: no call is ever ended for this reason, whatever it costs the
+   repository. That is a legitimate deployment choice and the reason the knob exists; the cost of it
+   is that one long call can pin the backlog for as long as it runs."
+  ^300
 %
 category: 'session lifetime defaults'
 classmethod: McpRouter
@@ -147,16 +225,20 @@ defaultRequestTimeoutSeconds
    It was 45 seconds, chosen to sit under what an MCP client will wait -- the clients seen so far
    give up around a minute, and a limit above theirs is no limit at all. What that number really
    was, though, is a GUESS at the moment nobody is waiting for the answer any more, made by a server
-   with no way to find out. A client that stops waiting can now SAY so, by a notifications/cancelled
-   (McpSession>>requestCancel:), which ends the call at the moment it stops being wanted. A deadline
-   approximates that; a cancel signal knows it. Prefer the signal.
+   with no way to find out. What replaces the guess is knowing: a call that asked to be kept informed
+   is answered on a stream it can report progress down (#serveStreamedCall:id:forSession:on:), and a
+   client that stops waiting can say so -- by a notifications/cancelled, or by closing that stream --
+   which ends the call at the moment it stops being wanted. A deadline approximates that; a cancel
+   signal knows it. Prefer the signal. (The stream is here; the progress on it and the cancel
+   triggers that read it are being built on top of it.)
    And the guess was not even conservative in the direction it was meant to be. Measured 2026-08-31
    against a live server: Claude Code ran a 150-second tool call to completion, with no progress
    notifications on it, and took delivery of the answer -- so the client patience the number was
    fitted to is not what it was taken to be, while the limit itself was real.
    The cost of the guess fell in the wrong place, too. A 45-second limit does not cut off runaways so
-   much as legitimate slow work -- a full suite run, a large fileIn, a broad search -- and a server
-   that can do a thing but refuses to finish it is worse than one that takes a while.
+   much as legitimate slow work -- a full suite run, a large fileIn, a broad search -- which is
+   exactly the work progress notifications exist to make watchable. A server that can do a thing but
+   refuses to finish it is worse than one that takes a while.
    What nil gives up is the guarantee that a runaway ever ends on its own, so set a number where the
    clients are unknown or cannot be trusted to cancel. Ending a request costs the client that request
    and nothing else: the worker is interrupted and stays usable, so the session, and the uncommitted
@@ -210,6 +292,28 @@ defaultStreamLossGraceSeconds
    #streamlessIdleTimeoutSeconds as before."
   ^10
 %
+category: 'view hygiene'
+classmethod: McpRouter
+defaultStuckViewGraceSeconds
+  "How long a session whose view CANNOT be moved is tolerated, under stone pressure, before its gem
+   is released: 60 seconds.
+   Sized for the only thing left to wait for. This ground was 600 seconds while it was about a DIRTY
+   view, where the number had to be long enough for an agent to read a warning and commit its work.
+   A stuck session has nothing it can commit -- its transaction is doomed and abort is the only move
+   -- so the grace need only cover a client already on its way to making it.
+   The reaper interval is a floor on this: see McpRouter>>stuckViewGracePasses."
+  ^60
+%
+category: 'transaction mode'
+classmethod: McpRouter
+frontEndTransactionModes
+  "The values #frontEndTransactionMode: accepts. Each is the NAME of a GemStone transaction mode, and
+   converts to the symbol System class>>transactionMode: takes with #asSymbol.
+   #manualBegin is deliberately not offered: it differs from #autoBegin only in when a transaction
+   begins, which is a distinction only a session that writes can spend -- and it would give this
+   class a third state to reason about for nothing."
+  ^#('transactionless' 'autoBegin')
+%
 category: 'network'
 classmethod: McpRouter
 loopbackAddress
@@ -233,10 +337,60 @@ category: 'forking'
 classmethod: McpRouter
 runOnPort: aPort configJson: aJsonString
   "Child-gem entry the detached fork runs (see the instance forkOnPort:): build a router of THIS
-   class, apply the serialized config, and run its blocking accept loop."
-  ^(self new applyConfigJson: aJsonString) runOnPort: aPort
+   class, apply the serialized config, put the gem in its configured transaction mode, and run its
+   blocking accept loop.
+   The transaction mode is set HERE and in no other entry point, because this is the only one that
+   owns its session outright: the gem was forked to evaluate this expression and does nothing else
+   afterwards. Every other way in runs in somebody's session -- #forkOnPort: in the launching one,
+   the instance #runOnPort: in an interactive topaz -- and #applyFrontEndTransactionMode aborts on
+   the way in, which in a caller's session would silently discard their uncommitted work."
+  | router |
+  router := self new applyConfigJson: aJsonString.
+  router applyFrontEndTransactionMode.
+  ^router runOnPort: aPort
 %
 ! ------------------- Instance methods for McpRouter
+category: 'routing'
+method: McpRouter
+acceptsEventStream: req
+  "Whether this request's Accept header offers to take an SSE stream as the answer.
+   The spec REQUIRES a client to list both application/json and text/event-stream, and both clients
+   do, so this is not really a capability check -- it is what keeps a hand-rolled caller that asked
+   for JSON from being handed a stream it cannot read. curl without an Accept header, and every
+   check in test.sh, stay on the plain-JSON path.
+   Header keys arrive lower-cased (McpHttpConnection>>parseHead:); the VALUE is lower-cased here
+   because a media type is case-insensitive and #includesString: would answer this one either way --
+   being explicit costs nothing and says which it meant."
+  | accept |
+  accept := (req at: 'headers' ifAbsent: [Dictionary new]) at: 'accept' ifAbsent: [nil].
+  accept isNil ifTrue: [^false].
+  ^(accept asLowercase indexOfSubCollection: 'text/event-stream') > 0
+%
+category: 'progress'
+method: McpRouter
+acceptWorkerSignal: aSignal
+  "Turn one InterSessionSignal from a worker gem into a queued notifications/progress for the client
+   that asked for it. Every failure here is a DROP, never a raise: this runs in the poller's
+   GsProcess, which serves every session, so one malformed payload must not stop the others being
+   delivered.
+   Four ways a tick is dropped, and only the second is worth a log line:
+     no payload -- something signalled this gem that is not a progress tick;
+     unparseable payload -- a worker built one wrong, which is a defect and should be visible;
+     unknown callId -- the call ended while the tick was in flight. Entirely normal, and the reason
+       the channel map is the authority on what is still live rather than the worker;
+     non-increasing progress -- refused by the channel, which owes the client a conforming stream."
+  | payload parsed channel |
+  payload := self payloadOfSignal: aSignal.
+  payload isNil ifTrue: [^self].
+  parsed := self parseBody: payload.
+  parsed isNil ifTrue: [
+    ^self log: 'Discarded an unparseable progress payload from a worker gem: ' , payload].
+  channel := self channelAt: (parsed at: 'c' ifAbsent: [nil]).
+  channel isNil ifTrue: [^self].
+  (channel noteProgress: (parsed at: 'p' ifAbsent: [nil])) ifFalse: [^self].
+  channel add: (self progressNotificationFor: channel from: parsed).
+  ^self
+%
 category: 'routing'
 method: McpRouter
 acknowledgeCancelledCall: sess on: conn
@@ -246,6 +400,8 @@ acknowledgeCancelledCall: sess on: conn
    report' -- valid HTTP, so the connection ends the way every other one does, and carrying no
    JSON-RPC response for a request the client has told us it is no longer listening for. (It would
    ignore one anyway: the spec tells the canceller to discard any response that arrives late.)
+   A streamed call needs no equivalent. Its stream is already open, so saying nothing IS ending it,
+   which is what the draft revision requires of a cancelled request outright.
    The session is still released where its gem had to be stopped to get the call out of it -- that is
    true however the call ended, and the client learns of it from the 404 on its next request."
   self releaseSessionIfAbandoned: sess.
@@ -277,8 +433,14 @@ applyConfig: aConfigDict
   tlsCertificateFile := aConfigDict at: 'tlsCertificateFile' ifAbsent: [tlsCertificateFile].
   tlsPrivateKeyFile := aConfigDict at: 'tlsPrivateKeyFile' ifAbsent: [tlsPrivateKeyFile].
   readOnly := aConfigDict at: 'readOnly' ifAbsent: [readOnly].
+  "Through the SETTER, not the ivar: it is the one thing here whose value has a fixed vocabulary, and
+   a name that is not in it must fail in the child gem rather than be handed to #asSymbol."
+  (aConfigDict includesKey: 'frontEndTransactionMode')
+    ifTrue: [self frontEndTransactionMode: (aConfigDict at: 'frontEndTransactionMode')].
   workerClassName := aConfigDict at: 'workerClassName' ifAbsent: [workerClassName].
   toolsetNames := aConfigDict at: 'toolsetNames' ifAbsent: [toolsetNames].
+  (aConfigDict includesKey: 'toolsetOptions')
+    ifTrue: [self toolsetOptions: (aConfigDict at: 'toolsetOptions')].
   serverName := aConfigDict at: 'serverName' ifAbsent: [serverName].
   serverTitle := aConfigDict at: 'serverTitle' ifAbsent: [serverTitle].
   serverVersion := aConfigDict at: 'serverVersion' ifAbsent: [serverVersion].
@@ -290,6 +452,14 @@ applyConfig: aConfigDict
   reaperIntervalSeconds := aConfigDict at: 'reaperIntervalSeconds' ifAbsent: [reaperIntervalSeconds].
   maxSessionLifetimeSeconds := aConfigDict at: 'maxSessionLifetimeSeconds' ifAbsent: [maxSessionLifetimeSeconds].
   reapOnFailedProbe := aConfigDict at: 'reapOnFailedProbe' ifAbsent: [reapOnFailedProbe].
+  "Through the SETTER: nil is a real setting here (view hygiene off) and every other value has a
+   floor, so a number that cannot work must fail on arrival in the child gem."
+  (aConfigDict includesKey: 'maxCommitsBehind')
+    ifTrue: [self maxCommitsBehind: (aConfigDict at: 'maxCommitsBehind')].
+  (aConfigDict includesKey: 'maintenanceCallTimeoutSeconds')
+    ifTrue: [self maintenanceCallTimeoutSeconds: (aConfigDict at: 'maintenanceCallTimeoutSeconds')].
+  stuckViewGraceSeconds := aConfigDict at: 'stuckViewGraceSeconds' ifAbsent: [stuckViewGraceSeconds].
+  pinnedViewGraceSeconds := aConfigDict at: 'pinnedViewGraceSeconds' ifAbsent: [pinnedViewGraceSeconds].
   messageTrace := aConfigDict at: 'messageTrace' ifAbsent: [messageTrace].
   messageTraceLimit := aConfigDict at: 'messageTraceLimit' ifAbsent: [messageTraceLimit].
   ^self
@@ -299,6 +469,28 @@ method: McpRouter
 applyConfigJson: aJsonString
   "Apply a JSON config string (see applyConfig: / configJson)."
   ^self applyConfig: (self parseBody: aJsonString)
+%
+category: 'transaction mode'
+method: McpRouter
+applyFrontEndTransactionMode
+  "Put THIS GEM into the configured transaction mode (#frontEndTransactionMode), and answer self.
+   Called from the class-side #runOnPort:configJson: and from nowhere else -- see that method for
+   why, and the class comment for what the default mode then forbids of front-end code.
+   A failure is logged and swallowed rather than raised. The mode is hygiene: a front end that could
+   not get it is still a working front end, just one that pins a commit record, and refusing to serve
+   for that reason would be the worse trade. The failure that will actually happen is #transactionless
+   in a SOLO session (the repository open by this gem alone), which is no way to run a server but is
+   exactly how someone tries one out; the log line names the mode the gem is left in, since that is
+   the fact the next question will be about."
+  | mode |
+  mode := self frontEndTransactionMode.
+  ^[System transactionMode: mode asSymbol. self]
+    on: Error
+    do: [:ex |
+      self log: 'Could not put this gem in transaction mode ' , mode , ' -- staying in '
+        , ([System transactionMode asString] on: Error do: [:x | 'an unknown mode'])
+        , ': ' , ([ex description] on: Error do: [:x | ex class name asString]).
+      self]
 %
 category: 'network'
 method: McpRouter
@@ -321,6 +513,15 @@ buildRoutes
   d at: 'GET'    put: [:req :conn | self serveGet: req on: conn].
   d at: 'DELETE' put: [:req :conn | self serveDelete: req on: conn].
   ^d
+%
+category: 'progress'
+method: McpRouter
+channelAt: aCallIdOrNil
+  "The progress channel for a call still in flight, or nil. Its own mutex, deliberately not the
+   session map's: that one is held across reapIdleSessions, and a chatty tool must not contend with
+   another client's session opening."
+  aCallIdOrNil isNil ifTrue: [^nil].
+  ^callMutex critical: [callChannels at: aCallIdOrNil ifAbsent: [nil]]
 %
 category: 'lifecycle'
 method: McpRouter
@@ -346,6 +547,41 @@ closeAllSessions
     found].
   doomed do: [:s | [s close] on: Error do: [:e | nil]].
   ^doomed size
+%
+category: 'view hygiene'
+method: McpRouter
+commitsBehindFor: sess
+  "How many commits the repository has taken since sess's WORKER GEM obtained its view
+   (descriptionOfSession: field 16), or nil if that cannot be read.
+   A stone query made from THIS gem about another session -- it never touches the worker's GCI
+   channel, so it is unaffected by whether the worker has a call in flight, and unaffected by this
+   gem's own view. That is what lets this arm measure a busy session it must not act on.
+   #workerStoneSession was cached at login (McpSession>>cacheWorkerIds) precisely so nothing on this
+   path has to ask the worker anything.
+   Two failures both answer nil: the session has logged out, and this server's user lacks the
+   SessionAccess privilege needed to read ANOTHER session's description. The second disables the
+   whole arm, so it is logged -- once, by #noteSessionAccessDenied:, because a line per session per
+   pass would bury the gem log in a fact that does not change."
+  | sid |
+  sid := sess workerStoneSession.
+  sid isNil ifTrue: [^nil].
+  ^[(System descriptionOfSession: sid) at: 16]
+    on: Error
+    do: [:ex | self noteSessionAccessDenied: ex. nil]
+%
+category: 'view hygiene'
+method: McpRouter
+commitsBehindLimit
+  "The commits-behind figure at which this server refreshes a worker's view: the LOWER of what this
+   router was configured to tolerate (#maxCommitsBehind) and what the stone itself tolerates
+   (StnSignalAbortCrBacklog), so either one firing is enough.
+   Answers nil when the arm is off (#maxCommitsBehind nil). When the stone cannot be read, the
+   configured number stands alone -- an unreadable stone setting must not silently raise the bar."
+  | stone |
+  maxCommitsBehind isNil ifTrue: [^nil].
+  stone := self stoneSignalAbortCrBacklog.
+  stone isNil ifTrue: [^maxCommitsBehind].
+  ^maxCommitsBehind min: stone
 %
 category: 'running'
 method: McpRouter
@@ -385,8 +621,14 @@ configDict
   d at: 'tlsCertificateFile' put: tlsCertificateFile.
   d at: 'tlsPrivateKeyFile' put: tlsPrivateKeyFile.
   d at: 'readOnly' put: readOnly.
+  d at: 'frontEndTransactionMode' put: frontEndTransactionMode.
   d at: 'workerClassName' put: workerClassName.
   d at: 'toolsetNames' put: toolsetNames.
+  "Toolset options are the one value here the core does not know the shape of. They stay inside the
+   fixed key allow-list all the same: a nested map under ONE key, whose contents were checked against
+   the toolsets' own declaredOptionNames when they were set (toolsetOptions:), so a future toolset
+   cannot start carrying something nobody declared."
+  d at: 'toolsetOptions' put: toolsetOptions.
   d at: 'serverName' put: serverName.
   d at: 'serverTitle' put: serverTitle.
   d at: 'serverVersion' put: serverVersion.
@@ -398,6 +640,10 @@ configDict
   d at: 'reaperIntervalSeconds' put: reaperIntervalSeconds.
   d at: 'maxSessionLifetimeSeconds' put: maxSessionLifetimeSeconds.
   d at: 'reapOnFailedProbe' put: reapOnFailedProbe.
+  d at: 'maxCommitsBehind' put: maxCommitsBehind.
+  d at: 'maintenanceCallTimeoutSeconds' put: maintenanceCallTimeoutSeconds.
+  d at: 'stuckViewGraceSeconds' put: stuckViewGraceSeconds.
+  d at: 'pinnedViewGraceSeconds' put: pinnedViewGraceSeconds.
   "Message tracing has to travel, or it is unreachable: forkOnPort: is the only way this server is
    ever started, so a setting the fork string does not carry is one an operator cannot turn on."
   d at: 'messageTrace' put: messageTrace.
@@ -453,6 +699,20 @@ countCovering: aTotalSeconds every: aUnitSeconds
    which is cheap; rounding down breaks the promise the number was making."
   ^((aTotalSeconds + aUnitSeconds - 1) // aUnitSeconds) max: 1
 %
+category: 'session lifetime'
+method: McpRouter
+deadlineSourceFor: sess
+  "Which bound set this session's absolute deadline, phrased for the client, because the two differ
+   in what the client can DO about it: a credential can be refreshed and a server's cap cannot.
+   Told apart without storing the fact: a deadline equal to the session's start plus the configured
+   cap is the cap's, and anything earlier came from the credential -- which is exactly what
+   McpSession>>startedAtSeconds exists for. Both may be set, in which case the earlier one is in
+   force, since #expiresAtSeconds: only ever moves a deadline earlier."
+  (maxSessionLifetimeSeconds notNil
+    and: [sess expiresAtSeconds = (sess startedAtSeconds + maxSessionLifetimeSeconds)])
+      ifTrue: [^'this server''s session lifetime cap'].
+  ^'your access credential, which refreshing it extends'
+%
 category: 'tls'
 method: McpRouter
 disableTls
@@ -462,21 +722,34 @@ disableTls
 %
 category: 'server-initiated'
 method: McpRouter
-drainOutbox: outbox to: conn
-  "Write everything waiting in outbox to the SSE stream, oldest first. Answers false as soon as a
-   write fails, which is how the drain loop learns the client is gone.
-   A gap is admitted rather than hidden, but to the OPERATOR now, not to the client. Announcing it
-   took a notifications/message, which was legal only while this server declared the logging
-   capability and is prohibited outright by the draft revision. The gem log is the better audience
-   anyway: an outbox overflow is a server-side fault, and there was never anything the client could
-   do about it."
+drain: aQueue to: conn
+  "Write everything waiting in aQueue to an SSE stream, oldest first. Answers false as soon as a write
+   fails, which is how a caller learns the client is gone.
+   Takes either kind of queue -- a session's McpOutbox, draining onto its standalone GET stream, or one
+   call's McpProgressChannel, draining onto the response stream of the very call that is producing the
+   ticks. The two are different things (see McpProgressChannel) but they present the same queueing
+   protocol on purpose, so this method needs to know which it has no more than a socket does.
+   A gap is admitted rather than hidden, but to the OPERATOR, not to the client. Announcing it took a
+   notifications/message, which was legal only while this server declared the logging capability and is
+   prohibited outright by the draft revision. The gem log is the better audience anyway: an overflow is
+   a server-side fault, and there was never anything the client could do about it."
   | dropped |
-  dropped := outbox takeDroppedCount.
+  dropped := aQueue takeDroppedCount.
   dropped > 0 ifTrue: [
     self log: dropped printString , ' queued message(s) for an MCP session were dropped before '
-      , 'they could be written: its outbox overflowed.'].
-  outbox drain do: [:each | (conn writeSseData: each) ifNil: [^false]].
+      , 'they could be written: its queue overflowed.'].
+  aQueue drain do: [:each | (conn writeSseData: each) ifNil: [^false]].
   ^true
+%
+category: 'progress'
+method: McpRouter
+drainWorkerSignals
+  "Drain every worker signal waiting for this gem, oldest first. Answers self.
+   Loops until the queue is empty rather than taking one per tick: a burst from several workers must
+   not be spread over several poll intervals, and the queue is only 50 deep."
+  | sig |
+  [(sig := InterSessionSignal poll) notNil] whileTrue: [self acceptWorkerSignal: sig].
+  ^self
 %
 category: 'toolsets'
 method: McpRouter
@@ -489,6 +762,23 @@ effectiveToolsetNames
    principal, which is only possible on this side, because this is where the token is."
   ^toolsetNames ifNil: [McpServer installedDefaultToolsetNames]
 %
+category: 'toolsets'
+method: McpRouter
+effectiveToolsetOptions
+  "The toolset options this router's NEXT worker is built with, narrowed to the toolsets actually in
+   its surface. Narrowed rather than passed whole so that a worker is never handed configuration for
+   a toolset it does not have -- which matters most where the surface is chosen PER SESSION (a
+   subclass narrowing effectiveToolsetNames by principal), because there the same router legitimately
+   serves different surfaces and the options must follow.
+   nil when nothing survives, which is what an unconfigured deployment always answers."
+  | names narrowed |
+  toolsetOptions isNil ifTrue: [^nil].
+  names := self effectiveToolsetNames collect: [:n | n asString].
+  narrowed := Dictionary new.
+  toolsetOptions keysAndValuesDo: [:k :v |
+    (names includes: k asString) ifTrue: [narrowed at: k put: v]].
+  ^narrowed isEmpty ifTrue: [nil] ifFalse: [narrowed]
+%
 category: 'worker class'
 method: McpRouter
 effectiveWorkerClassName
@@ -496,6 +786,29 @@ effectiveWorkerClassName
    forwarded request (McpSession>>workerExpressionFor:), so the worker gem is told rather than
    deciding."
   ^workerClassName ifNil: ['McpServer']
+%
+category: 'routing'
+method: McpRouter
+endedCallErrorFor: anError id: anIdOrNil
+  "The JSON-RPC error body for a request this server ENDED, as a JSON String.
+   The code is -32001, in JSON-RPC's implementation-defined server-error range, and `data.kind`
+   carries the same machine-readable classification a worker-raised error would
+   (McpDispatcher>>kindForError:), so a client branches the same way wherever the error was produced.
+   It bears the request's own id, and that is the point: an answer the client cannot match to the
+   request it is waiting on is no better than silence -- it would wait out its own timeout instead,
+   which is the whole thing ending a call early exists to prevent.
+   Built here rather than inside either writer because the two writers differ only in FRAMING: a
+   plain call gets it as the HTTP response body, a streamed one as an SSE frame on the stream already
+   open (#writeEndedCallFrame:forSession:id:on:)."
+  | err |
+  err := Dictionary new.
+  err at: 'jsonrpc' put: '2.0'; at: 'id' put: anIdOrNil.
+  err at: 'error' put: (Dictionary new
+    at: 'code' put: -32001;
+    at: 'message' put: anError description;
+    at: 'data' put: (Dictionary new at: 'kind' put: anError kind asString; yourself);
+    yourself).
+  ^McpJson write: err
 %
 category: 'message trace'
 method: McpRouter
@@ -516,6 +829,16 @@ escapedForTrace: aString
           ifTrue: [out nextPutAll: '\t']
           ifFalse: [out nextPut: c]]]].
   ^out contents
+%
+category: 'progress'
+method: McpRouter
+forgetChannel: aChannel
+  "Unregister a finished call's channel. Sent from an ensure: as the call returns, so a raising tool
+   cannot leak one -- and a tick arriving afterwards is dropped by #acceptWorkerSignal: for want of a
+   channel, which is the normal end of every reported call rather than an error."
+  aChannel isNil ifTrue: [^self].
+  callMutex critical: [callChannels removeKey: aChannel callId ifAbsent: [nil]].
+  ^self
 %
 category: 'forking'
 method: McpRouter
@@ -571,6 +894,54 @@ forkReaper
      [self maintainSessions] on: Error do: [:e |
        self log: 'maintainSessions error: ' , ([e description] on: Error do: [:x | e class name asString])]]] fork
 %
+category: 'progress'
+method: McpRouter
+forkSignalPoller
+  "Fork the GsProcess that drains worker-gem signals: the one thing that polls on a schedule, forked
+   here beside the reaper rather than by whatever happens to want a tick.
+   It is not the only thing that may drain, and that is safe: InterSessionSignal poll reads a SINGLE
+   queue belonging to this gem, shared by every worker signalling it, but #acceptWorkerSignal: routes
+   each payload to its own call by callId -- so whoever takes a message off the queue, it reaches the
+   same channel. A streamed call drains once itself, on the way out, to collect the tick its worker
+   sent as it returned (#serveStreamedCall:id:progressToken:forSession:on:).
+   It cannot be the reaper's own pass: that runs once a minute, and a progress tick a minute late is
+   not progress. #signalPollMilliseconds is the latency of every notification this server sends.
+   The Stone's queue holds 50 messages and the 51st raises SignalBufferFull IN THE SENDER, so
+   draining promptly is what keeps the senders working; the reporters rate-limit for the same reason."
+  [[isRunning] whileTrue: [
+     [self drainWorkerSignals] on: Error do: [:e |
+       self log: 'drainWorkerSignals error: '
+         , ([e description] on: Error do: [:x | e class name asString])].
+     (Delay forMilliseconds: self signalPollMilliseconds) wait]] fork
+%
+category: 'transaction mode'
+method: McpRouter
+frontEndTransactionMode
+  "The GemStone transaction mode this router's DETACHED gem puts itself in before it serves anything
+   (class-side #runOnPort:configJson: -> #applyFrontEndTransactionMode). 'transactionless' by
+   default; McpRouter class>>defaultFrontEndTransactionMode says why.
+   It says nothing about a router run in the FOREGROUND from an interactive session, which never
+   changes the mode of the session that called it -- so the startup banner reports the mode the gem
+   is actually in rather than this one."
+  ^frontEndTransactionMode
+%
+category: 'transaction mode'
+method: McpRouter
+frontEndTransactionMode: aString
+  "Set the transaction mode this router's detached gem runs in -- one of
+   McpRouter class>>frontEndTransactionModes -- and raise on anything else.
+   Checked here, in the session that is configuring the router, because the alternative is a typo
+   that leaves the front end quietly in transaction: a condition no part of a running server
+   complains about, that costs nothing visible for hours, and that surfaces only as a stone full of
+   commit records."
+  ((aString isKindOf: CharacterCollection)
+    and: [self class frontEndTransactionModes includes: aString asString]) ifFalse: [
+      ^self error: 'frontEndTransactionMode must be one of '
+        , (self class frontEndTransactionModes inject: '' into: [:a :b |
+            a isEmpty ifTrue: [b] ifFalse: [a , ', ' , b]])
+        , ', and is ' , aString printString , '.'].
+  frontEndTransactionMode := aString asString
+%
 category: 'running'
 method: McpRouter
 handleConnection: aConnection
@@ -591,6 +962,13 @@ handleConnection: aConnection
       on: Error do: [:e | nil]].
   aConnection close
 %
+category: 'view hygiene'
+method: McpRouter
+hasPinnedViewRelease
+  "Whether this router will ever end a running call because its view is pinning the repository's
+   oldest commit record. nil grace means never."
+  ^pinnedViewGraceSeconds notNil
+%
 category: 'session lifetime'
 method: McpRouter
 hasSessionIdleDeadline
@@ -599,6 +977,21 @@ hasSessionIdleDeadline
    per idle period, and #streamlessIdleTimeoutSeconds becomes the only thing that can release an
    unreachable client's gem."
   ^sessionIdleTimeoutSeconds notNil
+%
+category: 'view hygiene'
+method: McpRouter
+hasStuckViewReaping
+  "Whether this router will ever release a session because its view could not be moved. nil grace
+   means never, and switches the ground off whole rather than leaving a comparison against nothing."
+  ^stuckViewGraceSeconds notNil
+%
+category: 'view hygiene'
+method: McpRouter
+hasViewHygiene
+  "Whether this router watches its workers' views at all. Off means off entirely -- neither the
+   per-session ceiling nor the stone-pressure trigger applies -- which is the same bargain
+   #hasSessionIdleDeadline makes for idleness: nil is a deployment instruction, not an absence."
+  ^maxCommitsBehind notNil
 %
 category: 'routing'
 method: McpRouter
@@ -634,9 +1027,14 @@ initialize
   readOnly := false.
   workerClassName := nil.  "nil = McpServer"
   toolsetNames := nil.     "nil = the installed default surface, resolved per session"
+  toolsetOptions := nil.   "nil = no toolset needs configuring, which is the ordinary case"
   serverName := nil.       "nil = the worker's own default (McpServer class>>defaultServerName)"
   serverTitle := nil.
   serverVersion := nil.
+  "The mode a DETACHED front-end gem puts itself in (#applyFrontEndTransactionMode). Seeded rather
+   than left nil, because nil could only mean 'keep whatever STN_GEM_INITIAL_TRANSACTION_MODE gave
+   this gem at login', and that is the pinned-view behaviour this default exists to end."
+  frontEndTransactionMode := self class defaultFrontEndTransactionMode.
   "server-initiated messaging: the requests this server has sent and is waiting to be answered.
    Its OWN mutex, not the session-map one -- that is held across reapIdleSessions, and correlating
    a client's ping reply must not queue behind another client's login."
@@ -655,13 +1053,40 @@ initialize
   reaperIntervalSeconds := self class defaultReaperIntervalSeconds.
   maxSessionLifetimeSeconds := nil.  "nil = no absolute cap beyond whatever a credential imposes"
   reapOnFailedProbe := true.
+  "View hygiene. Seeded rather than left nil, because nil is the OFF setting and could not also mean
+   'use the default'. sessionAccessWarned is the once-only latch for the privilege this arm needs."
+  maxCommitsBehind := self class defaultMaxCommitsBehind.
+  maintenanceCallTimeoutSeconds := self class defaultMaintenanceCallTimeoutSeconds.
+  stuckViewGraceSeconds := self class defaultStuckViewGraceSeconds.
+  pinnedViewGraceSeconds := self class defaultPinnedViewGraceSeconds.
+  sessionAccessWarned := false.
   "Message tracing: OFF, because a traced log records every tool argument a client sent, and an
    operator must choose that rather than discover it. The cap is not optional -- a compile_method or
    execute_code body runs to tens of kilobytes, and an unbounded default would let a chatty session
    fill a disk nobody is watching."
   messageTrace := false.
   messageTraceLimit := self class defaultMessageTraceLimit.
+  callChannels := Dictionary new.
+  callMutex := Semaphore forMutualExclusion.
+  callCounter := 0.
   ^self
+%
+category: 'routing'
+method: McpRouter
+internalErrorFor: anIdOrNil
+  "A JSON-RPC -32603 body bearing anIdOrNil, as a JSON String, for a failure the front end could not
+   turn into anything more specific.
+   It exists for exactly one caller: a streamed call whose forward raised something other than an
+   ended call (#serveStreamedCall:id:forSession:on:). handleConnection: answers an escaped error with
+   a complete HTTP 500 response, which on a connection already carrying SSE frames would be appended
+   to the stream and read as junk -- so that path has to end itself, with a frame, and a frame needs
+   a body. Everywhere else the 500 is the right answer and this is not used."
+  | err |
+  err := Dictionary new.
+  err at: 'jsonrpc' put: '2.0'; at: 'id' put: anIdOrNil.
+  err at: 'error' put: (Dictionary new
+    at: 'code' put: -32603; at: 'message' put: 'Internal error'; yourself).
+  ^McpJson write: err
 %
 category: 'running'
 method: McpRouter
@@ -677,6 +1102,51 @@ keepaliveIntervalSeconds
   "How often an otherwise silent SSE stream gets a comment line. Comfortably under the usual 30-60
    second proxy and NAT idle timeouts, which is the only thing this interval has to beat."
   ^15
+%
+category: 'session lifetime'
+method: McpRouter
+lifetimeBoundsFor: sess
+  "What bounds this session, as the VALUES the worker needs to describe them when it reports them:
+     #( deadlineAtSeconds deadlineSource inactivitySeconds inactivityLabel )
+   or nil if nothing bounds this session at all. Any element may be nil.
+
+   DELIBERATELY NOT A RENDERED SENTENCE, and specifically not a rendered countdown. This is computed
+   when the request ARRIVES; the client reads it when the call RETURNS. A duration rendered here is
+   therefore wrong by the length of the call -- and wrong in the dangerous direction, telling a
+   client 24 minutes remain when a six-minute tool call has left it 18. So the deadline crosses as
+   an INSTANT and the worker subtracts when it answers (McpServer>>lifetimeNote). What stays here is
+   every policy choice: which bounds exist, what they are called, and which of the two inactivity
+   rules can actually fire.
+
+   BOTH bounds are reported, never only the nearer one, because they run on different clocks and
+   which of them binds can invert during a single call: a 33-minute credential outlasts a 30-minute
+   idle rule when the request arrives and undercuts it six minutes later. The worker orders them by
+   which comes first at the moment it answers.
+
+   The inactivity bound is whichever rule can actually fire. With no stream open, liveness can be
+   asked nothing -- #quietProbes cannot advance without answered pings -- so the give-up rule is
+   #streamlessIdleTimeoutSeconds, typically far shorter than the idle deadline, and quoting the idle
+   deadline there would be a comfortable lie.
+
+   Two reaping grounds are deliberately absent: three unanswered pings, and a client closing its
+   stream. Neither is a timer a client can plan around -- a client reading this answered the request
+   that carried it, and one that has stopped answering is not reading anything."
+  | deadlineAt inactivity label |
+  deadlineAt := sess expiresAtSeconds.
+  sess outbox hasStream
+    ifTrue: [
+      self hasSessionIdleDeadline ifTrue: [
+        inactivity := self sessionIdleTimeoutSeconds.
+        label := 'of inactivity']]
+    ifFalse: [
+      inactivity := self streamlessIdleTimeoutSeconds.
+      label := 'with no event stream open'].
+  (deadlineAt isNil and: [inactivity isNil]) ifTrue: [^nil].
+  ^Array
+    with: deadlineAt
+    with: (deadlineAt isNil ifTrue: [nil] ifFalse: [self deadlineSourceFor: sess])
+    with: inactivity
+    with: label
 %
 category: 'session lifetime'
 method: McpRouter
@@ -745,18 +1215,167 @@ maintainIdleSession: sess
 category: 'sessions'
 method: McpRouter
 maintainSessions
-  "One pass of session housekeeping, run on the reaper's GsProcess. The order is the point:
-     0. notice whether this pass is itself wildly late -- the host was suspended -- and forgive that
-        time rather than letting it be read as idleness;
-     1. time out server-initiated requests nobody answered, which is what marks a probed session
-        gone (or, where the silence is about the transport rather than the client, discards it);
+  "One pass of session housekeeping, run on the reaper's GsProcess. Answers the number reaped.
+   The order is the point:
+     1. move this gem's OWN view (#refreshFrontEndView), so the front end stops holding a commit
+        record open for the rest of the stone -- and, the same act seen from the other side, so that
+        a committed recompile of front-end code takes effect here;
      2. probe sessions that have gone quiet, so silence can be told from absence;
      3. reap what should go.
-   Step 0 comes first because every step after it reads a wall clock. Reaping comes last so that a
-   session found gone in step 1 is freed in the same pass rather than the next.
-   Answers the number reaped."
+   Step 1 comes first so that everything after it reasons about the repository as it is now rather
+   than as it was when this gem logged in. Reaping comes last so that a session found gone while
+   probing is freed in the same pass rather than the next.
+   Two steps this comment used to promise are gone, and both were REMOVED rather than left undone:
+     * there is no suspend detector, because every ground #reapReasonFor: reads is now a count of
+       something this front end observed, so a suspended host cannot manufacture one and there is no
+       suspend left to forgive;
+     * there is no pass that times out server-initiated requests, because a probe is counted at the
+       moment it is SENT (McpSession>>noteProbeSent) and an inadmissible one has its count taken back
+       at stream handover (#retirePendingProbesFor:) -- so nothing is waiting on a clock to be
+       declared unanswered."
+  self refreshFrontEndView.
+  self maintainViewHygiene.
   self probeIdleSessions.
   ^self reapIdleSessions
+%
+category: 'view hygiene'
+method: McpRouter
+maintainViewHygiene
+  "Look at how far behind the repository each worker gem's view has fallen, and answer how many are
+   far enough behind to act on.
+   A worker over the line is REFRESHED: the front end sends McpServer refreshViewForFrontEnd into
+   it, which takes a current view and keeps whatever uncommitted work is there
+   (System continueTransaction). Three things can come back, and the front end acts on none of them
+   beyond logging: 'kept' is the ordinary success, 'doomed' means the pending work now conflicts and
+   the WORKER tells its client so on every later call, and 'stuck' means the view did not move at all
+   because continueTransaction was illegal in that session's state -- which is the only case left
+   that a later step will need a reaping rule for.
+   THE GROUND IS ONE THING: how far behind this session's own view is. Nothing about the state of
+   the stone can put a worker over the line -- see the long note in the body for why a rule that let
+   it was measurably wrong. The stone figures are read for the log line, which is what the next
+   step's threshold will be tuned against.
+   The session snapshot is taken under the mutex the same way #probeIdleSessions does it, because a
+   session may be reaped or registered while this runs.
+   A session with a call in flight is MEASURED but never acted on, here or later. The measurement is
+   a stone query and cares nothing for the worker's GCI channel; the action would have to go through
+   it, and moving a view out from under a running tool is the corruption the transaction model exists
+   to prevent."
+  | limit critical backlog oldest acted |
+  self hasViewHygiene ifFalse: [^0].
+  limit := self commitsBehindLimit.
+  limit isNil ifTrue: [^0].
+  "Read once per pass: properties of the repository, so asking per session would multiply the cost
+   by the client count for an answer that cannot differ. All three are for the LOG LINE -- none of
+   them is part of the decision; see below."
+  backlog := self stoneCommitRecordBacklog.
+  critical := self stoneBacklogCritical.
+  oldest := self sessionsHoldingOldestCr.
+  acted := 0.
+  (mutex critical: [sessions values asArray]) do: [:sess |
+    [ | behind |
+      behind := self commitsBehindFor: sess.
+      behind ifNotNil: [ | changed |
+        "Read BEFORE recording: whether this is news or a repeat is what decides the log line."
+        changed := behind ~= sess commitsBehind.
+        sess noteCommitsBehind: behind.
+        "ONE GROUND, AND IT IS THIS SESSION'S OWN DISTANCE FROM THE CURRENT STATE. A worker whose
+         view is not far behind is never refreshed, whatever the state of the stone.
+         An earlier version had a second route -- the stone over its own StnCrBacklogThreshold AND
+         this session holding the oldest commit record -- and it was wrong twice over. First, the
+         inequality only runs one way: the backlog is at least the largest commits-behind figure
+         among the sessions, never the reverse, because the stone DEFERS disposing records nobody
+         references (which is the deferral StnCrBacklogThreshold exists to override). So a high
+         backlog is not evidence that anybody is behind. Second, measured on db-1 right after a
+         restart, EVERY session reports holding the oldest record -- they are all sitting on the same
+         current one -- so that flag is no discriminator at all until somebody has fallen behind.
+         Together those two make the second route fire hardest in exactly the state where refreshing
+         achieves nothing: a burst of commits has ended, every view is current, and the backlog
+         number has not caught up yet. It would have refreshed every worker in the server at once,
+         for a backlog none of their views was pinning.
+         Where the pressure signals do belong is the two decisions that are not 'would refreshing
+         help' but 'is this bad enough to justify something disruptive' -- ending a call a client is
+         waiting on, and reaping a session whose view cannot be moved at all. Both are still to come,
+         and both should take pressure as a conjunct with this ground rather than as an alternative
+         to it."
+        "The BUSY case, and the only arm here that can end work a client is waiting on. A call in
+         flight cannot be asked to refresh -- GCI allows one call per session -- so while it runs its
+         view is unreachable by every other means in this file. On a quiet repository that costs
+         nobody anything and the call is left alone however long it runs; this is not a request
+         deadline in disguise. What it will not tolerate is a call whose view is holding the OLDEST
+         commit record open while the stone is over its own backlog threshold, sustained across the
+         whole of #pinnedViewGracePasses -- which is why the count is consecutive and why the grace
+         is the longest in the file.
+         The ask only ever sets a flag (McpSession>>requestViewRelease); the ending is done by the
+         GsProcess that owns the worker mutex, on its next wait."
+        (sess isBusy and: [self hasPinnedViewRelease]) ifTrue: [
+          (behind >= limit
+            and: [critical and: [oldest includes: sess workerStoneSession]])
+              ifTrue: [
+                sess notePinnedViewPass.
+                sess pinnedViewPasses > self pinnedViewGracePasses ifTrue: [
+                  (sess requestViewRelease) ifTrue: [
+                    self log: 'view hygiene: ending the call in session ' , sess id printString
+                      , ' -- its view has held the stone''s oldest commit record open for '
+                      , sess pinnedViewPasses printString , ' passes while the backlog was '
+                      , backlog printString , '/' , self stoneCrBacklogThreshold printString
+                      , ' and it is ' , behind printString , ' commits behind.']]]
+              ifFalse: [sess noteViewNotPinned]].
+        behind >= limit ifTrue: [ | verdict moved |
+          "A session with a call in flight is measured but not touched: GCI allows one call in
+           flight, and moving a view out from under a running tool is the corruption the transaction
+           model exists to prevent. #refreshWorkerView answers nil rather than waiting for it."
+          verdict := sess refreshWorkerView.
+          moved := false.
+          verdict isNil ifFalse: [
+            acted := acted + 1.
+            "A pass that could not ASK advances nothing. Only an answer counts, and only 'stuck' is
+             a stuck one: a client running one long call after another must not accumulate a grace it
+             never earned, and a 'doomed' session is not stuck at all -- its view is current, so it
+             holds nothing open, and its un-committable work is the client's to resolve."
+            ((verdict findString: 'stuck' startingAt: 1) = 1)
+              ifTrue: [sess noteStuckView: verdict]
+              ifFalse: [sess noteViewMoved. moved := true]].
+          "What gets a line is news, and there are three kinds. A view that MOVED, always: that
+           happened under a client and is not to be left unrecorded. A view that has just BECOME
+           stuck, once: the transition is news, the standing state is not. And any pass on which the
+           number changed.
+           Everything else is silence, and both silences were measured rather than guessed. Before
+           the arm acted at all, an idle session over the line wrote three identical lines in a row
+           -- 1440 a day at a one-minute pass. And a stuck session writes one per pass for the whole
+           of its grace, which for a ten-pass grace is nine lines saying what the first already said."
+          (moved or: [changed or: [sess stuckViewPasses = 1]]) ifTrue: [
+            self log: 'view hygiene: session ' , sess id printString
+              , ' worker gem ' , sess workerStoneSession printString
+              , ' is ' , behind printString , ' commits behind (limit ' , limit printString
+              , '), stone backlog ' , backlog printString , '/'
+              , self stoneCrBacklogThreshold printString
+              , ', stone-critical ' , (critical ifTrue: ['yes'] ifFalse: ['no'])
+              , ', holds-oldest-cr ' , ((oldest includes: sess workerStoneSession)
+                  ifTrue: ['yes'] ifFalse: ['no'])
+              , ' -- ' , (verdict isNil
+                  ifTrue: ['a call is in flight; left alone this pass']
+                  ifFalse: ['refresh: ' , verdict printString])]]]]
+      on: Error
+      do: [:e | self log: 'maintainViewHygiene error: ' ,
+             ([e description] on: Error do: [:x | e class name asString])]].
+  ^acted
+%
+category: 'view hygiene'
+method: McpRouter
+maintenanceCallTimeoutSeconds
+  "How long this router waits on its own maintenance send into a worker gem before ending it. See
+   McpRouter class>>defaultMaintenanceCallTimeoutSeconds for why it is independent of
+   #requestTimeoutSeconds."
+  ^maintenanceCallTimeoutSeconds
+%
+category: 'view hygiene'
+method: McpRouter
+maintenanceCallTimeoutSeconds: aSecondCount
+  "Bound the front end's own sends into a worker (see #maintenanceCallTimeoutSeconds). nil is not
+   accepted: unlike a client's request deadline, 'no limit' here is not a deployment choice but a
+   stalled maintenance pass."
+  self validateSeconds: aSecondCount named: 'maintenanceCallTimeoutSeconds' allowingNil: false.
+  maintenanceCallTimeoutSeconds := aSecondCount
 %
 category: 'running'
 method: McpRouter
@@ -773,6 +1392,31 @@ makeListenerOnPort: aPort
   (sock makeServer: 16 atPort: aPort atAddress: self bindAddress)
     ifNil: [^self error: 'makeServer failed on port ' , aPort printString , ': ' , sock lastErrorString].
   ^sock
+%
+category: 'view hygiene'
+method: McpRouter
+maxCommitsBehind
+  "How far behind the repository a worker gem's view may fall before this server refreshes it, or
+   nil to leave every worker's view alone however far behind it gets.
+   Counted in COMMITS (descriptionOfSession: field 16), not seconds, because that is the quantity
+   the stone charges for: a session's view pins the commit record it was taken from, and what hurts
+   is the number of records piled up behind it, not how long ago it was taken. A session idle for a
+   day on a quiet stone costs nothing."
+  ^maxCommitsBehind
+%
+category: 'view hygiene'
+method: McpRouter
+maxCommitsBehind: anIntegerOrNil
+  "Set the commits-behind ceiling for worker views (nil turns view hygiene off entirely -- see
+   #hasViewHygiene). Raises on anything else.
+   The floor is 2 rather than 1: a ceiling of one commit would refresh a worker's view on the heels
+   of any other session's commit, which for a client mid-plan is a view move per keystroke of
+   somebody else's work."
+  anIntegerOrNil isNil ifTrue: [^maxCommitsBehind := nil].
+  ((anIntegerOrNil isKindOf: Integer) and: [anIntegerOrNil >= 2]) ifFalse: [
+    ^self error: 'maxCommitsBehind must be nil, or an integer of at least 2, and is '
+      , anIntegerOrNil printString , '.'].
+  maxCommitsBehind := anIntegerOrNil
 %
 category: 'session lifetime'
 method: McpRouter
@@ -804,7 +1448,7 @@ category: 'message trace'
 method: McpRouter
 messageTrace: aBoolean
   "Turn the message trace on or off (see #messageTrace). Travels to a forked front end in the
-   config, so ./run-server.sh GS_MCP_TRACE=1 reaches the gem that actually serves."
+   config, so ./run-server.sh MCP_TRACE=1 reaches the gem that actually serves."
   messageTrace := aBoolean
 %
 category: 'message trace'
@@ -833,6 +1477,17 @@ messageTraceSummary
     ifTrue: ['whole bodies (no cap)']
     ifFalse: ['bodies capped at ' , messageTraceLimit printString , ' chars']
 %
+category: 'progress'
+method: McpRouter
+nextCallId
+  "A fresh opaque name for a call whose progress is being reported. Its own namespace ('call-N'), so
+   it cannot be confused with a session id, a server-originated request id, or -- the one that
+   matters -- the client's progressToken, which is the client's to choose and is never sent to a
+   worker."
+  ^callMutex critical: [
+    callCounter := callCounter + 1.
+    'call-' , callCounter printString]
+%
 category: 'server-initiated'
 method: McpRouter
 nextServerRequestId
@@ -851,6 +1506,23 @@ nextSessionId
   | id |
   [id := self randomSessionToken. sessions includesKey: id] whileTrue: [].
   ^id
+%
+category: 'view hygiene'
+method: McpRouter
+noteSessionAccessDenied: anError
+  "Record that a worker's session description could not be read, and say so in the gem log ONCE.
+   Almost always one cause: reading ANOTHER session's description needs the SessionAccess privilege,
+   and without it this whole arm is a no-op. That is worth a line naming the privilege, and worth
+   exactly one -- the alternative is a line per session per pass, for a fact that will not change
+   until somebody changes the user.
+   The error text is included because the other reachable cause, a session that has logged out
+   between the snapshot and the query, is ordinary and should be distinguishable at a glance."
+  sessionAccessWarned == true ifTrue: [^self].
+  sessionAccessWarned := true.
+  ^self log: 'view hygiene is disabled: this server''s user cannot read another session''s '
+    , 'description, which needs the SessionAccess privilege. Grant it, or set maxCommitsBehind to '
+    , 'nil to stop asking. (' , ([anError description] on: Error do: [:x | anError class name asString])
+    , ')'
 %
 category: 'sessions'
 method: McpRouter
@@ -875,10 +1547,12 @@ openSessionCreating: aOneArgBlock
    worker) is what lets an authenticated router later narrow the tool surface per principal."
   sess workerClassName: self effectiveWorkerClassName;
     toolsetNames: self effectiveToolsetNames;
+    toolsetOptions: self effectiveToolsetOptions;
     serverName: self serverName;
     serverTitle: self serverTitle;
     serverVersion: self serverVersion;
     requestTimeoutSeconds: self requestTimeoutSeconds;
+    maintenanceCallTimeoutSeconds: self maintenanceCallTimeoutSeconds;
     prepareWorker.
   "An absolute lifetime cap, where one is configured, becomes an expiry the session carries. A
    subclass may tighten it further (McpAuthRouter, from the access token's exp) but never loosen it."
@@ -899,19 +1573,55 @@ originAllowed: req
   origin isNil ifTrue: [^true].
   ^self allowedOriginHosts includes: (self hostOfOrigin: origin) asLowercase
 %
-category: 'session lifetime'
+category: 'progress'
 method: McpRouter
-phraseForSeconds: aSeconds
-  "An interval as a phrase for the notice a reaped client is sent -- '30 minutes', '1 minute',
-   '90 seconds'. Minutes only where the interval is whole minutes and there is more than one of
-   them, because 'over 1 minutes' and 'over 1 minutes' rounded down from 90 seconds are both worse
-   than saying the seconds. The notice is often the only account of a reap the operator ever sees,
-   so it should say a number they can find in their own configuration."
-  | minutes |
-  minutes := aSeconds // 60.
-  ((minutes > 1) and: [minutes * 60 = aSeconds]) ifTrue: [^minutes printString , ' minutes'].
-  aSeconds = 60 ifTrue: [^'1 minute'].
-  ^aSeconds printString , ' seconds'
+payloadOfSignal: aSignal
+  "The payload a worker sent with an InterSessionSignal, or nil if there is none.
+   #messageText is a PROSE DESCRIPTION with the payload appended after a literal 'message: ' -- e.g.
+   'a InterSessionSignal occurred (notification 2711), fromSession=621 signal:1 message: {...}' -- so
+   the text has to be cut, not read. Verified on 3.7.5 and 3.7.6.
+   Do NOT send #signal to a polled signal to read the integer the sender passed: that selector is
+   Exception>>signal, so it RAISES the thing. #gsArgs raises too. The number is not needed here
+   anyway; the callId in the payload is what identifies a tick."
+  | text marker idx |
+  text := [aSignal messageText] on: Error do: [:ex | ex return: nil].
+  text isNil ifTrue: [^nil].
+  marker := 'message: '.
+  idx := text findString: marker startingAt: 1.
+  idx = 0 ifTrue: [^nil].
+  ^text copyFrom: idx + marker size to: text size
+%
+category: 'view hygiene'
+method: McpRouter
+pinnedViewGracePasses
+  "How many consecutive passes a running call may pin the oldest commit record before it is ended.
+   Zero is NOT special-cased here, unlike #stuckViewGracePasses: a grace of no time before ending
+   work a client is waiting on is not a coherent request, it is a mistake, and #validateTimerConfig
+   refuses it. Every value that reaches here is therefore a real interval, and #countCovering:every:
+   rounds it up so the configured number is a floor."
+  pinnedViewGraceSeconds isNil ifTrue: [^nil].
+  ^self countCovering: pinnedViewGraceSeconds every: self reaperIntervalSeconds
+%
+category: 'view hygiene'
+method: McpRouter
+pinnedViewGraceSeconds
+  "How long a running call may hold the repository's oldest commit record open, under real stone
+   pressure, before this server ends it -- or nil never to end one for this reason.
+   THE ONLY RULE HERE THAT ENDS WORK A CLIENT IS WAITING ON, and the only one that acts on a session
+   with a call in flight. It exists because a router with no request deadline is a supported
+   deployment -- an agent running a test suite for hours, with client-initiated interrupt as the stop
+   button -- and while that call runs its view cannot be refreshed by any other means. It is NOT a
+   disguised request timeout: a long call on a quiet repository is never ended, however long it runs.
+   See #maintainViewHygiene for the conjunction, and #requestViewRelease for why the reaper only ever
+   sets a flag."
+  ^pinnedViewGraceSeconds
+%
+category: 'view hygiene'
+method: McpRouter
+pinnedViewGraceSeconds: aSecondsOrNil
+  "Set the pinned-view grace (see #pinnedViewGraceSeconds). Checked at startup, where its relation to
+   #reaperIntervalSeconds can be judged whatever order the two were set in."
+  pinnedViewGraceSeconds := aSecondsOrNil
 %
 category: 'session lifetime'
 method: McpRouter
@@ -969,6 +1679,48 @@ probeSession: sess
   (self sendRequest: 'ping' params: nil toSession: sess) isNil ifTrue: [^false].
   sess noteProbeSent.
   ^true
+%
+category: 'progress'
+method: McpRouter
+progressNotificationFor: aChannel from: parsedPayload
+  "Build the notifications/progress the client actually receives, as a JSON String.
+   THE ROUTER builds this, not the worker, and that is the point of the compact payload: the envelope
+   needs the client's progressToken, which the worker must never hold. A worker that got its own
+   bookkeeping wrong can at worst address a tick to a callId that no longer exists; it cannot address
+   one to another client's stream.
+   `total` and `message` are omitted rather than sent as null when the tool gave none -- a client
+   renders a fraction from total, and a null would be worse than its absence."
+  | params |
+  params := Dictionary new.
+  params at: 'progressToken' put: aChannel progressToken.
+  params at: 'progress' put: (parsedPayload at: 'p' ifAbsent: [0]).
+  (parsedPayload at: 't' ifAbsent: [nil]) ifNotNil: [:t | params at: 'total' put: t].
+  (parsedPayload at: 'm' ifAbsent: [nil]) ifNotNil: [:m | params at: 'message' put: m].
+  ^McpJson write: (self notification: 'notifications/progress' params: params)
+%
+category: 'routing'
+method: McpRouter
+progressTokenFor: parsed accepting: req
+  "The progressToken this request asked to be kept informed on, or nil where the answer must be
+   ordinary JSON. Three conditions, all here because this is where a reader will come looking for
+   them: the request is a tools/call, it carries params._meta.progressToken, and its Accept header
+   offers to take a stream.
+   Read HERE, in the front end, and not in the worker, for a reason that is not a preference: the
+   Content-Type of the answer has to be chosen before the worker is called at all, so the worker
+   cannot be what decides it. That is the one place this class deliberately parses more of a body
+   than routing needs -- see servePost:.
+   Nothing about this is advertised. Progress has no capability, no initialize field and no per-tool
+   annotation in either revision, so the client opts in unilaterally and cannot lose the ability by
+   failing to notice something this server declares. Claude Code has been sending a token on every
+   single tools/call since it first connected."
+  | params meta |
+  (parsed at: 'method' ifAbsent: [nil]) = 'tools/call' ifFalse: [^nil].
+  (self acceptsEventStream: req) ifFalse: [^nil].
+  params := parsed at: 'params' ifAbsent: [nil].
+  (params isKindOf: Dictionary) ifFalse: [^nil].
+  meta := params at: '_meta' ifAbsent: [nil].
+  (meta isKindOf: Dictionary) ifFalse: [^nil].
+  ^meta at: 'progressToken' ifAbsent: [nil]
 %
 category: 'routing'
 method: McpRouter
@@ -1117,7 +1869,23 @@ reapReasonFor: sess
        itself opened and is still holding.
      - IDLENESS is confirmations -- pings the client answered while doing no work. It applies only
        where a deadline is configured.
-     - NO STREAM AT ALL is the give-up rule: liveness cannot speak for a client it cannot reach."
+     - NO STREAM AT ALL is the give-up rule: liveness cannot speak for a client it cannot reach.
+     - A STUCK VIEW is the one ground that is about the REPOSITORY rather than the client. It needs
+       all four of: this server does reap on it at all; the session has been found stuck on MORE
+       passes than the grace allows; it is far enough behind to be part of the problem; and the
+       stone is over its own backlog threshold.
+       The comparison is STRICTLY GREATER, where the other counted grounds use >=, and both reasons
+       matter. It is what makes a configured grace a floor rather than a ceiling: the pass that
+       discovers a stuck view is the same pass that would reap it, so `>= 1` would spend a
+       one-pass grace before a single interval had elapsed and hand a client none of the time the
+       number promised -- the same promise #countCovering:every: rounds up to protect. And it is
+       what makes a grace of ZERO mean what it says without a separate evidence test: `> 0` is
+       false for a session nobody has ever found stuck, and true on the first pass that does. Stuck means System continueTransaction is illegal there -- a commit
+       that failed on conflict, or a nested transaction -- so nothing this server can send will move
+       that view, and the gem will hold a commit record for as long as it lives. The work it holds is
+       already un-committable, which is what makes ending it defensible; it is reaped rather than
+       aborted so that it is LOUD -- logged here, and a 404 on the client's next call -- where a
+       silent abort would leave a live session working from a view it never chose."
   sess isBusy ifTrue: [^nil].
   sess isExpired ifTrue: [^'its access credential expired'].
   (sess streamClosedByClient and: [sess outbox hasStream not])
@@ -1128,10 +1896,62 @@ reapReasonFor: sess
   (self hasSessionIdleDeadline and: [sess quietProbes >= self confirmationsBeforeRelease])
     ifTrue: [^'it was idle for ' , (self phraseForSeconds: self sessionIdleTimeoutSeconds)
       , ' of liveness checks'].
+  (self hasStuckViewReaping
+    and: [sess stuckViewPasses > self stuckViewGracePasses
+    and: [sess commitsBehind notNil
+    and: [sess commitsBehind >= self commitsBehindLimit
+    and: [self stoneBacklogCritical]]]])
+      ifTrue: [^'its view could not be moved (' , sess stuckViewReason
+        , ') while it was ' , sess commitsBehind printString
+        , ' commits behind and the stone''s commit-record backlog was '
+        , self stoneCommitRecordBacklog printString].
   sess streamlessPasses >= self streamlessPassesBeforeRelease
     ifTrue: [^'no event stream was open to ping it for over '
       , (self phraseForSeconds: self streamlessIdleTimeoutSeconds)].
   ^nil
+%
+category: 'transaction mode'
+method: McpRouter
+refreshFrontEndView
+  "Move THIS GEM's database view to the current state of the repository, and answer self. Run at the
+   top of every maintenance pass, which makes it two things at once: this gem's release of whatever
+   commit record it was holding, and the front end's code-refresh point.
+   An explicit abort rather than trusting the stone to push the view along, because measured, it will
+   not: a view is STICKY (an idle transactionless session's view did not move at all over 30 seconds
+   of another session committing), and the stone's sigAbort fires only when the backlog is over
+   StnSignalAbortCrBacklog AND this session is on the oldest commit record. Without this the view
+   would move at an unpredictable, load-dependent moment, or never. Once per reaper interval is a
+   boring cadence that can be written down instead.
+   #abortTransaction is legal and correct in every transaction mode, so the 'autoBegin' escape hatch
+   needs no branch here -- in that mode this re-pins a fresh view rather than releasing the old one,
+   which is still the right act.
+   The needsCommit line is a BUG DETECTOR, not hygiene. Out of transaction, a write to a committed
+   object is allowed, sets needsCommit, and is then discarded by this abort with no error raised
+   anywhere -- where the same mistake in an in-transaction gem would at least raise 2030 at the
+   commit. The front end writes nothing today, which is what makes the mode safe; if that ever stops
+   being true, this line is the only thing that will say so."
+  ([System needsCommit] on: Error do: [:ex | false]) == true ifTrue: [
+    self log: 'BUG: the front end gem has uncommitted changes, which this view refresh is about to '
+      , 'discard. Nothing in McpRouter is supposed to write to the repository -- see the class '
+      , 'comment.'].
+  ^[System abortTransaction. self]
+    on: Error
+    do: [:ex |
+      self log: 'Could not refresh the front end''s view: '
+        , ([ex description] on: Error do: [:x | ex class name asString]).
+      self]
+%
+category: 'progress'
+method: McpRouter
+registerChannelForToken: aToken session: sess
+  "Create and register the progress channel for a call about to start, and answer it.
+   Registered BEFORE the worker is called, so a tick that arrives while the very first tool statement
+   is running already has somewhere to go; unregistered in an ensure: as the call returns
+   (#forgetChannel:)."
+  | channel |
+  channel := McpProgressChannel callId: self nextCallId progressToken: aToken sessionId: sess id.
+  callMutex critical: [callChannels at: channel callId put: channel].
+  ^channel
 %
 category: 'sessions'
 method: McpRouter
@@ -1193,9 +2013,9 @@ releaseSessionIfAbandoned: sess
    dropped.
    Does nothing for a session whose worker took a break, which is nearly all of them: there the gem,
    its view and its uncommitted work are all intact and the client lost only the one call.
-   Separate from the methods that answer the client (#writeTimeoutError:forSession:id:on: and
-   #acknowledgeCancelledCall:on:) because both owe the client this, and they differ only in what --
-   if anything -- they say about the call that ended."
+   Separate from the two methods that answer the client (#writeEndedCallError:forSession:id:on: and
+   #writeEndedCallFrame:forSession:id:on:) because both owe the client this and they differ only in
+   how the answer is framed."
   sess workerAbandoned ifFalse: [^self].
   mutex critical: [sessions removeKey: sess id ifAbsent: [nil]].
   [sess close] on: Error do: [:ex | ex return: nil].
@@ -1301,6 +2121,7 @@ runOnPort: aPort
   serverSocket := self makeListenerOnPort: aPort.
   isRunning := true.
   self forkReaper.
+  self forkSignalPoller.
   self log: self class name asString , ' listening on ' ,
     (self tlsEnabled ifTrue: ['https'] ifFalse: ['http']) , '://' , self bindAddress , ':' , aPort printString.
   self log: 'workers: ' , self effectiveWorkerClassName , ', toolsets: ' ,
@@ -1308,6 +2129,14 @@ runOnPort: aPort
       ifTrue: ['(none -- this router offers no tools)']
       ifFalse: [self effectiveToolsetNames inject: '' into: [:a :b | a isEmpty ifTrue: [b] ifFalse: [a , ' ' , b]]]).
   self log: 'session lifetime: ' , self lifetimeSummary.
+  "The mode the gem IS in, asked of the gem, not the mode this router was configured with. Only a
+   detached front end applies the configured one (class-side runOnPort:configJson:); run in the
+   foreground this reports the calling session's mode, which is the honest answer to 'what will this
+   process do to my view'. It is also the line that says whether the once-per-pass abort in
+   #refreshFrontEndView is releasing a commit record or re-pinning a fresh one."
+  self log: 'transaction mode: '
+    , ([System transactionMode asString] on: Error do: [:x | 'unknown']).
+  self log: 'view hygiene: ' , self viewHygieneSummary.
   "Say so when tracing is on, and say nothing when it is off. A reader of this log has to be able to
    tell a quiet server from an untraced one -- otherwise an absence of message lines reads as an
    absence of traffic, which is the wrong conclusion and the expensive one."
@@ -1354,7 +2183,7 @@ runStreamLoop: conn forSession: sess generation: aGeneration
   lastKeepalive := System timeGmt.
   (conn writeSseComment: 'connected') ifNil: [^true].
   [self isRunning and: [outbox isOpen and: [outbox isCurrentStream: aGeneration]]] whileTrue: [
-    (self drainOutbox: outbox to: conn) ifFalse: [^true].
+    (self drain: outbox to: conn) ifFalse: [^true].
     "A closing outbox has just had its last messages written -- the session-ending notice among
      them -- so the stream ends here, cleanly, rather than the client being cut off with the gem."
     outbox isClosing ifTrue: [outbox close. ^false].
@@ -1404,6 +2233,28 @@ serve: aClientSocket
    server-side handshake first; a failed handshake closes the socket and serves nothing."
   [(self completeHandshake: aClientSocket)
      ifTrue: [self handleConnection: (McpHttpConnection on: aClientSocket)]] fork
+%
+category: 'routing'
+method: McpRouter
+serveCall: body id: anIdOrNil forSession: sess on: conn
+  "Answer one routed request as a single JSON object -- what this server has always done, and still
+   does for everything that did not ask to be kept informed. 202 for a notification, whose worker
+   answer is empty because a notification gets no response.
+   The session gates already ran in #serveRouted:id:progressToken:sessionId:on:."
+  | resp |
+  resp := [sess forward: body lifetimeBounds: (self lifetimeBoundsFor: sess) requestId: anIdOrNil]
+    on: McpError
+    do: [:ex |
+      "A cancellation is the one ending the client is owed SILENCE about -- it asked for it, and the
+       spec tells a receiver not to answer the request it cancelled. Every other ending is one the
+       client did not ask for and cannot see the reason for, so it is owed the reason."
+      ex kind = #cancelled ifTrue: [^self acknowledgeCancelledCall: sess on: conn].
+      (McpSession isEndedCallKind: ex kind)
+        ifTrue: [^self writeEndedCallError: ex forSession: sess id: anIdOrNil on: conn]
+        ifFalse: [ex pass]].
+  resp isEmpty
+    ifTrue: [conn writeStatus: 202 reason: 'Accepted' body: '']
+    ifFalse: [conn writeJson: resp]
 %
 category: 'routing'
 method: McpRouter
@@ -1523,7 +2374,8 @@ serveInitialize: req on: conn
    McpAuthRouter overrides this to authenticate the request and open a per-user (JWT) session."
   | sess |
   sess := self openSession.
-  conn writeJson: (sess forward: (req at: 'body' ifAbsent: [''])) sessionId: sess id
+  conn writeJson: (sess forward: (req at: 'body' ifAbsent: [''])
+    lifetimeBounds: (self lifetimeBoundsFor: sess)) sessionId: sess id
 %
 category: 'running'
 method: McpRouter
@@ -1534,7 +2386,13 @@ servePost: req on: conn
    not block the front-end gem (McpSession>>runWorker:), so requests from different clients really do
    run concurrently -- serve: already gives each connection its own GsProcess; the id -> session map
    is guarded by the mutex, and one client's worker by that session's own. Only enough of the body is parsed
-   here to route it (is it initialize? is it well-formed?); full request handling is the worker's."
+   here to route it (is it initialize? is it well-formed? is it asking to be kept informed?); full
+   request handling is the worker's.
+   That last question is the one exception to 'only enough to route it', and it is not a slip. A
+   tools/call carrying a progressToken is answered as an SSE stream rather than one JSON object, and
+   the Content-Type has to be chosen BEFORE the worker is called -- so the front end has to look
+   inside params._meta, because the worker cannot be what decides how its own answer is framed. See
+   #progressTokenFor:accepting:."
   | body parsed method |
   body := req at: 'body' ifAbsent: [''].
   parsed := self parseBody: body.
@@ -1552,7 +2410,11 @@ servePost: req on: conn
   method = 'notifications/cancelled'
     ifTrue: [^self serveCancellation: parsed sessionId: (self sessionIdOf: req) on: conn].
   method = 'initialize' ifTrue: [^self serveInitialize: req on: conn].
-  ^self serveRouted: body id: (parsed at: 'id' ifAbsent: [nil]) sessionId: (self sessionIdOf: req) on: conn
+  ^self serveRouted: body
+      id: (parsed at: 'id' ifAbsent: [nil])
+      progressToken: (self progressTokenFor: parsed accepting: req)
+      sessionId: (self sessionIdOf: req)
+      on: conn
 %
 category: 'worker identity'
 method: McpRouter
@@ -1569,31 +2431,26 @@ serverName: aStringOrNil
 %
 category: 'routing'
 method: McpRouter
-serveRouted: body id: anIdOrNil sessionId: sid on: conn
-  "Route a non-initialize request to the client's worker by session id (required). Relay the
-   worker's JSON response, or 202 for a notification (empty response).
-   anIdOrNil does two jobs, and both need the id the request arrived with. A call this server ENDED
-   (McpSession>>endCallBecause:) is answered HERE rather than by the worker, and an answer the client
-   cannot match to the request it is waiting on is no better than silence -- it would wait out its
-   own timeout instead, which is the thing the deadline exists to prevent. And the session remembers
-   it for as long as the call runs, so that a notifications/cancelled naming it can be matched to the
-   call actually in flight (#serveCancellation:sessionId:on:).
-   The two endings are answered differently: a call that outran the deadline gets the error, a call
-   the CLIENT cancelled gets no JSON-RPC response at all."
-  | sess resp |
+serveRouted: body id: anIdOrNil progressToken: aTokenOrNil sessionId: sid on: conn
+  "Route a non-initialize request to the client's worker by session id (required), and answer it in
+   whichever of the two shapes the request asked for.
+   The session gates come FIRST and are the same for both shapes -- 400 without an id, 404 for one
+   this server does not know -- which is why they live here rather than in either of the two methods
+   below. They have to: a stream cannot be opened before it is known there is a session to serve, or
+   the refusal would have to be written into a response already committed to being a stream.
+   aTokenOrNil decides the framing (#progressTokenFor:accepting:): nil is the ordinary JSON answer
+   this server has always given, non-nil an SSE stream carrying the answer as a frame.
+   anIdOrNil is the JSON-RPC id the request arrived with, carried in for one case: a call this server
+   ENDED (McpSession>>endCallBecause:) is answered here rather than by the worker, and the answer
+   has to bear the id the client is waiting on."
+  | sess |
   sid isNil ifTrue: [^self writeSessionError: 'Missing MCP-Session-Id header (call initialize first)' code: 400 reason: 'Bad Request' on: conn].
   sess := self sessionAt: sid.
   sess isNil ifTrue: [^self writeSessionError: 'Unknown or expired session: ' , sid code: 404 reason: 'Not Found' on: conn].
-  resp := [sess forward: body requestId: anIdOrNil]
-    on: McpError
-    do: [:ex |
-      ex kind = #cancelled ifTrue: [^self acknowledgeCancelledCall: sess on: conn].
-      ex kind = #timeout
-        ifTrue: [^self writeTimeoutError: ex forSession: sess id: anIdOrNil on: conn]
-        ifFalse: [ex pass]].
-  resp isEmpty
-    ifTrue: [conn writeStatus: 202 reason: 'Accepted' body: '']
-    ifFalse: [conn writeJson: resp]
+  ^aTokenOrNil isNil
+    ifTrue: [self serveCall: body id: anIdOrNil forSession: sess on: conn]
+    ifFalse: [self serveStreamedCall: body id: anIdOrNil progressToken: aTokenOrNil
+                forSession: sess on: conn]
 %
 category: 'worker identity'
 method: McpRouter
@@ -1619,6 +2476,66 @@ category: 'worker identity'
 method: McpRouter
 serverVersion: aStringOrNil
   serverVersion := aStringOrNil
+%
+category: 'routing'
+method: McpRouter
+serveStreamedCall: body id: anIdOrNil progressToken: aToken forSession: sess on: conn
+  "Answer one tools/call as an SSE stream instead of a single JSON object, because the client put a
+   progressToken in the request and so asked to be kept informed while it runs.
+   The stream is REQUEST-SCOPED: it belongs to this POST, it carries only messages about this call,
+   and it ends with this call's response. That is not a stylistic choice -- progress is request-scoped
+   in every revision of the spec, and the draft bars it from the long-lived stream outright, so the
+   standalone GET stream (#serveGetStream:forSession:) is the wrong connection for it however
+   convenient its drain loop looks.
+   Nothing streams YET: the headers go out, the call runs, the response follows as one frame. What
+   this method establishes is the SHAPE -- that a tools/call can be answered on an open stream at
+   all -- which is worth having on its own, because it is the half of progress that depends on a
+   client behaving the way the spec says it must, and it can be verified without a line of cross-gem
+   code.
+   Once the headers are written there is no second HTTP response to be had, so every ending has to be
+   a frame on this stream: an ended call gets #writeEndedCallFrame:forSession:id:on:, and any other
+   error is caught HERE rather than reaching handleConnection:, whose 500 would be appended to a
+   stream as if it were a fresh response and read as garbage.
+   A nil from a write is the client having gone; nothing more is owed to it."
+  | resp gone delivered channel |
+  (conn writeSseStreamHeaders) ifNil: [^self].
+  channel := self registerChannelForToken: aToken session: sess.
+  resp := [[[ | answer |
+    answer := sess forward: body
+      lifetimeBounds: (self lifetimeBoundsFor: sess)
+      requestId: anIdOrNil
+      progressCallId: channel callId
+      whileWaiting: [self drain: channel to: conn].
+    "Catch up on the worker's LAST tick before the channel is unregistered. The worker sends its
+     final tick and returns in the same breath, so that tick is still sitting in the Stone's queue
+     when this call's ensure: forgets the channel, and the poller -- up to #signalPollMilliseconds
+     later -- then finds nowhere to put it. Every reported call lost its last step that way, which is
+     the one saying the work is finished."
+    self drainWorkerSignals.
+    answer]
+    on: McpError
+    do: [:ex |
+      ex kind = #cancelled ifTrue: [^self releaseSessionIfAbandoned: sess].
+      (McpSession isEndedCallKind: ex kind)
+        ifTrue: [^self writeEndedCallFrame: ex forSession: sess id: anIdOrNil on: conn]
+        ifFalse: [ex pass]]]
+    on: Error
+    do: [:ex |
+      self log: 'Streamed call failed for MCP session ' , sess id printString , ': '
+        , ([ex description] on: Error do: [:x | ex class name asString]).
+      ^conn writeSseData: (self internalErrorFor: anIdOrNil)]]
+    ensure: [self forgetChannel: channel].
+  "Any tick that arrived while the worker was answering, before the response goes out after it: the
+   spec requires progress to STOP at completion, so this is the last chance to write one and it must
+   come before the answer."
+  self drain: channel to: conn.
+  "An empty answer means a notification, which cannot reach here: only a tools/call is streamed and
+   a tools/call always carries an id. Ending the stream is still the right thing to do with one."
+  resp isEmpty ifTrue: [^self].
+  gone := conn clientHasClosed.
+  delivered := (conn writeSseData: resp) notNil.
+  self traceStreamedAnswerFor: sess goneBefore: gone delivered: delivered.
+  ^self
 %
 category: 'sessions'
 method: McpRouter
@@ -1658,6 +2575,81 @@ method: McpRouter
 sessionIdOf: req
   "The MCP-Session-Id request header (header keys are lower-cased by parseHead:), or nil."
   ^(req at: 'headers' ifAbsent: [Dictionary new]) at: 'mcp-session-id' ifAbsent: [nil]
+%
+category: 'view hygiene'
+method: McpRouter
+sessionsHoldingOldestCr
+  "The stone session ids holding the repository's OLDEST commit record open, as an Array; empty if
+   the question cannot be answered.
+   Needs no privilege, unlike reading another session's description, and answers in one call exactly
+   which sessions are the reason a backlog is not draining. That makes it both the enrichment for
+   the log line and the discriminator for the stone-pressure case: pressure plus THIS session is a
+   reason to act, where pressure alone is not."
+  ^[System sessionsReferencingOldestCr asArray] on: Error do: [:ex | #()]
+%
+category: 'progress'
+method: McpRouter
+signalPollMilliseconds
+  "How long the signal poller sleeps between passes. It is a Delay, so it YIELDS -- the accept loop,
+   the reaper and every open stream keep running while it waits.
+   100ms is the latency floor for every progress notification this server sends, and it is a poll
+   rather than an interrupt on purpose: InterSessionSignal CAN be made to raise in the receiving gem
+   (enableSignalling), which would interrupt whatever the router happened to be doing at the time.
+   Polling costs a wakeup ten times a second and can interrupt nothing."
+  ^100
+%
+category: 'view hygiene'
+method: McpRouter
+stoneBacklogCritical
+  "Whether the repository's commit-record backlog is above the stone's OWN threshold for
+   aggressively disposing commit records (StnCrBacklogThreshold). False whenever either number is
+   unreadable or the threshold is disabled -- an unknown is never treated as pressure.
+   This is a fact about the repository and not about any session, so it is never a sufficient reason
+   to move a particular client's view; see #maintainViewHygiene for the conjunction it appears in."
+  | backlog threshold |
+  backlog := self stoneCommitRecordBacklog.
+  backlog isNil ifTrue: [^false].
+  threshold := self stoneCrBacklogThreshold.
+  threshold isNil ifTrue: [^false].
+  ^backlog > threshold
+%
+category: 'view hygiene'
+method: McpRouter
+stoneCommitRecordBacklog
+  "How many commit records the repository is holding, or nil if unreadable. The stone's own
+   CommitRecordCount statistic -- the number this whole arm exists to keep down."
+  ^[System commitRecordBacklog] on: Error do: [:ex | nil]
+%
+category: 'view hygiene'
+method: McpRouter
+stoneCrBacklogThreshold
+  "The backlog above which the stone aggressively disposes commit records
+   (STN_CR_BACKLOG_THRESHOLD), or nil if unreadable or disabled.
+   The stone answers this ALREADY RESOLVED. system.conf documents -1 as meaning twice
+   STN_MAX_SESSIONS, but measured on db-1 -- which sets neither -- the runtime read answers 80 with
+   StnMaxSessions of 10, so resolving -1 here would compute 20 and be WRONG about the number the
+   stone is actually using. The two documented special values are still mapped defensively, in case
+   some version answers the raw setting: 0 means disabled, and a negative means 'the stone did not
+   resolve it for us', which is an unknown rather than a threshold of nothing."
+  | v |
+  v := [System stoneConfigurationAt: #StnCrBacklogThreshold] on: Error do: [:ex | nil].
+  (v isKindOf: Integer) ifFalse: [^nil].
+  v <= 0 ifTrue: [^nil].
+  ^v
+%
+category: 'view hygiene'
+method: McpRouter
+stoneSignalAbortCrBacklog
+  "The backlog above which the stone sigAborts a gem that is outside a transaction and holding the
+   oldest commit record (STN_SIGNAL_ABORT_CR_BACKLOG, default 20), or nil if unreadable.
+   Read for its NUMBER, not for its behaviour: nothing in this server is eligible for that sigAbort
+   in the first place. Worker gems are permanently in transaction (an in-transaction gem is immune
+   unless it has called #enableSignaledFinishTransactionError, which nothing here does), and the
+   front end keeps itself off the oldest record by refreshing every pass. What the number is good
+   for is calibration -- it is the stone's own statement of how far behind is too far."
+  | v |
+  v := [System stoneConfigurationAt: #StnSignalAbortCrBacklog] on: Error do: [:ex | nil].
+  ^(v isKindOf: Integer) ifTrue: [v] ifFalse: [nil]
 %
 category: 'controlling'
 method: McpRouter
@@ -1724,6 +2716,45 @@ streamPollMilliseconds
    latency/wakeup tradeoff: 100ms puts a notification on the wire promptly without spinning."
   ^100
 %
+category: 'view hygiene'
+method: McpRouter
+stuckViewGracePasses
+  "How many consecutive stuck passes a session is allowed before it is released -- the grace, in the
+   only unit the reaper counts.
+   ZERO IS A REAL ANSWER and cannot come from #countCovering:every:, which answers at least 1 by
+   design. A grace of zero is the coherent request 'release it on the pass that finds it stuck', so
+   it is special-cased here rather than multiplied up to one. #reapReasonFor: compares STRICTLY
+   GREATER against this, so zero reaps on the first stuck pass and one pass of grace costs a whole
+   interval -- see the note there. #streamLossGraceSeconds has the same
+   carve-out for the same reason -- it is a WAIT, and a wait of no time is a thing somebody may
+   legitimately ask for, where nil is the different instruction.
+   Every other value is a ceiling (#countCovering:every:), so a configured grace is a floor on what a
+   deployment gets rather than a ceiling -- and #validateTimerConfig refuses a positive grace shorter
+   than one pass, so the rounding is never doing work the number did not ask for."
+  stuckViewGraceSeconds isNil ifTrue: [^nil].
+  stuckViewGraceSeconds = 0 ifTrue: [^0].
+  ^self countCovering: stuckViewGraceSeconds every: self reaperIntervalSeconds
+%
+category: 'view hygiene'
+method: McpRouter
+stuckViewGraceSeconds
+  "How long a session whose view cannot be moved is tolerated under stone pressure before release.
+   Three settings, all of them instructions: nil never reaps on this ground however loaded the stone;
+   0 reaps on the pass that finds the session stuck; a positive number waits that many seconds' worth
+   of maintenance passes, floored at one (#stuckViewGracePasses).
+   It applies to the two states where System continueTransaction is illegal and NOTHING can move the
+   view -- a commit that failed on conflict, and a nested transaction. A session merely far behind is
+   refreshed instead, and has no grace because it is not heading anywhere."
+  ^stuckViewGraceSeconds
+%
+category: 'view hygiene'
+method: McpRouter
+stuckViewGraceSeconds: aSecondsOrNil
+  "Set the stuck-view grace (see #stuckViewGraceSeconds). Checked at startup rather than here,
+   because the rule that matters is a comparison with #reaperIntervalSeconds and the two can be set
+   in either order -- #validateTimerConfig is where every such pairing is decided."
+  stuckViewGraceSeconds := aSecondsOrNil
+%
 category: 'tls'
 method: McpRouter
 tlsCertificateFile
@@ -1779,6 +2810,55 @@ toolsetNames: aCollectionOfNamesOrNil
     ifTrue: [nil]
     ifFalse: [(aCollectionOfNamesOrNil collect: [:n | self validatedClassName: n]) asArray]
 %
+category: 'toolsets'
+method: McpRouter
+toolsetOptions
+  "This deployment's options for its toolsets: a Dictionary of toolset name -> that toolset's own
+   options Dictionary, or nil when none are configured. See McpToolset's class comment for what a
+   toolset does with them, and toolsetOptions: for what is allowed here."
+  ^toolsetOptions
+%
+category: 'toolsets'
+method: McpRouter
+toolsetOptions: aDictOrNil
+  "Configure the toolsets in this router's surface -- the general answer to 'my toolset needs to know
+   something the core does not', so that a vendor's setting does not become a core ivar. Keyed by
+   toolset NAME, each value that toolset's own options:
+
+     (McpRouter new
+        toolsetOptions: (Dictionary new
+          at: 'McpGrailToolset' put: (Dictionary new at: 'grailDirectory' put: '/opt/Grail'; yourself);
+          yourself))
+       forkOnPort: 8000
+
+   VALIDATED HERE, when it is set, against each toolset's class>>declaredOptionNames -- so a mistyped
+   option name is a configuration error naming what that toolset does accept, rather than a setting
+   that is silently ignored and found much later. Same choice, and same reasoning, as
+   additionalProperties: false on every tool's input schema.
+
+   The toolset classes are resolved in the FRONT END's symbol list, which is where this router runs.
+   A worker may log in as a different user (McpAuthRouter), so the worker checks again when it builds
+   -- this catches an operator's typo, not a deployment mismatch."
+  | validated |
+  aDictOrNil isNil ifTrue: [toolsetOptions := nil. ^self].
+  validated := Dictionary new.
+  aDictOrNil keysAndValuesDo: [:toolsetName :opts | | cls declared |
+    cls := McpServer toolsetClassNamed: toolsetName.
+    declared := cls declaredOptionNames collect: [:n | n asString].
+    (opts isKindOf: Dictionary) ifFalse: [
+      ^self error: 'Toolset options for ' , toolsetName asString
+        , ' must be a Dictionary of option name -> value.'].
+    opts keysDo: [:optName |
+      (declared includes: optName asString) ifFalse: [
+        ^self error: 'Unknown option ' , optName asString printString , ' for toolset '
+          , toolsetName asString , '. It declares: '
+          , (declared isEmpty
+              ifTrue: ['(none)']
+              ifFalse: [declared inject: '' into: [:a :b |
+                a isEmpty ifTrue: [b] ifFalse: [a , ', ' , b]]]) , '.']].
+    validated at: toolsetName asString put: opts].
+  toolsetOptions := validated
+%
 category: 'message trace'
 method: McpRouter
 traceLineFor: req
@@ -1821,6 +2901,26 @@ traceRequest: req
    trace at all."
   messageTrace == true ifFalse: [^self].
   [self log: (self traceLineFor: req)] on: Error do: [:ex | nil]
+%
+category: 'message trace'
+method: McpRouter
+traceStreamedAnswerFor: sess goneBefore: goneBoolean delivered: deliveredBoolean
+  "Record how a STREAMED answer ended, if this router is tracing. Outbound, unlike everything else
+   the trace covers, and here for a reason the inbound lines cannot serve.
+   Two facts, and it is the PAIR that makes them evidence: whether the client's connection was
+   already gone when the call finished, and whether the final frame reached it. Both false means the
+   client waited for its answer and got it. Both true means it stopped listening while the call ran --
+   which is the draft revision's ONLY cancellation signal, and which the current revision says a
+   server SHOULD NOT read that way, precisely because it cannot tell a client that meant it from a
+   network that dropped. Before this server acts on that signal in either direction it is worth
+   knowing whether the clients actually in use here ever send it, and a closed stream leaves no
+   inbound message to trace -- so without this line it looks exactly like nothing having happened.
+   Cannot fail the caller, for the same reason #traceRequest: cannot."
+  messageTrace == true ifFalse: [^self].
+  [self log: '<-- streamed answer, session ' , sess id printString
+    , ': client-gone=' , goneBoolean printString
+    , ' delivered=' , deliveredBoolean printString]
+      on: Error do: [:ex | nil]
 %
 category: 'session lifetime'
 method: McpRouter
@@ -1896,12 +2996,37 @@ validateTimerConfig
     ((streamLossGraceSeconds isKindOf: Number) and: [streamLossGraceSeconds >= 0]) ifFalse: [
       ^self error: 'streamLossGraceSeconds must be nil, or zero, or a positive number of seconds, '
         , 'and is ' , streamLossGraceSeconds printString , '.']].
+  "Zero is meaningful for this one too, and for the same reason it is for streamLossGraceSeconds: it
+   is a grace, and a grace of no time is the coherent request 'release it the moment it is found
+   stuck'. nil is the different instruction -- never on this ground at all. What zero must NOT be is
+   silently turned into one pass, which is why it bypasses #countCovering:every: rather than going
+   through it (#stuckViewGracePasses)."
+  stuckViewGraceSeconds isNil ifFalse: [
+    ((stuckViewGraceSeconds isKindOf: Number) and: [stuckViewGraceSeconds >= 0]) ifFalse: [
+      ^self error: 'stuckViewGraceSeconds must be nil, or zero, or a positive number of seconds, '
+        , 'and is ' , stuckViewGraceSeconds printString , '.']].
+  "Zero is NOT allowed here, where it is for the two graces above, and the difference is what the
+   grace protects. Those wait before ending something already idle or already doomed; this one waits
+   before ending work a client is waiting on, so a grace of no time is not a coherent request."
+  self validateSeconds: pinnedViewGraceSeconds named: 'pinnedViewGraceSeconds' allowingNil: true.
   self validateSeconds: self livenessProbeIntervalSeconds named: 'livenessProbeIntervalSeconds' allowingNil: false.
   self validateSeconds: self reaperIntervalSeconds named: 'reaperIntervalSeconds' allowingNil: false.
   self livenessProbeIntervalSeconds >= self reaperIntervalSeconds ifFalse: [
     ^self error: 'livenessProbeIntervalSeconds (' , self livenessProbeIntervalSeconds printString
       , 's) is shorter than reaperIntervalSeconds (' , self reaperIntervalSeconds printString
       , 's), so a ping cannot be sent less than one maintenance pass apart.'].
+  (stuckViewGraceSeconds notNil and: [stuckViewGraceSeconds > 0
+    and: [stuckViewGraceSeconds < self reaperIntervalSeconds]]) ifTrue: [
+      ^self error: 'stuckViewGraceSeconds (' , stuckViewGraceSeconds printString
+        , 's) is shorter than reaperIntervalSeconds (' , self reaperIntervalSeconds printString
+        , 's), which is the shortest span the maintenance pass can measure, so the grace would be '
+        , 'rounded up to one pass and never honoured as written. Use 0 if you mean no grace at all.'].
+  (pinnedViewGraceSeconds notNil
+    and: [pinnedViewGraceSeconds < self reaperIntervalSeconds]) ifTrue: [
+      ^self error: 'pinnedViewGraceSeconds (' , pinnedViewGraceSeconds printString
+        , 's) is shorter than reaperIntervalSeconds (' , self reaperIntervalSeconds printString
+        , 's), which is the shortest span the maintenance pass can measure, so the grace would be '
+        , 'rounded up to one pass and never honoured as written.'].
   self streamlessIdleTimeoutSeconds >= self reaperIntervalSeconds ifFalse: [
     ^self error: 'streamlessIdleTimeoutSeconds (' , self streamlessIdleTimeoutSeconds printString
       , 's) is shorter than reaperIntervalSeconds (' , self reaperIntervalSeconds printString
@@ -1927,8 +3052,23 @@ validateWorkerConfig
   ((cls isKindOf: Behavior) and: [cls == McpServer or: [cls inheritsFrom: McpServer]]) ifFalse: [
     ^self error: 'Worker class not usable: ' , self effectiveWorkerClassName
       , ' must be McpServer or a subclass, installed in a symbol dictionary in the worker''s symbol '
-      , 'list (e.g. Published).'].
+      , 'list (e.g. Mcp).'].
   self effectiveToolsetNames do: [:n | McpServer toolsetClassNamed: n].
+  "Options were validated against declaredOptionNames when they were SET, but the surface can have
+   changed since (toolsetNames: after toolsetOptions:, or a default surface resolved only now), so a
+   configured toolset may no longer be in it. Say so rather than dropping it silently: an option that
+   can never reach anything is a mistake worth a startup failure, and effectiveToolsetOptions would
+   otherwise narrow it away without a word."
+  toolsetOptions ifNotNil: [:opts | | names |
+    names := self effectiveToolsetNames collect: [:n | n asString].
+    opts keysDo: [:k |
+      (names includes: k asString) ifFalse: [
+        ^self error: 'Toolset options configured for ' , k asString
+          , ', which is not in this router''s tool surface ('
+          , (names isEmpty
+              ifTrue: ['no toolsets']
+              ifFalse: [names inject: '' into: [:a :b |
+                a isEmpty ifTrue: [b] ifFalse: [a , ', ' , b]]]) , ').']]].
   ^self
 %
 category: 'server-initiated'
@@ -1945,6 +3085,46 @@ verdictAdmissible: aPendingEntry forSession: sess
   gen isNil ifTrue: [^false].
   ^sess outbox hasStream and: [sess outbox isCurrentStream: gen]
 %
+category: 'view hygiene'
+method: McpRouter
+viewHygieneSummary
+  "One line naming the view-hygiene policy in force, for the startup banner. A reader has to be able
+   to tell a server that found nothing over the line from one that was never going to look, which is
+   why the off case says so in words rather than by the absence of anything."
+  | s |
+  self hasViewHygiene ifFalse: [^'off (maxCommitsBehind nil) -- worker views are left alone'].
+  s := WriteStream on: String new.
+  s nextPutAll: 'refresh at '.
+  s nextPutAll: self commitsBehindLimit printString.
+  s nextPutAll: ' commits behind (configured '; nextPutAll: maxCommitsBehind printString.
+  s nextPutAll: ', stone StnSignalAbortCrBacklog '.
+  s nextPutAll: (self stoneSignalAbortCrBacklog isNil
+    ifTrue: ['unreadable']
+    ifFalse: [self stoneSignalAbortCrBacklog printString]).
+  s nextPutAll: '), stone backlog '.
+  s nextPutAll: (self stoneCommitRecordBacklog isNil
+    ifTrue: ['unreadable']
+    ifFalse: [self stoneCommitRecordBacklog printString]).
+  s nextPutAll: '/'.
+  s nextPutAll: (self stoneCrBacklogThreshold isNil
+    ifTrue: ['disabled']
+    ifFalse: [self stoneCrBacklogThreshold printString]).
+  s nextPutAll: ', maintenance-call limit '.
+  s nextPutAll: self maintenanceCallTimeoutSeconds printString.
+  s nextPutAll: 's, stuck-view grace '.
+  s nextPutAll: (self hasStuckViewReaping
+    ifTrue: [self stuckViewGraceSeconds printString , 's ('
+      , self stuckViewGracePasses printString , ' pass'
+      , (self stuckViewGracePasses = 1 ifTrue: [''] ifFalse: ['es']) , ')']
+    ifFalse: ['none -- a session whose view cannot be moved is never reaped for it']).
+  s nextPutAll: ', pinned-view grace '.
+  s nextPutAll: (self hasPinnedViewRelease
+    ifTrue: [self pinnedViewGraceSeconds printString , 's ('
+      , self pinnedViewGracePasses printString , ' pass'
+      , (self pinnedViewGracePasses = 1 ifTrue: [''] ifFalse: ['es']) , ')']
+    ifFalse: ['none -- a running call is never ended for holding the oldest commit record']).
+  ^s contents
+%
 category: 'worker class'
 method: McpRouter
 workerClassName
@@ -1958,8 +3138,34 @@ method: McpRouter
 workerClassName: aNameOrNil
   "Name the worker class (nil restores McpServer). Validated as an identifier -- see
    validatedClassName:. The class must be visible in the WORKER gem's symbol list, which under
-   McpAuthRouter belongs to the authenticated user, so Published rather than UserGlobals."
+   McpAuthRouter belongs to the authenticated user, so Mcp rather than UserGlobals."
   workerClassName := aNameOrNil isNil ifTrue: [nil] ifFalse: [self validatedClassName: aNameOrNil]
+%
+category: 'routing'
+method: McpRouter
+writeEndedCallError: anError forSession: sess id: anIdOrNil on: conn
+  "Answer a request this server ended (McpSession>>endCallBecause:) on a call being answered as
+   ordinary JSON.
+   HTTP 200 with a JSON-RPC error, not an HTTP error status: the request was accepted, routed and
+   served, and what failed is the call inside it -- a result the client should match to its request
+   rather than a transport refusal it might not read as JSON-RPC at all. See #endedCallErrorFor:id: for
+   the body, and #releaseSessionIfAbandoned: for the one case where ending the call also ends the
+   session."
+  self releaseSessionIfAbandoned: sess.
+  conn writeJson: (self endedCallErrorFor: anError id: anIdOrNil)
+%
+category: 'routing'
+method: McpRouter
+writeEndedCallFrame: anError forSession: sess id: anIdOrNil on: conn
+  "The same answer as #writeEndedCallError:forSession:id:on:, framed for a call already being answered
+   as a stream: the SSE headers went out before the worker was ever called, so there is no second
+   HTTP response available and the error has to travel as a frame on the stream that is open.
+   Ending the stream afterwards is the caller's business (#serveStreamedCall:id:forSession:on:); what
+   matters here is that the client gets a TERMINATING message. A stream that simply stops leaves a
+   client waiting on a socket that will never say anything again, which is worse than the timeout it
+   was told about -- and the id in the body is what lets it stop waiting on the right request."
+  self releaseSessionIfAbandoned: sess.
+  ^conn writeSseData: (self endedCallErrorFor: anError id: anIdOrNil)
 %
 category: 'routing'
 method: McpRouter
@@ -1985,28 +3191,4 @@ writeSessionError: aMessage code: httpCode reason: reasonString on: conn
   err at: 'jsonrpc' put: '2.0'; at: 'id' put: nil.
   err at: 'error' put: (Dictionary new at: 'code' put: -32600; at: 'message' put: aMessage; yourself).
   conn writeStatus: httpCode reason: reasonString body: (McpJson write: err)
-%
-category: 'routing'
-method: McpRouter
-writeTimeoutError: anError forSession: sess id: anIdOrNil on: conn
-  "Answer a request this server ended on its own deadline (McpSession>>endCallBecause:).
-   HTTP 200 with a JSON-RPC error, not an HTTP error status: the request was accepted, routed and
-   served, and what failed is the call inside it -- a result the client should match to its request
-   rather than a transport refusal it might not read as JSON-RPC at all. The code is -32001, in
-   JSON-RPC's implementation-defined server-error range, and `data.kind` carries the same
-   machine-readable 'timeout' a worker-raised error would (McpDispatcher>>kindForError:), so a client
-   branches the same way wherever the error was produced. The kind is taken FROM the error rather
-   than written in here, so this cannot drift from what actually ended the call.
-   A cancelled call does not come here: the client that asked for it is owed no response at all
-   (#acknowledgeCancelledCall:on:). What the two endings do share is #releaseSessionIfAbandoned:."
-  | err |
-  self releaseSessionIfAbandoned: sess.
-  err := Dictionary new.
-  err at: 'jsonrpc' put: '2.0'; at: 'id' put: anIdOrNil.
-  err at: 'error' put: (Dictionary new
-    at: 'code' put: -32001;
-    at: 'message' put: anError description;
-    at: 'data' put: (Dictionary new at: 'kind' put: anError kind asString; yourself);
-    yourself).
-  conn writeJson: (McpJson write: err)
 %

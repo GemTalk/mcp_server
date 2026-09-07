@@ -3,11 +3,11 @@ set compile_env: 0
 expectvalue /Class
 doit
 GsTestCase subclass: 'McpToolTest'
-  instVarNames: #()
+  instVarNames: #( sharedServer)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %
@@ -19,6 +19,13 @@ McpToolTest category: 'Mcp-Tests'
 removeallmethods McpToolTest
 removeallclassmethods McpToolTest
 ! ------------------- Class methods for McpToolTest
+category: 'session view'
+classmethod: McpToolTest
+movesTheSessionView
+  "Why this suite cannot be run from a session that has uncommitted work. See
+   McpTestingToolset class>>sessionViewRefusalFor:, which is what asks."
+  ^'it commits throwaway fixture classes, and a commit takes the whole session with it'
+%
 ! ------------------- Instance methods for McpToolTest
 category: 'helpers'
 method: McpToolTest
@@ -101,8 +108,13 @@ sessionTools
 category: 'running'
 method: McpToolTest
 tearDown
-  "Force-remove any throwaway fixtures a test created, then commit, so nothing leaks."
+  "Force-remove any throwaway fixtures a test created, then commit, so nothing leaks.
+   Aborts FIRST: since the mutation tools stopped committing (McpMutationToolset), a test can end
+   with uncommitted changes, and without this the commit below would persist them instead of the
+   removals alone. It also clears a deliberately-provoked commit conflict, which would otherwise
+   make that commit fail and leak the fixture."
   | up dict |
+  System abortTransaction.
   up := System myUserProfile.
   #(McpTestSub McpTestFixture McpTestSuiteFixture) do: [:sym |
     (up objectNamed: sym) ifNotNil: [:cls |
@@ -157,9 +169,11 @@ category: 'tools - mutation'
 method: McpToolTest
 testCompileClassDefinition
   | out |
-  out := self mutationTools tool_compile_class_definition: (self oneArg: 'source' value:
-    'Object subclass: ''McpTestFixture'' instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()').
-  self assert: (self includesCS: 'committed class: McpTestFixture' in: out).
+  "A class that does not exist yet: creation is never blind, so no read is needed."
+  out := self mutationTools tool_compile_class_definition: (Dictionary new
+    at: 'className' put: 'McpTestFixture';
+    at: 'dictionary' put: 'UserGlobals'; yourself).
+  self assert: (self includesCS: 'Compiled class: McpTestFixture' in: out).
   self assert: (System myUserProfile objectNamed: #McpTestFixture) notNil
 %
 category: 'tools - mutation'
@@ -170,8 +184,10 @@ testCompileClassDefinitionPreservesMethods
   cls := Object subclass: 'McpTestFixture' instVarNames: #(a) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #().
   cls compileMethod: 'getA ^a' dictionaries: System myUserProfile symbolList category: 'acc'.
   System commitTransaction.
-  out := self mutationTools tool_compile_class_definition: (self oneArg: 'source' value:
-    'Object subclass: ''McpTestFixture'' instVarNames: #(a b) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()').
+  self browsingTools tool_get_class_definition: (self oneArg: 'className' value: 'McpTestFixture').
+  out := self mutationTools tool_compile_class_definition: (Dictionary new
+    at: 'className' put: 'McpTestFixture';
+    at: 'instVarNames' put: (Array with: 'a' with: 'b'); yourself).
   self assert: (self includesCS: 'recompiled 1/1' in: out).
   self assert: ((System myUserProfile objectNamed: #McpTestFixture) canUnderstand: #getA).
   self assert: ((System myUserProfile objectNamed: #McpTestFixture) instVarNames includes: #b)
@@ -184,8 +200,11 @@ testCompileClassDefinitionRawWhenFlagFalse
   cls := Object subclass: 'McpTestFixture' instVarNames: #(a) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #().
   cls compileMethod: 'getA ^a' dictionaries: System myUserProfile symbolList category: 'acc'.
   System commitTransaction.
+  "recompileMethods=false discards every method, so the licence is the whole class."
+  self browsingTools tool_export_class_source: (self oneArg: 'className' value: 'McpTestFixture').
   out := self mutationTools tool_compile_class_definition: (Dictionary new
-    at: 'source' put: 'Object subclass: ''McpTestFixture'' instVarNames: #(a b) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()';
+    at: 'className' put: 'McpTestFixture';
+    at: 'instVarNames' put: (Array with: 'a' with: 'b');
     at: 'recompileMethods' put: false; yourself).
   self deny: ((System myUserProfile objectNamed: #McpTestFixture) canUnderstand: #getA)
 %
@@ -197,21 +216,26 @@ testCompileClassDefinitionRefusesWithSubclasses
   cls := Object subclass: 'McpTestFixture' instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #().
   cls subclass: 'McpTestSub' instVarNames: #() classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #().
   System commitTransaction.
-  out := self mutationTools tool_compile_class_definition: (self oneArg: 'source' value:
-    'Object subclass: ''McpTestFixture'' instVarNames: #(a) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()').
+  self browsingTools tool_get_class_definition: (self oneArg: 'className' value: 'McpTestFixture').
+  out := self mutationTools tool_compile_class_definition: (Dictionary new
+    at: 'className' put: 'McpTestFixture';
+    at: 'instVarNames' put: (Array with: 'a'); yourself).
   self assert: (self includesCS: 'Refused' in: out).
   self assert: (self includesCS: 'McpTestSub' in: out)
 %
 category: 'tools - mutation'
 method: McpToolTest
-testCompileClassDefinitionRejectsNonClass
-  "A source that evaluates to something other than a class is rejected and directed to
-   execute_code, and nothing is committed."
+testCompileClassDefinitionRejectsUnknownSuperclass
+  "Replaces an older test that fed this tool '3 + 4' and expected 'did not evaluate to a class'.
+   There is no longer a source string to evaluate -- the definition is built from named arguments --
+   so the way to get this wrong is to name a superclass that does not resolve, and that is reported
+   rather than raised."
   | out |
-  out := self mutationTools tool_compile_class_definition: (self oneArg: 'source' value: '3 + 4').
-  self assert: (self includesCS: 'did not evaluate to a class' in: out).
-  self assert: (self includesCS: 'execute_code' in: out).
-  self deny: (self includesCS: 'committed' in: out)
+  out := self mutationTools tool_compile_class_definition: (Dictionary new
+    at: 'className' put: 'McpTestFixture';
+    at: 'superclassName' put: 'NoSuchSuperclassZZZ'; yourself).
+  self assert: (self includesCS: 'Superclass not found' in: out).
+  self assert: (System myUserProfile objectNamed: #McpTestFixture) isNil
 %
 category: 'tools - mutation'
 method: McpToolTest
@@ -224,8 +248,10 @@ testCompileClassDefinitionReportsRecompileFailure
   cls compileMethod: 'withLocal | tmp | tmp := 5. ^tmp' dictionaries: System myUserProfile symbolList category: 'acc'.
   System commitTransaction.
   "adding ivar 'tmp' collides with withLocal's temporary -> that one fails to recompile"
-  out := self mutationTools tool_compile_class_definition: (self oneArg: 'source' value:
-    'Object subclass: ''McpTestFixture'' instVarNames: #(a tmp) classVars: #() classInstVars: #() poolDictionaries: #() inDictionary: UserGlobals options: #()').
+  self browsingTools tool_get_class_definition: (self oneArg: 'className' value: 'McpTestFixture').
+  out := self mutationTools tool_compile_class_definition: (Dictionary new
+    at: 'className' put: 'McpTestFixture';
+    at: 'instVarNames' put: (Array with: 'a' with: 'tmp'); yourself).
   self assert: (self includesCS: 'recompiled 1/2' in: out).
   self assert: (self includesCS: 'failed' in: out).
   self assert: (self includesCS: 'withLocal' in: out).
@@ -239,7 +265,7 @@ testCompileMethod
   self createFixtureClass.
   out := self mutationTools tool_compile_method:
     (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'source' put: 'answer ^42'; at: 'category' put: 'tmp'; yourself).
-  self assert: (self includesCS: 'and committed' in: out).
+  self assert: (self includesCS: 'Compiled McpTestFixture' in: out).
   self assert: ((System myUserProfile objectNamed: #McpTestFixture) canUnderstand: #answer)
 %
 category: 'tools - mutation'
@@ -250,7 +276,7 @@ testCompileMethodMeta
   cls := self createFixtureClass.
   out := self mutationTools tool_compile_method:
     (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'source' put: 'classAnswer ^42'; at: 'category' put: 'tmp'; at: 'meta' put: true; yourself).
-  self assert: (self includesCS: 'and committed' in: out).
+  self assert: (self includesCS: 'Compiled McpTestFixture' in: out).
   self assert: (cls class canUnderstand: #classAnswer).
   self deny: (cls canUnderstand: #classAnswer)
 %
@@ -259,6 +285,9 @@ method: McpToolTest
 testDeleteClass
   | out |
   self createFixtureClass.
+  "Licence the delete: destroying a class discards every method on it, so the guardrail wants the
+   whole class seen, which is what export_class_source shows."
+  self browsingTools tool_export_class_source: (self oneArg: 'className' value: 'McpTestFixture').
   out := self mutationTools tool_delete_class: (self oneArg: 'className' value: 'McpTestFixture').
   self assert: (self includesCS: 'Deleted class' in: out).
   self assert: (System myUserProfile objectNamed: #McpTestFixture) isNil
@@ -271,6 +300,9 @@ testDeleteMethod
   (System myUserProfile objectNamed: #McpTestFixture)
     compileMethod: 'answer ^42' dictionaries: System myUserProfile symbolList category: 'tmp'.
   System commitTransaction.
+  "Licence the delete by reading the method first, as a client must."
+  self browsingTools tool_get_method_source:
+    (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'selector' put: 'answer'; yourself).
   out := self mutationTools tool_delete_method:
     (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'selector' put: 'answer'; yourself).
   self assert: (self includesCS: 'Deleted method' in: out).
@@ -284,6 +316,8 @@ testDeleteMethodMeta
   cls := self createFixtureClass.
   cls class compileMethod: 'classAnswer ^42' dictionaries: System myUserProfile symbolList category: 'tmp'.
   System commitTransaction.
+  self browsingTools tool_get_method_source:
+    (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'selector' put: 'classAnswer'; at: 'meta' put: true; yourself).
   out := self mutationTools tool_delete_method:
     (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'selector' put: 'classAnswer'; at: 'meta' put: true; yourself).
   self assert: (self includesCS: 'Deleted method' in: out).
@@ -494,6 +528,43 @@ method: McpToolTest
 testingTools
   ^self toolsetOfClass: McpTestingToolset
 %
+category: 'tools - session'
+method: McpToolTest
+testLifetimeNoteCountsDownFromAnInstantAndOrdersByWhatComesFirst
+  "The worker renders the countdown when it ANSWERS, from an instant the front end sent, so a long
+   tool call cannot leave it promising time that has already gone. And it puts the nearer bound
+   first -- which is not a fixed order, because it inverts: a 33-minute credential outlasts a
+   30-minute idle rule when a request arrives and undercuts it six minutes later. Both are always
+   reported, since only one of them fires whatever the client does next."
+  | srv now note |
+  srv := McpServer new.
+  now := System timeGmt.
+  srv handleJsonString: '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+    lifetimeBounds: (Array with: now + 1980 with: 'your access credential'
+      with: 1800 with: 'of inactivity').
+  note := srv lifetimeNote.
+  self assert: (self includesCS: '30 minutes of inactivity, or 33 minutes left' in: note).
+  "the same session six minutes into a call: the credential is now the nearer of the two"
+  srv handleJsonString: '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+    lifetimeBounds: (Array with: now + 1620 with: 'your access credential'
+      with: 1800 with: 'of inactivity').
+  note := srv lifetimeNote.
+  self assert: (self includesCS: '27 minutes left on your access credential, or 30 minutes of inactivity' in: note)
+%
+category: 'tools - session'
+method: McpToolTest
+testLifetimeNoteIsNilWithoutBounds
+  "No bounds means no clause, and the warning keeps its unqualified form. Also the state a direct
+   in-image send leaves: handleJsonString: routes through the bounds variant with nil, so bounds
+   from an earlier request can never outlive the deadline that produced them."
+  | srv |
+  srv := McpServer new.
+  srv handleJsonString: '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+    lifetimeBounds: (Array with: System timeGmt + 60 with: 'your access credential' with: nil with: nil).
+  self assert: srv lifetimeNote notNil.
+  srv handleJsonString: '{"jsonrpc":"2.0","method":"notifications/initialized"}'.
+  self assert: srv lifetimeNote isNil
+%
 category: 'tools - listing'
 method: McpToolTest
 testListAllClasses
@@ -563,22 +634,58 @@ method: McpToolTest
 testListTestClasses
   self assert: (self includesCS: 'SUnitTest' in: (self testingTools tool_list_test_classes: Dictionary new))
 %
+category: 'tools - mutation'
+method: McpToolTest
+testMutationToolsDoNotCommit
+  "Since 2026-08-28 no mutation tool commits: commit is the only tool that does. Compile a method
+   through the tool, abort with the primitive, and the method must be GONE -- the mirror of
+   testCommit, which proves the same abort cannot touch what commit persisted.
+
+   This is what makes compile -> run the tests -> commit possible: the method is live in this
+   session (asserted before the abort) without being published to anyone else."
+  | cls out |
+  cls := self createFixtureClass.
+  out := self mutationTools tool_compile_method:
+    (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'source' put: 'uncommittedAnswer ^42'; yourself).
+  self assert: (self includesCS: 'Compiled McpTestFixture' in: out).
+  self deny: (self includesCS: 'committed' in: out).
+  self assert: (cls canUnderstand: #uncommittedAnswer).
+  self assert: System needsCommit.
+  System abortTransaction.
+  self deny: ((System myUserProfile objectNamed: #McpTestFixture) canUnderstand: #uncommittedAnswer)
+%
 category: 'tools - session'
 method: McpToolTest
 testRefresh
-  "tool_refresh reveals the committed view, discarding uncommitted work (it is
-   System abortTransaction under a friendlier name). Commit a fixture baseline, change its
-   comment without committing, refresh, and confirm the committed comment is restored.
-   A true cross-session refresh (another gem commits, we see it) is an integration concern,
-   not a unit test. (tearDown removes McpTestFixture.)"
-  | cls out baseline |
+  "tool_refresh must KEEP uncommitted work while taking a current view (System
+   continueTransaction). Until 2026-08-28 it was abortTransaction under a friendlier name, so this
+   test asserted the opposite: that refresh discarded the caller's change. Commit a fixture
+   baseline, change its comment without committing, refresh, and confirm the change SURVIVES and
+   the transaction is still dirty. A true cross-session refresh (another gem commits, we see it)
+   is an integration concern, not a unit test. (tearDown removes McpTestFixture.)"
+  | cls out changed |
   cls := self createFixtureClass.
-  baseline := cls comment.
-  cls comment: 'uncommitted - should be dropped by refresh'.
-  self assert: (cls comment = 'uncommitted - should be dropped by refresh').
+  changed := 'uncommitted - must SURVIVE refresh'.
+  cls comment: changed.
   out := self sessionTools tool_refresh: Dictionary new.
   self assert: (self includesCS: 'refreshed' in: out).
-  self assert: (cls comment = baseline)
+  self assert: (cls comment = changed).
+  self assert: System needsCommit
+%
+category: 'tools - session'
+method: McpToolTest
+testRefreshRefusesWhenNestedTransaction
+  "continueTransaction is illegal inside a nested transaction (ImproperOperation 2717), so
+   tool_refresh refuses with a message naming the state rather than letting the raw error out --
+   the recovery move differs from the other illegal state's, and the caller has to know which."
+  | raised |
+  System beginNestedTransaction.
+  raised := [self sessionTools tool_refresh: Dictionary new. nil]
+    on: McpError do: [:ex | ex].
+  System abortTransaction.
+  self assert: raised notNil.
+  self assert: raised kind equals: #refused.
+  self assert: (self includesCS: 'nested transaction' in: raised description)
 %
 category: 'tools - mutation'
 method: McpToolTest
@@ -625,6 +732,32 @@ testRunTestMethod
   self assert: (self includesCS: 'FAIL' in: fail).
   self assert: (self includesCS: '#testFails' in: fail)
 %
+category: 'tools - testing'
+method: McpToolTest
+testRunTestToolsRefuseAViewMovingSuiteWhenWorkIsPending
+  "The guard, through the tools a client actually calls. Both run tools refuse a suite that declares
+   it moves the session's transaction, while this session has work that move would take with it.
+   McpTransactionTest is the subject because it is always installed and its #movesTheSessionView is
+   the irreducible case -- if the guard ever stopped firing, THAT suite running here would abort
+   this very test's transaction, which is the loss the guard exists to prevent."
+  | onClass onMethod |
+  System abortTransaction.
+  UserGlobals at: #McpGuardProbe put: 'planted'.
+  onClass := [self testingTools tool_run_test_class:
+    (self oneArg: 'className' value: 'McpTransactionTest'). nil] on: McpError do: [:ex | ex].
+  onMethod := [self testingTools tool_run_test_method: (Dictionary new
+    at: 'className' put: 'McpTransactionTest';
+    at: 'selector' put: 'testAbortIsTheWayOutAndSaysNothingElse'; yourself). nil]
+      on: McpError do: [:ex | ex].
+  self assert: onClass notNil.
+  self assert: onClass kind equals: #refused.
+  self assert: (self includesCS: 'McpTransactionTest' in: onClass description).
+  self assert: (self includesCS: 'uncommitted changes' in: onClass description).
+  self assert: onMethod notNil.
+  self assert: onMethod kind equals: #refused.
+  "and the work it protected is still here"
+  self assert: (UserGlobals at: #McpGuardProbe ifAbsent: [nil]) equals: 'planted'
+%
 category: 'tools - search'
 method: McpToolTest
 testSearchMethodSource
@@ -648,14 +781,30 @@ testSearchMethodSourceTruncated
   hitLines := lines select: [:l | self includesCS: '>>' in: l].
   self assert: hitLines size = 200
 %
+category: 'tools - testing'
+method: McpToolTest
+testSessionViewGuardFiresOnTheSessionAndNotOnTheSuite
+  "Which suite it is does not decide this -- the session does. The same suite refused above is
+   allowed the moment there is nothing to lose, and a suite that declares nothing is never gated
+   either way. Asserting on the policy directly rather than through a tool keeps this test from
+   having to run a real view-moving suite to find out."
+  System abortTransaction.
+  self assert: (McpTestingToolset sessionViewRefusalFor: McpTransactionTest) isNil.
+  self assert: (McpTestingToolset sessionViewRefusalFor: McpOutboxTest) isNil.
+  UserGlobals at: #McpGuardProbe put: 'planted'.
+  self assert: (McpTestingToolset sessionViewRefusalFor: McpTransactionTest) notNil.
+  self assert: (McpTestingToolset sessionViewRefusalFor: McpOutboxTest) isNil
+%
 category: 'tools - mutation'
 method: McpToolTest
 testSetClassComment
   | out |
   self createFixtureClass.
+  "The fixture already has a comment, so replacing it needs the read that shows one -- describe_class."
+  self browsingTools tool_describe_class: (self oneArg: 'className' value: 'McpTestFixture').
   out := self mutationTools tool_set_class_comment:
     (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'comment' put: 'hello there'; yourself).
-  self assert: (self includesCS: 'committed' in: out).
+  self assert: (self includesCS: 'Comment set on McpTestFixture' in: out).
   self assert: (System myUserProfile objectNamed: #McpTestFixture) comment equals: 'hello there'
 %
 category: 'tools - session'
@@ -678,9 +827,17 @@ testTestingToolsClassNotFound
 category: 'helpers'
 method: McpToolTest
 toolsetOfClass: aToolsetClass
-  "The toolset of aToolsetClass belonging to a fresh full-surface server -- the receiver its
+  "The toolset of aToolsetClass belonging to THIS test's full-surface server -- the receiver its
    registered blocks send the tool_* handler to, so a handler test drives it exactly as a real
    tools/call does. Built through McpServer so the toolset has its server: a mutation handler asks
-   the server for the kernel guard (see McpMutationToolset)."
-  ^McpServer new toolsets detect: [:ts | ts class == aToolsetClass]
+   the server for the kernel guard (see McpMutationToolset).
+
+   ONE server per test, not one per call. A worker gem has exactly one, and its toolsets share it --
+   which is what makes `self browsingTools` read something and `self mutationTools` then be allowed
+   to change it, because the blind-write ledgers live on the server (McpServer>>readLedger). A fresh
+   server per call gave each toolset its own empty ledger and no read could ever license a write.
+   The instance variable is nil for each test, SUnit building a new test instance per test method,
+   so no ledger state leaks between tests."
+  sharedServer isNil ifTrue: [sharedServer := McpServer new].
+  ^sharedServer toolsets detect: [:ts | ts class == aToolsetClass]
 %

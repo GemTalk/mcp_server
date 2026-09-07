@@ -7,7 +7,7 @@ GsTestCase subclass: 'McpAuthConformanceTest'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %
@@ -111,6 +111,14 @@ McpAuthConformanceTest category: 'Mcp-Auth-Tests'
 removeallmethods McpAuthConformanceTest
 removeallclassmethods McpAuthConformanceTest
 ! ------------------- Class methods for McpAuthConformanceTest
+category: 'session view'
+classmethod: McpAuthConformanceTest
+movesTheSessionView
+  "Why this suite cannot be run from a session that has uncommitted work. See
+   McpTestingToolset class>>sessionViewRefusalFor:, which is what asks.
+   Same fixture as McpAuthTest, same reason."
+  ^'it commits a throwaway JWT UserProfile so a real worker gem can log in as it, and a commit takes the whole session with it'
+%
 ! ------------------- Instance methods for McpAuthConformanceTest
 category: 'helpers'
 method: McpAuthConformanceTest
@@ -234,7 +242,7 @@ jsonOf: aResponse
   "The response body parsed as JSON, or nil if it is not a JSON object."
   | body |
   body := self bodyOf: aResponse.
-  ^[ | p | p := McpJson parse: body.
+  ^[ | p | p := JsonParser parse: body.
      (p isKindOf: Dictionary) ifTrue: [p] ifFalse: [nil] ]
    on: Error do: [:e | nil]
 %
@@ -295,7 +303,7 @@ method: McpAuthConformanceTest
 testAudienceArrayContainingThisResourceAccepted
   "RFC 7519: aud may be a single string or an array of strings, and a match on any element counts.
    Asserted through a real JsonWebToken rather than a hand-built Dictionary, because the payload of
-   a parsed token is a SymbolDictionary while McpJson yields a plain Dictionary -- a claim-shape
+   a parsed token is a SymbolDictionary while JsonParser yields a plain Dictionary -- a claim-shape
    test that builds its own Dictionary is not exercising the type the router actually sees. Keycloak
    issues aud as an array, so this is the shape a real deployment presents."
   | claims |
@@ -749,6 +757,13 @@ withJwtUser: aUserId scope: aScopeStringOrNil do: aOneArgBlock
   jwtSec userIdKey: #sub; addUserId: aUserId; addIssuer: #*; addAudience: #*.
   up := AllUsers addNewUserWithId: aUserId password: 'swordfishXYZ'.
   up enableJwtAuthenticationWith: jwtSec.
+  "A worker gem logs in as THIS user and resolves its worker class and its toolsets BY NAME, so the
+   Mcp dictionary has to be in its symbol list. A brand-new UserProfile gets the DEFAULT list
+   (UserGlobals, Globals, Published), which does not have it -- Published is standard and Mcp is
+   ours. install.sh does this for the users that exist when it runs; this is the same step for a
+   user created afterwards, and setup-oidc-users.sh does it for a provisioned JWT user. Without it
+   every initialize here fails with 'undefined symbol McpServer' from the worker bootstrap."
+  up insertDictionary: (System myUserProfile objectNamed: #Mcp) at: up symbolList size + 1.
   System commitTransaction.
   "Clear any leftover of this id first, for the reason #withConformanceKeyDo: already spells out:
    System addJwtKey:withId: RAISES on a duplicate, the register is STONE-wide runtime state, and a

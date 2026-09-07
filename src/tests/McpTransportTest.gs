@@ -7,7 +7,7 @@ GsTestCase subclass: 'McpTransportTest'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %
@@ -101,6 +101,20 @@ postRequest: body sessionId: anIdOrNil
   crlf := self crlf.
   idLine := anIdOrNil isNil ifTrue: [''] ifFalse: ['MCP-Session-Id: ' , anIdOrNil , crlf].
   ^'POST /mcp HTTP/1.1' , crlf , 'Host: localhost' , crlf , idLine ,
+   'Content-Type: application/json' , crlf ,
+   'Content-Length: ' , body size printString , crlf , crlf , body
+%
+category: 'helpers'
+method: McpTransportTest
+postRequest: body sessionId: anIdOrNil accepting: acceptOrNil
+  "A raw HTTP POST /mcp with a session id and an explicit Accept header -- what decides whether this
+   server may answer with a stream. nil means the header is absent, which is what curl sends and what
+   every other check here relies on."
+  | crlf idLine acceptLine |
+  crlf := self crlf.
+  idLine := anIdOrNil isNil ifTrue: [''] ifFalse: ['MCP-Session-Id: ' , anIdOrNil , crlf].
+  acceptLine := acceptOrNil isNil ifTrue: [''] ifFalse: ['Accept: ' , acceptOrNil , crlf].
+  ^'POST /mcp HTTP/1.1' , crlf , 'Host: localhost' , crlf , idLine , acceptLine ,
    'Content-Type: application/json' , crlf ,
    'Content-Length: ' , body size printString , crlf , crlf , body
 %
@@ -221,6 +235,91 @@ testACancelledCallIsAnsweredWithNoJsonRpcResponse
   "the session survives: the client cancelled a request, not its work"
   self assert: (r sessionAt: sess id) notNil
 %
+category: 'tests - cancellation'
+method: McpTransportTest
+testACancelledStreamedCallJustEndsItsStream
+  "On a streamed call the answer is simply absent: the SSE headers already went out, so saying
+   nothing IS ending the stream -- which is exactly what the draft revision requires of a cancelled
+   request, and what the current one gets by the same silence."
+  | r sess out |
+  r := McpFixtureRouter new.
+  sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
+  sess mockWorker waitsBeforeDone: 1000000.
+  [(Delay forMilliseconds: 100) wait. sess requestCancel: 9] fork.
+  out := (self runRequest: (self postRequest: (self toolsCallWithProgressToken: 9)
+    sessionId: sess id accepting: 'text/event-stream') onRouter: r) output.
+  self assert: (self includesCS: 'Content-Type: text/event-stream' in: out).
+  "headers, and then nothing at all -- no frame for a request the client stopped waiting for"
+  self deny: (self includesCS: 'event: message' in: out).
+  self deny: (self includesCS: '-32001' in: out)
+%
+category: 'tests - progress'
+method: McpTransportTest
+testAnAcceptHeaderWithoutAProgressTokenStaysPlainJson
+  "Offering to take a stream is not asking for one. The client opts in per request by sending a
+   token; a client that sends the header on every request -- which is every client -- must not
+   therefore get a stream for every call."
+  | r sess out body |
+  r := McpFixtureRouter new.
+  sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
+  body := '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"status","arguments":{}}}'.
+  out := (self runRequest: (self postRequest: body
+    sessionId: sess id accepting: 'application/json, text/event-stream') onRouter: r) output.
+  self assert: (self includesCS: 'Content-Type: application/json' in: out).
+  self deny: (self includesCS: 'text/event-stream' in: out)
+%
+category: 'tests - progress'
+method: McpTransportTest
+testAProgressTokenAndAnAcceptHeaderGetAnEventStream
+  "A tools/call that asks to be kept informed is answered as a request-scoped SSE stream: the headers,
+   then the response as one SSE frame. Both halves matter. The Content-Type is what lets anything be
+   sent before the answer at all; and the answer arriving as `data:` rather than as a body is what a
+   client has to accept for progress to be possible, which the spec requires of it and which no
+   client had ever been observed doing against this server."
+  | r sess out |
+  r := McpFixtureRouter new.
+  sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
+  sess mockWorker nextResult: '{"jsonrpc":"2.0","id":9,"result":{"content":[]}}'.
+  out := (self runRequest: (self postRequest: (self toolsCallWithProgressToken: 9)
+    sessionId: sess id accepting: 'application/json, text/event-stream') onRouter: r) output.
+  self assert: (self includesCS: 'Content-Type: text/event-stream' in: out).
+  self deny: (self includesCS: 'Content-Type: application/json' in: out).
+  "no Content-Length: the stream stays open, and a length would end it at the first frame"
+  self deny: (self includesCS: 'Content-Length' in: out).
+  "and the anti-buffering header, or a proxy may hold every frame until the answer arrives"
+  self assert: (self includesCS: 'X-Accel-Buffering: no' in: out).
+  self assert: (self includesCS: 'event: message' in: out).
+  self assert: (self includesCS: 'data: {"jsonrpc":"2.0","id":9' in: out)
+%
+category: 'tests - progress'
+method: McpTransportTest
+testAProgressTokenOnSomethingOtherThanAToolsCallIsIgnored
+  "Only a tools/call is streamed. A progressToken on a tools/list has nothing to report against --
+   there is no long operation and no denominator -- so it is left alone rather than honoured into an
+   empty stream."
+  | r sess out body |
+  r := McpFixtureRouter new.
+  sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
+  body := '{"jsonrpc":"2.0","id":3,"method":"tools/list","params":{"_meta":{"progressToken":3}}}'.
+  out := (self runRequest: (self postRequest: body
+    sessionId: sess id accepting: 'application/json, text/event-stream') onRouter: r) output.
+  self assert: (self includesCS: 'Content-Type: application/json' in: out).
+  self deny: (self includesCS: 'text/event-stream' in: out)
+%
+category: 'tests - progress'
+method: McpTransportTest
+testAProgressTokenWithoutTheAcceptHeaderStaysPlainJson
+  "The spec REQUIRES a client to accept text/event-stream, and both real clients send the header --
+   so this is not a capability check but a guard for the hand-rolled caller: curl, and every other
+   check in this suite and in test.sh, asked for JSON and gets JSON."
+  | r sess out |
+  r := McpFixtureRouter new.
+  sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
+  out := (self runRequest: (self postRequest: (self toolsCallWithProgressToken: 9)
+    sessionId: sess id accepting: nil) onRouter: r) output.
+  self assert: (self includesCS: 'Content-Type: application/json' in: out).
+  self deny: (self includesCS: 'text/event-stream' in: out)
+%
 category: 'tests'
 method: McpTransportTest
 testARequestEndedOnTheDeadlineIsAnsweredWithItsOwnId
@@ -265,6 +364,29 @@ testASessionWhoseWorkerCannotBeInterruptedIsUnmapped
   out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":8,"method":"tools/list"}' sessionId: sess id)
     onRouter: r) output.
   self assert: (self includesCS: '404' in: out)
+%
+category: 'tests - progress'
+method: McpTransportTest
+testAStreamedCallEndedOnTheDeadlineIsTerminatedByAFrame
+  "A call ended on the deadline AFTER its stream was opened cannot be answered with a second HTTP
+   response -- the headers already went out -- so the error travels as a frame on the stream that is
+   open. The frame is what stops the client waiting: a stream that simply goes quiet leaves it on a
+   socket that will never say anything again, which is worse than the timeout it was told about.
+   Same -32001 and same id as the plain-JSON path, because it is the same news."
+  | r sess out |
+  r := McpFixtureRouter new.
+  r requestTimeoutSeconds: 1.
+  sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
+  sess mockWorker waitsBeforeDone: 1000000.
+  out := (self runRequest: (self postRequest: (self toolsCallWithProgressToken: 9)
+    sessionId: sess id accepting: 'text/event-stream') onRouter: r) output.
+  self assert: (self includesCS: 'Content-Type: text/event-stream' in: out).
+  self assert: (self includesCS: 'event: message' in: out).
+  self assert: (self includesCS: '-32001' in: out).
+  self assert: (self includesCS: '"kind":"timeout"' in: out).
+  self assert: (self includesCS: '"id":9' in: out).
+  "the worker took the break, so the client keeps its session"
+  self assert: (r sessionAt: sess id) notNil
 %
 category: 'tests - worker config'
 method: McpTransportTest
@@ -584,6 +706,24 @@ testSupportedProtocolVersionServed
   self deny: (self includesCS: 'Unsupported MCP-Protocol-Version' in: out).
   self assert: (self includesCS: '-32600' in: out)
 %
+category: 'tests - progress'
+method: McpTransportTest
+testTheSessionGatesRunBeforeAnyStreamIsOpened
+  "400 and 404 are decided before the answer is committed to being a stream, and they are the same
+   refusals a plain call gets. They have to run first: a refusal written into a response already
+   promised as text/event-stream would have to be a frame, so a client with a stale session id would
+   learn of it inside a stream instead of from the status line the transport spec tells it to read."
+  | r out |
+  r := McpFixtureRouter new.
+  out := (self runRequest: (self postRequest: (self toolsCallWithProgressToken: 9)
+    sessionId: nil accepting: 'text/event-stream') onRouter: r) output.
+  self assert: (self includesCS: '400' in: out).
+  self deny: (self includesCS: 'text/event-stream' in: out).
+  out := (self runRequest: (self postRequest: (self toolsCallWithProgressToken: 9)
+    sessionId: 'NOSUCHSESSION' accepting: 'text/event-stream') onRouter: r) output.
+  self assert: (self includesCS: '404' in: out).
+  self deny: (self includesCS: 'text/event-stream' in: out)
+%
 category: 'tests'
 method: McpTransportTest
 testTlsDisabledByDefault
@@ -608,39 +748,55 @@ testTlsEnabledWhenConfigured
 %
 category: 'tests'
 method: McpTransportTest
-testUnicodeResponseIsAsciiWithByteAccurateContentLength
+testUnicodeResponseIsUtf8WithByteAccurateContentLength
   "THE TRANSPORT'S UNICODE CONTRACT, and the test whose absence let three defects ship.
-   Content-Length is written as `body size`, which is the byte count ONLY while the body holds
-   nothing outside 0x20-0x7E. So the two assertions belong together: a response carrying non-ASCII
-   text must still leave as pure ASCII, and the length must be one a client can trust. If the
-   escaping policy is ever changed to put real UTF-8 on the wire, this fails -- which is the point.
+   Latin-1, BMP AND ASTRAL text. The astral case is the one that changed: while responses were
+   rendered by kernel printJsonOn:, an emoji here would have measured that writer's defect (a
+   codepoint above U+FFFF became one wrong escape) rather than the transport, so this test had to
+   stay inside the BMP. McpJson writes UTF-8, so the emoji is now the most interesting row in it.
+   Content-Length is written as `body size`, which is the byte count only while the body is a byte
+   String -- and it always is, because McpJson encodes to bytes rather than leaving characters for
+   the transport (a DoubleByteString of n characters is 2n bytes on the wire, so a wide body would
+   announce a length a fraction of what followed it and every client would hang). So the assertions
+   belong together: the body must be bytes, the length must be one a client can trust, and the text
+   must survive.
+   NOTE WHAT IS NOT ASSERTED ANY MORE: that the wire is pure ASCII. That was a stronger invariant
+   than anything needed, and holding it cost the correctness of every astral character. What the
+   transport actually requires is only that the body be bytes whose count is its #size.
    The request carries RAW UTF-8, the way every real client sends it, and the body is forwarded to
    the worker BYTE FOR BYTE: the worker decodes it (McpBase>>parseBody:), the front end does not, so
    what the transport must not do is alter it in passing."
-  | r sess text response out body raw |
-  text := 'caf' , (String with: (Character codePoint: 16rE9)) , ' '
-    , (String with: (Character codePoint: 16r2603))
-    , (String with: (Character codePoint: 16r1F600)).
+  | r sess text response out body raw sent |
+  text := WriteStream on: String new.
+  text nextPutAll: 'caf'.
+  text nextPut: (Character codePoint: 16rE9).
+  text nextPut: (Character codePoint: 16r2603).
+  text nextPut: (Character codePoint: 16r1F600).
   response := Dictionary new.
   response at: 'jsonrpc' put: '2.0'.
   response at: 'id' put: 1.
-  response at: 'result' put: (Dictionary new at: 'text' put: text; yourself).
+  response at: 'result' put: (Dictionary new at: 'text' put: text contents; yourself).
+  sent := self bytesOf: #(16rC3 16rA9 16rE2 16r98 16r83).
   raw := '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"x","arguments":'
-    , '{"code":"' , (self bytesOf: #(16rC3 16rA9 16rE2 16r98 16r83)) , '"}}}'.
+    , '{"code":"' , sent , '"}}}'.
   r := McpFixtureRouter new.
   sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
   sess mockWorker nextResult: (McpJson write: response).
   out := (self runRequest: (self postRequest: raw sessionId: sess id) onRouter: r) output.
-  "Pure ASCII on the wire, header and body alike."
-  1 to: out size do: [:i | self assert: (out at: i) codePoint < 128].
+  "Bytes on the wire, header and body alike -- nothing wide reached the socket."
+  self assert: out class equals: String.
   "Content-Length is the byte count of exactly what followed it."
   body := self bodyOf: out.
   self assert: (self contentLengthOf: out) equals: body size.
-  "And the text survived the trip intact, astral character included."
-  self assert: (((McpJson parse: body) at: 'result') at: 'text') equals: text.
+  "The text survived, asserted on CODEPOINTS: on 3.6.2 the kernel's write and parse defects cancel,
+   so comparing round-tripped text would pass there for the wrong reason."
+  body := ((McpBase parseBody: body) at: 'result') at: 'text'.
+  self assert: ((1 to: body size) collect: [:i | (body at: i) codePoint])
+    equals: #(99 97 102 16rE9 16r2603 16r1F600).
+  "And it went out as UTF-8: the emoji's four bytes are on the wire, and no escape for it."
+  self assert: (self includesCS: (self bytesOf: #(16rF0 16r9F 16r98 16r80)) in: out).
   "The raw request body reached the worker unaltered -- five bytes, not decoded and not mangled."
-  self assert: ((sess mockWorker expressions last)
-    findString: (self bytesOf: #(16rC3 16rA9 16rE2 16r98 16r83)) startingAt: 1) > 0
+  self assert: ((sess mockWorker expressions last) findString: sent startingAt: 1) > 0
 %
 category: 'tests'
 method: McpTransportTest
@@ -694,6 +850,14 @@ testWorkerConfigDefaultsAreResolvedByTheFrontEnd
   r workerClassName: 'McpFixtureServerProbe'; toolsetNames: #().
   self assert: r effectiveWorkerClassName equals: 'McpFixtureServerProbe'.
   self assert: r effectiveToolsetNames isEmpty
+%
+category: 'helpers'
+method: McpTransportTest
+toolsCallWithProgressToken: aToken
+  "A tools/call body carrying a progressToken in params._meta -- what Claude Code sends on every
+   single tools/call, measured, and what this server used to throw away."
+  ^'{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"status","arguments":{},'
+    , '"_meta":{"progressToken":' , aToken printString , '}}}'
 %
 category: 'helpers'
 method: McpTransportTest

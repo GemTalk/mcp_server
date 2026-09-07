@@ -7,7 +7,7 @@ Object subclass: 'McpDispatcher'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %
@@ -58,6 +58,38 @@ withToolRegistry: aRegistry server: aServerOrNil
   ^self new setRegistry: aRegistry server: aServerOrNil
 %
 ! ------------------- Instance methods for McpDispatcher
+category: 'transaction'
+method: McpDispatcher
+annotateContent: aResultDict
+  "Append the session-state note (transactionNote) to an already-built tools/call envelope's text,
+   or answer it unchanged when there is nothing to say. Applied to BOTH the success and the error
+   envelope, because a tool that raised is exactly when dirty state most needs reporting.
+
+   WHY AFTER THE TOOL AND NOT BEFORE. The note describes the state the client is actually left in,
+   not the state the call arrived in. That is what lets `abort` clear a pending commit conflict and
+   answer 'Transaction aborted' with no contradicting warning stapled to it, while abort itself
+   stays two lines that know nothing about any of this -- the alternative, annotating from the
+   pre-call state, would need every transaction tool to suppress a note the dispatcher had already
+   decided to add.
+
+   structuredContent is deliberately NOT touched: its error kind and message stay exactly what the
+   tool raised, so a client branching on the kind is unaffected by prose meant for the model."
+  | note content item |
+  note := self transactionNote.
+  note isNil ifTrue: [^aResultDict].
+  content := aResultDict at: 'content' ifAbsent: [nil].
+  (content isNil or: [content isEmpty]) ifTrue: [^aResultDict].
+  item := content at: 1.
+  item at: 'text' put: (item at: 'text' ifAbsent: ['']) , (String with: Character lf) , note.
+  ^aResultDict
+%
+category: 'transaction'
+method: McpDispatcher
+commitConflictPending
+  "Whether a failed commit has left this session in the must-abort state; see
+   McpToolset class>>commitConflictPending, which is the single implementation."
+  ^McpToolset commitConflictPending
+%
 category: 'responses'
 method: McpDispatcher
 contentText: aString isError: aBool
@@ -127,7 +159,20 @@ handleToolsCall: params id: id
        These carry actionable feedback the model can use to self-correct and retry, so the spec
        wants them in the result, not as a JSON-RPC error. (Before 2025-11-25 we answered -32602
        here too; only the envelope changed -- the check still runs BEFORE the tool is invoked, so
-       a rejected call still has no side effect.)"
+       a rejected call still has no side effect.)
+
+   THE VIEW. NO TOOL REFRESHES IT. A session sees one consistent snapshot of the repository until
+   the client itself asks for another, by committing, aborting, or calling `refresh`. That is not
+   an omission, it is the guardrail: GemStone's conflict check is write-write AGAINST THE VIEW and
+   does not track what a client read, so the view is the only record the stone has of what this
+   client saw. Refreshing under it -- which this method did before 2026-08-28, first with
+   abortTransaction and then briefly with continueTransaction -- tells the stone the client has
+   seen changes it has not, and a commit that should have been refused as stale is accepted
+   instead, silently discarding another session's work. Measured both ways; see
+   docs/server-to-client-messaging.md 15.
+
+   What the call left behind is reported afterwards by annotateContent:. No tool commits either:
+   see McpMutationToolset."
   | name tool args argErr |
   name := params at: 'name' ifAbsent: [nil].
   name isNil ifTrue: [^self errorFor: id code: -32602 message: 'Missing tool name' kind: 'invalidParams'].
@@ -144,10 +189,10 @@ handleToolsCall: params id: id
   argErr := tool validationErrorFor: args.
   argErr ifNotNil: [
     ^self resultFor: id with: (self structuredErrorContent: argErr kind: 'invalidParams')].
-  System abortTransaction.
-  ^[ self resultFor: id with: (self contentText: (tool callWith: args) isError: false) ]
+  ^[ self resultFor: id
+       with: (self annotateContent: (self contentText: (tool callWith: args) isError: false)) ]
    on: Error
-   do: [:ex | self resultFor: id with: (self toolErrorContentFrom: ex) ]
+   do: [:ex | self resultFor: id with: (self annotateContent: (self toolErrorContentFrom: ex)) ]
 %
 category: 'responses'
 method: McpDispatcher
@@ -185,6 +230,11 @@ initializeResultFor: params
   d at: 'protocolVersion' put: negotiated.
   d at: 'capabilities' put: caps.
   d at: 'serverInfo' put: info.
+  "instructions: OMITTED when nil, on the same rule as title -- an absent key is what a client
+   treats as 'none given', and sending null would have it render or forward the word. The spec
+   calls this a hint to the model, so what goes in it is what a model cannot get from tool
+   descriptions read one at a time: see McpServer class>>defaultServerInstructions."
+  self serverInstructions ifNotNil: [:i | d at: 'instructions' put: i].
   ^d
 %
 category: 'responses'
@@ -227,6 +277,14 @@ resultFor: id with: resultObj
 %
 category: 'accessing'
 method: McpDispatcher
+serverInstructions
+  "The initialize result's `instructions`, or nil for none -- see serverName for why this asks the
+   server rather than caching. nil means the key is omitted entirely, which is also what a
+   read-only session gets (McpServer>>serverInstructions)."
+  ^server isNil ifTrue: [McpServer defaultServerInstructions] ifFalse: [server serverInstructions]
+%
+category: 'accessing'
+method: McpDispatcher
 serverName
   "The serverInfo name to report: ASK the server rather than caching a copy, because the worker
    bootstrap may set its name (from router config) AFTER this dispatcher was built -- the server is
@@ -247,12 +305,45 @@ serverVersion
   "See serverName."
   ^server isNil ifTrue: [McpServer defaultServerVersion] ifFalse: [server serverVersion]
 %
+category: 'transaction'
+method: McpDispatcher
+sessionLifetimeNote
+  "What the front end said would end this session, or nil -- the clause transactionNote appends to
+   the uncommitted-changes warning, so it names WHICH deadline is coming rather than only that one
+   is. nil whenever there is no server (isolated dispatcher tests) or no front end said anything,
+   in which case the warning falls back to its unqualified form."
+  ^server isNil ifTrue: [nil] ifFalse: [server lifetimeNote]
+%
 category: 'initialization'
 method: McpDispatcher
 setRegistry: aRegistry server: aServerOrNil
   toolRegistry := aRegistry.
   server := aServerOrNil.
   ^self
+%
+category: 'transaction'
+method: McpDispatcher
+staleReadNote
+  "One line naming the reads the last view move invalidated, or nil when it invalidated none (or
+   there is no server to ask). Appended by transactionNote.
+
+   CONSUMED AS IT IS REPORTED: the keys come from McpServer>>takeStaleReadKeys, so the line lands on
+   the result of the very call that moved the view -- abort, commit or refresh -- and never again.
+   That is the point of naming them at all: the client can redo exactly those reads in one pass,
+   instead of meeting each as a blindWrite refusal later. The count puts the names in proportion
+   ('2 of 7 earlier reads'), which is what tells the client the other five still stand, and the names
+   are summarised by class rather than listed (McpServer class>>staleReadSummaryFor:), so the line
+   stays one line whatever was browsed."
+  | keys total |
+  server isNil ifTrue: [^nil].
+  keys := server takeStaleReadKeys.
+  keys isEmpty ifTrue: [^nil].
+  total := keys size + server readLedger size.
+  ^'[session] The view moved: ' , keys size printString , ' of ' , total printString
+    , ' earlier read' , (total = 1 ifTrue: [''] ifFalse: ['s'])
+    , (keys size = 1 ifTrue: [' is'] ifFalse: [' are'])
+    , ' stale and must be re-read before writing to them: '
+    , (server class staleReadSummaryFor: keys) , '.'
 %
 category: 'responses'
 method: McpDispatcher
@@ -296,4 +387,114 @@ toolsListResult
   d := Dictionary new.
   d at: 'tools' put: (toolRegistry descriptors select: [:desc | self toolAllowed: (desc at: 'name')]).
   ^d
+%
+category: 'transaction'
+method: McpDispatcher
+transactionNote
+  "One line of session state the model must act on, or nil when there is nothing to say. Appended
+   to every tool result by annotateContent:, and computed from the state left AFTER the tool ran.
+
+   Kept to one line and one subject on purpose: the tool's own text says what the tool did, this
+   says what the SESSION now needs, and the transaction model that makes both intelligible is
+   stated once in the initialize instructions rather than repeated per call.
+
+   Ordered most-blocking first. A failed commit subsumes everything else -- no further commit can
+   succeed and the view cannot move until the transaction is aborted -- and a nested transaction
+   subsumes pending changes, since nothing can be committed out of one either.
+
+   One addition since 2026-09-02, kept as a SECOND line rather than a fourth state: on the result of
+   a call that moved the view (abort, commit, refresh), the reads the move invalidated are named once
+   (staleReadNote). It is a different subject
+   from the transaction's state -- what to RE-READ, not what to commit or abort -- it can coincide
+   with any of the three states above, and it appears exactly once, so it is appended rather than
+   ranked.
+
+   That second line has two possible occupants and only ever one at a time. Where the view move was
+   the SERVER's own doing, #viewRefreshedNote says so -- but only when #staleReadNote has nothing to
+   report, because that line already says the view moved and says more besides. Naming one event
+   twice, in two lines, would be the worst of both -- and the suppressed line is CONSUMED rather
+   than held over, so it cannot name the same event on a later result either."
+  | state stale refreshed |
+  state := self transactionStateNote.
+  "Order matters, and not only for reading: #staleReadNote CONSUMES the stale keys, so it has to be
+   asked before #viewRefreshedNote can decide whether anything is left to add."
+  stale := self staleReadNote.
+  "BOTH are consumed on this result, whichever one is used: suppressed is not deferred. The general
+   note is armed by a flag rather than by a set that empties, so asking it only when the stale line
+   was silent left it armed -- and the client heard the same view move announced a second time on the
+   NEXT result, in words ending 'none of the reads this session tracks went stale', contradicting the
+   line it had just been given. Measured 2026-09-06."
+  refreshed := self viewRefreshedNote.
+  stale isNil ifTrue: [stale := refreshed].
+  stale isNil ifTrue: [^state].
+  state isNil ifTrue: [^stale].
+  ^state , (String with: Character lf) , stale
+%
+category: 'transaction'
+method: McpDispatcher
+transactionStateNote
+  "The transaction-state line of transactionNote, or nil: failed commit, nested transaction, or
+   uncommitted changes, most-blocking first. See transactionNote for why."
+  self commitConflictPending ifTrue: [ | subjects |
+    "Same jam, two possible causes, and the client must not be told the wrong one. 'Your last commit
+     failed' is right only when a commit is what failed; where the SERVER's own view refresh left the
+     pending work un-committable, the client made no commit and would go looking for one.
+     McpServer>>frontEndDoomedSubjects is non-nil in exactly that case, and stays so until the abort
+     that clears the state."
+    subjects := server isNil ifTrue: [nil] ifFalse: [server frontEndDoomedSubjects].
+    subjects ifNotNil: [
+      ^'[session] The server refreshed your view -- it had fallen far enough behind to be holding '
+        , 'the repository''s commit records open -- and your uncommitted changes now CONFLICT with '
+        , 'work another session has committed'
+        , (subjects isEmpty ifTrue: [''] ifFalse: [': it changed '
+            , (McpToolset listPhraseFor: subjects)])
+        , '. They cannot be committed, and abort is the only way out -- save anything you need '
+        , 'first, then abort, re-read and redo it. The conflict was already there: the refresh '
+        , 'revealed it rather than caused it.'].
+    ^'[session] Your last commit FAILED: another session changed the same objects since your view '
+      , 'was taken (' , McpToolset commitConflictReport , '). Nothing was written. Your changes are '
+      , 'still here but cannot be committed and your view cannot move until you call abort, which '
+      , 'discards them -- save anything you need first, then abort, re-read, and redo it.'].
+  System transactionLevel > 1 ifTrue: [
+    ^'[session] This session is inside a nested transaction; commit and abort cannot act on the '
+      , 'outer one until it is closed.'].
+  System needsCommit ifTrue: [ | note |
+    note := self sessionLifetimeNote.
+    ^'[session] You have uncommitted changes. No tool commits for you: call commit to persist '
+      , 'them or abort to discard them. '
+      , (note isNil
+          ifTrue: ['They are lost if this session ends first.']
+          ifFalse: ['They are lost when this session ends: ' , note , '.'])].
+  ^nil
+%
+category: 'transaction'
+method: McpDispatcher
+viewRefreshedNote
+  "One line telling the client the SERVER moved its view, or nil. Appended by transactionNote, and
+   only where #staleReadNote found nothing to say.
+
+   That silent case is what this exists for. A server-initiated refresh whose read ledger came
+   through clean would otherwise say nothing at all -- the client's snapshot moved under it and
+   nothing anywhere mentioned it -- and a client that has been told its view moves only when it moves
+   it would go on believing something false.
+
+   It gives the REASON, not just the fact, because the reason is the client's only defence against
+   concluding it did this to itself: a view is refreshed only when it has fallen far enough behind to
+   be holding the repository's commit records open, and only when the session has no call in flight.
+
+   It also says what it cannot promise. Only reads made THROUGH A TOOL are tracked, so 'nothing you
+   read has changed' would be a claim about a set the guardrail does not fully know
+   (docs/blind-write-guardrail.md, known limits).
+
+   CONSUMED AS REPORTED (McpServer>>takeFrontEndRefreshedView), like the stale keys: news on the
+   next result and never again."
+  | behind |
+  server isNil ifTrue: [^nil].
+  server takeFrontEndRefreshedView ifFalse: [^nil].
+  behind := server ownCommitsBehind.
+  ^'[session] The server refreshed your view: it had fallen far enough behind the repository to be '
+    , 'holding its commit records open'
+    , (behind isNil ifTrue: [''] ifFalse: [' (now ' , behind printString , ' behind)'])
+    , '. Your uncommitted changes were kept, and none of the reads this session tracks went stale. '
+    , 'Reads made inside execute_code are not tracked, so re-read anything you are about to act on.'
 %

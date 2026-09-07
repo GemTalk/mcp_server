@@ -24,28 +24,51 @@
 #   GS_STONE   - stone name      (default: gs64stone)
 #   GS_USER    - GemStone user   (default: DataCurator)
 #   GS_PASS    - GemStone password (default: swordfish)
-#   GS_MCP_PORT- listen port      (default: 8000)
-#   GS_MCP_READONLY - 1 to open a read-only server (mutating tools hidden + refused; a localhost
+#   MCP_PORT- listen port      (default: 8000)
+#   MCP_READONLY - 1 to open a read-only server (mutating tools hidden + refused; a localhost
 #                     convenience so a single user cannot accidentally mutate the image). Default 0.
-#   GS_MCP_WORKER_CLASS - McpServer subclass the workers should instantiate (default McpServer).
+#   MCP_WORKER_CLASS - McpServer subclass the workers should instantiate (default McpServer).
 #                     Subclass to change BEHAVIOR; to add tools write a toolset instead.
-#   GS_MCP_TOOLSETS - space-separated McpToolset names to expose instead of the default surface,
+#   MCP_TOOLSETS - space-separated McpToolset names to expose instead of the default surface,
 #                     e.g. "McpBrowsingToolset McpSearchToolset". Empty means the default.
+#   MCP_GRAIL_DIR - path to the Grail CHECKOUT, on an image that has the Grail (python) toolset.
+#                     Grail's Python lives in the image, but its .py stdlib and its test fixtures
+#                     live on DISK under the checkout, and a worker gem cannot work out where: its
+#                     own working directory is the STONE's, which holds no src/python/stdlib. Without
+#                     it run_python_tests refuses, and get_python_source and the python traceback
+#                     have nothing to read. Use the same checkout this image was installed from --
+#                     a DIFFERENT one will resolve names against source the image did not compile.
+#                     Checked here for src/python/stdlib, so a typo fails at launch rather than at
+#                     the first tool call. On an image with no Grail toolset loaded, setting this
+#                     fails with "Toolset not found: McpGrailToolset" -- which is correct: the
+#                     setting could never have reached anything.
+#   MCP_TOOLSET_OPTIONS - options for any OTHER toolset that declares some, as a JSON object of
+#                     toolset name -> that toolset's options, e.g.
+#                     '{"AcmeDbToolset":{"dataDirectory":"/srv/acme"}}'. The general form of the
+#                     variable above; use one or the other, not both. Each name is validated against
+#                     that toolset's class>>declaredOptionNames when it is set, so a mistyped option
+#                     refuses to start instead of being silently ignored.
 #   Session lifetime (how long a quiet client keeps its worker gem, whether it may keep it
-#                     indefinitely, and when it is warned) is configured with the GS_MCP_IDLE_TIMEOUT
+#                     indefinitely, and when it is warned) is configured with the MCP_IDLE_TIMEOUT
 #                     family -- see ./session-lifetime.sh, which documents each one. The common case
 #                     for a localhost server you come back to hours later is
-#                     GS_MCP_IDLE_TIMEOUT=none, which keeps a session alive for as long as its client
+#                     MCP_IDLE_TIMEOUT=none, which keeps a session alive for as long as its client
 #                     keeps answering liveness pings.
-#   GS_MCP_TRACE    - 1 to write every message a client SENDS to the gem log (default 0). Turn this
+#   View hygiene    - the MCP_MAX_COMMITS_BEHIND family, documented in the same file. These
+#                     govern the REPOSITORY rather than the client: a worker's view pins the commit
+#                     record it was taken from, and this is what refreshes a view that has fallen too
+#                     far behind, releases a session whose view cannot be moved at all, and ends a
+#                     running call that is holding the repository's oldest record while the stone is
+#                     over its backlog threshold.
+#   MCP_TRACE    - 1 to write every message a client SENDS to the gem log (default 0). Turn this
 #                     on when a call is going wrong and the client's own UI shows you only the tool
 #                     name: the trace carries the JSON-RPC text, including the arguments. It is off
 #                     by default because a traced log then holds every argument every client sent.
-#                     Find the log with  lsof -nP -iTCP:$GS_MCP_PORT -sTCP:LISTEN  and tail the
+#                     Find the log with  lsof -nP -iTCP:$MCP_PORT -sTCP:LISTEN  and tail the
 #                     gemnetobject_<pid>.log the gem has open.
-#   GS_MCP_TRACE_LIMIT - characters of each traced body written before the rest is summarized
+#   MCP_TRACE_LIMIT - characters of each traced body written before the rest is summarized
 #                     (default 4096). "none" writes whole bodies, with no cap at all.
-#   GS_MCP_TITLE    - human-readable label for THIS INSTANCE, reported as serverInfo.title, e.g.
+#   MCP_TITLE    - human-readable label for THIS INSTANCE, reported as serverInfo.title, e.g.
 #                     "GemStone - staging (gs64stone)". Empty means no title at all: the key is
 #                     omitted and clients display the server name. Use this -- not a relabeled
 #                     serverName -- to tell two deployments of the same software apart.
@@ -55,13 +78,15 @@ cd "$(dirname "$0")"
 GS_STONE="${GS_STONE:-gs64stone}"
 GS_USER="${GS_USER:-DataCurator}"
 GS_PASS="${GS_PASS:-swordfish}"
-GS_MCP_PORT="${GS_MCP_PORT:-8000}"
-GS_MCP_READONLY="${GS_MCP_READONLY:-0}"
-GS_MCP_WORKER_CLASS="${GS_MCP_WORKER_CLASS:-}"
-GS_MCP_TOOLSETS="${GS_MCP_TOOLSETS:-}"
-GS_MCP_TITLE="${GS_MCP_TITLE:-}"
-GS_MCP_TRACE="${GS_MCP_TRACE:-0}"
-GS_MCP_TRACE_LIMIT="${GS_MCP_TRACE_LIMIT:-}"
+MCP_PORT="${MCP_PORT:-8000}"
+MCP_READONLY="${MCP_READONLY:-0}"
+MCP_WORKER_CLASS="${MCP_WORKER_CLASS:-}"
+MCP_TOOLSETS="${MCP_TOOLSETS:-}"
+MCP_GRAIL_DIR="${MCP_GRAIL_DIR:-}"
+MCP_TOOLSET_OPTIONS="${MCP_TOOLSET_OPTIONS:-}"
+MCP_TITLE="${MCP_TITLE:-}"
+MCP_TRACE="${MCP_TRACE:-0}"
+MCP_TRACE_LIMIT="${MCP_TRACE_LIMIT:-}"
 
 # Resolve the environment and confirm BOTH the stone and a netldi. The netldi requirement is real
 # and is not about how this script logs in: forkOnPort: creates a GsTsExternalSession for the front
@@ -76,52 +101,84 @@ gs_env_require_netldi
 
 # Refuse a port that is already served, rather than letting the forked gem fail on bind in a log
 # nobody is watching.
-if gs_env_locate_lsof && "$GS_LSOF" -nP -iTCP:"$GS_MCP_PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
-  echo "error: something is already listening on port $GS_MCP_PORT." >&2
-  echo "       Stop it with  GS_MCP_PORT=$GS_MCP_PORT ./stop-server.sh  or pick another GS_MCP_PORT." >&2
+if gs_env_locate_lsof && "$GS_LSOF" -nP -iTCP:"$MCP_PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
+  echo "error: something is already listening on port $MCP_PORT." >&2
+  echo "       Stop it with  MCP_PORT=$MCP_PORT ./stop-server.sh  or pick another MCP_PORT." >&2
   exit 1
 fi
 
-# Session-lifetime setters (GS_MCP_IDLE_TIMEOUT and friends) -> $LIFETIME_LINES; empty when none are
-# set, leaving McpRouter>>initialize's defaults in place.
+# Session-lifetime setters (MCP_IDLE_TIMEOUT and friends) -> $LIFETIME_LINES, and the view-hygiene
+# setters (MCP_MAX_COMMITS_BEHIND and friends) -> $VIEW_HYGIENE_LINES. Either is empty when none
+# of its variables are set, leaving McpRouter>>initialize's defaults in place. That file documents
+# every one of them, and validates them, so neither launcher repeats either job.
 . ./session-lifetime.sh
 
-[ "$GS_MCP_READONLY" = "1" ] && RO="true" || RO="false"
+[ "$MCP_READONLY" = "1" ] && RO="true" || RO="false"
 
 # Optional worker-class / toolset configuration, as extra Smalltalk setter sends on the router.
 CONFIG=""
-[ -n "$GS_MCP_WORKER_CLASS" ] && CONFIG="$CONFIG
-r workerClassName: '$GS_MCP_WORKER_CLASS'."
-if [ -n "$GS_MCP_TOOLSETS" ]; then
+[ -n "$MCP_WORKER_CLASS" ] && CONFIG="$CONFIG
+r workerClassName: '$MCP_WORKER_CLASS'."
+if [ -n "$MCP_TOOLSETS" ]; then
   LITERALS=""
-  for t in $GS_MCP_TOOLSETS; do LITERALS="$LITERALS '$t'"; done
+  for t in $MCP_TOOLSETS; do LITERALS="$LITERALS '$t'"; done
   CONFIG="$CONFIG
 r toolsetNames: #($LITERALS)."
 fi
+# Toolset options. Both forms end at the same setter, so asking for both is an ambiguity rather than
+# a merge -- say so instead of silently letting one win.
+if [ -n "$MCP_GRAIL_DIR" ] && [ -n "$MCP_TOOLSET_OPTIONS" ]; then
+  echo "error: set MCP_GRAIL_DIR or MCP_TOOLSET_OPTIONS, not both." >&2
+  echo "       The first is shorthand for the second:" >&2
+  echo "       MCP_TOOLSET_OPTIONS='{\"McpGrailToolset\":{\"grailDirectory\":\"...\"}}'" >&2
+  exit 1
+fi
+if [ -n "$MCP_GRAIL_DIR" ]; then
+  # Checked HERE, not in the gem: the worker forks on this host, so this is the same filesystem it
+  # will read, and a wrong path is worth one line now rather than a wave of import errors later --
+  # which is exactly how a misconfigured session reads as a broken Python subsystem.
+  if [ ! -d "$MCP_GRAIL_DIR/src/python/stdlib" ]; then
+    echo "error: MCP_GRAIL_DIR=$MCP_GRAIL_DIR holds no src/python/stdlib," >&2
+    echo "       so it is not a Grail checkout. Point it at the checkout this image was" >&2
+    echo "       installed from (the one whose install.sh you last ran)." >&2
+    exit 1
+  fi
+  CONFIG="$CONFIG
+r toolsetOptions: (Dictionary new at: 'McpGrailToolset' put:
+  (Dictionary new at: 'grailDirectory' put: '$(printf '%s' "$MCP_GRAIL_DIR" | sed "s/'/''/g")'; yourself);
+  yourself)."
+fi
+if [ -n "$MCP_TOOLSET_OPTIONS" ]; then
+  # parseBody: answers nil for anything that is not a JSON OBJECT, and toolsetOptions: nil means
+  # "no options" -- so a malformed string would quietly configure nothing. Fail instead.
+  CONFIG="$CONFIG
+r toolsetOptions: ((McpRouter parseBody: '$(printf '%s' "$MCP_TOOLSET_OPTIONS" | sed "s/'/''/g")')
+  ifNil: [Error signal: 'MCP_TOOLSET_OPTIONS is not a JSON object'])."
+fi
 # Message tracing. Both settings travel to the forked gem in the config (McpRouter>>configDict);
 # nothing here is committed.
-if [ "$GS_MCP_TRACE" = "1" ]; then
+if [ "$MCP_TRACE" = "1" ]; then
   CONFIG="$CONFIG
 r messageTrace: true."
 fi
-if [ -n "$GS_MCP_TRACE_LIMIT" ]; then
-  if [ "$GS_MCP_TRACE_LIMIT" = "none" ]; then
+if [ -n "$MCP_TRACE_LIMIT" ]; then
+  if [ "$MCP_TRACE_LIMIT" = "none" ]; then
     CONFIG="$CONFIG
 r messageTraceLimit: nil."
   else
-    case "$GS_MCP_TRACE_LIMIT" in
-      ''|*[!0-9]*) echo "error: GS_MCP_TRACE_LIMIT must be a positive integer, or 'none'." >&2; exit 1 ;;
+    case "$MCP_TRACE_LIMIT" in
+      ''|*[!0-9]*) echo "error: MCP_TRACE_LIMIT must be a positive integer, or 'none'." >&2; exit 1 ;;
     esac
     CONFIG="$CONFIG
-r messageTraceLimit: $GS_MCP_TRACE_LIMIT."
+r messageTraceLimit: $MCP_TRACE_LIMIT."
   fi
 fi
 # Free-form operator text, so double any embedded quote rather than letting it close the literal.
-if [ -n "$GS_MCP_TITLE" ]; then
+if [ -n "$MCP_TITLE" ]; then
   CONFIG="$CONFIG
-r serverTitle: '$(printf '%s' "$GS_MCP_TITLE" | sed "s/'/''/g")'."
+r serverTitle: '$(printf '%s' "$MCP_TITLE" | sed "s/'/''/g")'."
 fi
-echo "Forking McpRouter (readOnly=$RO) onto 127.0.0.1:$GS_MCP_PORT (detached; this script returns)..."
+echo "Forking McpRouter (readOnly=$RO) onto 127.0.0.1:$MCP_PORT (detached; this script returns)..."
 "$TOPAZ" -l <<TPZ
 set gemstone $GS_STONE
 set username $GS_USER
@@ -131,8 +188,9 @@ iferr 1 stk
 run
 | r |
 r := McpRouter new.
-r readOnly: $RO.$CONFIG$LIFETIME_LINES
-r forkOnPort: $GS_MCP_PORT
+r readOnly: $RO.
+$VIEW_HYGIENE_LINES$CONFIG$LIFETIME_LINES
+r forkOnPort: $MCP_PORT
 %
 logout
 exit

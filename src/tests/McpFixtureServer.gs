@@ -7,7 +7,7 @@ McpServer subclass: 'McpFixtureServer'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %

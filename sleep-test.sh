@@ -51,8 +51,8 @@
 # Configure (or export before running):
 #   GEMSTONE              - GemStone product directory (required; source your setenv first)
 #   GS_STONE/GS_USER/GS_PASS - as for the other scripts (defaults: gs64stone/DataCurator/swordfish)
-#   GS_MCP_PORT           - test port (default 8020, kept off 8000 and off test.sh's 8011)
-#   GS_MCP_IDLE_TIMEOUT   - the idle deadline (default none). It used to default to 5m, because
+#   MCP_PORT              - test port (default 8020, kept off 8000 and off test.sh's 8011)
+#   MCP_IDLE_TIMEOUT      - the idle deadline (default none). It used to default to 5m, because
 #                           idleness was wall-clock and the sleep had to EXCEED it to prove the
 #                           detector forgave the gap. Counting pings inverts that. A sleep advances
 #                           no count, so exceeding a deadline proves nothing -- while a deadline
@@ -61,14 +61,14 @@
 #                           one, so the harness, which answers pings faithfully, is reaped on the
 #                           first one. The suspend question is only visible with no deadline in the
 #                           way; set one here to test the deadline itself, which needs no sleep.
-#   GS_MCP_SLEEP_STATE    - where the run's state lives (default $TMPDIR/gs-mcp-sleep-test)
+#   MCP_SLEEP_STATE       - where the run's state lives (default $TMPDIR/mcp_server-sleep-test)
 set -uo pipefail
 cd "$(dirname "$0")"
 
-STATE="${GS_MCP_SLEEP_STATE:-${TMPDIR:-/tmp}/gs-mcp-sleep-test}"
-PORT="${GS_MCP_PORT:-8020}"
+STATE="${MCP_SLEEP_STATE:-${TMPDIR:-/tmp}/mcp_server-sleep-test}"
+PORT="${MCP_PORT:-8020}"
 URL="http://127.0.0.1:$PORT/mcp"
-IDLE="${GS_MCP_IDLE_TIMEOUT:-none}"
+IDLE="${MCP_IDLE_TIMEOUT:-none}"
 export GS_STONE="${GS_STONE:-gs64stone}"
 export GS_USER="${GS_USER:-DataCurator}"
 export GS_PASS="${GS_PASS:-swordfish}"
@@ -124,10 +124,10 @@ arm() {
   # this Mac is exactly that case.)
   if nc -z 127.0.0.1 "$PORT" 2>/dev/null; then
     red "Something is already listening on 127.0.0.1:$PORT."
-    red "Run ./sleep-test.sh clean if it is a previous run, or set GS_MCP_PORT to a free port."; exit 1
+    red "Run ./sleep-test.sh clean if it is a previous run, or set MCP_PORT to a free port."; exit 1
   fi
 
-  echo "=== gs-mcp suspend test: arming ==="
+  echo "=== mcp_server suspend test: arming ==="
   echo "Stone=$GS_STONE  Port=$PORT  idle timeout=$IDLE"
   echo
 
@@ -155,7 +155,7 @@ arm() {
 
   # --- the server -------------------------------------------------------------
   echo "Starting front end on 127.0.0.1:$PORT ..."
-  GS_MCP_PORT="$PORT" GS_MCP_IDLE_TIMEOUT="$IDLE" ./run-server.sh > "$SERVER_LOG" 2>&1
+  MCP_PORT="$PORT" MCP_IDLE_TIMEOUT="$IDLE" ./run-server.sh > "$SERVER_LOG" 2>&1
   local i
   for i in $(seq 1 60); do nc -z 127.0.0.1 "$PORT" 2>/dev/null && break; sleep 0.5; done
   if ! nc -z 127.0.0.1 "$PORT" 2>/dev/null; then
@@ -290,11 +290,11 @@ print_sleep_instructions() {
     *s) idle_s=${IDLE%[sS]} ;;
     *)  idle_s=$IDLE ;;
   esac
-  streamless_s="${GS_MCP_STREAMLESS_TIMEOUT:-60}"
+  streamless_s="${MCP_STREAMLESS_TIMEOUT:-60}"
   # ceiling of the division, plus the pass the count starts on -- see
   # McpRouter>>streamlessPassesBeforeRelease.
-  passes=$(( (streamless_s + ${GS_MCP_REAPER_INTERVAL:-60} - 1) / ${GS_MCP_REAPER_INTERVAL:-60} + 1 ))
-  GRACE_S="${GS_MCP_STREAM_LOSS_GRACE:-10}"
+  passes=$(( (streamless_s + ${MCP_REAPER_INTERVAL:-60} - 1) / ${MCP_REAPER_INTERVAL:-60} + 1 ))
+  GRACE_S="${MCP_STREAM_LOSS_GRACE:-10}"
 
   echo
   echo "=== ready. Now sleep the Mac. ==="
@@ -307,7 +307,7 @@ print_sleep_instructions() {
   dim ""
   dim "  What the length actually buys is dark wakes. Each one lets the front end run a few passes,"
   dim "  and those DO count: a pass with no stream advances toward release at ${passes} of them"
-  dim "  (streamless ${streamless_s}s / reaper ${GS_MCP_REAPER_INTERVAL:-60}s), and a ping the client is too frozen"
+  dim "  (streamless ${streamless_s}s / reaper ${MCP_REAPER_INTERVAL:-60}s), and a ping the client is too frozen"
   dim "  to answer advances toward three. That is the one way a night could still end a session,"
   dim "  and the only way to find out is to give it a whole night to try."
   dim ""
@@ -346,7 +346,7 @@ check() {
   now=$(date +%s); elapsed=$((now - ARMED_AT))
   gemlog="${GEMLOG:-}"; [ -f "$gemlog" ] || gemlog="$(find_gem_log || true)"
 
-  echo "=== gs-mcp suspend test: results ==="
+  echo "=== mcp_server suspend test: results ==="
   echo "Armed ${ARMED_AT_HUMAN:-?}, $((elapsed / 60))m$((elapsed % 60))s ago.  Session $SID, idle timeout $IDLE."
   echo
 
@@ -462,7 +462,7 @@ check() {
   local sent answered expected ran_pct
   sent=$(grep -c '"method":"ping"' "$STREAM_LOG" 2>/dev/null | tr -d ' ')
   answered=$(grep -c 'answered' "$PING_LOG" 2>/dev/null | tr -d ' ')
-  expected=$(( elapsed / ${GS_MCP_PROBE_SECONDS:-300} ))
+  expected=$(( elapsed / ${MCP_PROBE_SECONDS:-300} ))
   if [ "${expected:-0}" -gt 0 ]; then
     ran_pct=$(( 100 * ${sent:-0} / expected ))
     verdict ok "how much of the night the front end ran" \
@@ -548,11 +548,11 @@ simulate() {
   # No idle deadline here either, and for the same reason as arm: with one set, the harness answers
   # pings faithfully and is reaped for perfectly correct idleness a couple of minutes in, which says
   # nothing about the freeze. A fast reaper and a fast probe just make the passes tick quickly enough
-  # to see something happen inside a two-minute run. GS_MCP_PENDING_TIMEOUT is gone with the pending
+  # to see something happen inside a two-minute run. MCP_PENDING_TIMEOUT is gone with the pending
   # -request timer the redesign deleted; setting it here did nothing.
-  GS_MCP_IDLE_TIMEOUT="${GS_MCP_IDLE_TIMEOUT:-none}" \
-  GS_MCP_REAPER_INTERVAL="${GS_MCP_REAPER_INTERVAL:-10}" \
-  GS_MCP_PROBE_INTERVAL="${GS_MCP_PROBE_INTERVAL:-30}" arm || exit 1
+  MCP_IDLE_TIMEOUT="${MCP_IDLE_TIMEOUT:-none}" \
+  MCP_REAPER_INTERVAL="${MCP_REAPER_INTERVAL:-10}" \
+  MCP_PROBE_INTERVAL="${MCP_PROBE_INTERVAL:-30}" arm || exit 1
   . "$META"
   [ -n "${GEMPID:-}" ] || { red "No gem pid recorded; cannot freeze anything."; exit 1; }
 
@@ -585,7 +585,7 @@ clean() {
   # line below announced it had been stopped. stop-server.sh also kills only a gem and escalates
   # SIGTERM -> SIGKILL. The arm-time check above stays on nc for an unrelated reason: it has to see
   # listeners owned by OTHER users, which an unprivileged lsof hides.
-  GS_MCP_PORT="$PORT" ./stop-server.sh
+  MCP_PORT="$PORT" ./stop-server.sh
   echo "Stopped the background captures."
   echo "State left in $STATE (rm -rf it when you are done with the evidence)."
 }

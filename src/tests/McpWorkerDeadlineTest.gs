@@ -7,7 +7,7 @@ GsTestCase subclass: 'McpWorkerDeadlineTest'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %

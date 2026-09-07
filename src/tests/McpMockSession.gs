@@ -8,7 +8,7 @@ McpSession subclass: 'McpMockSession'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %

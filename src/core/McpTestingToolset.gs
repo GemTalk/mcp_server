@@ -7,7 +7,7 @@ McpToolset subclass: 'McpTestingToolset'
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
-  inDictionary: Published
+  inDictionary: Mcp
   options: #()
 
 %
@@ -29,6 +29,34 @@ McpTestingToolset category: 'Mcp-Core'
 removeallmethods McpTestingToolset
 removeallclassmethods McpTestingToolset
 ! ------------------- Class methods for McpTestingToolset
+category: 'session view guard'
+classmethod: McpTestingToolset
+sessionViewRefusalFor: aTestClass
+  "Why aTestClass must not be run from THIS session right now, or nil to go ahead.
+
+   Nearly every suite leaves the caller's transaction alone, but a few cannot: they commit fixtures,
+   abort to reach a clean session, or provoke a real commit conflict. Run from a gem that has
+   uncommitted work -- the normal state of a worker gem mid-task, and the whole point of being able
+   to compile, test, and only then commit -- those suites either discard that work or publish it,
+   and the caller finds out afterwards, if at all. A suite says it is one of them by answering a
+   reason from #movesTheSessionView; the absence of that method means it is safe.
+
+   Only the SESSION's state can decide this, not the suite's: the same suite is perfectly safe from
+   a clean session, which is why the guard asks #needsCommit first and stays silent when there is
+   nothing to lose.
+
+   THE GUARD IS ON THE TOOL PATH ONLY. ./run-unit-tests.sh sends #run to each suite directly, from a
+   throwaway topaz session that owns its transaction and is thrown away at logout, so it is
+   deliberately not gated -- and could not be without wrapping GsTestCase itself, which is kernel."
+  | reason |
+  System needsCommit ifFalse: [^nil].
+  (aTestClass respondsTo: #movesTheSessionView) ifFalse: [^nil].
+  reason := aTestClass movesTheSessionView.
+  reason isNil ifTrue: [^nil].
+  ^aTestClass name asString , ' moves this session''s transaction (' , reason
+    , '), and you have uncommitted changes that would go with it. Commit them or abort them '
+    , 'first, then run it.'
+%
 ! ------------------- Instance methods for McpTestingToolset
 category: 'private'
 method: McpTestingToolset
@@ -124,15 +152,22 @@ tool_describe_test_failure: args
 category: 'tools - testing'
 method: McpTestingToolset
 tool_list_failing_tests: args
-  | names classes out |
+  | names classes out done |
   classes := OrderedCollection new.
   names := args at: 'classNames' ifAbsent: [nil].
   names isNil
     ifTrue: [classes addAll: (ClassOrganizer new allSubclassesOf: (System myUserProfile objectNamed: #TestCase))]
     ifFalse: [names do: [:n | | c | c := self resolveClass: n. c ifNotNil: [classes add: c]]].
   out := WriteStream on: String new.
+  "Progress is reported per CLASS here, not per test: this tool's unit of work is a class, and a
+   client watching it wants to know how many of the suites it named are done. Running EVERY TestCase
+   subclass is the slowest thing this server can be asked to do."
+  done := 0.
   classes do: [:cls | | res |
     res := cls suite run.
+    done := done + 1.
+    self progress: done of: classes size
+      message: done printString , '/' , classes size printString , ' test classes'.
     res failures do: [:t | out nextPutAll: 'FAIL  '; nextPutAll: t asString; nextPut: Character lf].
     res errors do: [:t | out nextPutAll: 'ERROR '; nextPutAll: t asString; nextPut: Character lf]].
   ^out contents isEmpty ifTrue: ['(no failing tests)'] ifFalse: [out contents]
@@ -149,21 +184,36 @@ tool_list_test_classes: args
 category: 'tools - testing'
 method: McpTestingToolset
 tool_run_test_class: args
-  | cls |
+  "Deliberately NO per-test progress, though this is the tool that would benefit most.
+   Reporting per test means iterating the suite here instead of letting TestSuite>>run do it, and
+   measured on 3.7.5 that CHANGES THE COUNTS: a hand-rolled loop over `suite tests`, sending the same
+   #run: to each test into a fresh TestResult, scored one more test passed than the framework's own
+   run of the same suite and lost the selector from the failure labels. The cause was not identified.
+   Whatever it is, a tool that miscounts test results is worse than a tool that reports its progress
+   silently, so this waits for the mechanism to be understood -- probably a TestResult subclass that
+   only OBSERVES, which cannot change what is counted.
+   #tool_list_failing_tests: does report progress, per class, and needs no such change: it already
+   loops over classes and calls the framework's run on each."
+  | cls refusal |
   cls := self resolveClass: (args at: 'className').
-  ^cls isNil
-    ifTrue: ['Class not found: ' , (args at: 'className')]
-    ifFalse: [self formatTestResult: cls suite run label: cls name asString]
+  cls isNil ifTrue: [^'Class not found: ' , (args at: 'className')].
+  refusal := self class sessionViewRefusalFor: cls.
+  refusal ifNotNil: [:r | ^McpError signalKind: #refused message: r].
+  ^self formatTestResult: cls suite run label: cls name asString
 %
 category: 'tools - testing'
 method: McpTestingToolset
 tool_run_test_method: args
-  | cls |
+  "Gated at CLASS granularity like #tool_run_test_class:, and deliberately so: what moves the view
+   is usually the suite's setUp or tearDown, which runs for every one of its tests, so picking a
+   single method out of a view-moving suite is no safer than running the lot."
+  | cls refusal |
   cls := self resolveClass: (args at: 'className').
-  ^cls isNil
-    ifTrue: ['Class not found: ' , (args at: 'className')]
-    ifFalse: [self formatTestResult: (cls selector: (args at: 'selector') asSymbol) run
-      label: (args at: 'className') , '>>' , (args at: 'selector')]
+  cls isNil ifTrue: [^'Class not found: ' , (args at: 'className')].
+  refusal := self class sessionViewRefusalFor: cls.
+  refusal ifNotNil: [:r | ^McpError signalKind: #refused message: r].
+  ^self formatTestResult: (cls selector: (args at: 'selector') asSymbol) run
+    label: (args at: 'className') , '>>' , (args at: 'selector')
 %
 category: 'accessing'
 method: McpTestingToolset
