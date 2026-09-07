@@ -119,12 +119,28 @@ There is no CI. The suites are the whole safety net, and they are cheap:
 
 | | what it covers | needs |
 |---|---|---|
-| `./run-unit-tests.sh` | 18 in-image suites; the full base surface | a stone; a netldi and ~7 login slots for the six forking suites |
+| `./run-unit-tests.sh` | every installed in-image suite | a stone; a netldi for the forking suites |
 | `./test.sh` | the tools **over the wire**, via curl | a stone, a netldi, port 8011 |
 | `./test-tls.sh` | the same transport over HTTPS, with a throwaway self-signed cert | as above, port 8443 |
 
 Optional groups are picked up by class name, so a suite that is not installed is a skip rather than
 an error. The README's **Test** section lists every suite and what it pins.
+
+**Each suite runs in its own topaz session.** That costs a login per suite and buys the one thing
+that matters when something goes wrong: a suite that blows up can no longer take the whole report
+down with it. A Python exception reaching `defaultAction` — a Grail `ModuleNotFoundError` is the one
+seen in practice — is not caught by SUnit's `on: Error do:` and terminates the doit, so with every
+suite in one session the run printed a stack and **no tally at all**: 484 passing tests reported as
+"UNIT TESTS DID NOT RUN". Such a suite is now marked `ABORTED` and listed under `COULD NOT RUN`, the
+others still report, and the run still exits non-zero — an aborted suite has told you nothing, so it
+is a failure rather than a skip.
+
+**On an image with the Grail toolset, set `MCP_GRAIL_DIR` to the Grail checkout.** Grail's Python
+lives in the image but its `.py` stdlib lives on disk under the checkout, and a gem cannot work out
+where — its working directory holds no `src/python/stdlib`, so every `.py`-backed import in
+`McpGrailToolsetTest` fails. Same variable, same meaning and the same up-front check as
+`run-server.sh`. Note that the suite is installed by `--grail` but resolves by class name, so it
+runs on any stone where it was *ever* installed, whether or not you passed `--grail` this time.
 
 Two long-running harnesses exist for things a suite cannot reach — `session-lifetime.sh` and
 `sleep-test.sh` (host-suspend detection). They are not part of the ordinary loop.

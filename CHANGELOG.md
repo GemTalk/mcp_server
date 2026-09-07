@@ -20,6 +20,13 @@ pre-release: breaking changes are expected and are called out rather than shimme
   the auth fixtures all add it; new provisioning code must too.
 * **Renamed the `GS_MCP_*` environment variables to `MCP_*`**, and the `gs_mcp_*` shell functions to
   `mcp_*`. Breaking for existing launch scripts.
+* **`run-unit-tests.sh` runs each suite in its own topaz session**, so one suite that blows up no
+  longer takes the whole report with it. A Grail `ModuleNotFoundError` reaches `defaultAction`,
+  which SUnit's `on: Error do:` does not catch, and it terminated the doit — printing a stack and no
+  tally, so 484 passing tests were reported as "UNIT TESTS DID NOT RUN". Such a suite is now
+  `ABORTED` and listed under `COULD NOT RUN`; the rest report, and the run still exits non-zero.
+  The runner also accepts **`MCP_GRAIL_DIR`** now, with the same meaning and the same up-front check
+  as `run-server.sh`, so `McpGrailToolsetTest` can find the Grail checkout its Python needs.
 * **View hygiene.** The front-end gem now runs `#transactionless` and refreshes its view at the
   start of every maintenance pass, so it stops holding a commit record the stone cannot dispose of.
   Worker views are measured against the repository and refreshed — keeping uncommitted work — when

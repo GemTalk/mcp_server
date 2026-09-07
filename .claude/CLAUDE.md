@@ -54,6 +54,10 @@ lookups by name are fine. `McpRouter`'s class comment says so too.
    merge, drops a method with `errorcount` still reading 0. Compare the file's selectors against the
    image's, or the suite's test count against `grep -c '^test' <file>`.
 3. **Run the unit suite** — `./install.sh && ./run-unit-tests.sh`. Exit 0 means every test passed.
+   Each suite runs in its own topaz session, so a suite that blows up is reported `ABORTED` and
+   listed under `COULD NOT RUN` rather than silencing the whole report. On a stone carrying the
+   Grail toolset suite, pass `MCP_GRAIL_DIR=<Grail checkout>` or that suite cannot resolve its
+   Python.
 4. **Run `./test.sh` if you touched a tool schema, a guardrail, or `McpMutationToolset`.** It is the
    only check that drives the tools over the wire, and nothing in the unit suites covers it, so a
    break there is silent. When many of its checks fail at once, fix the **first** and re-run — a
