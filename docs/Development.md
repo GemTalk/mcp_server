@@ -147,8 +147,10 @@ Two long-running harnesses exist for things a suite cannot reach — `session-li
 
 Expected failures are real signal, not noise:
 
-* On **3.7.2**, `McpExternalSessionTest` fails on purpose. The image carries kernel defect #51438
-  and nothing in `src/` can fix it; the failure is the suite reporting the image.
+* On **3.7.2**, kernel defect #51438 is *covered* rather than reported: `McpSession` probes its
+  worker at session start and resets the kernel's fetch buffer before each call, so the suite
+  passes. On `main`, which carries no cover, `McpExternalSessionTest` fails there on purpose
+  instead — that is the difference between the two lines.
 * One blind-write test (`testTheStoneAloneWouldAllowThatClobber`) is written to **fail on good
   news**, so a stone that grows its own read protection gets noticed instead of quietly making a
   whole layer redundant.
@@ -160,7 +162,7 @@ The project's standing goal is to run on as many GemStone versions and extents a
 | image | base server | OAuth/OIDC front end | notes |
 |---|---|---|---|
 | 3.6.2 | **deferred** | no | no `GsTsExternalSession` on macOS (its own header parser crashes), so no worker gems at all |
-| 3.7.2 | yes | no — no kernel JWT classes | carries #51438; `install.sh` leaves `src/auth` out |
+| 3.7.2 | yes | no — no kernel JWT classes | carries #51438, which this branch covers; `install.sh` leaves `src/auth` out |
 | 3.7.5 | yes | yes, against a local IdP | |
 | 3.7.6+ | yes | yes, including an external OIDC IdP | |
 | 4.0.0 | untested here | untested here | |

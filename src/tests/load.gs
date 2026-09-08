@@ -25,7 +25,7 @@ d isNil ifTrue: [
 names := #( #McpMockSocket #McpMockWorker #McpMockSession #McpStubSession #McpFixtureToolset
   #McpFixtureServer #McpFixtureRouter #McpJsonTest #McpUtf8Test #McpToolTest #McpDispatcherTest
   #McpTransportTest #McpContractTest #McpExtensionTest #McpSessionTest #McpOutboxTest
-  #McpProgressTest #McpStreamTest #McpLifetimeTest #McpViewHygieneTest #McpExternalSessionTest #McpTransactionTest
+  #McpProgressTest #McpStreamTest #McpLifetimeTest #McpViewHygieneTest #McpTransactionTest
   #McpWorkerDeadlineTest #McpBlindWriteTest #McpConcurrentEditTest ).
 names do: [:s | (d includesKey: s) ifFalse: [ d at: s put: nil ] ].
 names size
@@ -61,6 +61,5 @@ input src/tests/McpViewHygieneTest.gs
 
 ! Need a real worker gem, so they need a NETLDI -- see their class comments and run-unit-tests.sh.
 ! These are the only suites here that are not purely in-image.
-input src/tests/McpExternalSessionTest.gs
 input src/tests/McpTransactionTest.gs
 input src/tests/McpWorkerDeadlineTest.gs

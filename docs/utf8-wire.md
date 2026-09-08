@@ -193,7 +193,7 @@ bytes:
 
 - `McpHttpConnection` writes `Content-Length` as `body size`;
 - the worker → front-end hop is measured in bytes by the kernel's result fetch, whose buffer is
-  sized in bytes (see `McpExternalSessionTest`);
+  sized in bytes (see `McpSession class>>resultBufferBytes` and the #51438 cover that rides on it);
 - `MCP_TRACE` writes bodies to the gem log through `GsFile`, where a 16-bit string garbles.
 
 A byte `String`'s `#size` *is* its byte count whatever the bytes are, so all three now hold by

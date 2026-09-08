@@ -29,7 +29,7 @@ call until the transaction is aborted -- so it is the one state in which the ser
 refresh cannot do its job, and the only way out is a tool call the client has to be told to make.
 
 NOT PURELY IN-IMAGE. It spawns one real worker gem (McpSession startWithId:) to commit the
-conflicting change, so it needs a NETLDI, like McpExternalSessionTest. The gem is short-lived: it
+conflicting change, so it needs a NETLDI, like McpWorkerDeadlineTest. The gem is short-lived: it
 runs one expression and tearDown logs it out.'
 %
 expectvalue /Class

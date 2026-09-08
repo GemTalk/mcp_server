@@ -53,8 +53,9 @@ old ASCII-only policy for an incidental reason (nothing above 0x7E) and hold und
 structural one (a byte String''s #size IS its byte count, whatever the bytes are):
  - McpHttpConnection writes Content-Length as `body size`;
  - the worker->front-end hop is measured in BYTES by the kernel''s result fetch, whose buffer is
-   sized in bytes (see McpExternalSessionTest) -- a wide string crossing it is not safe, which is
-   why this writer emits BYTES rather than leaving characters for the transport to encode;
+   sized in bytes (McpSession class>>resultBufferBytes, and the pre-3.7.4.1 kernel-#51438
+   stale-tail cover that rides on it) -- a wide string crossing it is not safe, which is why this
+   writer emits BYTES rather than leaving characters for the transport to encode;
  - MCP_TRACE writes bodies to the gem log through GsFile, where a 16-bit string comes out
    garbled.
 That is the argument for encoding here rather than at the socket: the response leaves the worker

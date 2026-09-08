@@ -10,6 +10,16 @@ that made it. Development ran on several lines at once during that period (`dev`
 each carrying its own bumps, so attribution to a release is approximate before 0.7.0. The project is
 pre-release: breaking changes are expected and are called out rather than shimmed.
 
+**This is the `main372` line.** It carries everything `main` does, plus a cover for kernel defect
+#51438 — the pre-3.7.4.1 external-session result corruption. Every session probes its worker at
+startup and, where the defect is present, resets the kernel's fetch buffer before each call;
+independently of that, every response carries a per-call nonce and one that comes back without it is
+refused, on every version. That is what lets this line run correctly on **3.7.2**. `main` carries no
+cover and fails loudly there instead, in `McpExternalSessionTest` — a suite that does not exist here,
+because the cover both detects the defect and prevents it. Keep the two lines in step by merging
+`main` into this one: the cover is the only intentional difference, and it is confined to
+`McpSession`, `McpMockSession`, `McpMockWorker` and `McpSessionTest`.
+
 ## 0.7.0 — 2026-09-07
 
 * **The classes now install into their own symbol dictionary, `Mcp`**, not `Published`. Migration is

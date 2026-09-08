@@ -18,11 +18,7 @@
 # 484 passing tests reported as "UNIT TESTS DID NOT RUN". Now that suite is marked ABORTED, the
 # others still report, and the exit status still says the run was not clean.
 #
-# NB: four suites are NOT purely in-image, and all four need a NETLDI.
-#   McpExternalSessionTest  drives a real worker gem to check that a result comes back with the
-#                           bytes the worker sent. It fails on any image before 3.7.4.1, which
-#                           carries kernel defect #51438 -- that failure is the suite working, not
-#                           a regression in mcp_server. See its class comment.
+# NB: three suites are NOT purely in-image, and all three need a NETLDI.
 #   McpTransactionTest      spawns a worker gem to commit a CONFLICTING change, which is the only
 #                           way to reach the state a failed commit leaves a session in. Nothing
 #                           short of a real second session can produce it.
@@ -56,20 +52,22 @@ GS_USER="${GS_USER:-DataCurator}"
 GS_PASS="${GS_PASS:-swordfish}"
 MCP_GRAIL_DIR="${MCP_GRAIL_DIR:-}"
 
-# Five suites fork a real worker gem and so need a NETLDI: McpExternalSessionTest,
-# McpTransactionTest, McpWorkerDeadlineTest and McpConcurrentEditTest (all always installed, see
-# below) and McpAuthTest (only where the auth group could be). Ask the image which are present
-# rather than asserting a netldi unconditionally -- the check still has to survive an image where
-# none is installed, and discovering the lack up front beats hitting it as a GciError partway
-# through a suite run.
+# Four suites fork a real worker gem and so need a NETLDI: McpTransactionTest,
+# McpWorkerDeadlineTest and McpConcurrentEditTest (all always installed, see below) and McpAuthTest
+# (only where the auth group could be). Ask the image which are present rather than asserting a
+# netldi unconditionally -- the check still has to survive an image where none is installed, and
+# discovering the lack up front beats hitting it as a GciError partway through a suite run.
 #
-# In practice the first four are always there, so a netldi is in practice always required.
+# In practice the first three are always there, so a netldi is in practice always required.
 # That is not a new burden: mcp_server gives every client its own worker gem, so it cannot serve a
 # single request without a netldi. What changed is that the test run now says so plainly instead of
 # passing on an image the server could not actually run on.
+#
+# The cover for kernel defect #51438 needs no gem of its own -- McpMockWorker models the corrupting
+# fetch in-image, so both sides of that defect are exercised without one.
 mcp_require_netldi_if_forking_suite_installed() {
   local nm have
-  for nm in McpExternalSessionTest McpTransactionTest McpWorkerDeadlineTest McpAuthTest McpConcurrentEditTest; do
+  for nm in McpTransactionTest McpWorkerDeadlineTest McpAuthTest McpConcurrentEditTest; do
     gs_env_image_has "$nm" && have=0 || have=$?
     case "$have" in
       0) gs_env_require_netldi; return $? ;;
@@ -125,7 +123,7 @@ fi
 SUITES="McpJsonTest McpUtf8Test McpBlindWriteTest McpConcurrentEditTest McpToolTest
 McpDispatcherTest McpSessionTest McpOutboxTest McpProgressTest
 McpStreamTest McpLifetimeTest McpViewHygieneTest McpTransportTest McpContractTest
-McpExtensionTest McpExternalSessionTest McpTransactionTest McpWorkerDeadlineTest
+McpExtensionTest McpTransactionTest McpWorkerDeadlineTest
 McpAuthTest McpAuthConformanceTest McpGrailToolsetTest"
 
 # Run each suite in its own topaz session. `iferr 1 stk` still prints the stack for a suite that
