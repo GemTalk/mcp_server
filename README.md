@@ -1297,13 +1297,13 @@ flag, so a missing suite is a skip and not an error:
 Run a single suite while a server is up via the `run_test_class` tool (e.g. `run_test_class
 McpToolTest`). `./run-unit-tests.sh` runs them all and exits 0 when every test passes: the
 socket-less suites `McpJsonTest` (12), `McpUtf8Test` (7), `McpBlindWriteTest` (41),
-`McpToolTest` (58), `McpDispatcherTest` (18), `McpSessionTest` (33), `McpOutboxTest` (9),
+`McpToolTest` (58), `McpDispatcherTest` (18), `McpSessionTest` (34), `McpOutboxTest` (9),
 `McpProgressTest` (19), `McpStreamTest` (18), `McpLifetimeTest` (49), `McpViewHygieneTest` (46),
 `McpTransportTest` (43), `McpContractTest` (35) and `McpExtensionTest` (14), plus
-`McpConcurrentEditTest` (18), `McpTransactionTest` (8) and `McpWorkerDeadlineTest` (4) — **432
+`McpConcurrentEditTest` (18), `McpTransactionTest` (8) and `McpWorkerDeadlineTest` (4) — **433
 tests**, which is the whole suite on a base install, and on 3.7.2. Where the optional groups are
 installed the runner picks their suites up automatically: plus `McpAuthTest` (31) and
-`McpAuthConformanceTest` (25) — **488 tests** — and **515 with the 27 in `McpGrailToolsetTest`** on
+`McpAuthConformanceTest` (25) — **489 tests** — and **516 with the 27 in `McpGrailToolsetTest`** on
 a Grail image.
 
 Five suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
@@ -1332,9 +1332,11 @@ logged in."* Stop the servers, or raise the limit, before reading such a failure
 > buffer, every later result between 1025 bytes and that size arrives as 1024 good bytes followed by
 > the tail of an earlier result — right length, plausible bytes, no error raised. mcp_server meets this
 > on its main path, since every MCP response is a String of JSON pulled out of a worker gem. Here
-> `McpSession` probes for the defect at session start and covers it, so the suite passes on 3.7.2;
-> `main` carries no cover and fails loudly on such an image instead. See `McpSession`'s class
-> comment for the mechanism.
+> `McpSession` probes for the defect at session start and covers it, so nothing in the suite fails
+> for #51438; `main` carries no cover and fails loudly there instead, in `McpExternalSessionTest`.
+> See `McpSession`'s class comment for the mechanism — and *Expected failures* in
+> [docs/Development.md](docs/Development.md) for the five 3.7.2 failures that have nothing to do
+> with the cover, and are the same five on both lines.
 
 > Note: a test helper must never reuse a SUnit framework selector (`run:`, `setUp`, …) — doing
 > so shadows the framework method and silently breaks `suite run`. The transport helper is named

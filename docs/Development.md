@@ -148,12 +148,27 @@ Two long-running harnesses exist for things a suite cannot reach — `session-li
 Expected failures are real signal, not noise:
 
 * On **3.7.2**, kernel defect #51438 is *covered* rather than reported: `McpSession` probes its
-  worker at session start and resets the kernel's fetch buffer before each call, so the suite
-  passes. On `main`, which carries no cover, `McpExternalSessionTest` fails there on purpose
+  worker at session start and resets the kernel's fetch buffer before each call, so nothing fails
+  for it. On `main`, which carries no cover, `McpExternalSessionTest` fails there on purpose
   instead — that is the difference between the two lines.
 * One blind-write test (`testTheStoneAloneWouldAllowThatClobber`) is written to **fail on good
   news**, so a stone that grows its own read protection gets noticed instead of quietly making a
-  whole layer redundant.
+  whole layer redundant. On 3.7.2 it fires: that stone refuses the clobber on its own.
+* **Five failures on 3.7.2 are not this branch's doing**, and they are the same five on `main`.
+  Measured on gs372 on 2026-09-08 — `main372` 433 tests across 17 suites, `main` 428 across 18,
+  the outcomes identical apart from `McpExternalSessionTest`:
+
+  | suite | test |
+  |---|---|
+  | `McpConcurrentEditTest` | `testTheStoneAloneWouldAllowThatClobber` |
+  | `McpConcurrentEditTest` | `testAClientWhoseWorkWasDoomedIsNotToldItsOwnCommitFailed` |
+  | `McpConcurrentEditTest` | `testAFailedRefreshClearsTheWritesAndReChecksTheReads` |
+  | `McpConcurrentEditTest` | `testAServerRefreshOfDoomedWorkSaysSoAndNamesWhatCollided` |
+  | `McpTransactionTest` | `testRefreshAdoptsTheOtherVersionAsTheStartingPoint` |
+
+  All five turn on what the 3.7.2 stone does with a stale read and with a doomed transaction, which
+  is not what 3.7.5 does. The last errors only under `suite run` and passes when run alone, so it
+  also depends on state an earlier test in the suite leaves behind.
 
 ## Version support
 

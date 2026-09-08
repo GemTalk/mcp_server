@@ -95,9 +95,19 @@ expressionWith: anExpressionString nonce: aNonceString
    nonce is the LAST thing in the source -- inside a string literal at a fixed offset from the end --
    so #resultNonceIn: can recover it without parsing Smalltalk and without being confused by a client
    request body that happens to contain quotes or brackets.
-   Every expression sent through #runWorker: must answer a String. All of them do: a JSON-RPC
-   response, the worker bootstrap's ready line, or a fidelity probe's marker string."
-  ^'[' , anExpressionString , '] value , ''' , aNonceString , ''''
+   A NON-STRING ANSWER IS PRINTED rather than concatenated. Every expression the SERVER sends
+   answers a String -- a JSON-RPC response, the worker bootstrap's ready line, a fidelity probe's
+   marker -- and this once said so and relied on it. But #runWorker: is also how a test drives a
+   genuine second gem, and such an expression ends in whatever its last statement answers:
+   `System commitTransaction` answers a Boolean, which does not understand #, and failed the call
+   inside the worker with a doesNotUnderstand that named neither the wrap nor the expression.
+   McpTransactionTest and McpConcurrentEditTest are the ones that do this, and they arrived on the
+   line that has no cover, so nothing had ever driven the two together until now.
+   Printing costs the String path nothing -- it is a single #isKindOf: on a value already in hand --
+   and makes the wrap total, which is worth more than an invariant maintained by hoping."
+  ^'| mcpValue | mcpValue := [' , anExpressionString
+    , '] value. (mcpValue isKindOf: CharacterCollection) ifFalse: [mcpValue := mcpValue printString]. '
+    , 'mcpValue , ''' , aNonceString , ''''
 %
 category: 'ended calls'
 classmethod: McpSession

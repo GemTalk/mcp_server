@@ -203,6 +203,27 @@ testAMaintenanceSendGivesUpRatherThanQueueBehindAClientsCall
   self assert: w expressions size equals: 1.
   self assert: (self includesCS: 'REQUEST-A' in: (forked at: 1))
 %
+category: 'tests - response integrity'
+method: McpSessionTest
+testANonStringAnswerIsPrintedRatherThanBreakingTheWrap
+  "The wrap has to survive an expression that does not answer a String. #runWorker: is not only the
+   server's path to its worker: it is also how McpTransactionTest and McpConcurrentEditTest drive a
+   real second gem, and those expressions end in `System commitTransaction`, which answers a
+   Boolean. Concatenating the nonce onto that raised a doesNotUnderstand inside the worker and lost
+   the call.
+   Evaluated rather than driven through McpMockWorker, which echoes its expression instead of
+   compiling it: what is under test is the SOURCE the wrap builds, and only a compiler can judge it."
+  | nonce |
+  nonce := McpSession resultNonceMarker , '000000000042'.
+  self assert: (self valueOfWrapped: 'true' nonce: nonce) equals: 'true' , nonce.
+  self assert: (self valueOfWrapped: '3 + 4' nonce: nonce) equals: '7' , nonce.
+  self assert: (self valueOfWrapped: 'nil' nonce: nonce) equals: 'nil' , nonce.
+  "A String is passed through untouched -- printString would have added quotes."
+  self assert: (self valueOfWrapped: '''already a string''' nonce: nonce)
+    equals: 'already a string' , nonce.
+  "The block still earns its keep: an expression may declare its own temporaries."
+  self assert: (self valueOfWrapped: '| t | t := 2. t * 3' nonce: nonce) equals: '6' , nonce
+%
 category: 'tests - view release'
 method: McpSessionTest
 testAViewReleaseEndsTheCallAndKeepsTheSession
@@ -658,6 +679,13 @@ testWorkerExpressionCarriesLifetimeBoundsOnlyWhenThereAreSome
       lifetimeBounds: (Array with: 1756400000 with: 'your credential, it''s yours' with: nil with: nil))
     equals: 'McpServer handleJsonString: ''{}'' lifetimeBounds: (Array with: 1756400000'
       , ' with: ''your credential, it''''s yours'' with: nil with: nil)'
+%
+category: 'helpers'
+method: McpSessionTest
+valueOfWrapped: anExpressionString nonce: aNonceString
+  "Compile and run what #expressionWith:nonce: builds, the way the worker gem would, and answer the
+   result the front end would then have to strip the nonce from."
+  ^(McpSession expressionWith: anExpressionString nonce: aNonceString) evaluate
 %
 category: 'helpers'
 method: McpSessionTest
