@@ -529,6 +529,35 @@ testGetWithoutASessionIdIsRefused
 %
 category: 'tests'
 method: McpTransportTest
+testInitializePastTheSessionCapIsRefusedOnTheWire
+  "The complaint behind the cap is that running out of sessions was QUIET from the client's side --
+   a tool call on a session whose worker login had failed answered empty content rather than an
+   error. So the refusal has to be something a client actually reads: a JSON-RPC error bearing the
+   request's own id, in a 200, with no MCP-Session-Id header to be mistaken for a session it could
+   use. This is also the one initialize this suite can drive end to end, precisely because a refused
+   one spawns no worker gem and so needs no NETLDI."
+  | r out |
+  r := McpFixtureRouter new.
+  r maxSessions: 1.
+  r openSessionCreating: [:newId | McpStubSession startWithId: newId].
+  out := (self runRequest: (self postRequest:
+    '{"jsonrpc":"2.0","id":9,"method":"initialize","params":{"protocolVersion":"2025-06-18",'
+    , '"capabilities":{},"clientInfo":{"name":"c","version":"1"}}}') onRouter: r) output.
+  self assert: (self includesCS: 'HTTP/1.1 200' in: out).
+  self assert: (self includesCS: '-32001' in: out).
+  self assert: (self includesCS: '"kind":"sessionLimit"' in: out).
+  self assert: (self includesCS: '"id":9' in: out).
+  "the message says the number and what to do about it, since nothing else will"
+  self assert: (self includesCS: 'maxSessions' in: out).
+  "no session was opened, and the client is handed nothing that looks like one"
+  self assert: r sessionCount equals: 1.
+  self deny: (self includesCS: 'MCP-Session-Id' in: out).
+  "and the router said why, where an operator will find it"
+  self assert: (r loggedLines
+    detect: [:line | self includesCS: 'refused initialize' in: line] ifNone: [nil]) notNil
+%
+category: 'tests'
+method: McpTransportTest
 testLoopbackOriginServed
   "A loopback Origin passes the DNS-rebinding check, so the request is routed (session-less
    tools/list -> the routed -32600, NOT a 403)."

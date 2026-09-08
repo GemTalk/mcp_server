@@ -12,6 +12,27 @@ pre-release: breaking changes are expected and are called out rather than shimme
 
 ## Unreleased
 
+* **A router now caps how many sessions it will hold at once** — `maxSessions`, **3 by default**
+  (`MCP_MAX_SESSIONS`; `none` for no cap, which is the behaviour every earlier release had). Past the
+  cap an `initialize` is refused with a JSON-RPC `-32001` naming the limit and `data.kind`
+  `sessionLimit`, in an HTTP 200 bearing the request's own id and no `MCP-Session-Id` header, and
+  **no login is attempted**. A session is a GemStone login, a repository has a finite number of them,
+  and the login that exhausts them fails for *every* gem on the stone — topaz included — not just for
+  the client that asked: measured on 3.7.5 against a Community Edition database, nine one-shot
+  clients took nine worker gems and the tenth login of any kind failed with error 4039, locking the
+  machine's owner out of their own extent. Nor does it take a careless client to get there —
+  reconnecting opens a *new* session, so reloading an editor window or restarting an agent leaves the
+  old gem behind until the idle rules catch up. The cap is enforced in `openSessionCreating:`, where
+  the slot is taken and the id minted in one critical section, so clients that all arrive during one
+  another's logins cannot talk past it; the slot is released again whether the session registers or
+  the login fails. New: `McpRouter class>>defaultMaxSessions`, `McpRouter>>maxSessions`,
+  `maxSessions:`, `sessionCount`, `isSessionLimitError:`, `refusingOverSessionLimit:on:do:` and
+  `writeSessionLimitError:forRequest:on:`; the startup banner logs `concurrent sessions:`, and each
+  refusal is logged. 7 new tests in `McpLifetimeTest`, 1 in `McpTransportTest`, 7 wire checks in
+  `test.sh`. Closes #2. See *Session lifetime* in the README and
+  [docs/session-lifetime.md](docs/session-lifetime.md).
+  **Behaviour change for an existing deployment**: a server that was serving more than three clients
+  at once will start refusing the fourth. Set `MCP_MAX_SESSIONS` to what your stone can afford.
 * **The gems name themselves in the shared cache**, so a DBA reading
   `System cacheStatisticsForAllSlots` can tell them apart: the front end is
   `<router class>:<port>` (`McpRouter:8000`, `McpAuthRouter:8443`) and each worker is

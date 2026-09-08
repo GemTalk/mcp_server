@@ -39,6 +39,8 @@ PASS=0; FAIL=0
 WRAPPER_PID=""
 LIFE_WRAPPER_PID=""
 LIFE_LOG=""
+CAP_WRAPPER_PID=""
+CAP_LOG=""
 SID=""
 
 cleanup() {
@@ -58,7 +60,10 @@ cleanup() {
   # the second, differently-configured front end the lifetime section starts (see [3/4])
   MCP_PORT="$((PORT + 1))" ./stop-server.sh >/dev/null 2>&1
   [ -n "$LIFE_WRAPPER_PID" ] && kill "$LIFE_WRAPPER_PID" 2>/dev/null
-  rm -f "$SERVER_LOG" "${LIFE_LOG:-}"
+  # and the third, the one-session router the concurrency-cap section starts (see [3/4])
+  MCP_PORT="$((PORT + 3))" ./stop-server.sh >/dev/null 2>&1
+  [ -n "$CAP_WRAPPER_PID" ] && kill "$CAP_WRAPPER_PID" 2>/dev/null
+  rm -f "$SERVER_LOG" "${LIFE_LOG:-}" "${CAP_LOG:-}"
 }
 trap cleanup EXIT
 
@@ -737,6 +742,48 @@ else
   check "...and no front end is left running"  'nothing listening'  "nothing listening"
 fi
 rm -f "$BAD_LOG"
+
+# --- the concurrency cap: a session is a login, and there are only so many ---
+# Driven on real wires because the thing being proved is what a CLIENT sees. The failure this
+# replaces was silent from the client's side -- a worker whose login had failed answered empty
+# content -- so a refusal nothing renders would be no improvement. Forked with MCP_MAX_SESSIONS=1
+# rather than exercised against the default of 3 so the check costs one worker gem at a time: the
+# number is unit-tested, the behaviour is what needs wires. Deliberately checks that the slot comes
+# BACK, since a cap that leaked would take a working server down over an afternoon.
+CAP_PORT=$((PORT + 3))
+CAP_URL="http://127.0.0.1:$CAP_PORT/mcp"
+CAP_LOG="$(mktemp -t gsmcp-cap.XXXXXX)"
+CAP_INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}'
+MCP_PORT="$CAP_PORT" MCP_MAX_SESSIONS=1 ./run-server.sh > "$CAP_LOG" 2>&1 &
+CAP_WRAPPER_PID=$!
+for i in $(seq 1 60); do nc -z 127.0.0.1 "$CAP_PORT" 2>/dev/null && break; sleep 0.5; done
+if nc -z 127.0.0.1 "$CAP_PORT" 2>/dev/null; then
+  check "a router capped at one session starts"    'listening'        "$(cat "$CAP_LOG")"
+  r=$(curl -s -i -m 10 "$CAP_URL" --data-binary "$CAP_INIT")
+  check "...and serves its one session"           'MCP-Session-Id'   "$r"
+  CAP_SID=$(printf '%s' "$r" | grep -i '^mcp-session-id:' | tr -d '\r' | awk '{print $2}')
+  r=$(curl -s -i -m 10 "$CAP_URL" --data-binary "$CAP_INIT")
+  check "a second client is refused, not logged in" '-32001'         "$r"
+  check "...as an answer it can match to its request" '"id":1'       "$r"
+  check "...classified for a client to branch on"  '"kind":"sessionLimit"'  "$r"
+  check "...saying what to do about it"            'maxSessions'     "$r"
+  # No session id on the refusal: there is nothing for the client to hold or retry against, and one
+  # here would be worse than none -- a client would carry it and get a 404 on every later call.
+  if printf '%s' "$r" | grep -qi '^mcp-session-id:'; then
+    check "...and hands back no session id"        'no header'       "an MCP-Session-Id header"
+  else
+    check "...and hands back no session id"        'no header'       "no header"
+  fi
+  curl -s -m 10 -X DELETE "$CAP_URL" -H "MCP-Session-Id: $CAP_SID" >/dev/null 2>&1
+  r=$(curl -s -i -m 10 "$CAP_URL" --data-binary "$CAP_INIT")
+  check "ending a session gives its slot back"     'MCP-Session-Id'  "$r"
+  CAP_SID=$(printf '%s' "$r" | grep -i '^mcp-session-id:' | tr -d '\r' | awk '{print $2}')
+  curl -s -m 10 -X DELETE "$CAP_URL" -H "MCP-Session-Id: $CAP_SID" >/dev/null 2>&1
+else
+  check "a router capped at one session starts"  'listening'  "did not start. log: $(cat "$CAP_LOG")"
+fi
+MCP_PORT="$CAP_PORT" ./stop-server.sh >/dev/null 2>&1 || true
+rm -f "$CAP_LOG"
 
 # ---------------------------------------------------------------------------
 echo

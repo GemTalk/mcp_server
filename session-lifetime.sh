@@ -1,7 +1,8 @@
-# Router configuration shared by run-server.sh and run-auth-server.sh: SESSION LIFETIME, and the
-# VIEW HYGIENE knobs at the foot of this file. Two subjects, one file, because they share the
-# duration vocabulary and both launchers need both -- and because a knob documented in only one of
-# two near-identical launchers is a knob nobody finds.
+# Router configuration shared by run-server.sh and run-auth-server.sh: SESSION LIFETIME (including
+# the cap on how many sessions there may be AT ONCE), and the VIEW HYGIENE knobs at the foot of this
+# file. Two subjects, one file, because they share the duration vocabulary and both launchers need
+# both -- and because a knob documented in only one of two near-identical launchers is a knob nobody
+# finds.
 #
 # Sourced, not executed. Reads the MCP_* variables below and leaves Smalltalk setter sends for
 # them in $LIFETIME_LINES and $VIEW_HYGIENE_LINES, ready to drop into either launcher's topaz
@@ -11,6 +12,23 @@
 #
 # Durations accept a unit suffix -- 90s, 30m, 4h -- or a bare number of seconds.
 #
+#   MCP_MAX_SESSIONS        How many client sessions this server will hold AT ONCE. Default 3;
+#                           `none` removes the cap. The only knob here that is a count of sessions
+#                           rather than a span of time, and the only one that makes a failure
+#                           impossible rather than short-lived. Past the cap an initialize is
+#                           refused, with a JSON-RPC error saying so, instead of being answered with
+#                           a login attempt that may fail.
+#                           Why so low by default: a session IS a GemStone login, a repository has a
+#                           finite number of them (ten, on a Community Edition database), and the
+#                           login that exceeds that fails for EVERY gem on the stone -- topaz
+#                           included -- not just for the client that asked. Nor does it take a
+#                           careless client to get there: reconnecting opens a NEW session, so
+#                           reloading an editor window or restarting an agent leaves the old worker
+#                           gem behind until the idle rules catch up, and a few of those inside one
+#                           idle period is nobody being reckless. Raise it once you know what your
+#                           stone allows (`SessionsCurrent` against `StnMaxSessions`), and remember
+#                           that the unit suite and any other server on the same stone are spending
+#                           from the same budget.
 #   MCP_IDLE_TIMEOUT        How long a client may be quiet before its worker gem is released.
 #                           Default 30m. `none` removes the deadline entirely: the session then
 #                           lives as long as its client keeps answering liveness pings on the SSE
@@ -105,6 +123,22 @@ r $selector: $secs."
 }
 
 LIFETIME_LINES=""
+
+# A count of sessions, not a duration: no unit suffix, and `none` is an instruction (never refuse an
+# initialize) that has to reach the router as an explicit nil rather than as an absence. 0 is refused
+# rather than folded in with `none`, as it is for MCP_MAX_COMMITS_BEHIND and for the same reason:
+# taken literally it is a server that refuses every client, and it reads like the opposite.
+case "$(printf '%s' "${MCP_MAX_SESSIONS:-}" | tr 'A-Z' 'a-z')" in
+  '')          ;;
+  none|off)    LIFETIME_LINES="$LIFETIME_LINES
+r maxSessions: nil." ;;
+  0)           echo "ERROR: MCP_MAX_SESSIONS must be at least 1, or 'none' for no cap (got '0')." >&2
+               exit 1 ;;
+  *[!0-9]*)    echo "ERROR: MCP_MAX_SESSIONS must be a whole number of sessions, or 'none' (got '$MCP_MAX_SESSIONS')." >&2
+               exit 1 ;;
+  *)           LIFETIME_LINES="$LIFETIME_LINES
+r maxSessions: $MCP_MAX_SESSIONS." ;;
+esac
 
 # `none` is an instruction, not an absence: it has to reach the router as an explicit nil.
 case "$(printf '%s' "${MCP_IDLE_TIMEOUT:-}" | tr 'A-Z' 'a-z')" in

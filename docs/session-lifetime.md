@@ -1,7 +1,7 @@
 # Session lifetime
 
-How long an MCP session lives — and therefore how long a worker gem, and the uncommitted work
-inside it, survives. Split out of the [README](../README.md), whose
+How long an MCP session lives — and how many may live at once — and therefore how long a worker gem,
+and the uncommitted work inside it, survives. Split out of the [README](../README.md), whose
 [Server-initiated messages](../README.md#server-initiated-messages) section describes the SSE
 pathway that everything below rides on.
 
@@ -12,6 +12,7 @@ against the others before a port is bound.
 
 | | default | |
 |---|---|---|
+| `maxSessions` | 3 | how many sessions this router holds **at once**. `nil` = no cap |
 | `sessionIdleTimeoutSeconds` | 1800 | how long a client may be quiet. **`nil` = no deadline at all** |
 | `streamLossGraceSeconds` | 10 | how long a client that **closed its stream** gets to open another. `0` = release at once; `nil` = no fast release |
 | `streamlessIdleTimeoutSeconds` | 60 | the floor for a client that opens **no** stream |
@@ -24,6 +25,43 @@ against the others before a port is bound.
 | `pinnedViewGraceSeconds` | 300 | how long a **running call** may hold the oldest commit record open under pressure before it is ended. `nil` = never end one |
 | `reapOnFailedProbe` | `true` | whether an unanswered ping frees a gem early. Forced on with no deadline |
 | `requestTimeoutSeconds` | `nil` | how long **one request** may run before it is ended. `nil` = no limit |
+
+**How many at once is a separate question, and the only one here with a hard answer.** Everything
+else on this page decides when a session *ends*; `maxSessions` decides whether one may *begin*. A
+router at its cap refuses `initialize` with a JSON-RPC error naming the limit — `-32001`, `data.kind`
+`sessionLimit`, HTTP 200, bearing the request's own id and no `MCP-Session-Id` — and **attempts no
+login**, so the failure is this server's to report rather than the repository's to suffer.
+
+That distinction is the whole point. A session *is* a GemStone login; a repository has a finite
+number of them (ten, on a Community Edition database); and the login that exhausts them fails for
+**every** gem on the stone, not just for the client that asked. Measured on 3.7.5: nine one-shot
+clients took nine worker gems, the tenth login of any kind failed with
+`the maximum number of users are already logged in` (error 4039), and the owner of that database was
+locked out of it — including from plain `topaz` — until the router was killed. Killing the router did
+release all nine within about four seconds, each worker being an RPC gem whose client process is the
+router, but that is a recovery for somebody who already knows.
+
+It does not take a careless client to get there, which is why a cap rather than a shorter timeout is
+the answer. A well-behaved client calls `initialize` once and reuses its `MCP-Session-Id`, so
+ordinary use costs one session — but **reconnecting counts as a new client**. Reloading an editor
+window, restarting an agent, or a client that crashes and retries each leaves a gem behind until the
+idle rules catch up, and eight of those inside one idle period is nobody being reckless. The idle
+rules make that self-correcting; the cap makes it impossible. Both are worth having, and the cap is
+the one that does not depend on how long the wait is.
+
+**Three is deliberately low.** One agent session, one editor, and one left over for a reconnect that
+has not yet been reaped is what a developer on a localhost server actually runs, and the number this
+default has to be safe against is not what a busy server wants but what the smallest plausible stone
+allows. Raise it once you know what yours allows — `SessionsCurrent` against `StnMaxSessions` — and
+remember that the unit suite, `test.sh`, and any other server on the same stone spend from the same
+budget. `MCP_MAX_SESSIONS=none` restores the pre-0.7 behaviour: no cap, and a router that opens
+sessions until the stone refuses.
+
+The slot is taken where the id is minted, in one critical section, and released again whether the
+session registers or the login fails. That matters because opening a session is mostly the *login*,
+and the front end goes on serving other connections across it: a count taken only once a session was
+registered would let every client that arrived during one login past a cap they had all already
+filled.
 
 **What actually ends a session**, in one place: a **deadline counts calls**; **`none` counts pings**;
 a client that **closed its stream** is released after `streamLossGraceSeconds`, whatever the idle
@@ -124,8 +162,9 @@ diagnosing a reap can find it. See
 what the stream is being kept for: progress on long-running tool calls.
 
 From the shell, `MCP_IDLE_TIMEOUT` and friends set these on either launcher — durations like
-`90s`, `30m`, `4h`, or `none`. See [session-lifetime.sh](../session-lifetime.sh), which documents
-each. That file also carries the **view-hygiene** knobs below (`MCP_FRONT_END_TX_MODE`,
+`90s`, `30m`, `4h`, or `none`. `MCP_MAX_SESSIONS` is the one that is a count rather than a duration:
+a whole number of sessions, or `none`. See [session-lifetime.sh](../session-lifetime.sh), which
+documents each. That file also carries the **view-hygiene** knobs below (`MCP_FRONT_END_TX_MODE`,
 `MCP_MAX_COMMITS_BEHIND`, `MCP_STUCK_VIEW_GRACE`, `MCP_PINNED_VIEW_GRACE`): a different
 subject — the repository's commit records rather than the client — but the same launchers, the same
 duration vocabulary, and one place to read rather than two near-identical copies in the launchers.
@@ -176,8 +215,10 @@ the renewed token was never consulted about lifetime. A read-write session is *n
 token that has lost the write scope: that token keeps working, but buys no time, and the next session
 opens read-only.
 
-**The log says what was in force.** The startup banner records the whole lifetime configuration, and
-a reap names the session and the reason the client was given rather than a count — the defaults are
+**The log says what was in force.** The startup banner records the whole lifetime configuration and
+the concurrency cap beside it (`concurrent sessions: at most 3`); a refused `initialize` is logged
+with the count in use, since a client turned away by a server that is otherwise working has nothing
+else to go on; and a reap names the session and the reason the client was given rather than a count — the defaults are
 class-side and the rest arrives as JSON in the fork string, so nothing else on disk records what
 *this* router was told. Every line is timestamped, since the events worth correlating (a host
 suspend, a wake, a client reconnect) are ones the gem neither caused nor can see.

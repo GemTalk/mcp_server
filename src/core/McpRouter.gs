@@ -12,7 +12,7 @@ McpBase subclass: 'McpRouter'
                     reapOnFailedProbe streamLossGraceSeconds messageTrace messageTraceLimit
                     requestTimeoutSeconds callChannels callMutex callCounter
                     frontEndTransactionMode maxCommitsBehind sessionAccessWarned maintenanceCallTimeoutSeconds
-                    stuckViewGraceSeconds pinnedViewGraceSeconds)
+                    stuckViewGraceSeconds pinnedViewGraceSeconds maxSessions sessionsOpening)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -30,6 +30,12 @@ MCP-Session-Id header: `initialize` opens a worker (a McpSession) and returns it
 other request is forwarded to that client''s worker. The worker runs the actual tools
 (McpServer, per gem). This class owns only the socket, the id -> McpSession map (mutex-guarded)
 and the idle-session reaper -- it never parses a tool call itself.
+
+Because a session IS a login, it also decides HOW MANY there may be. #maxSessions caps the workers
+one router will hold at once (three by default) and #openSessionCreating: refuses an initialize past
+it, so a client that reconnects in a loop costs this server its own allowance rather than the
+stone''s: a repository has a finite number of sessions, and exhausting it locks out every other
+gem -- topaz included -- not just the next MCP client.
 
 It also decides WHAT each worker is: per session it resolves the worker class (workerClassName) and
 the tool surface (toolsetNames, defaulting to the installed toolsets) and pushes them into the worker
@@ -185,6 +191,27 @@ defaultMaxCommitsBehind
    never moved its view was 489 commits behind, with a stone backlog of 490. 20 is not a
    conservative number."
   ^20
+%
+category: 'session limit'
+classmethod: McpRouter
+defaultMaxSessions
+  "How many client sessions -- and therefore how many worker gems -- one router will hold at once: 3.
+   Deliberately far below what any repository allows, because the number this has to be safe against
+   is not the number of clients a busy server wants but the number of logins the SMALLEST plausible
+   stone has. A GemStone/S Community Edition database allows ten sessions in total, and a session
+   spent here is one the owner of that database cannot spend on topaz: measured on 3.7.5, nine
+   one-shot clients took nine worker gems and the tenth login of any kind failed with error 4039,
+   locking the machine''s owner out of their own extent until the router was killed.
+   Three because it is enough for the ordinary use and cheap to be wrong about. One agent session,
+   one editor, and one left over for the reconnect that has not yet been reaped is what a developer
+   on a localhost server actually runs; a deployment that wants more says so, having looked at what
+   its stone allows. The failure this bounds is not a careless client -- reconnecting IS opening a
+   new session, so reloading an editor window or restarting an agent leaves the old gem behind until
+   the idle rules catch up, and eight of those inside one idle period is nobody being reckless.
+   nil is the pre-0.7 behaviour: no cap, and a router that will open sessions until the stone
+   refuses. Set it only where the stone''s session budget is known to be larger than any client
+   population that can reach this port."
+  ^3
 %
 category: 'message trace'
 classmethod: McpRouter
@@ -458,6 +485,10 @@ applyConfig: aConfigDict
     ifTrue: [self maxCommitsBehind: (aConfigDict at: 'maxCommitsBehind')].
   (aConfigDict includesKey: 'maintenanceCallTimeoutSeconds')
     ifTrue: [self maintenanceCallTimeoutSeconds: (aConfigDict at: 'maintenanceCallTimeoutSeconds')].
+  "Through the SETTER for the same reason as maxCommitsBehind above: nil is a real setting (no cap)
+   and every other value has a floor, so a number that cannot work must fail in the child gem."
+  (aConfigDict includesKey: 'maxSessions')
+    ifTrue: [self maxSessions: (aConfigDict at: 'maxSessions')].
   stuckViewGraceSeconds := aConfigDict at: 'stuckViewGraceSeconds' ifAbsent: [stuckViewGraceSeconds].
   pinnedViewGraceSeconds := aConfigDict at: 'pinnedViewGraceSeconds' ifAbsent: [pinnedViewGraceSeconds].
   messageTrace := aConfigDict at: 'messageTrace' ifAbsent: [messageTrace].
@@ -660,6 +691,7 @@ configDict
   d at: 'reaperIntervalSeconds' put: reaperIntervalSeconds.
   d at: 'maxSessionLifetimeSeconds' put: maxSessionLifetimeSeconds.
   d at: 'reapOnFailedProbe' put: reapOnFailedProbe.
+  d at: 'maxSessions' put: maxSessions.
   d at: 'maxCommitsBehind' put: maxCommitsBehind.
   d at: 'maintenanceCallTimeoutSeconds' put: maintenanceCallTimeoutSeconds.
   d at: 'stuckViewGraceSeconds' put: stuckViewGraceSeconds.
@@ -1041,6 +1073,13 @@ initialize
   routesTable := self buildRoutes.
   isRunning := false.
   sessions := Dictionary new.
+  "How many of those there may be at once, and how many are being opened right now. The cap is
+   SEEDED rather than left nil-for-default, because nil is a real setting here -- no cap at all --
+   and could not also mean 'use the default'. sessionsOpening is the reservation
+   #openSessionCreating: holds across a login, and is a count rather than a flag because several
+   clients can be logging in at the same time."
+  maxSessions := self class defaultMaxSessions.
+  sessionsOpening := 0.
   allowedOriginHosts := self class defaultAllowedOriginHosts.  "loopback -- a security default"
   tlsCertificateFile := nil.
   tlsPrivateKeyFile := nil.
@@ -1115,6 +1154,16 @@ isRunning
    (not the instance variable) by the SSE drain loop, so a test can hold a stream open against a
    router that never bound a socket -- see McpFixtureRouter."
   ^isRunning == true
+%
+category: 'session limit'
+method: McpRouter
+isSessionLimitError: anError
+  "Whether anError is the refusal #openSessionCreating: raises at #maxSessions, as opposed to any
+   other way opening a session can fail.
+   The KIND is the test, not the class. McpError is raised all over this server for unrelated
+   reasons, and a front end that read every one of them as 'at capacity' would tell a client to wait
+   for a slot when what had actually happened was a bad token or an unresolvable toolset."
+  ^(anError isKindOf: McpError) and: [anError kind == #sessionLimit]
 %
 category: 'running'
 method: McpRouter
@@ -1453,6 +1502,34 @@ maxSessionLifetimeSeconds: anIntegerOrNil
   "Cap the absolute lifetime of every session this router opens (nil removes the cap)."
   maxSessionLifetimeSeconds := anIntegerOrNil
 %
+category: 'session limit'
+method: McpRouter
+maxSessions
+  "How many client sessions this router will hold at once, or nil for no cap. 3 by default; see
+   McpRouter class>>defaultMaxSessions for why so few.
+   This is a bound on what this SERVER may spend, and it is worth being clear about what it is not.
+   It does not make sessions cheaper, it does not release anything sooner (that is the session
+   lifetime family), and it is not admission control for load -- a router at its cap is usually a
+   router holding gems for clients that have gone away and not yet been reaped. What it buys is that
+   the failure is this server's to report rather than the repository's to suffer: the eleventh login
+   to a ten-session stone fails for EVERY gem, so a front end that keeps opening sessions until the
+   stone says no has already taken the database out from under its owner by the time it finds out."
+  ^maxSessions
+%
+category: 'session limit'
+method: McpRouter
+maxSessions: anIntegerOrNil
+  "Cap the concurrent client sessions this router will hold (nil removes the cap -- see
+   #maxSessions). Raises on anything else.
+   Zero is refused rather than taken literally. It reads like 'no sessions' and it would be honoured
+   as such -- a server that answers every initialize with a refusal -- but the thing somebody
+   typing it almost always means is nil, and the two are as far apart as a setting can be."
+  anIntegerOrNil isNil ifTrue: [^maxSessions := nil].
+  ((anIntegerOrNil isKindOf: Integer) and: [anIntegerOrNil >= 1]) ifFalse: [
+    ^self error: 'maxSessions must be nil, or an integer of at least 1, and is '
+      , anIntegerOrNil printString , '.'].
+  maxSessions := anIntegerOrNil
+%
 category: 'message trace'
 method: McpRouter
 messageTrace
@@ -1558,28 +1635,52 @@ openSessionCreating: aOneArgBlock
    McpSession), and register it in the id -> session map. The block runs OUTSIDE the mutex (login is
    slow); the id mint and map insert are guarded. Subclasses (McpAuthRouter) pass a block that
    starts a per-user JWT session. A block that raises (e.g. a failed login) propagates and leaves
-   nothing registered."
+   nothing registered.
+
+   THIS IS ALSO WHERE #maxSessions IS ENFORCED, and it is the only place: taking the slot and
+   minting the id happen in ONE critical section, so a cap of three cannot be talked past by three
+   clients that all looked before any of them logged in. That is not a theoretical race. The slow
+   part of this method is the login inside aOneArgBlock, and the front end goes on running other
+   GsProcesses across it -- each connection has its own (#serve:) -- so the window between deciding
+   there is room and filling it is the widest window in the class. A check made anywhere else would
+   be a second opinion; #serveInitialize:on: asks no question of its own, it just answers whatever
+   this decides.
+   The reservation is a COUNT of sessions being opened, held until the session is registered or the
+   attempt has failed (the ensure:), rather than a placeholder in the map: nothing may find a
+   half-built session by id, and the count still has to include it.
+   Refused with an McpError kinded #sessionLimit, which #refusingOverSessionLimit:on:do: turns into
+   an answer the client can read. Raising rather than answering nil because every other way this
+   method fails to produce a session is a raise, and because a caller that ignores the difference
+   would otherwise send #workerClassName: to nil."
   | newId sess |
-  newId := mutex critical: [self nextSessionId].
-  sess := aOneArgBlock value: newId.
-  "Push this router's worker config, then prepare the worker gem -- both BEFORE the session is
-   registered, so no request can reach an unprepared worker. Resolving here (rather than in the
-   worker) is what lets an authenticated router later narrow the tool surface per principal."
-  sess workerClassName: self effectiveWorkerClassName;
-    toolsetNames: self effectiveToolsetNames;
-    toolsetOptions: self effectiveToolsetOptions;
-    serverName: self serverName;
-    serverTitle: self serverTitle;
-    serverVersion: self serverVersion;
-    requestTimeoutSeconds: self requestTimeoutSeconds;
-    maintenanceCallTimeoutSeconds: self maintenanceCallTimeoutSeconds;
-    prepareWorker.
-  "An absolute lifetime cap, where one is configured, becomes an expiry the session carries. A
-   subclass may tighten it further (McpAuthRouter, from the access token's exp) but never loosen it."
-  self maxSessionLifetimeSeconds ifNotNil: [:secs |
-    sess expiresAtSeconds: System timeGmt + secs].
-  mutex critical: [sessions at: newId put: sess].
-  ^sess
+  newId := mutex critical: [
+    (maxSessions notNil and: [self sessionCount >= maxSessions])
+      ifTrue: [nil]
+      ifFalse: [sessionsOpening := sessionsOpening + 1. self nextSessionId]].
+  newId isNil ifTrue: [
+    ^McpError signalKind: #sessionLimit message: 'This server is already serving its maximum of '
+      , maxSessions printString , ' concurrent sessions, and each one is a GemStone login. Close '
+      , 'one (DELETE /mcp), wait for an idle one to be released, or raise maxSessions.'].
+  ^[sess := aOneArgBlock value: newId.
+    "Push this router's worker config, then prepare the worker gem -- both BEFORE the session is
+     registered, so no request can reach an unprepared worker. Resolving here (rather than in the
+     worker) is what lets an authenticated router later narrow the tool surface per principal."
+    sess workerClassName: self effectiveWorkerClassName;
+      toolsetNames: self effectiveToolsetNames;
+      toolsetOptions: self effectiveToolsetOptions;
+      serverName: self serverName;
+      serverTitle: self serverTitle;
+      serverVersion: self serverVersion;
+      requestTimeoutSeconds: self requestTimeoutSeconds;
+      maintenanceCallTimeoutSeconds: self maintenanceCallTimeoutSeconds;
+      prepareWorker.
+    "An absolute lifetime cap, where one is configured, becomes an expiry the session carries. A
+     subclass may tighten it further (McpAuthRouter, from the access token's exp) but never loosen it."
+    self maxSessionLifetimeSeconds ifNotNil: [:secs |
+      sess expiresAtSeconds: System timeGmt + secs].
+    mutex critical: [sessions at: newId put: sess].
+    sess]
+      ensure: [mutex critical: [sessionsOpening := sessionsOpening - 1]]
 %
 category: 'routing'
 method: McpRouter
@@ -1961,6 +2062,29 @@ refreshFrontEndView
         , ([ex description] on: Error do: [:x | ex class name asString]).
       self]
 %
+category: 'session limit'
+method: McpRouter
+refusingOverSessionLimit: req on: conn do: aBlock
+  "Run aBlock -- the WHOLE of one initialize -- and, if it turns out this router is at #maxSessions,
+   answer the client a refusal it can read instead (#writeSessionLimitError:forRequest:on:).
+   Wrapped around initialize rather than checked before it because the cap is decided where the slot
+   is taken (#openSessionCreating:) and must be decided nowhere else; see that method for the race a
+   second check here would lose. So this is only the ANSWER, and it is a wrapper so that both front
+   ends give the same one -- McpAuthRouter's initialize is a different method with its own four
+   ways to refuse a client before it ever gets here.
+   Only the refusal is caught. Everything else keeps the answer it had: a failed login is still a 401
+   on the authenticated front end, and an unexpected error still escapes to the 500 in
+   #handleConnection:. The refusal is logged because it is the one event that explains a client
+   being turned away by a server that is working perfectly -- and it names no client, because at this
+   point there is nothing to name."
+  ^[aBlock value]
+    on: McpError
+    do: [:ex |
+      (self isSessionLimitError: ex) ifFalse: [ex pass].
+      self log: 'refused initialize: ' , ex description , ' (' , self sessionCount printString
+        , ' in use)'.
+      ex return: (self writeSessionLimitError: ex forRequest: req on: conn)]
+%
 category: 'progress'
 method: McpRouter
 registerChannelForToken: aToken session: sess
@@ -2156,6 +2280,12 @@ runOnPort: aPort
       ifTrue: ['(none -- this router offers no tools)']
       ifFalse: [self effectiveToolsetNames inject: '' into: [:a :b | a isEmpty ifTrue: [b] ifFalse: [a , ' ' , b]]]).
   self log: 'session lifetime: ' , self lifetimeSummary.
+  "Separate from the lifetime line because it answers a different question -- how many at once,
+   rather than how long each one lasts -- and because it is the line an operator will want when a
+   client reports being refused by a server that is otherwise working."
+  self log: 'concurrent sessions: ' , (self maxSessions isNil
+    ifTrue: ['no cap (bounded only by what the stone allows)']
+    ifFalse: ['at most ' , self maxSessions printString]).
   "READ BACK from the shared cache rather than reported from what was just set, so the line says what
    the cache actually holds -- a name too long for it arrives truncated, and one that could not be set
    at all leaves the gem unnamed. This is the line that ties this log to a row in
@@ -2408,11 +2538,14 @@ method: McpRouter
 serveInitialize: req on: conn
   "Open a new client session (worker gem), forward the initialize request to it, and answer with
    the worker's response plus the MCP-Session-Id header the client echoes on later requests.
+   A client that would take this router past #maxSessions is told so instead, by the wrapper --
+   which asks no question of its own, it only answers the one #openSessionCreating: settles.
    McpAuthRouter overrides this to authenticate the request and open a per-user (JWT) session."
-  | sess |
-  sess := self openSession.
-  conn writeJson: (sess forward: (req at: 'body' ifAbsent: [''])
-    lifetimeBounds: (self lifetimeBoundsFor: sess)) sessionId: sess id
+  ^self refusingOverSessionLimit: req on: conn do: [
+    | sess |
+    sess := self openSession.
+    conn writeJson: (sess forward: (req at: 'body' ifAbsent: [''])
+      lifetimeBounds: (self lifetimeBoundsFor: sess)) sessionId: sess id]
 %
 category: 'running'
 method: McpRouter
@@ -2581,6 +2714,18 @@ sessionAt: aSessionId
    reaped). Mutex-guarded, since it reads the shared `sessions` map."
   aSessionId isNil ifTrue: [^nil].
   ^mutex critical: [sessions at: aSessionId ifAbsent: [nil]]
+%
+category: 'session limit'
+method: McpRouter
+sessionCount
+  "How many of this router's session slots are in use: the sessions registered, plus any being
+   opened right now. What #maxSessions is compared against.
+   Reads the map WITHOUT taking the mutex, unlike #sessionAt:, and that is required rather than
+   sloppy: #openSessionCreating: sends this from inside the critical section that decides on the
+   cap, and a GemStone Semaphore is not reentrant, so taking it here would deadlock the front end on
+   its first initialize. Every other caller wants the number for a log line or a test, where a count
+   that may have moved since is no worse than one that moved immediately after."
+  ^sessions size + sessionsOpening
 %
 category: 'session lifetime'
 method: McpRouter
@@ -3228,4 +3373,32 @@ writeSessionError: aMessage code: httpCode reason: reasonString on: conn
   err at: 'jsonrpc' put: '2.0'; at: 'id' put: nil.
   err at: 'error' put: (Dictionary new at: 'code' put: -32600; at: 'message' put: aMessage; yourself).
   conn writeStatus: httpCode reason: reasonString body: (McpJson write: err)
+%
+category: 'session limit'
+method: McpRouter
+writeSessionLimitError: anError forRequest: req on: conn
+  "Answer a refused initialize: a JSON-RPC -32001 error bearing the request's own id and a
+   `data.kind` of sessionLimit, in an HTTP 200.
+   200 rather than 503, for the reason #writeEndedCallError:forSession:id:on: gives about a call this
+   server ended: the request was accepted, routed and understood, and what was refused is the thing
+   it asked for -- a result the client should match to the request it is waiting on, rather than a
+   transport refusal it might not read as JSON-RPC at all. Which matters more here than there. The
+   whole complaint behind this cap is that running out of sessions was QUIET from the client's side,
+   and an answer some clients render as a bare connection failure would leave it quiet.
+   No MCP-Session-Id header goes back, which is the other half of the answer: there is no session,
+   so there is nothing for the client to retry against and nothing for it to hold.
+   The id is dug back out of the body rather than passed down. This is the only path that wants it,
+   and #serveInitialize:on: is a method subclasses override -- threading an id through it for an
+   error case would be a parameter every override had to carry and none of them would use."
+  | parsed err |
+  parsed := self parseBody: (req at: 'body' ifAbsent: ['']).
+  err := Dictionary new.
+  err at: 'jsonrpc' put: '2.0'.
+  err at: 'id' put: (parsed isNil ifTrue: [nil] ifFalse: [parsed at: 'id' ifAbsent: [nil]]).
+  err at: 'error' put: (Dictionary new
+    at: 'code' put: -32001;
+    at: 'message' put: anError description;
+    at: 'data' put: (Dictionary new at: 'kind' put: 'sessionLimit'; yourself);
+    yourself).
+  ^conn writeJson: (McpJson write: err)
 %

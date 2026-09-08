@@ -14,14 +14,19 @@ GsTestCase subclass: 'McpLifetimeTest'
 expectvalue /Class
 doit
 McpLifetimeTest comment: 
-'How long a session lives, and what the front end is entitled to conclude before ending one.
+'How long a session lives, how many may live at once, and what the front end is entitled to conclude
+before ending one.
 
 McpStreamTest covers the PATHWAY -- the stream, the outbox, the return path. This covers the POLICY
 that rides on it, which is a separate thing and a configurable one: how long a client may be quiet,
 whether it may be quiet forever, what an unanswered ping proves, and what happens to all of it when
 the host was asleep.
 
-The four questions each group answers:
+The five questions each group answers:
+  - the session cap: how many sessions there may be AT ONCE, which is the one bound here that is
+    not about time. A session is a GemStone login, a repository has a finite number of them, and
+    running out is a failure the whole stone suffers rather than the client that caused it -- so the
+    cap is enforced where the slot is taken, before any login is attempted.
   - config: the intervals are deployment policy, not literals in a method, and they travel to a
     forked child gem with everything else. A short-timeout hosted auth server and a localhost server
     a developer comes back to after lunch are the same code with different numbers.
@@ -221,6 +226,23 @@ testAnIntervalThatDoesNotDivideRoundsUp
   r livenessProbeIntervalSeconds: 90; reaperIntervalSeconds: 60.
   self assert: r probePassInterval equals: 2
 %
+category: 'tests - the session cap'
+method: McpLifetimeTest
+testAnOpenThatFailsGivesItsSlotBack
+  "A refused login, an unresolvable worker class, a stone that has gone away -- none of them may
+   leave the slot spent. This is the failure that would be invisible: a server that counted itself
+   down to nothing over an afternoon and then refused every client, with nothing in its own state to
+   say why."
+  | r msg |
+  r := McpFixtureRouter new.
+  r maxSessions: 1.
+  msg := [r openSessionCreating: [:newId | self error: 'login refused']. nil]
+    on: Error do: [:e | [e description] on: Error do: [:x | e messageText]].
+  self deny: msg isNil.
+  self assert: r sessionCount equals: 0.
+  "and the slot is really usable again, not merely counted back"
+  self assert: (r openSessionCreating: [:newId | McpStubSession startWithId: newId]) notNil
+%
 category: 'tests - liveness'
 method: McpLifetimeTest
 testAProbeLostToAStreamHandoverIsDiscardedNotCondemned
@@ -281,6 +303,21 @@ testARefreshedTokenExtendsAnExistingDeadline
   self assert: (sess renewExpiryTo: now + 900).
   self assert: sess expiresAtSeconds equals: now + 900
 %
+category: 'tests - the session cap'
+method: McpLifetimeTest
+testAReleasedSessionGivesItsSlotBack
+  "The cap counts what is HELD, not what has ever been opened -- otherwise a server would refuse
+   clients on the strength of gems it had already let go, and a cap of three would be three sessions
+   per lifetime rather than three at a time."
+  | r sess |
+  r := McpFixtureRouter new.
+  r maxSessions: 1.
+  sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
+  r releaseAbandonedSession: sess unlessActiveSince: sess lastActivitySeconds.
+  self assert: (r sessionAt: sess id) isNil.
+  self assert: r sessionCount equals: 0.
+  self assert: (r openSessionCreating: [:newId | McpStubSession startWithId: newId]) notNil
+%
 category: 'tests - counting'
 method: McpLifetimeTest
 testASessionGoesAtTheConfirmationCount
@@ -293,6 +330,29 @@ testASessionGoesAtTheConfirmationCount
   self assert: (r reapReasonFor: sess) isNil.
   sess noteProbeSent; noteAlive.
   self assert: (self includesCS: 'idle' in: (r reapReasonFor: sess))
+%
+category: 'tests - the session cap'
+method: McpLifetimeTest
+testASessionPastTheCapIsRefusedRatherThanAttempted
+  "The login is never TRIED, which is the whole point: a stone refuses the eleventh session to EVERY
+   gem on it and not merely to the client that asked for it, so a front end that finds out by
+   attempting has already taken the database away from its owner by the time it knows."
+  | r attempts kind |
+  r := McpFixtureRouter new.
+  r maxSessions: 2.
+  attempts := 0.
+  1 to: 2 do: [:i |
+    r openSessionCreating: [:newId |
+      attempts := attempts + 1.
+      McpStubSession startWithId: newId]].
+  kind := [r openSessionCreating: [:newId |
+    attempts := attempts + 1.
+    McpStubSession startWithId: newId]. nil]
+      on: McpError do: [:ex | ex return: ex kind].
+  self assert: kind equals: #sessionLimit.
+  "the third creation block never ran at all, and nothing was registered for it"
+  self assert: attempts equals: 2.
+  self assert: r sessionCount equals: 2
 %
 category: 'tests - unreachable'
 method: McpLifetimeTest
@@ -514,6 +574,20 @@ testMaxSessionLifetimeBecomesAnExpiryAtOpen
   self deny: sess isExpired.
   self assert: (sess expiresAtSeconds - System timeGmt) <= 60
 %
+category: 'tests - the session cap'
+method: McpLifetimeTest
+testNoCapIsARealSetting
+  "nil is the behaviour every release before this one had, and a legitimate choice on an image whose
+   session budget is known to be larger than any client population that can reach the port. So it
+   has to be reachable, and it has to mean 'never refuse' rather than 'use the default'."
+  | r |
+  r := McpFixtureRouter new.
+  self assert: r maxSessions equals: McpRouter defaultMaxSessions.
+  r maxSessions: nil.
+  1 to: McpRouter defaultMaxSessions + 2 do: [:i |
+    r openSessionCreating: [:newId | McpStubSession startWithId: newId]].
+  self assert: r sessionCount equals: McpRouter defaultMaxSessions + 2
+%
 category: 'tests - liveness'
 method: McpLifetimeTest
 testOneAnswerClearsTheWholeUnansweredRun
@@ -597,6 +671,40 @@ testRenewalNeverShortensAndSaysSoWhenItDoesNothing
   self deny: (sess renewExpiryTo: now + 500).
   self deny: (sess renewExpiryTo: now + 200).
   self assert: sess expiresAtSeconds equals: now + 500
+%
+category: 'tests - the session cap'
+method: McpLifetimeTest
+testTheCapRefusesANumberThatCannotWork
+  "Zero reads like nil and is as far from it as a setting can be -- a server that answers every
+   initialize with a refusal -- so it is refused at the setter rather than honoured six months
+   later. Checked in the setter and not at startup because applyConfig: routes this key through it,
+   which is what makes a bad number in a fork string fail in the child gem."
+  | msg |
+  msg := [McpRouter new maxSessions: 0. nil]
+    on: Error do: [:e | [e description] on: Error do: [:x | e messageText]].
+  self deny: msg isNil.
+  self assert: (self includesCS: 'maxSessions' in: msg).
+  self assert: ([McpRouter new maxSessions: -1. nil]
+    on: Error do: [:e | e return: 'raised']) equals: 'raised'.
+  "nil and any positive integer are both accepted"
+  self assert: (McpRouter new maxSessions: nil; yourself) maxSessions isNil.
+  self assert: (McpRouter new maxSessions: 12; yourself) maxSessions equals: 12
+%
+category: 'tests - the session cap'
+method: McpLifetimeTest
+testTheCapTravelsToAForkedChild
+  "Config reaches a detached front end only through the fork string, so a cap that does not
+   round-trip is a cap the gem actually serving clients does not have. Both settings have to
+   survive, and for the same reason the idle timeout does: 'no cap' is an instruction, and a key
+   that is present-and-null is the only way JSON says it."
+  | child |
+  child := McpRouter new applyConfigJson: (McpRouter new maxSessions: 7; yourself) configJson.
+  self assert: child maxSessions equals: 7.
+  child := McpRouter new applyConfigJson: (McpRouter new maxSessions: nil; yourself) configJson.
+  self assert: child maxSessions isNil.
+  "and an unconfigured router round-trips to the default rather than to no cap at all"
+  self assert: (McpRouter new applyConfigJson: McpRouter new configJson) maxSessions
+    equals: McpRouter defaultMaxSessions
 %
 category: 'tests - counting'
 method: McpLifetimeTest
@@ -722,6 +830,24 @@ testTheShippingDefaultsAreTheDocumentedOnes
   self assert: r realizedProbeIntervalSeconds equals: 120.
   self assert: r streamlessPassesBeforeRelease equals: 2.
   self assert: r validateTimerConfig == r
+%
+category: 'tests - the session cap'
+method: McpLifetimeTest
+testTheSlotIsTakenBeforeTheLoginAndNotAfterIt
+  "The window this closes. Opening a session is mostly the LOGIN, and the front end goes on running
+   other connections' GsProcesses across it -- so a slot counted only once the session had been
+   registered would let every client that arrived during that login past a cap they had all already
+   filled. Staged deterministically by having the creation block, which runs exactly where a login
+   would, ask this same router for another session."
+  | r inner |
+  r := McpFixtureRouter new.
+  r maxSessions: 1.
+  r openSessionCreating: [:newId |
+    inner := [r openSessionCreating: [:otherId | McpStubSession startWithId: otherId]. nil]
+      on: McpError do: [:ex | ex return: ex kind].
+    McpStubSession startWithId: newId].
+  self assert: inner equals: #sessionLimit.
+  self assert: r sessionCount equals: 1
 %
 category: 'tests - unreachable'
 method: McpLifetimeTest

@@ -48,6 +48,12 @@
 #                     variable above; use one or the other, not both. Each name is validated against
 #                     that toolset's class>>declaredOptionNames when it is set, so a mistyped option
 #                     refuses to start instead of being silently ignored.
+#   MCP_MAX_SESSIONS - how many client sessions this server will hold AT ONCE (default 3; `none`
+#                     for no cap). Past it an initialize is refused with a JSON-RPC error rather
+#                     than answered with a login. A session is a GemStone login and a repository has
+#                     a finite number of them, so this is what keeps a client that reconnects in a
+#                     loop from spending the whole stone's allowance and locking its owner out. See
+#                     ./session-lifetime.sh for how to pick the number.
 #   Session lifetime (how long a quiet client keeps its worker gem, whether it may keep it
 #                     indefinitely, and when it is warned) is configured with the MCP_IDLE_TIMEOUT
 #                     family -- see ./session-lifetime.sh, which documents each one. The common case
