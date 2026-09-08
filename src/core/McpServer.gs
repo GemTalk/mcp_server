@@ -31,11 +31,11 @@ session routing live in McpRouter.
 Which tools a server offers is NOT fixed by its class: each server registers a list of McpToolset
 instances (see McpToolset), so a deployment -- or a vendor shipping only their own tools -- chooses the
 surface. The front end resolves both the worker class and the toolset list per session and pushes them
-into the worker gem in one call (prepareWorkerWithToolsets:options:readOnly:serverName:title:version:),
-so a worker
-never decides what it is. Subclass this to change BEHAVIOR (the kernel guards, the worker entry,
-dispatcher wiring, the advertised identity); write a toolset to add tools. A subclass is used only when
-it is NAMED in the router''s workerClassName config.
+into the worker gem in one call
+(prepareWorkerWithToolsets:options:readOnly:serverName:title:version:frontEnd:cacheName:), so a
+worker never decides what it is. Subclass this to change BEHAVIOR (the kernel guards, the worker
+entry, dispatcher wiring, the advertised identity); write a toolset to add tools. A subclass is used
+only when it is NAMED in the router''s workerClassName config.
 
 To start the server, see McpRouter (runOnPort: / forkOnPort:).'
 %
@@ -274,12 +274,12 @@ newWithToolsetNames: anArrayOfNames toolsetOptions: aDictOrNil
 %
 category: 'worker'
 classmethod: McpServer
-prepareWorkerWithToolsets: anArrayOfNames options: anOptionsJsonOrNil readOnly: aBoolean serverName: aNameOrNil title: aTitleOrNil version: aVersionOrNil frontEnd: aFrontEndSessionOrNil
+prepareWorkerWithToolsets: anArrayOfNames options: anOptionsJsonOrNil readOnly: aBoolean serverName: aNameOrNil title: aTitleOrNil version: aVersionOrNil frontEnd: aFrontEndSessionOrNil cacheName: aCacheNameOrNil
   "Prepare THIS worker gem for one client, in the single call the front end makes at session open
    (McpSession>>prepareWorker). Sent to the class the front end NAMED, so `self` is the server class to
    build -- a worker never chooses.
-   Order matters: the read-only flag is set FIRST, so the build can leave gated tools out of the
-   registry entirely (McpServer>>registerToolsets). Then the instance is built with the given toolsets
+   Order matters: the read-only flag is set BEFORE THE BUILD, so the build can leave gated tools out
+   of the registry entirely (McpServer>>registerToolsets). Then the instance is built with the given toolsets
    and identity and cached where handleJsonString: looks for it, which moves tool registration off the
    client's first request and makes an unresolvable toolset fail here, at session open, rather than
    mid-conversation. Answers a short line for the log.
@@ -294,8 +294,16 @@ prepareWorkerWithToolsets: anArrayOfNames options: anOptionsJsonOrNil readOnly: 
    open-ended map whose shape the core does not know, and because both ends already have
    McpBase>>parseBody: -- so nothing new has to be written, and a value that cannot be represented
    as JSON cannot travel, which is exactly the constraint the fork string needs anyway. nil means no
-   toolset was configured, which is the ordinary case."
+   toolset was configured, which is the ordinary case.
+
+   aCacheNameOrNil is what this gem calls itself in the shared cache, built by the front end
+   (McpSession>>workerCacheName) because it names the front end and the client. Applied FIRST, before
+   anything that can fail: a bootstrap that dies on an unresolvable toolset is exactly when an
+   operator is looking at the session list, and it costs nothing to have the gem already named by
+   then. nil, and a name the cache refuses, both leave the gem as it was -- see
+   McpBase class>>nameThisGem:."
   | srv |
+  self nameThisGem: aCacheNameOrNil.
   self sessionReadOnly: aBoolean.
   SessionTemps current at: #McpFrontEndSession put: aFrontEndSessionOrNil.
   srv := self newWithToolsetNames: anArrayOfNames

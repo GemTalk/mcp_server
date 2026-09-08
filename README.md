@@ -752,7 +752,8 @@ tools itself (those run in the per-client `McpServer` workers):
 
 - **`initialize`** → the front end opens a `McpSession` (a `GsTsExternalSession` worker gem,
   logged in as the current user via a one-time password), **prepares** it with a single
-  `prepareWorkerWithToolsets:readOnly:serverName:title:version:` call — which sets read-only, resolves the
+  `prepareWorkerWithToolsets:options:readOnly:serverName:title:version:frontEnd:cacheName:` call —
+  which names the worker's gem in the shared cache, sets read-only, resolves the
   named toolsets, applies the advertised identity, and pre-builds the server so the client's first
   request has no registration to do — assigns a server-side id, and returns it in the
   **`MCP-Session-Id`** response header. A worker class or toolset the worker gem cannot resolve fails
@@ -777,6 +778,56 @@ client's long tool call no longer stalls anyone else — see
 [Concurrency & robustness](#concurrency--robustness) below.
 The base `McpRouter` logs every worker in as the current (server) user; the network-facing
 `McpAuthRouter` instead logs each worker in as the **token's own GemStone user** via JWT.
+
+### Naming the gems
+
+Every gem here is created by `GsTsExternalSession`, and the stock name for one of those is `GciTs` —
+so without help the front end, every worker, and any unrelated external session on the stone are
+**indistinguishable** in the one column of `System cacheStatisticsForAllSlots` that is supposed to say
+who a session is. Each gem therefore names itself as it starts:
+
+| gem | name | example |
+|---|---|---|
+| front end | `<router class>:<port>` | `McpRouter:8000`, `McpAuthRouter:8443` |
+| worker | `<worker class>:<front-end session>:<first 8 of the MCP session id>` | `McpServer:5:978EC559` |
+
+```
+$ # System cacheStatisticsForAllSlotsShort, three rows of it:
+name                     pid     sessionId
+McpServer:5:978EC559     43793   4
+McpRouter:8000           42435   5
+McpServer:5:5ADC62A4     43797   6
+```
+
+**Both names lead with the class that is actually running** — the router's own class, and for a worker
+the class the router *told* it to be (`workerClassName`) — so a deployment running a subclass sees
+that subclass rather than a fixed role name that would then be a lie: `AcmeDbServer:5:978EC559`
+against an `McpAuthRouter:8443`. The two roles stay distinguishable by shape as well as by class: a
+front end carries one `:` field after its class, a worker two.
+
+The rest of the table then answers **on its own**, without a log to cross-check: a worker's middle
+field is the front-end gem's own `sessionId`, so a stone running several routers still sorts into
+servers, and the last field is the head of the `MCP-Session-Id` the router logs in full — a prefix, so
+grepping the gem log for it finds that client's traffic. The worker's own session id and host pid are
+not repeated, because they are already the other columns of the same row.
+
+Two consequences worth knowing:
+
+- **A supervising process can find these gems by name** —
+  `System cacheStatisticsForProcessWithCacheName: 'McpRouter:8000'` answers the router's row —
+  rather than recording its pid somewhere at fork time.
+- The front end logs the name it actually got (`shared cache name: McpRouter:8000`), read back from
+  the cache rather than reported from what it set, so the log and the table cannot disagree.
+
+The cache accepts **1 to 31 characters** and raises `OutOfRange` outside that, so a name is truncated
+rather than allowed to fail a login or a server start. Where the class name and the identifying
+fields cannot both fit, **the identifying fields are kept whole and the class name is cut** — a
+router name shortened to `McpRouter:80` would name a port nothing is listening on, and a worker's cut
+the same way would identify neither its server nor its client. This is reachable in practice for a
+worker, whose class name a deployment chooses. `System cacheName:` is the only lever, and
+it names only the session that sends it (there is no `cacheName:forSession:`, and
+`descriptionOfSession:` has no setter at all), which is why a worker's name travels *into* the worker
+with the rest of its bootstrap instead of being applied from outside.
 
 ## Concurrency & robustness
 
@@ -1166,7 +1217,7 @@ grouped by area, with one loader per group:
 
 ```
 src/core/    21 classes  the server itself: protocol, transport, dispatch, toolsets   (always)
-src/tests/   24 classes  the SUnit suites and their fixtures                          (always)
+src/tests/   26 classes  the SUnit suites and their fixtures                          (always)
 src/auth/     3 classes  the OAuth/OIDC front end McpAuthRouter + its two suites      (3.7.5+)
 src/grail/    2 classes  the optional GemStone-Python toolset + its suite             (--grail)
 load.gs                  files in core + tests, then commits
@@ -1278,6 +1329,16 @@ flag, so a missing suite is a skip and not an error:
   admitted gap, the `beginClosing`/`close` handshake, and latest-GET-wins — including that detaching
   a superseded stream must *not* roll the generation back, or the stream that replaced it would look
   stale and end too.
+- `McpGemNameTest` — what the gems call themselves in the shared cache
+  ([Naming the gems](#naming-the-gems)): both ends of the cache's measured 1–31 character range, that
+  an over-long name is truncated rather than raising and an empty one is dropped, that each gem leads
+  with the class actually running (the front end its own, plus its port; the worker the class the
+  router named it, plus the front-end session and the head of the client's id), that a long worker
+  class name loses characters rather than the two identifying fields, that the name travels in the
+  bootstrap expression, and that the worker end applies it. The three collaborators sit in different
+  hierarchies (`McpBase` holds the limit, `McpRouter` and `McpSession` build the two names), so they
+  are pinned together rather than in three suites. Every test that can rename the *driving* session
+  restores it.
 - `McpStreamTest` — the whole server-to-client pathway with no sockets: the session-scoped GET
   (`400`/`404`/stream), the drain onto the stream, a closing outbox getting its last flush, a POSTed
   JSON-RPC response → `202` and its correlation back to the ping that caused it, the probe over an
@@ -1346,12 +1407,12 @@ McpToolTest`). `./run-unit-tests.sh` runs them all and exits 0 when every test p
 socket-less suites `McpJsonTest` (12), `McpUtf8Test` (7), `McpBlindWriteTest` (41),
 `McpToolTest` (65), `McpDispatcherTest` (21), `McpSessionTest` (24), `McpOutboxTest` (9),
 `McpProgressTest` (19), `McpStreamTest` (18), `McpLifetimeTest` (49), `McpViewHygieneTest` (46),
-`McpTransportTest` (43), `McpContractTest` (35) and `McpExtensionTest` (14), plus
-`McpConcurrentEditTest` (18), `McpExternalSessionTest` (5), `McpTransactionTest` (8) and
-`McpWorkerDeadlineTest` (4) — **438 tests**,
+`McpTransportTest` (43), `McpContractTest` (35), `McpExtensionTest` (14) and `McpGemNameTest` (16),
+plus `McpConcurrentEditTest` (18), `McpExternalSessionTest` (5), `McpTransactionTest` (8) and
+`McpWorkerDeadlineTest` (4) — **454 tests**,
 which is the whole suite on a base install. Where the optional groups are installed the runner picks
-their suites up automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **494
-tests** — and **523 with the 29 in `McpGrailToolsetTest`** on a Grail image.
+their suites up automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **510
+tests** — and **539 with the 29 in `McpGrailToolsetTest`** on a Grail image.
 
 Six suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
 `McpAuthConformanceTest` commit a throwaway JWT user and spawn real worker gems; they are in the

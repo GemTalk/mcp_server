@@ -167,6 +167,34 @@ too; `sendingSession` is safe). `messageText` is prose with the payload after th
 `'message: '`. And `System session` is a different number from `stoneSessionId` — `sendSignal:to:`
 and `sendingSession` both live in the `System session` namespace.
 
+**Naming a session is `System cacheName:`, and it is the only lever.** Every gem a
+`GsTsExternalSession` creates is called **`GciTs`** — the front end, every worker, and any unrelated
+external session on the stone, identical in the one column of `System cacheStatisticsForAllSlots`
+that says who a session is. (An unnamed linked topaz is `TopazL`, an unnamed RPC gem `TopazR`.)
+What is measured about it, identically on 3.7.2, 3.7.5 and 3.7.6:
+
+* **The limit is 1 to 31 characters.** 31 is accepted; **32 raises `OutOfRange` (2061)** naming the
+  range, and so does the **empty string** — 0 is not a legal length. So a name wants truncating, and
+  an empty one dropping, rather than being allowed to fail a login.
+* **It names only the current session.** There is no `cacheName:forSession:`, so a gem cannot be
+  named by whoever started it — a name for a worker has to travel *into* the worker and be applied
+  there.
+* **`descriptionOfSession:` is not this and has no setter.** It carries the host pid, the view age
+  and the client pid, but *not* the name. The name reads back through
+  `cacheStatisticsForAllSlots` / `cacheStatisticsForSessionId:` (first field of the row) or
+  `cacheStatisticsForProcessWithCacheName:`, which also means a **name is a lookup key**: a
+  supervising process can find a gem by name instead of recording its pid somewhere.
+* It is **not transactional** — no commit, and a suite that only renames its own session needs no
+  `movesTheSessionView`. `System currentSessionNames` does *not* show it (session number and userId
+  only).
+
+What this project does with it: [README, Naming the gems](../README.md#naming-the-gems).
+
+**A class-side method cannot declare a temp called `name`** — `| name |` there is `[1030] variable
+has already been declared`, because `name` is an instance variable of `Class` and so already in
+scope when `self` is a class. Loud, not silent, but the message does not say where the collision
+comes from. The same goes for the other `Class` ivars.
+
 ## Sockets and TLS
 
 `GsSocket>>acceptTimeoutMs:` returns **nil** on an idle timeout, but **`GsSecureSocket` overrides it

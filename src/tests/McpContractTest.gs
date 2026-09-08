@@ -239,7 +239,7 @@ testPrepareWorkerAppliesReadOnlyBeforeBuilding
   self withFreshWorkerCacheDo: [
     self savingReadOnlyDo: [ | out |
       McpServer prepareWorkerWithToolsets: McpServer defaultToolsetNames options: nil
-        readOnly: true serverName: nil title: nil version: nil frontEnd: nil.
+        readOnly: true serverName: nil title: nil version: nil frontEnd: nil cacheName: nil.
       out := McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'.
       self deny: (self includesCS: 'execute_code' in: out).
       self deny: (self includesCS: 'compile_method' in: out).
@@ -256,7 +256,7 @@ testPrepareWorkerBuildsNamedSurfaceAndCaches
       note := McpServer
         prepareWorkerWithToolsets: #('McpBrowsingToolset') options: nil
         readOnly: false serverName: 'acme-db-mcp' title: 'Acme Labels - sandbox' version: '2.5.0'
-        frontEnd: nil.
+        frontEnd: nil cacheName: nil.
       self assert: (self includesCS: 'McpServer ready' in: note).
       listed := (((McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
         indexOfSubCollection: 'describe_class') > 0).
