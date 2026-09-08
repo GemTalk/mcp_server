@@ -7,7 +7,7 @@
 #
 # WHICH SUITES RUN depends on what is installed, not on a list kept here: the auth suites and the
 # Grail suite are added only if their classes resolve, because install.sh files in src/auth only on
-# an image with kernel JWT support and src/grail only on --grail. A base install runs the twelve
+# an image with kernel JWT support and src/grail only on --grail. A base install runs the eighteen
 # core suites.
 #
 # EACH SUITE RUNS IN ITS OWN TOPAZ SESSION, which costs a login per suite and buys the only thing
