@@ -514,6 +514,26 @@ buildRoutes
   d at: 'DELETE' put: [:req :conn | self serveDelete: req on: conn].
   ^d
 %
+category: 'gem name'
+method: McpRouter
+cacheNameForPort: aPort
+  "This front end's name in the shared cache: the router class and the port it listens on --
+   'McpRouter:8000', or 'McpAuthRouter:8443' for the authenticated front end. Applied by #runOnPort:.
+   THE PORT IS THE PART THAT MUST SURVIVE, so the class name is what gets cut when the two cannot
+   both fit in the cache's 31 characters -- a subclass may be named anything, and a name with the
+   port missing would be the one thing this is for. That is what
+   McpBase class>>gemCacheNameFrom:keeping: is for, and why the port is passed as the suffix.
+   Two reasons the port and not something shorter: it is how an operator identifies a running server
+   (./stop-server.sh takes a port, and several differently-configured routers can serve one stone at
+   once), and it makes the gem findable by name with #cacheStatisticsForProcessWithCacheName: --
+   which is the point, since the alternative a supervising process has today is recording this gem's
+   pid in a file so it can stop it later.
+   The class name rather than a literal because the router class is an extension point
+   (McpFixtureRouter, McpAuthRouter), and a front end that reported the superclass's name would be
+   the wrong answer to 'what is this gem'.
+   Split out of #runOnPort: so the format can be pinned without opening a socket."
+  ^self class gemCacheNameFrom: self class name asString keeping: ':' , aPort printString
+%
 category: 'progress'
 method: McpRouter
 channelAt: aCallIdOrNil
@@ -2116,10 +2136,17 @@ runOnPort: aPort
   "Bind a localhost-only listener and run the accept loop until #stop.
    BLOCKING: this is meant to be the gem's main activity (forked GsProcesses
    only run while the gem is actively executing Smalltalk)."
+  | priorCacheName |
   self validateWorkerConfig.
   self validateTimerConfig.
   serverSocket := self makeListenerOnPort: aPort.
   isRunning := true.
+  "Name the gem now that it is really listening, so the shared-cache statistics a DBA reads say which
+   server this is instead of the stock 'GciTs' every GsTsExternalSession gem arrives with. After the
+   bind rather than before it, because a gem that failed to take the port is not this server.
+   The old name is kept for the epilogue below; see there for the case that needs it."
+  priorCacheName := self class gemCacheName.
+  self class nameThisGem: (self cacheNameForPort: aPort).
   self forkReaper.
   self forkSignalPoller.
   self log: self class name asString , ' listening on ' ,
@@ -2129,6 +2156,11 @@ runOnPort: aPort
       ifTrue: ['(none -- this router offers no tools)']
       ifFalse: [self effectiveToolsetNames inject: '' into: [:a :b | a isEmpty ifTrue: [b] ifFalse: [a , ' ' , b]]]).
   self log: 'session lifetime: ' , self lifetimeSummary.
+  "READ BACK from the shared cache rather than reported from what was just set, so the line says what
+   the cache actually holds -- a name too long for it arrives truncated, and one that could not be set
+   at all leaves the gem unnamed. This is the line that ties this log to a row in
+   System cacheStatisticsForAllSlots, so it has to be the truth and not the intention."
+  self log: 'shared cache name: ' , (self class gemCacheName ifNil: ['(unnamed)']).
   "The mode the gem IS in, asked of the gem, not the mode this router was configured with. Only a
    detached front end applies the configured one (class-side runOnPort:configJson:); run in the
    foreground this reports the calling session's mode, which is the honest answer to 'what will this
@@ -2161,6 +2193,11 @@ runOnPort: aPort
    stopped in-image. There the workers would sit logged in, holding login slots and transaction
    views, until that session happened to end."
   self log: 'Released ' , self closeAllSessions printString , ' worker gem(s).'.
+  "Give the gem its name back, for the same case the release above serves: an interactive topaz that
+   called #runOnPort: and was then stopped in-image would otherwise sit labelled as a server that is
+   no longer running -- which is exactly the wrong thing to tell the DBA this name is for. A detached
+   front-end gem exits here, so for the ordinary deployment this changes nothing."
+  self class nameThisGem: priorCacheName.
   self log: 'McpRouter stopped.'.
   ^self
 %

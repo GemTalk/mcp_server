@@ -124,7 +124,7 @@ fi
 # early. See the note above about not wrapping these heredocs in `$( )`.
 SUITES="McpJsonTest McpUtf8Test McpBlindWriteTest McpConcurrentEditTest McpToolTest
 McpDispatcherTest McpSessionTest McpOutboxTest McpProgressTest
-McpStreamTest McpLifetimeTest McpViewHygieneTest McpTransportTest McpContractTest
+McpStreamTest McpLifetimeTest McpViewHygieneTest McpTransportTest McpContractTest McpGemNameTest
 McpExtensionTest McpExternalSessionTest McpTransactionTest McpWorkerDeadlineTest
 McpAuthTest McpAuthConformanceTest McpGrailToolsetTest"
 

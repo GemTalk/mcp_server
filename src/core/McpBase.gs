@@ -18,7 +18,15 @@ McpBase comment:
 per-client session routing) and the per-client worker McpServer (JSON-RPC dispatch + tools).
 Holds only what both roles share, and nothing that belongs to either. Not instantiated directly.
 
-Two groups. Reading a request: #parseBody: and best-effort #log:.
+Three groups. Reading a request: #parseBody: and best-effort #log:.
+
+Naming the gem (#nameThisGem:, #gemCacheName, #maxGemCacheNameSize): every gem here is a
+GsTsExternalSession''s and so arrives called ''GciTs'', which makes the front end, every worker and
+any unrelated external session on the stone indistinguishable in the shared-cache statistics a DBA
+reads. Both roles name themselves -- the router as it starts serving, the worker as it is prepared --
+and `System cacheName:` names only the CURRENT session, so the shared part is the setting and the
+31-character limit, while what each name SAYS belongs to the role
+(McpRouter>>cacheNameForPort:, McpSession>>workerCacheName).
 
 Writing a server-INITIATED message: #notification:params: and #request:params:id:, which build the
 JSON-RPC envelopes for messages the server sends first -- down the standalone SSE stream rather
@@ -119,6 +127,39 @@ combineSurrogateEscapesIn: aString
         i := i + step]].
   ^out isNil ifTrue: [aString] ifFalse: [out contents asString]
 %
+category: 'gem name'
+classmethod: McpBase
+gemCacheName
+  "The name THIS gem is known by in the shared cache, or nil if it cannot be read.
+   Read out of #cacheStatisticsForSessionId: -- the first field of a session's row -- because that is
+   where the name lives. #descriptionOfSession: carries the host pid, the view age and the client pid
+   but NOT the name, which is worth saying because the name reads like a session description and is
+   not one. Measured on 3.7.2, 3.7.5 and 3.7.6.
+   Answers nil rather than raising: every caller here is either logging or restoring a label, and
+   neither is worth failing over. See #nameThisGem:."
+  ^[(System cacheStatisticsForSessionId: System session) at: 1]
+    on: Error
+    do: [:ex | ex return: nil]
+%
+category: 'gem name'
+classmethod: McpBase
+gemCacheNameFrom: aBaseString keeping: aSuffixString
+  "aBaseString followed by aSuffixString, cut to fit #maxGemCacheNameSize -- with THE SUFFIX KEPT
+   WHOLE and the base cut instead.
+   WHICH END SURVIVES is the whole reason this is a method. A gem name here is 'what this is' followed
+   by 'which one it is', and it is the second part a reader needs: 'McpRouter:8000' cut to
+   'McpRouter:80' would name a port nothing is listening on, which is worse than leaving the gem
+   unnamed. #nameThisGem: truncates too, as the last-resort guard on a name from anywhere, and that
+   one cuts the tail -- by then there is nothing left to say which end mattered. This is where the
+   caller says.
+   A suffix that fills the limit by itself leaves no room for a base and answers alone; a suffix
+   longer than the limit is left for #nameThisGem: to cut. Neither is reachable from the callers here
+   (a port is at most five digits), and both answer something rather than raising, because a
+   diagnostic label is never worth an exception."
+  | room |
+  room := self maxGemCacheNameSize - aSuffixString size.
+  ^(aBaseString copyFrom: 1 to: (aBaseString size min: (room max: 0))) , aSuffixString
+%
 category: 'private'
 classmethod: McpBase
 hexUnitIn: aString at: anIndex
@@ -141,6 +182,50 @@ hexUnitIn: aString at: anIndex
           ifFalse: [^nil]]].
     value := value * 16 + digit].
   ^value
+%
+category: 'gem name'
+classmethod: McpBase
+maxGemCacheNameSize
+  "The longest name the shared cache will accept: 31 characters.
+   MEASURED, not documented, and identical on 3.7.2, 3.7.5 and 3.7.6: 31 is accepted, 32 raises
+   OutOfRange (error 2061) naming the range, and so does an EMPTY string -- the legal range is 1 to
+   31, not 0 to 31. Both ends matter here, since one caller truncates to this and another has to
+   drop a name that came out empty.
+   Named rather than inlined because #gemCacheNameFrom:keeping: and #nameThisGem: both size against
+   it, and this is where the measurement is recorded."
+  ^31
+%
+category: 'gem name'
+classmethod: McpBase
+nameThisGem: aStringOrNil
+  "Name THIS gem in the shared cache, and answer the name that landed (nil if none did).
+   WHY THIS EXISTS. Every gem this server runs is a GsTsExternalSession's, and the stock name for one
+   of those is 'GciTs' -- so the front end, every worker, and any unrelated external session on the
+   stone all arrive indistinguishable in the one column of
+   #cacheStatisticsForAllSlots that is supposed to say who a session is. A DBA looking at nine
+   identical rows learns nothing from them. What goes here instead: McpRouter>>cacheNameForPort: and
+   McpSession>>workerCacheName.
+   `System cacheName:` is the ONLY lever, and it names the CURRENT session only -- there is no
+   cacheName:forSession:, and #descriptionOfSession: has no setter at all. That is why each gem names
+   itself rather than being named by whoever started it, and it is why a worker's name has to travel
+   into the worker (McpSession>>workerBootstrapExpression) instead of being applied from outside.
+   TRUNCATED, NEVER REFUSED. The cache takes 1 to 31 characters (#maxGemCacheNameSize) and raises
+   OutOfRange outside that. A label that does not fit is not a reason to fail a login or to refuse to
+   start a server, so an over-long name is cut and an empty one is dropped. Nothing here raises, for
+   the same reason: the callers are a server starting up and a worker bootstrap on the client's path
+   in, and neither should ever end because a diagnostic label could not be applied.
+   Both callers are McpBase subclasses -- the front end names itself as it starts serving and the
+   worker as it is prepared -- which is why the one place that touches `System cacheName:` sits here
+   rather than in either of them.
+   The temp is `label` and not `name` because a CLASS-side method already has `name` in scope: it is
+   an instance variable of Class, so declaring it here is [1030] variable has already been declared."
+  | label |
+  aStringOrNil isNil ifTrue: [^nil].
+  label := aStringOrNil asString.
+  label isEmpty ifTrue: [^nil].
+  label size > self maxGemCacheNameSize ifTrue: [
+    label := label copyFrom: 1 to: self maxGemCacheNameSize].
+  ^[System cacheName: label. label] on: Error do: [:ex | ex return: nil]
 %
 category: 'private'
 classmethod: McpBase

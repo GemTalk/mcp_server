@@ -1072,7 +1072,11 @@ workerBootstrapExpression
    (McpServer class>>prepareWorkerWithToolsets:options:...). They are the only argument here whose
    shape the core does not know -- a nested map a vendor defines -- so encoding them as JSON rather
    than building a Smalltalk literal keeps this method free of that shape entirely, and gives them
-   the same one-quoted-literal safety property every other argument has."
+   the same one-quoted-literal safety property every other argument has.
+
+   cacheName: is the label the worker gives its own gem in the shared cache (#workerCacheName). It is
+   built HERE because it names the front end and the client, neither of which the worker knows, and
+   it has to travel because `System cacheName:` names only the session that sends it."
   ^self workerClassName
     , ' prepareWorkerWithToolsets: ' , (self quotedNameArrayFor: toolsetNames)
     , ' options: ' , ((toolsetOptions isNil or: [toolsetOptions isEmpty])
@@ -1083,6 +1087,47 @@ workerBootstrapExpression
     , ' title: ' , (serverTitle isNil ifTrue: ['nil'] ifFalse: [serverTitle printString])
     , ' version: ' , (serverVersion isNil ifTrue: ['nil'] ifFalse: [serverVersion printString])
     , ' frontEnd: ' , System session printString
+    , ' cacheName: ' , self workerCacheName printString
+%
+category: 'gem name'
+method: McpSession
+workerCacheName
+  "This worker gem's name in the shared cache: '<worker class>:<front end>:<client>', e.g.
+   'McpServer:5:a1b2c3d4'. Travels into the worker with the rest of the bootstrap
+   (#workerBootstrapExpression) and is applied there, since a session can only name itself.
+   THE CLASS COMES FIRST, the same shape McpRouter>>cacheNameForPort: uses for the front end, and for
+   the same reason: it is the honest answer to 'what is this gem'. It is #workerClassName -- the class
+   the FRONT END told this worker to be, which is what the worker actually instantiated -- so a
+   deployment running a vendor subclass sees that subclass here rather than a word this file made up.
+   The two roles stay distinguishable by shape as well as by class: a front end carries one colon
+   field after its class, a worker two.
+   THE OTHER TWO FIELDS ARE THERE SO THE STATISTICS TABLE ANSWERS ON ITS OWN, without a log to
+   cross-check:
+     the middle one is the FRONT END's stone session id, which is the sessionId column of the
+       router's own row -- so a stone running several routers still sorts into servers, and a worker
+       can be told from a stranger's external session that happens to be logged in;
+     the last one is the head of the MCP session id, which is what the router logs in full. It is a
+       PREFIX, so grepping the gem log for it finds that client's traffic.
+   Eight hex characters of a 128-bit id (McpRouter>>nextSessionId): the whole 32 would not fit in
+   McpBase class>>maxGemCacheNameSize even alone, and eight is far more than enough to be unique
+   among the sessions one stone holds at once -- which keeps the NAME unique too, so
+   System cacheStatisticsForProcessWithCacheName: answers one gem rather than an arbitrary one.
+   Fitted through McpBase class>>gemCacheNameFrom:keeping: rather than concatenated, because the
+   class name is a deployment's to choose and can be long: the two identifying fields are the suffix
+   and survive whole, and the class name is what gets cut. Sent to McpBase rather than to `self
+   class`, since this class -- alone among the three that build or apply one of these names -- is not
+   an McpBase subclass.
+   The worker's own stone session id and host pid are deliberately NOT repeated here: they are
+   already the other two columns of the same row (and this session holds them from login --
+   #cacheWorkerIds). What the row cannot say for itself is which server and which client, which is
+   exactly what this adds.
+   Built in the FRONT END because that is where all three facts are known; the worker knows none of
+   them."
+  | short |
+  short := id asString.
+  short size > 8 ifTrue: [short := short copyFrom: 1 to: 8].
+  ^McpBase gemCacheNameFrom: self workerClassName
+    keeping: ':' , System session printString , ':' , short
 %
 category: 'accessing'
 method: McpSession

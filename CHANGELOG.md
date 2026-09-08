@@ -12,6 +12,25 @@ pre-release: breaking changes are expected and are called out rather than shimme
 
 ## Unreleased
 
+* **The gems name themselves in the shared cache**, so a DBA reading
+  `System cacheStatisticsForAllSlots` can tell them apart: the front end is
+  `<router class>:<port>` (`McpRouter:8000`, `McpAuthRouter:8443`) and each worker is
+  `<worker class>:<front-end session>:<first 8 of the MCP session id>` (`McpServer:5:978EC559`).
+  Every gem here is a `GsTsExternalSession`'s, so they all used to arrive called `GciTs` — the
+  router, every worker and any unrelated external session on the stone, indistinguishable in the one
+  column that is supposed to say who a session is. Both names lead with the class that is actually
+  running — the router's own, and for a worker the class the router told it to be — so a deployment
+  running a subclass sees that rather than a fixed role name. A worker's name identifies its server
+  and its client without reference to a log, and the router's makes the gem findable by name
+  (`cacheStatisticsForProcessWithCacheName:`) instead of by a pid recorded at fork time. The front
+  end also logs the name it actually got. New: `McpBase class>>nameThisGem:`, `gemCacheName`,
+  `gemCacheNameFrom:keeping:`, `maxGemCacheNameSize`, `McpRouter>>cacheNameForPort:` and
+  `McpSession>>workerCacheName`, plus the `McpGemNameTest` suite (16 tests). Closes #1. See
+  *Naming the gems* in the README.
+  **Breaking for a caller that drives the worker bootstrap directly**:
+  `McpServer class>>prepareWorkerWithToolsets:options:readOnly:serverName:title:version:frontEnd:`
+  gains a final `cacheName:` keyword. Nothing else sends it — the front end builds the name, because
+  `System cacheName:` names only the session that sends it, so a worker cannot be named from outside.
 * **The list-shaped tools page**: `limit` and `offset` on `list_all_classes`, `list_classes`,
   `list_dictionary_entries`, `list_test_classes`, `find_implementors`, `find_references_to`,
   `find_senders` and `search_method_source`, with a header naming the window, the total and the

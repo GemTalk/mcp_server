@@ -71,7 +71,7 @@ testBootstrapBuildsTheNamedSubclassWithItsNamedToolsets
   self withFreshWorkerCacheDo: [ | note out |
     note := McpFixtureServer
       prepareWorkerWithToolsets: #('McpFixtureToolset') options: nil
-      readOnly: false serverName: nil title: nil version: nil frontEnd: nil.
+      readOnly: false serverName: nil title: nil version: nil frontEnd: nil cacheName: nil.
     self assert: (self includesCS: 'McpFixtureServer ready' in: note).
     out := McpFixtureServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'.
     self assert: (self includesCS: 'fixture_echo' in: out).
@@ -84,7 +84,7 @@ testBootstrapBuildsTheNamedSubclassWithItsNamedToolsets
   self withFreshWorkerCacheDo: [ | out |
     McpFixtureServer prepareWorkerWithToolsets: #('McpFixtureToolset') options: nil
       readOnly: false serverName: 'billing-mcp' title: 'Billing - staging' version: '1.1.1'
-      frontEnd: nil.
+      frontEnd: nil cacheName: nil.
     out := McpFixtureServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'.
     self assert: (self includesCS: 'billing-mcp' in: out).
     self assert: (self includesCS: 'Billing - staging' in: out).
