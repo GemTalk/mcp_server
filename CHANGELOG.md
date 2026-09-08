@@ -69,6 +69,17 @@ pre-release: breaking changes are expected and are called out rather than shimme
   longer means its own opposite. `frontEndTransactionMode: 'autoBegin'` restores the old frozen-view
   behaviour (`session-lifetime.sh` exposes it as `MCP_FRONT_END_TX_MODE`; `run-server.sh` does not).
   Note that `maxCommitsBehind` bounds drift *between* calls only. See `McpViewHygieneTest` and the `McpRouter` class comment.
+* **The Grail toolset grew from two tools to seven.** `eval_python` and `compile_python` had been
+  the whole Python surface since July. Added: `get_python_source` (the image's
+  `inspect.getsource` answers an empty string, so this reads the `.py` that `co_filename` names),
+  `run_python_tests` (in a gem with no history — a long-lived worker's `sys.modules` state made
+  Grail's own suite report thousands of phantom errors), and `describe_python_class`,
+  `list_python_methods`, `python_module_state`, which ask for a class by its Python name because a
+  Grail class is created anonymously (`inDictionary: nil`) and no symbol dictionary names it.
+  `eval_python` itself became a REPL: one module scope per worker, captured stdout, Grail's real
+  multi-frame traceback, and Python's `repr` rather than Smalltalk's `printString`. New
+  `grailDirectory` toolset option — a worker gem's working directory is the stone's, so it cannot
+  infer where the checkout lives.
 * **`run-unit-tests.sh` runs each suite in its own topaz session**, so one suite that blows up no
   longer takes the whole report with it. A Grail `ModuleNotFoundError` reaches `defaultAction`,
   which SUnit's `on: Error do:` does not catch, and it terminated the doit — printing a stack and no
@@ -90,8 +101,6 @@ pre-release: breaking changes are expected and are called out rather than shimme
   calls — measured, no client-side deadline bites. See
   [docs/MCP_Client_Notes.md](docs/MCP_Client_Notes.md).
 * String literals compile as byte `String`s whatever the image's `#StringConfiguration` says.
-* Grail toolset: browses Python the way Grail actually stores it, runs Grail's tests in a gem with
-  no history, and the launchers can name the Grail checkout.
 
 ## 0.6.0 — 2026-08-31
 
