@@ -384,6 +384,41 @@ testListPythonMethodsGivesRealSignaturesAndLines
 %
 category: 'tests'
 method: McpGrailToolsetTest
+testListPythonMethodsPagesButKeepsWhatNamesTheClass
+  "The methods page; the class name, its file and the signature-table note do not. A page 2 that had
+   lost the class and the .py it belongs to would be a list of signatures attached to nothing."
+  | checkout pages first second firstSigs secondSigs |
+  checkout := self grailCheckoutOrNil.
+  checkout isNil ifTrue: [^self assert: true].
+  pages := self withFreshScopeDo: [ | ts |
+    ts := self grailToolsetOn: checkout.
+    Array
+      with: (ts tool_list_python_methods: (Dictionary new
+              at: 'name' put: '_grail_session.SessionDict'; at: 'limit' put: 2; yourself))
+      with: (ts tool_list_python_methods: (Dictionary new
+              at: 'name' put: '_grail_session.SessionDict'; at: 'limit' put: 2;
+              at: 'offset' put: 2; yourself))].
+  first := pages at: 1.
+  second := pages at: 2.
+  self assert: (self includesCS: '(showing 1-2 of ' in: first).
+  self assert: (self includesCS: 'pass offset: 2 for the next page)' in: first).
+  self assert: (self includesCS: '(showing 3-4 of ' in: second).
+  "outside the page, on BOTH pages: the class and its file are still named"
+  self assert: (self includesCS: 'SessionDict' in: second).
+  self assert: (self includesCS: '_grail_session.py' in: second).
+  "and the two pages hold different methods. A signature line is an INDENTED line with a paren: the
+   class line and the page header both carry parens of their own and start in column zero, and the
+   file line is indented but has none."
+  firstSigs := (first subStrings: (String with: Character lf))
+    select: [:l | (l beginsWith: '  ') and: [self includesCS: '(' in: l]].
+  secondSigs := (second subStrings: (String with: Character lf))
+    select: [:l | (l beginsWith: '  ') and: [self includesCS: '(' in: l]].
+  self assert: firstSigs size equals: 2.
+  self assert: secondSigs size equals: 2.
+  firstSigs do: [:sig | self deny: (secondSigs includes: sig)]
+%
+category: 'tests'
+method: McpGrailToolsetTest
 testPythonErrorMessageNamesTheClassOnce
   "The reported message must name the exception class exactly ONCE. Grail's #description already
    begins with the class name, and withPythonErrorsAsMcpError: used to prepend it again, so every
@@ -476,7 +511,13 @@ def wanted(a):
 def after():
     pass
 '; close.
-  [ out := (McpGrailToolset new) sourceFrom: path startingAt: 3 label: 'wanted'.
+  [ | ts |
+    ts := McpGrailToolset new.
+    "Two sends since the block extraction and its rendering split, so a page could be headed with
+     its OWN line: #sourceLinesFrom:startingAt:label: finds the block, #pagedSource:args: renders it.
+     Empty args means no paging, which is the whole-definition answer this test is about."
+    out := ts pagedSource: (ts sourceLinesFrom: path startingAt: 3 label: 'wanted')
+      args: Dictionary new.
     self assert: (self includesCS: 'def wanted(a):' in: out).
     self assert: (self includesCS: '"""Doc."""' in: out).
     "the blank line INSIDE the definition is kept"
@@ -486,7 +527,46 @@ def after():
     "nor the line before it"
     self deny: (self includesCS: 'import os' in: out).
     "the header names the file and the line, so the answer is traceable"
-    self assert: (self includesCS: path , ':3' in: out) ]
+    self assert: (self includesCS: path , ':3' in: out).
+    "and an unpaged answer carries no page header at all"
+    self deny: (self includesCS: '(showing' in: out) ]
+      ensure: [GsFile removeServerFile: path]
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testPythonSourcePagesByLineAndTheHeaderFollowsThePage
+  "Source pages over LINES, and the `# <path>:<line>` header names where the PAGE starts. That is
+   the assertion worth having: a page 2 still headed with the definition's own first line would
+   point a model at the wrong place in the file and look authoritative doing it.
+   Written against a file this test creates, so it needs no Grail checkout and can state the line
+   numbers exactly."
+  | path f ts block first second |
+  path := '/tmp/mcp_grail_paging_probe.py'.
+  f := GsFile openWriteOnServer: path.
+  self assert: f notNil.
+  f nextPutAll: 'one
+two
+three
+four
+five
+six
+'; close.
+  [ ts := McpGrailToolset new.
+    "startingAt: 0 -- a module, so the block is the whole file and begins at line 1"
+    block := ts sourceLinesFrom: path startingAt: 0 label: 'probe'.
+    first := ts pagedSource: block args: (self oneArg: 'limit' value: 3).
+    second := ts pagedSource: block args: (Dictionary new
+      at: 'limit' put: 3; at: 'offset' put: 3; yourself).
+    self assert: (self includesCS: '(showing 1-3 of 6; pass offset: 3 for the next page)' in: first).
+    self assert: (self includesCS: path , ':1' in: first).
+    self assert: (self includesCS: 'one' in: first).
+    self deny: (self includesCS: 'four' in: first).
+    "page 2 is headed with line 4, not line 1"
+    self assert: (self includesCS: '(showing 4-6 of 6)' in: second).
+    self assert: (self includesCS: path , ':4' in: second).
+    self deny: (self includesCS: path , ':1' in: second).
+    self assert: (self includesCS: 'four' in: second).
+    self deny: (self includesCS: 'one' in: second) ]
       ensure: [GsFile removeServerFile: path]
 %
 category: 'tests'

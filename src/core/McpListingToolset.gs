@@ -15,7 +15,11 @@ expectvalue /Class
 doit
 McpListingToolset comment: 
 'The dictionary/class listing tools: what classes exist, in which symbol dictionaries, and what else
-those dictionaries hold. All read-only-safe.'
+those dictionaries hold. All read-only-safe.
+
+Every tool here but list_dictionaries takes limit/offset and answers sorted, so a client that finds
+an answer too long has a way to walk it -- see McpToolset>>page:args:defaultLimit:. None of them
+defaults to a limit; registerOn: says why.'
 %
 expectvalue /Class
 doit
@@ -35,23 +39,34 @@ readOnlySafeToolNames
 category: 'registration'
 method: McpListingToolset
 registerOn: aToolRegistry
-  | noArgs dictArg |
-  noArgs := self objectSchema: Dictionary new required: #().
-  dictArg := self objectSchema:
-    (Dictionary new at: 'dictionaryName' put: (self propString: 'Name of the symbol dictionary'); yourself)
-    required: (Array with: 'dictionaryName').
+  "Three of the four page (limit/offset), and none of them defaults to a limit: a listing an agent
+   reads to FIND a name is worse truncated than long, because the name it wants is as likely to be
+   in the tail as the head and a first page gives no way to tell. So the default is every result,
+   as before, and limit/offset are there for the client that decides the answer was too big --
+   which is the client that knows.
+
+   list_dictionaries is deliberately unpaged: it answers the symbol list, which is a handful of
+   entries by construction, and a schema that advertises paging a handler ignores is worse than no
+   paging at all."
+  | dictProps entryProps |
+  dictProps := Dictionary new at: 'dictionaryName' put: (self propString: 'Name of the symbol dictionary'); yourself.
+  entryProps := Dictionary new at: 'dictionaryName' put: (self propString: 'Name of the symbol dictionary'); yourself.
   aToolRegistry name: 'list_all_classes'
-    description: 'List every class across all dictionaries in the symbol list, tagged with its dictionary.'
-    inputSchema: noArgs do: [:args | self tool_list_all_classes: args].
+    description: 'List every class across all dictionaries in the symbol list, tagged with its dictionary. Sorted; pages with limit/offset.'
+    inputSchema: (self pagedSchema: Dictionary new required: #() defaultLimit: nil)
+    do: [:args | self tool_list_all_classes: args].
   aToolRegistry name: 'list_classes'
-    description: 'List the classes defined in a given symbol dictionary.'
-    inputSchema: dictArg do: [:args | self tool_list_classes: args].
+    description: 'List the classes defined in a given symbol dictionary. Sorted; pages with limit/offset.'
+    inputSchema: (self pagedSchema: dictProps required: (Array with: 'dictionaryName') defaultLimit: nil)
+    do: [:args | self tool_list_classes: args].
   aToolRegistry name: 'list_dictionaries'
     description: 'List the symbol dictionaries in the current symbol list, in lookup order.'
-    inputSchema: noArgs do: [:args | self tool_list_dictionaries: args].
+    inputSchema: (self objectSchema: Dictionary new required: #())
+    do: [:args | self tool_list_dictionaries: args].
   aToolRegistry name: 'list_dictionary_entries'
-    description: 'List every entry in a symbol dictionary, tagged as (class) or (global).'
-    inputSchema: dictArg do: [:args | self tool_list_dictionary_entries: args].
+    description: 'List every entry in a symbol dictionary, tagged as (class) or (global). Sorted; pages with limit/offset.'
+    inputSchema: (self pagedSchema: entryProps required: (Array with: 'dictionaryName') defaultLimit: nil)
+    do: [:args | self tool_list_dictionary_entries: args].
   ^self
 %
 category: 'tools - listing'
@@ -61,7 +76,9 @@ tool_list_all_classes: args
   names := OrderedCollection new.
   System myUserProfile symbolList do: [:d |
     d values do: [:v | (v isKindOf: Behavior) ifTrue: [names add: v name asString , '  (' , d name asString , ')']]].
-  ^self linesFrom: names
+  "Sorted BEFORE paging, not by the renderer afterwards: an offset into an order that is recomputed
+   per call is not a position in anything. The sort is what makes page 2 the page after page 1."
+  ^self page: names asSortedCollection asArray args: args defaultLimit: nil
 %
 category: 'tools - listing'
 method: McpListingToolset
@@ -70,7 +87,11 @@ tool_list_classes: args
   dict := self dictNamed: (args at: 'dictionaryName').
   ^dict isNil
     ifTrue: ['Dictionary not found: ' , (args at: 'dictionaryName')]
-    ifFalse: [self linesFrom: ((dict values select: [:v | v isKindOf: Behavior]) collect: [:c | c name asString])]
+    ifFalse: [self
+      page: ((dict values select: [:v | v isKindOf: Behavior]) collect: [:c | c name asString])
+        asSortedCollection asArray
+      args: args
+      defaultLimit: nil]
 %
 category: 'tools - listing'
 method: McpListingToolset
@@ -96,7 +117,7 @@ tool_list_dictionary_entries: args
       lines := OrderedCollection new.
       dict keysAndValuesDo: [:k :v |
         lines add: k asString , ((v isKindOf: Behavior) ifTrue: ['  (class)'] ifFalse: ['  (global)'])].
-      self linesFrom: lines]
+      self page: lines asSortedCollection asArray args: args defaultLimit: nil]
 %
 category: 'accessing'
 method: McpListingToolset

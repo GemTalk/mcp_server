@@ -10,6 +10,35 @@ that made it. Development ran on several lines at once during that period (`dev`
 each carrying its own bumps, so attribution to a release is approximate before 0.7.0. The project is
 pre-release: breaking changes are expected and are called out rather than shimmed.
 
+## Unreleased
+
+* **The list-shaped tools page**: `limit` and `offset` on `list_all_classes`, `list_classes`,
+  `list_dictionary_entries`, `list_test_classes`, `find_implementors`, `find_references_to`,
+  `find_senders` and `search_method_source`, with a header naming the window, the total and the
+  offset that fetches the next page. Defaults preserve what each tool answered before: the two that
+  capped at 200 make 200 their default limit, and the rest still return everything unless a limit
+  is passed. `limit: 0` answers the count alone. Not a breaking change to any existing call, but
+  the truncation notes on `find_senders` and `search_method_source` are new text, and
+  `search_method_source` now answers in scan order rather than sorted — sorting a collected prefix
+  would let a name belonging on page 1 turn up on page 2.
+* **`search_method_source` says when it does not know the total** (`of at least 201 … the total is
+  not known`) instead of reporting the size of what it happened to collect. Its scan is the cost,
+  so it stops one hit past the page rather than reading every method in the image to print a number.
+* **The 50,000-character result cap names what it dropped**:
+  `...[truncated: showing 50000 of 60002 characters]`, where it used to say only `...[truncated]`.
+  Shared by `execute_code` and the Python tools.
+* **The two long-output Grail tools page**: `list_python_methods` (the method lines page; the class
+  name, its `.py` and the signature-table note stay outside the page) and `get_python_source`,
+  which pages over **lines** and heads each page with the file line that page actually starts at —
+  a page 2 still headed with the definition's first line would point at the wrong place in the file.
+  `McpGrailToolset>>sourceFrom:startingAt:label:` split into `sourceLinesFrom:startingAt:label:`
+  (finds the block, answers its lines and their first file line) and `pagedSource:args:` (renders
+  one page); source lines are re-emitted verbatim rather than re-joined, so a `.py` comes back with
+  its own line endings.
+* **`tools/list` refuses a cursor** with `-32602`, as the spec asks, instead of silently answering
+  page 1. This server returns every tool in one page and issues no `nextCursor`, so a cursor
+  arriving here came from somewhere else. See *Pagination* in the README.
+
 ## 0.7.0 — 2026-09-07
 
 * **The classes now install into their own symbol dictionary, `Mcp`**, not `Published`. Migration is
