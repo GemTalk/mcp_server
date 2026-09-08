@@ -338,6 +338,55 @@ JSON
 )
 check "list_all_classes tags dictionary"      'McpServer  (Mcp)' "$r"
 
+# --- pagination ---
+# Two mechanisms, and they are not the same one. MCP's own pagination is an opaque cursor on the
+# LIST operations (tools/list here); a tools/call RESULT has no cursor in the protocol at all, so
+# the list-shaped tools page in their own limit/offset arguments. Both are checked over the wire
+# because both are schema/transport surface the unit suites reach only from inside the image.
+r=$(post <<'JSON'
+{"jsonrpc":"2.0","id":124,"method":"tools/call","params":{"name":"list_classes","arguments":{"dictionaryName":"Mcp","limit":3}}}
+JSON
+)
+check "list_classes honours limit"            '(showing 1-3 of '        "$r"
+check "...and names the offset for the rest"  'pass offset: 3 for the next page' "$r"
+
+r=$(post <<'JSON'
+{"jsonrpc":"2.0","id":125,"method":"tools/call","params":{"name":"list_classes","arguments":{"dictionaryName":"Mcp","limit":3,"offset":3}}}
+JSON
+)
+check "...and offset moves the window"        '(showing 4-6 of '        "$r"
+
+r=$(post <<'JSON'
+{"jsonrpc":"2.0","id":126,"method":"tools/call","params":{"name":"list_classes","arguments":{"dictionaryName":"Mcp","limit":-1}}}
+JSON
+)
+check "a negative limit is a tool error"      '"isError":true'          "$r"
+check "...classified invalidParams"           '"kind":"invalidParams"'  "$r"
+
+# The closed schema is what makes limit/offset callable at all: an argument a tool does not declare
+# is refused before the handler runs, so a tool that pages must SAY so in its inputSchema.
+r=$(post <<'JSON'
+{"jsonrpc":"2.0","id":127,"method":"tools/call","params":{"name":"list_dictionaries","arguments":{"limit":1}}}
+JSON
+)
+check "an unpaged tool refuses limit"         'Unknown argument'        "$r"
+
+# tools/list: every cursor is invalid here, because this server issues none. The spec's answer to an
+# invalid cursor is -32602, and the wrong answer is the quiet one -- page 1 to a client that asked
+# to resume somewhere else.
+r=$(post <<'JSON'
+{"jsonrpc":"2.0","id":128,"method":"tools/list","params":{"cursor":"eyJwYWdlIjogMn0="}}
+JSON
+)
+check "tools/list refuses a cursor"           '"code":-32602'           "$r"
+deny  "...and returns no tools with it"       '"tools"'                 "$r"
+
+r=$(post <<'JSON'
+{"jsonrpc":"2.0","id":129,"method":"tools/list","params":{}}
+JSON
+)
+deny  "tools/list issues no nextCursor"       'nextCursor'              "$r"
+
 # --- browsing ---
 r=$(post <<'JSON'
 {"jsonrpc":"2.0","id":25,"method":"tools/call","params":{"name":"get_class_definition","arguments":{"className":"McpServer"}}}

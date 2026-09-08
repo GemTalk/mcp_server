@@ -219,6 +219,7 @@ version when supported, otherwise answers `2025-11-25`.
 | `initialize` version negotiation | echo if supported, else our latest |
 | `ping` | empty result (spec MUST) |
 | `tools/list`, `tools/call` | implemented; `tools` is the only declared capability |
+| `tools/list` pagination | one page, no `nextCursor`; a `cursor` is refused `-32602` (see [Pagination](#pagination)) |
 | `resources/*`, `prompts/*`, `logging/*`, `completion/*` | undeclared and answered `-32601` |
 | Notification POST | `202 Accepted`, no body |
 | `notifications/cancelled` | `202 Accepted`; the named call is ended, and gets no response of its own |
@@ -232,8 +233,7 @@ version when supported, otherwise answers `2025-11-25`.
 omitted otherwise, so a client falls back to displaying `name`. That is the **server**'s title; a
 **tool** `title` is not implemented.
 
-Not implemented, all optional at these revisions: pagination (`tools/list` returns every tool and
-no `nextCursor`), `listChanged` notifications, SSE resumability (`Last-Event-ID` — no event `id:` is
+Not implemented, all optional at these revisions: `listChanged` notifications, SSE resumability (`Last-Event-ID` — no event `id:` is
 emitted at all, deliberately: ids without a replay buffer behind them invite a resume the server
 cannot honour), progress notifications, elicitation, sampling, resources, prompts, tool `title` /
 `annotations` / `icons` / `outputSchema`, server `instructions`, and `tasks`.
@@ -242,6 +242,53 @@ The **draft `2026-07-28`** revision is a different protocol era — no `initiali
 GET stream, per-request `_meta`, and a mandatory `server/discover`. It is not implemented, and
 supporting it will need a decision about how per-client worker-gem isolation survives a protocol
 with no session id to key it on.
+
+### Pagination
+
+There are **two** paginations here, and they are not the same mechanism.
+
+**The protocol's** pagination is an opaque `cursor` in and an optional `nextCursor` out, defined for
+exactly four *list operations* — `resources/list`, `resources/templates/list`, `prompts/list` and
+`tools/list`. The text is word-for-word identical in both revisions this server speaks. `tools/list`
+is the only one of the four implemented here, and it answers the whole tool surface in **one page**:
+`nextCursor` is optional and its absence is defined as the end of the results, and a few dozen
+descriptors already in memory buy nothing from a second round trip. Because no cursor is ever
+issued, a cursor arriving in `tools/list` cannot have come from this server, so it is refused with
+`-32602` — the code the spec asks for on an invalid cursor. Returning page 1 to a client that asked
+to resume elsewhere is the one wrong answer available.
+
+**A tool result** has no cursor, no `nextCursor` and no page in the protocol at all. So the
+list-shaped tools page in arguments of their own: `limit` and `offset`, with a header line that
+names the window, the total and the offset that fetches the next page.
+
+```
+(showing 1-200 of 1417; pass offset: 200 for the next page)
+```
+
+Defaults preserve what each tool answered before: `find_senders` and `search_method_source`, which
+capped at 200, now make 200 their default *limit* — the same first answer, with a way to ask for the
+rest — and the tools that had no cap still return everything unless a limit is passed. A listing an
+agent reads to *find* a name is worse truncated than long, so truncation stays the client's choice.
+`limit: 0` answers the count alone. A negative or non-integer `limit`/`offset` is a tool error of
+kind `invalidParams`.
+
+`search_method_source` is the one tool that cannot report a true total: the scan *is* the cost, so
+it stops one hit past the page and says so (`of at least 201 … the total is not known`) rather than
+printing the size of what it happened to collect as if it were the answer. Its hits come back in
+scan order for the same reason — sorting a collected prefix would let a name belonging on page 1
+turn up on page 2.
+
+The two Grail tools that answer long output page too. `list_python_methods` pages the method lines
+while keeping the class name, its `.py` and the signature-table note *outside* the page — a page 2
+that had lost the class it belongs to would be a list of signatures attached to nothing.
+`get_python_source` pages over **lines**, and its `# <path>:<line>` header advances with the page:
+page 2 of `json.py` is headed with the line page 2 actually starts at, because a header that still
+named the definition's first line would point a model at the wrong place in the file and look
+authoritative doing it.
+
+Results that are one *value* rather than a list — `execute_code`, `eval_python` — are still
+capped at 50,000 characters, but the marker now names what was dropped:
+`...[truncated: showing 50000 of 60002 characters]`.
 
 ## Tools (31 base + 7 optional Grail)
 
@@ -313,10 +360,10 @@ own that does need one. All four knobs are documented, and validated, in
 
 | Tool | Arguments | Result |
 |------|-----------|--------|
-| `list_all_classes` | – | every class across all dictionaries |
-| `list_classes` | `dictionaryName` | classes in a dictionary |
+| `list_all_classes` | `limit?`, `offset?` | every class across all dictionaries, sorted |
+| `list_classes` | `dictionaryName`, `limit?`, `offset?` | classes in a dictionary, sorted |
 | `list_dictionaries` | – | symbol dictionaries in lookup order |
-| `list_dictionary_entries` | `dictionaryName` | every entry, tagged (class)/(global) |
+| `list_dictionary_entries` | `dictionaryName`, `limit?`, `offset?` | every entry, tagged (class)/(global), sorted |
 
 **Browsing**
 
@@ -333,10 +380,10 @@ own that does need one. All four knobs are documented, and validated, in
 
 | Tool | Arguments | Result |
 |------|-----------|--------|
-| `find_implementors` | `selector` | methods implementing the selector |
-| `find_references_to` | `name` | methods referencing a named global/class |
-| `find_senders` | `selector` | methods sending the selector (capped at 200; note shows the true total) |
-| `search_method_source` | `pattern`, `dictionaryName?` | methods whose source contains the substring (capped at 200) |
+| `find_implementors` | `selector`, `limit?`, `offset?` | methods implementing the selector |
+| `find_references_to` | `name`, `limit?`, `offset?` | methods referencing a named global/class |
+| `find_senders` | `selector`, `limit?`, `offset?` | methods sending the selector (200 at a time by default, with the true total) |
+| `search_method_source` | `pattern`, `dictionaryName?`, `limit?`, `offset?` | methods whose source contains the substring (200 at a time by default, in scan order) |
 
 **Mutation**
 
@@ -362,7 +409,7 @@ symbol list.
 |------|-----------|--------|
 | `describe_test_failure` | `className`, `selector` | re-run one test in isolation, return the failure/error detail (exception class + `description`) |
 | `list_failing_tests` | `classNames?` | failing/erroring methods (given classes, or all) |
-| `list_test_classes` | – | all `TestCase` subclasses |
+| `list_test_classes` | `limit?`, `offset?` | all `TestCase` subclasses, sorted |
 | `run_test_class` | `className` | run a test class, summary + failures |
 | `run_test_method` | `className`, `selector` | run one test method |
 
@@ -378,10 +425,10 @@ an image without Grail. Once loaded the toolset joins the default tool surface a
 |------|-----------|--------|
 | `compile_python` | `code` | transpile Python source to Smalltalk via Grail (`ModuleAst`), return the generated source |
 | `eval_python` | `code` | evaluate Python in this session's persistent namespace; returns anything printed, then the value's `repr`, or the Python traceback on failure |
-| `get_python_source` | `name` | source of a module, class or function named dotted (`gemdb.transaction`), read from the `.py` it was loaded from |
+| `get_python_source` | `name`, `limit?`, `offset?` | source of a module, class or function named dotted (`gemdb.transaction`), read from the `.py` it was loaded from; pages over **lines**, and the `# path:line` header names where the page starts |
 | `run_python_tests` | `classNames` *(optional)* | run Grail's `PythonTestCase` classes **in a fresh gem** and report the result structurally |
 | `describe_python_class` | `name` | a Python class: backing Smalltalk class, storage base, `__bases__`/`__mro__`, `__slots__`, class attributes, method names |
-| `list_python_methods` | `name` | its methods with real signatures (parameter names *and* defaults) and the `.py` line each was defined at, in source order |
+| `list_python_methods` | `name`, `limit?`, `offset?` | its methods with real signatures (parameter names *and* defaults) and the `.py` line each was defined at, in source order |
 | `python_module_state` | `name` | what a module **is** here — native or `.py`, canonical, committed, current or stale, in `sys.modules` — and what the next import would do |
 
 > **Why a Python class needs its own describe tool.** Grail creates every user Python class
@@ -1297,14 +1344,14 @@ flag, so a missing suite is a skip and not an error:
 Run a single suite while a server is up via the `run_test_class` tool (e.g. `run_test_class
 McpToolTest`). `./run-unit-tests.sh` runs them all and exits 0 when every test passes: the
 socket-less suites `McpJsonTest` (12), `McpUtf8Test` (7), `McpBlindWriteTest` (41),
-`McpToolTest` (58), `McpDispatcherTest` (18), `McpSessionTest` (22), `McpOutboxTest` (9),
+`McpToolTest` (65), `McpDispatcherTest` (21), `McpSessionTest` (24), `McpOutboxTest` (9),
 `McpProgressTest` (19), `McpStreamTest` (18), `McpLifetimeTest` (49), `McpViewHygieneTest` (46),
 `McpTransportTest` (43), `McpContractTest` (35) and `McpExtensionTest` (14), plus
-`McpConcurrentEditTest` (15), `McpExternalSessionTest` (5), `McpTransactionTest` (8) and
-`McpWorkerDeadlineTest` (4) — **423 tests**,
+`McpConcurrentEditTest` (18), `McpExternalSessionTest` (5), `McpTransactionTest` (8) and
+`McpWorkerDeadlineTest` (4) — **438 tests**,
 which is the whole suite on a base install. Where the optional groups are installed the runner picks
-their suites up automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **479
-tests** — and **506 with the 27 in `McpGrailToolsetTest`** on a Grail image.
+their suites up automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **494
+tests** — and **523 with the 29 in `McpGrailToolsetTest`** on a Grail image.
 
 Six suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
 `McpAuthConformanceTest` commit a throwaway JWT user and spawn real worker gems; they are in the

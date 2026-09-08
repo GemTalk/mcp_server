@@ -393,8 +393,13 @@ testExecuteCodeTruncates
    capResult: is shared by execute_code and the python tools, so this guards all three."
   | out |
   out := self executionTools tool_execute_code: (self oneArg: 'code' value: '(String new: 60000)').
-  self assert: (self includesCS: '...[truncated]' in: out).
-  self assert: out size equals: 50000 + ' ...[truncated]' size
+  "The marker names what was dropped. A bare '...[truncated]' left a model unable to tell ten
+   missing characters from ten million, which is the whole question when deciding whether to read
+   on. 60002 rather than 60000: execute_code answers the value's printString, so the two quotes
+   count too, and asserting the exact number is what proves the total is the SOURCE's and not the
+   cap's."
+  self assert: (self includesCS: '...[truncated: showing 50000 of 60002 characters]' in: out).
+  self assert: out size equals: 50000 + ' ...[truncated: showing 50000 of 60002 characters]' size
 %
 category: 'tools - browsing'
 method: McpToolTest
@@ -456,12 +461,16 @@ testFindSenders
 category: 'tools - search'
 method: McpToolTest
 testFindSendersTruncated
-  "= has well over 200 senders, so the output is capped at 200 method lines and prefixed with
-   a count note. Assert the note is present and exactly 200 method lines come back (the note
-   line and any trailing blank have no '>>', so counting '>>' lines is robust)."
+  "= has well over 200 senders, so the first page holds 200 method lines under a header that names
+   the true total and the offset that fetches the rest. sendersOf: materialises every sender before
+   anything is formatted, so the total is exact rather than a floor -- unlike search_method_source,
+   whose scan stops at the page (see testSearchMethodSourceTruncated).
+   Counting '>>' lines is robust: neither the header nor a trailing blank has one."
   | out lines methodLines |
   out := self searchTools tool_find_senders: (self oneArg: 'selector' value: '=').
-  self assert: (self includesCS: '(showing first 200 of ' in: out).
+  self assert: (self includesCS: '(showing 1-200 of ' in: out).
+  self assert: (self includesCS: '; pass offset: 200 for the next page)' in: out).
+  self deny: (self includesCS: 'at least' in: out).
   lines := out subStrings: (String with: Character lf).
   methodLines := lines select: [:l | self includesCS: '>>' in: l].
   self assert: methodLines size = 200
@@ -654,6 +663,103 @@ testMutationToolsDoNotCommit
   System abortTransaction.
   self deny: ((System myUserProfile objectNamed: #McpTestFixture) canUnderstand: #uncommittedAnswer)
 %
+category: 'paging'
+method: McpToolTest
+testPagesComposeIntoTheWholeAnswer
+  "The contract that makes an offset worth having: page 1 followed by page 2 IS the unpaged answer,
+   in the same order, with nothing repeated and nothing skipped. Asserted against the unpaged call
+   itself rather than against a remembered list, so a change to the sort cannot pass this by
+   changing both sides."
+  | all first second |
+  all := (self listingTools tool_list_classes: (self oneArg: 'dictionaryName' value: 'Globals'))
+    subStrings: (String with: Character lf).
+  self assert: all size > 10.
+  first := (self listingTools tool_list_classes: (Dictionary new
+    at: 'dictionaryName' put: 'Globals'; at: 'limit' put: 5; yourself))
+      subStrings: (String with: Character lf).
+  second := (self listingTools tool_list_classes: (Dictionary new
+    at: 'dictionaryName' put: 'Globals'; at: 'limit' put: 5; at: 'offset' put: 5; yourself))
+      subStrings: (String with: Character lf).
+  self assert: (self includesCS: '(showing 1-5 of ' in: (first at: 1)).
+  self assert: (self includesCS: '; pass offset: 5 for the next page)' in: (first at: 1)).
+  self assert: (self includesCS: '(showing 6-10 of ' in: (second at: 1)).
+  self assert: (first copyFrom: 2 to: 6) equals: (all copyFrom: 1 to: 5).
+  self assert: (second copyFrom: 2 to: 6) equals: (all copyFrom: 6 to: 10)
+%
+category: 'paging'
+method: McpToolTest
+testPagingHeaderIsAbsentWhenTheWholeAnswerCame
+  "A tool that fitted in one answer before it could page reads exactly as it did. The header is for
+   a client with something to do about it -- a page to fetch, or a total it asked for by paging."
+  | out |
+  self createFixtureClass.
+  out := self listingTools tool_list_dictionary_entries: (self oneArg: 'dictionaryName' value: 'UserGlobals').
+  self deny: (self includesCS: '(showing' in: out).
+  self deny: (self includesCS: 'offset' in: out)
+%
+category: 'paging'
+method: McpToolTest
+testPagingLimitZeroAnswersTheCountAlone
+  "limit: 0 is how a client asks HOW MANY there are without paying for the lines. It is a legal
+   page, not an error, and the count is the whole answer."
+  | out lines |
+  out := self listingTools tool_list_classes: (Dictionary new
+    at: 'dictionaryName' put: 'Globals'; at: 'limit' put: 0; yourself).
+  "Empties rejected because #subStrings: keeps the field after the final newline; the point of the
+   count is that nothing but the header came back."
+  lines := (out subStrings: (String with: Character lf)) reject: [:l | l isEmpty].
+  self assert: lines size equals: 1.
+  self assert: (self includesCS: ' results; pass a limit above 0 to see them)' in: (lines at: 1))
+%
+category: 'paging'
+method: McpToolTest
+testPagingOffsetPastTheEndSaysSo
+  "An offset past the last result is an empty page, not an error and not a silent wrap to the
+   beginning: the client is told where the end actually is so it can stop."
+  | out |
+  out := self listingTools tool_list_classes: (Dictionary new
+    at: 'dictionaryName' put: 'Globals'; at: 'offset' put: 1000000; yourself).
+  self assert: (self includesCS: '(no results at offset 1000000: there are ' in: out).
+  self deny: (self includesCS: '>>' in: out)
+%
+category: 'paging'
+method: McpToolTest
+testPagingRefusesANegativeOrNonIntegerArgument
+  "McpTool>>validationErrorFor: is structural only, so `type: integer` in the schema documents the
+   argument and checks nothing. Without McpToolset>>integerArg:named:default: these reach
+   #copyFrom:to: and come back as a kernel index error, which says nothing about the argument the
+   client got wrong. #invalidParams is the kind the dispatcher already uses for exactly this."
+  | negative notAnInteger |
+  negative := [self listingTools tool_list_classes: (Dictionary new
+    at: 'dictionaryName' put: 'Globals'; at: 'limit' put: -1; yourself). nil]
+      on: McpError do: [:ex | ex].
+  self assert: negative notNil.
+  self assert: negative kind equals: #invalidParams.
+  self assert: (self includesCS: 'limit must be 0 or greater' in: negative description).
+  notAnInteger := [self listingTools tool_list_classes: (Dictionary new
+    at: 'dictionaryName' put: 'Globals'; at: 'offset' put: '5'; yourself). nil]
+      on: McpError do: [:ex | ex].
+  self assert: notAnInteger notNil.
+  self assert: notAnInteger kind equals: #invalidParams.
+  self assert: (self includesCS: 'offset must be a whole number' in: notAnInteger description)
+%
+category: 'paging'
+method: McpToolTest
+testPagingSchemaAndHandlerAgreeOnTheDefault
+  "The default limit is written twice per tool -- in the schema's description, which is what the
+   model reads, and in the handler, which is what it gets. This asserts they are the same number
+   for the two tools that have one, which is the drift a paging bug hides behind."
+  | schema |
+  schema := (McpServer new toolRegistry at: 'find_senders') descriptor at: 'inputSchema'.
+  self assert: ((schema at: 'properties') includesKey: 'limit').
+  self assert: ((schema at: 'properties') includesKey: 'offset').
+  self assert: (self includesCS: 'default 200'
+    in: (((schema at: 'properties') at: 'limit') at: 'description')).
+  self assert: McpSearchToolset defaultSearchLimit equals: 200.
+  "and a tool that does not page does not advertise that it does"
+  self assert: (((McpServer new toolRegistry at: 'list_dictionaries') descriptor at: 'inputSchema')
+    at: 'properties') isEmpty
+%
 category: 'tools - session'
 method: McpToolTest
 testRefresh
@@ -769,14 +875,38 @@ testSearchMethodSource
 %
 category: 'tools - search'
 method: McpToolTest
+testSearchMethodSourceSecondPage
+  "The offset is a real position in the scan: page 2 holds the hits after page 1's, none of them
+   repeated. This is what the unsorted scan order buys -- sorting a collected PREFIX would let a
+   name belonging on page 1 turn up on page 2."
+  | first second |
+  first := ((self searchTools tool_search_method_source:
+    (Dictionary new at: 'pattern' put: 'self'; at: 'dictionaryName' put: 'Globals';
+      at: 'limit' put: 5; yourself)) subStrings: (String with: Character lf))
+        reject: [:l | l isEmpty].
+  second := ((self searchTools tool_search_method_source:
+    (Dictionary new at: 'pattern' put: 'self'; at: 'dictionaryName' put: 'Globals';
+      at: 'limit' put: 5; at: 'offset' put: 5; yourself)) subStrings: (String with: Character lf))
+        reject: [:l | l isEmpty].
+  self assert: first size equals: 6.
+  self assert: second size equals: 6.
+  self assert: (self includesCS: '(showing 6-10 of at least 11' in: (second at: 1)).
+  (first copyFrom: 2 to: 6) do: [:hit | self deny: ((second copyFrom: 2 to: 6) includes: hit)]
+%
+category: 'tools - search'
+method: McpToolTest
 testSearchMethodSourceTruncated
-  "'self' appears in far more than 200 kernel methods, so scoping to Globals overflows the cap:
-   the output is prefixed with the truncation note and holds exactly 200 hit lines (the note
-   line has no '>>', so counting '>>' lines is robust)."
+  "'self' appears in far more than 200 kernel methods, so scoping to Globals overflows the first
+   page: 200 hit lines under a header that says the total is NOT known. That is the honest answer
+   here and the reason complete: exists -- the scan stops one hit past the page, so the only thing
+   this tool can truthfully say about the total is a floor. The old note, '(truncated at 200 hits)',
+   said neither how many there were nor how to see the next one."
   | out lines hitLines |
   out := self searchTools tool_search_method_source:
     (Dictionary new at: 'pattern' put: 'self'; at: 'dictionaryName' put: 'Globals'; yourself).
-  self assert: (self includesCS: '(truncated at 200 hits)' in: out).
+  self assert: (self includesCS: '(showing 1-200 of at least 201' in: out).
+  self assert: (self includesCS: 'pass offset: 200 for the next page' in: out).
+  self assert: (self includesCS: 'the total is not known' in: out).
   lines := out subStrings: (String with: Character lf).
   hitLines := lines select: [:l | self includesCS: '>>' in: l].
   self assert: hitLines size = 200

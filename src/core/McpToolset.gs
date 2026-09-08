@@ -47,10 +47,17 @@ same reason -- a mistyped setting that is silently ignored is far more expensive
 that refuses to start. Values must be JSON-safe: they travel to the worker as JSON.
 
 The schema builders and the image-lookup helpers every toolset needs (resolveClass:, dictNamed:,
-linesFrom:, capResult:) are BOTH class- and instance-side: the class-side methods are the single
+linesFrom:, capResult:, page:args:defaultLimit:) are BOTH class- and instance-side: the class-side methods are the single
 implementation -- McpServer''s kernel guards reach dictNamed: that way, so the lookup has one home --
 and the instance-side ones let a registerOn: or handler body read as `self objectSchema: ...` /
 `self resolveClass: ...`.
+
+PAGING. A tool that answers a LIST pages it: declare its schema with #pagedSchema:required:defaultLimit:
+and answer through #page:args:defaultLimit:, which adds `limit` and `offset` to the schema and honours
+them in the answer. MCP itself paginates only tools/list and its three siblings, never a tools/call
+result, so these arguments are the only paging a tool result can have; see
+#page:args:defaultLimit:complete: for why, and for what a tool that cannot count its own results
+should say instead of guessing.
 
 NB the `server` reference: a toolset''s handlers own their own work, but the POLICY question ''may this
 be modified at all?'' is one answer per deployment, not per tool pack -- so it stays on McpServer
@@ -83,9 +90,20 @@ category: 'private'
 classmethod: McpToolset
 capResult: aString
   "Cap an arbitrary tool result at 50000 characters so a huge value can't swamp the client. Shared by
-   execute_code and the Python tools of the optional Grail toolset."
+   execute_code and the Python tools of the optional Grail toolset.
+
+   THE MARKER STATES WHAT WAS DROPPED. A bare '...[truncated]' told a model that its answer was
+   incomplete and nothing else -- not whether ten characters were missing or ten million, which is
+   the difference between reading on and asking a different question altogether. Measured against
+   the live server: `list(range(100000))` and a 500-line module both ended in '...[truncated]' with
+   no count, and the only way to find out how much was lost was to ask for the size separately.
+
+   There is no offset to pass here, deliberately: this caps ONE value, not a list, and a value has
+   no natural page boundary. A tool that answers a list takes limit/offset instead and reports a
+   true total -- see #page:args:defaultLimit:complete:."
   ^aString size > 50000
-    ifTrue: [(aString copyFrom: 1 to: 50000) , ' ...[truncated]']
+    ifTrue: [(aString copyFrom: 1 to: 50000) , ' ...[truncated: showing 50000 of '
+              , aString size printString , ' characters]']
     ifFalse: [aString]
 %
 category: 'transaction'
@@ -151,6 +169,39 @@ dictNamed: aName
 %
 category: 'private'
 classmethod: McpToolset
+integerArg: args named: aName default: anIntegerOrNil
+  "The value of an optional non-negative integer argument, or anIntegerOrNil when the client sent
+   none. Refuses anything else as #invalidParams.
+
+   THE SCHEMA IS NOT A VALIDATOR. McpTool>>validationErrorFor: is structural only -- unknown keys
+   and missing required ones -- so `type: integer` in a tool's inputSchema documents an argument
+   and nothing checks it. Without this, a limit that arrived as the String '50' or as -1 would
+   reach #copyFrom:to: and come back as a kernel error naming an index, which tells the model
+   nothing about the argument it got wrong."
+  | v |
+  v := args at: aName ifAbsent: [nil].
+  v isNil ifTrue: [^anIntegerOrNil].
+  (v isKindOf: Integer) ifFalse: [
+    ^McpError signalKind: #invalidParams message:
+      aName , ' must be a whole number, not ' , v class name asString , ' (' , v printString , ').'].
+  v < 0 ifTrue: [
+    ^McpError signalKind: #invalidParams message:
+      aName , ' must be 0 or greater, not ' , v printString , '.'].
+  ^v
+%
+category: 'schema building'
+classmethod: McpToolset
+intProperty: aDescription
+  "An integer-valued argument. The fourth property type, after string, boolean and string-array,
+   and added for the paging arguments -- see #pagedSchema:required:defaultLimit:."
+  | d |
+  d := Dictionary new.
+  d at: 'type' put: 'integer'.
+  d at: 'description' put: aDescription.
+  ^d
+%
+category: 'private'
+classmethod: McpToolset
 linesFrom: aCollectionOfStrings
   "Sort the strings and join them one per line; '(none)' if empty."
   | s |
@@ -201,6 +252,144 @@ on: aServer options: aDictOrNil
    through (McpServer>>initializeWithToolsetNames:toolsetOptions:). aDictOrNil is keyed by option
    name; nil and empty mean the same thing, which is what a toolset that declares none always gets."
   ^self new setServer: aServer; setOptions: aDictOrNil; yourself
+%
+category: 'paging'
+classmethod: McpToolset
+page: anOrderedCollectionOfStrings args: args defaultLimit: anIntegerOrNil
+  "One page of a complete result set -- see #page:args:defaultLimit:complete:."
+  ^self page: anOrderedCollectionOfStrings args: args defaultLimit: anIntegerOrNil complete: true
+%
+category: 'paging'
+classmethod: McpToolset
+page: anOrderedCollectionOfStrings args: args defaultLimit: anIntegerOrNil complete: aBoolean
+  "The page of anOrderedCollectionOfStrings the client asked for, one line each, headed by a line
+   saying which page it is, how many results there are in all, and the offset that fetches the next.
+   The shared answer to 'the tool told me there was more and gave me no way to ask for it'.
+
+   WHY ARGUMENTS AND NOT A PROTOCOL CURSOR. MCP's own pagination -- opaque cursor in, nextCursor
+   out -- is defined for exactly four LIST OPERATIONS (tools/list, prompts/list, resources/list,
+   resources/templates/list) and for nothing else; the text is word-for-word identical in both
+   revisions this server speaks. A tools/call RESULT has no cursor, no nextCursor and no page in
+   the protocol at all, so a tool that answers a long list has to page in its OWN arguments, and
+   limit/offset is the shape the client can act on without inventing a second cursor grammar.
+   McpDispatcher>>handleToolsList:id: is where the protocol's mechanism lives.
+
+   COMPLETE says whether the collection is the WHOLE result set or a prefix of it. A tool that
+   materialises every hit before answering (ClassOrganizer's searches, a dictionary's contents) can
+   report a true total and does. One that stops scanning as soon as it has the page --
+   search_method_source, whose scan is the expensive part -- cannot, and says the total is unknown
+   rather than reporting the prefix's size as if it were the answer. Reporting a floor as a total
+   is exactly the confidently-wrong shape this pagination exists to remove.
+
+   THE HEADER IS OMITTED for the answer that needs no navigating: the whole set, no arguments
+   passed. So a tool that fitted in one answer before this reads exactly as it did, and the header
+   appears when there is something for the client to do about it -- or whenever the client paged
+   explicitly, where the total is the point of the call.
+
+   limit: 0 is legal and useful: it answers the header alone, which is how a client asks how many
+   there are without paying for the lines."
+  | held window first last lines s |
+  held := anOrderedCollectionOfStrings size.
+  (held = 0 and: [aBoolean and: [(self integerArg: args named: 'offset' default: 0) = 0]])
+    ifTrue: [^'(none)'].
+  window := self pageIndicesFor: args defaultLimit: anIntegerOrNil of: held.
+  first := window at: 1.
+  last := window at: 2.
+  lines := first > last
+    ifTrue: [#()]
+    ifFalse: [anOrderedCollectionOfStrings asArray copyFrom: first to: last].
+  s := WriteStream on: String new.
+  (self pageIsNavigable: args from: first to: last of: held complete: aBoolean) ifTrue: [
+    s nextPutAll: (self pageHeaderFrom: first to: last of: held complete: aBoolean);
+      nextPut: Character lf].
+  lines do: [:l | s nextPutAll: l asString; nextPut: Character lf].
+  ^s contents
+%
+category: 'paging'
+classmethod: McpToolset
+pagedSchema: propsDict required: requiredArray defaultLimit: anIntegerOrNil
+  "A paged schema counting 'results' -- see #pagedSchema:required:defaultLimit:noun:."
+  ^self pagedSchema: propsDict required: requiredArray defaultLimit: anIntegerOrNil noun: 'results'
+%
+category: 'paging'
+classmethod: McpToolset
+pagedSchema: propsDict required: requiredArray defaultLimit: anIntegerOrNil noun: aPluralNoun
+  "objectSchema:required:, plus the two paging arguments every list-shaped tool takes. One send, so
+   a tool cannot advertise a default its handler does not honour or the reverse -- the handler
+   passes the same anIntegerOrNil to #page:args:defaultLimit:.
+   aPluralNoun names what is being counted, because this description is what the model reads before
+   it picks a number: 'at most this many lines' asks a different question of a caller than 'at most
+   this many results' does.
+   propsDict is mutated: build a fresh one per tool rather than sharing it with a tool that does
+   not page."
+  propsDict at: 'limit' put: (self intProperty:
+    'Optional: return at most this many ' , aPluralNoun , ' ('
+      , (anIntegerOrNil isNil
+          ifTrue: ['default: all of them']
+          ifFalse: ['default ' , anIntegerOrNil printString])
+      , '; 0 answers the count alone).').
+  propsDict at: 'offset' put: (self intProperty:
+    'Optional: skip this many ' , aPluralNoun , ' first (default 0). The header of a truncated answer names the offset that fetches the next page.').
+  ^self objectSchema: propsDict required: requiredArray
+%
+category: 'paging'
+classmethod: McpToolset
+pageHeaderFrom: firstIndex to: lastIndex of: heldCount complete: aBoolean
+  "The one line above a page of results -- see #pageHeaderFrom:to:of:complete:noun:."
+  ^self pageHeaderFrom: firstIndex to: lastIndex of: heldCount complete: aBoolean noun: 'results'
+%
+category: 'paging'
+classmethod: McpToolset
+pageHeaderFrom: firstIndex to: lastIndex of: heldCount complete: aBoolean noun: aPluralNoun
+  "The one line above a page: what it holds, of how many, and what to pass for the next one.
+   aPluralNoun is what this tool is counting -- 'results' for most, 'lines' for source text -- and it
+   is worth carrying because the two empty-page messages are the only place the header names the
+   thing at all, and 'no results at offset 900' is the wrong sentence about a 500-line module."
+  | total s |
+  total := aBoolean
+    ifTrue: [heldCount printString]
+    ifFalse: ['at least ' , heldCount printString].
+  firstIndex > lastIndex ifTrue: [
+    "Two ways to hold no lines, and they need different answers: a limit of 0 is a client asking
+     how many there are, an offset past the end is a client that has walked off it."
+    ^(firstIndex - 1) < heldCount
+      ifTrue: ['(' , total , ' ' , aPluralNoun , '; pass a limit above 0 to see them)']
+      ifFalse: ['(no ' , aPluralNoun , ' at offset ' , (firstIndex - 1) printString , ': there are '
+                  , total , ' in all)']].
+  s := '(showing ' , firstIndex printString , '-' , lastIndex printString , ' of ' , total.
+  (aBoolean not or: [lastIndex < heldCount]) ifTrue: [
+    s := s , '; pass offset: ' , lastIndex printString , ' for the next page'].
+  aBoolean ifFalse: [
+    s := s , '. The scan stopped at this page, so the total is not known'].
+  ^s , ')'
+%
+category: 'paging'
+classmethod: McpToolset
+pageIndicesFor: args defaultLimit: anIntegerOrNil of: heldCount
+  "The 1-based first and last index of the page these arguments ask for, as an Array {first. last},
+   clamped to what is actually held. first > last means an empty page -- a limit of 0, or an offset
+   past the end; #pageHeaderFrom:to:of:complete: tells those two apart and says which happened.
+
+   Separate from #page:args:defaultLimit:complete: because not every paged answer is a list of lines
+   to join with newlines: source text is read a line at a time and re-emitted verbatim, terminators
+   and all (McpGrailToolset>>tool_get_python_source:). Both renderers compute their window HERE, so
+   `offset` means the same thing in every tool that takes one."
+  | offset limit |
+  offset := self integerArg: args named: 'offset' default: 0.
+  limit := self integerArg: args named: 'limit' default: anIntegerOrNil.
+  ^Array
+    with: offset + 1
+    with: (limit isNil ifTrue: [heldCount] ifFalse: [(offset + limit) min: heldCount])
+%
+category: 'paging'
+classmethod: McpToolset
+pageIsNavigable: args from: firstIndex to: lastIndex of: heldCount complete: aBoolean
+  "Whether this page needs a header. It does when the client PAGED (it asked for a window, and the
+   total is the point of asking), or when there is more to come than came. It does not when the
+   whole answer arrived unasked -- so a tool that fitted in one answer before it could page reads
+   exactly as it did."
+  ^(args includesKey: 'limit')
+    or: [(args includesKey: 'offset') or: [aBoolean not or: [lastIndex < heldCount]]]
 %
 category: 'schema building'
 classmethod: McpToolset
@@ -340,6 +529,16 @@ hasReadKey: aKey
 %
 category: 'private'
 method: McpToolset
+integerArg: args named: aName default: anIntegerOrNil
+  ^self class integerArg: args named: aName default: anIntegerOrNil
+%
+category: 'schema building'
+method: McpToolset
+intProperty: aDescription
+  ^self class intProperty: aDescription
+%
+category: 'private'
+method: McpToolset
 linesFrom: aCollectionOfStrings
   ^self class linesFrom: aCollectionOfStrings
 %
@@ -439,6 +638,41 @@ options
    the answer when nothing was configured is a fresh empty Dictionary, so mutating it changes
    nothing."
   ^options ifNil: [Dictionary new]
+%
+category: 'paging'
+method: McpToolset
+page: anOrderedCollectionOfStrings args: args defaultLimit: anIntegerOrNil
+  ^self class page: anOrderedCollectionOfStrings args: args defaultLimit: anIntegerOrNil
+%
+category: 'paging'
+method: McpToolset
+page: anOrderedCollectionOfStrings args: args defaultLimit: anIntegerOrNil complete: aBoolean
+  ^self class page: anOrderedCollectionOfStrings args: args defaultLimit: anIntegerOrNil complete: aBoolean
+%
+category: 'paging'
+method: McpToolset
+pagedSchema: propsDict required: requiredArray defaultLimit: anIntegerOrNil
+  ^self class pagedSchema: propsDict required: requiredArray defaultLimit: anIntegerOrNil
+%
+category: 'paging'
+method: McpToolset
+pagedSchema: propsDict required: requiredArray defaultLimit: anIntegerOrNil noun: aPluralNoun
+  ^self class pagedSchema: propsDict required: requiredArray defaultLimit: anIntegerOrNil noun: aPluralNoun
+%
+category: 'paging'
+method: McpToolset
+pageHeaderFrom: firstIndex to: lastIndex of: heldCount complete: aBoolean noun: aPluralNoun
+  ^self class pageHeaderFrom: firstIndex to: lastIndex of: heldCount complete: aBoolean noun: aPluralNoun
+%
+category: 'paging'
+method: McpToolset
+pageIndicesFor: args defaultLimit: anIntegerOrNil of: heldCount
+  ^self class pageIndicesFor: args defaultLimit: anIntegerOrNil of: heldCount
+%
+category: 'paging'
+method: McpToolset
+pageIsNavigable: args from: firstIndex to: lastIndex of: heldCount complete: aBoolean
+  ^self class pageIsNavigable: args from: firstIndex to: lastIndex of: heldCount complete: aBoolean
 %
 category: 'progress'
 method: McpToolset

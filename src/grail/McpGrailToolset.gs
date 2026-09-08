@@ -459,6 +459,41 @@ nextImportFor: aName inSys: inSys committed: committed hashCurrent: hashCurrent 
 %
 category: 'private'
 method: McpGrailToolset
+pagedSource: anArray args: args
+  "One page of a source block -- {path . firstFileLine . lines} from
+   #sourceLinesFrom:startingAt:label: -- headed by the `# <path>:<line>` line naming where THIS PAGE
+   starts, and by the page header when the client paged.
+
+   Why source does not go through McpToolset>>page:args:defaultLimit: like every list-shaped tool:
+   that renderer joins its lines with newlines of its own, and these lines are the file's own bytes,
+   which have to go back verbatim -- a .py answered with re-manufactured line endings is no longer
+   the source. The WINDOW is still computed by the shared #pageIndicesFor:defaultLimit:of:, so
+   `offset` means here exactly what it means everywhere else.
+
+   THE LINE NUMBER IS THE POINT. A page 2 headed with the line the DEFINITION starts at would tell a
+   model the wrong place in the file, and read as authoritative -- worse than not paging at all. So
+   the header advances with the page.
+
+   No default limit: a definition that fitted in one answer still comes back whole. What paging adds
+   is a way past the shared 50k cap, which now says how much it dropped."
+  | path start body window first last size |
+  path := anArray at: 1.
+  start := anArray at: 2.
+  body := anArray at: 3.
+  size := body size.
+  window := self pageIndicesFor: args defaultLimit: nil of: size.
+  first := window at: 1.
+  last := window at: 2.
+  ^((self pageIsNavigable: args from: first to: last of: size complete: true)
+      ifTrue: [(self pageHeaderFrom: first to: last of: size complete: true noun: 'lines')
+                 , (String with: Character lf)]
+      ifFalse: [''])
+    , (self headed: path
+        line: start + first - 1
+        body: (first > last ifTrue: [#()] ifFalse: [body asArray copyFrom: first to: last]))
+%
+category: 'private'
+method: McpGrailToolset
 placeholderArgs: aCount
   "'a1, a2, a3' -- names a selector cannot supply, made obviously positional."
   | s |
@@ -652,12 +687,14 @@ registerOn: aToolRegistry
       required: (Array with: 'name'))
     do: [:args | self tool_describe_python_class: args].
   aToolRegistry name: 'list_python_methods'
-    description: 'List a Python class''s methods with real signatures (parameter names and defaults) and the .py file and line each was defined at, in source order.'
-    inputSchema: (self objectSchema:
+    description: 'List a Python class''s methods with real signatures (parameter names and defaults) and the .py file and line each was defined at, in source order. Pages with limit/offset.'
+    inputSchema: (self pagedSchema:
       (Dictionary new at: 'name' put:
         (self propString: 'Dotted class name, e.g. "json.JSONDecoder"');
         yourself)
-      required: (Array with: 'name'))
+      required: (Array with: 'name')
+      defaultLimit: nil
+      noun: 'methods')
     do: [:args | self tool_list_python_methods: args].
   aToolRegistry name: 'python_module_state'
     description: 'What a Python module IS in this image right now -- native or .py, canonical, committed, source current or stale, in this session''s sys.modules -- and what the next import of it would do.'
@@ -676,12 +713,14 @@ registerOn: aToolRegistry
       required: #())
     do: [:args | self tool_run_python_tests: args].
   aToolRegistry name: 'get_python_source'
-    description: 'Source of a Python module, class or function in the image, named dotted (e.g. "gemdb.transaction"). Reads the .py the object was loaded from, so it answers the docstring and body even where the image itself has lost them.'
-    inputSchema: (self objectSchema:
+    description: 'Source of a Python module, class or function in the image, named dotted (e.g. "gemdb.transaction"). Reads the .py the object was loaded from, so it answers the docstring and body even where the image itself has lost them. Pages with limit/offset over LINES, and the `# path:line` header names where the page starts.'
+    inputSchema: (self pagedSchema:
       (Dictionary new at: 'name' put:
         (self propString: 'Dotted name, e.g. "gemdb", "gemdb.transaction" or "json.JSONDecoder"');
         yourself)
-      required: (Array with: 'name'))
+      required: (Array with: 'name')
+      defaultLimit: nil
+      noun: 'lines')
     do: [:args | self tool_get_python_source: args].
   ^self
 %
@@ -787,14 +826,19 @@ signatureFor: aMethodName from: aSigTableOrNil on: aClass
 %
 category: 'private'
 method: McpGrailToolset
-sourceFrom: aPath startingAt: aLineNumber label: aName
-  "Read aPath and answer the definition beginning at aLineNumber, headed by a `# <path>:<line>` line
-   so the caller can go and look. aLineNumber 0 means the whole file (a module).
+sourceLinesFrom: aPath startingAt: aLineNumber label: aName
+  "Read aPath and answer the definition beginning at aLineNumber, as an Array
+   {path . firstFileLine . lines}. aLineNumber 0 means the whole file (a module), which begins at
+   file line 1.
 
    The definition ends at the first line after it that is neither blank nor indented -- Python's own
    block rule, which needs no parser and no knowledge of decorators, nesting or continuation lines.
-   Blank lines are kept rather than ending the block, and trailing ones are dropped so a definition
-   does not come back padded to the next one."
+   Blank lines are kept rather than ending the block, and trailing ones are dropped (by
+   #headed:line:body:) so a definition does not come back padded to the next one.
+
+   THE LINES, NOT THE TEXT, and the file line they start at: #pagedSource:args: needs both to head a
+   page with the line the PAGE starts at rather than the line the definition does. This answered the
+   rendered String before it could page."
   | f all keep done |
   f := GsFile openReadOnServer: aPath.
   f isNil ifTrue: [
@@ -804,7 +848,7 @@ sourceFrom: aPath startingAt: aLineNumber label: aName
         , 'it is the one this image was installed from.'].
   all := OrderedCollection new.
   [ | line | [(line := f nextLine) isNil] whileFalse: [all add: line] ] ensure: [f close].
-  aLineNumber = 0 ifTrue: [^self headed: aPath line: 1 body: all].
+  aLineNumber = 0 ifTrue: [^Array with: aPath with: 1 with: all].
   keep := OrderedCollection new.
   done := false.
   aLineNumber to: all size do: [:i | | l |
@@ -813,7 +857,7 @@ sourceFrom: aPath startingAt: aLineNumber label: aName
       (i > aLineNumber and: [self startsABlockAfter: l])
         ifTrue: [done := true]
         ifFalse: [keep add: l]]].
-  ^self headed: aPath line: aLineNumber body: keep
+  ^Array with: aPath with: aLineNumber with: keep
 %
 category: 'private'
 method: McpGrailToolset
@@ -1046,7 +1090,9 @@ tool_get_python_source: args
 
    The end of a definition is found by INDENTATION -- the first later line that is neither blank nor
    indented -- which is how Python delimits a block and needs no parser. A module answers its whole
-   file. Both are capped by capResult:."
+   file. Both are capped by capResult:, and both page -- limit/offset count LINES here, and the
+   `# <path>:<line>` header names where the page starts, not where the definition does. See
+   #pagedSource:args:."
   | name obj code path firstLine |
   self ensureGrailConfigured.
   ^self withPythonErrorsAsMcpError: [
@@ -1073,7 +1119,8 @@ tool_get_python_source: args
           , 'native (Smalltalk-implemented) module has no .py at all; for a CLASS use '
           , 'describe_python_class and list_python_methods, which report the file and line of every '
           , 'method instead.'].
-    self capResult: (self sourceFrom: path asString startingAt: firstLine label: name)]
+    self capResult: (self pagedSource: (self sourceLinesFrom: path asString startingAt: firstLine label: name)
+      args: args)]
 %
 category: 'tools - python'
 method: McpGrailToolset
@@ -1089,7 +1136,7 @@ tool_list_python_methods: args
 
    Order is the class body's own (___classBodyOrder___), not alphabetical: a class reads in the order
    it was written, and that is also the order the .py lines run in."
-  | name cls out sigs codes order shown common |
+  | name cls out sigs codes order lines common |
   self ensureGrailConfigured.
   name := (args at: 'name') asString.
   cls := self canonicalClassNamed: name.
@@ -1103,19 +1150,21 @@ tool_list_python_methods: args
    -- and this result shares a 50k cap with everything else."
   common := self commonSourceFileFor: order from: codes.
   common ifNotNil: [out nextPutAll: '  ', common; nextPut: Character lf].
-  shown := 0.
-  order do: [:m | | sig loc |
+  "The method lines are collected rather than streamed so they can be paged. The class name, the
+   file and the signature-table NOTE stay OUTSIDE the page: they describe the whole class, not the
+   window, and a page 2 that had lost the class it belongs to would be unreadable.
+   Nothing is sorted -- the order is the class body's own (___classBodyOrder___), which is what an
+   offset needs and what the file reads in."
+  lines := order collect: [:m | | sig loc line |
     sig := self signatureFor: m from: sigs on: cls.
     loc := self sourceLocationFor: m from: codes.
-    shown := shown + 1.
-    out nextPutAll: '  ', sig.
-    loc ifNotNil: [:l |
-      out nextPutAll: '  -- ';
-        nextPutAll: (common isNil
-          ifTrue: [l]
-          ifFalse: ['line ' , (self lineOfLocation: l)])].
-    out nextPut: Character lf].
-  shown = 0 ifTrue: [out nextPutAll: '  (no python methods)'; nextPut: Character lf].
+    line := '  ', sig.
+    loc isNil
+      ifTrue: [line]
+      ifFalse: [line , '  -- ' , (common isNil ifTrue: [loc] ifFalse: ['line ' , (self lineOfLocation: loc)])]].
+  lines isEmpty
+    ifTrue: [out nextPutAll: '  (no python methods)'; nextPut: Character lf]
+    ifFalse: [out nextPutAll: (self page: lines args: args defaultLimit: nil)].
   sigs isNil ifTrue: [
     out nextPut: Character lf;
       nextPutAll: 'NOTE: this class carries no signature table, so the parameter lists above are '

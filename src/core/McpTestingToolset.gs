@@ -96,8 +96,7 @@ readOnlySafeToolNames
 category: 'registration'
 method: McpTestingToolset
 registerOn: aToolRegistry
-  | noArgs classArg methodArg |
-  noArgs := self objectSchema: Dictionary new required: #().
+  | classArg methodArg |
   classArg := self objectSchema:
     (Dictionary new at: 'className' put: (self propString: 'Name of the TestCase subclass'); yourself)
     required: (Array with: 'className').
@@ -121,8 +120,9 @@ registerOn: aToolRegistry
       required: #())
     do: [:args | self tool_list_failing_tests: args].
   aToolRegistry name: 'list_test_classes'
-    description: 'List all TestCase subclasses in the symbol list.'
-    inputSchema: noArgs do: [:args | self tool_list_test_classes: args].
+    description: 'List all TestCase subclasses in the symbol list. Sorted; pages with limit/offset.'
+    inputSchema: (self pagedSchema: Dictionary new required: #() defaultLimit: nil)
+    do: [:args | self tool_list_test_classes: args].
   aToolRegistry name: 'run_test_class'
     description: 'Run all test methods in a TestCase subclass and report the result.'
     inputSchema: classArg do: [:args | self tool_run_test_class: args].
@@ -179,7 +179,11 @@ tool_list_test_classes: args
   tc := System myUserProfile objectNamed: #TestCase.
   ^tc isNil
     ifTrue: ['TestCase is not available in this image.']
-    ifFalse: [self linesFrom: ((ClassOrganizer new allSubclassesOf: tc) collect: [:c | c name asString])]
+    ifFalse: [self
+      page: ((ClassOrganizer new allSubclassesOf: tc) collect: [:c | c name asString])
+        asSortedCollection asArray
+      args: args
+      defaultLimit: nil]
 %
 category: 'tools - testing'
 method: McpTestingToolset

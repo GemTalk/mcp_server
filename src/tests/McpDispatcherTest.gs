@@ -234,6 +234,43 @@ testToolsListIsAlphabeticalAnd31
 %
 category: 'tests'
 method: McpDispatcherTest
+testToolsListIsOnePageAndSaysSoByOmission
+  "MCP's pagination makes nextCursor optional and defines its ABSENCE as the end of the results, so
+   a server that answers everything in one page says so by not sending the key. Absent, not null: a
+   client treats a present cursor as a position it may resume from."
+  | result |
+  result := (self dispatch: (self request: 'tools/list' params: nil)) at: 'result'.
+  self deny: (result at: 'tools') isEmpty.
+  self deny: (result includesKey: 'nextCursor')
+%
+category: 'tests'
+method: McpDispatcherTest
+testToolsListRefusesACursorItCouldNotHaveIssued
+  "Every cursor is an invalid cursor here, because this server issues none -- so one arrives only
+   from another server or from a client persisting cursors across sessions, which the spec forbids.
+   'Invalid cursors SHOULD result in an error with code -32602 (Invalid params)', and the wrong
+   answer is the quiet one: returning page 1 to a client that asked to resume elsewhere."
+  | resp err |
+  resp := self dispatch: (self request: 'tools/list'
+    params: (Dictionary new at: 'cursor' put: 'eyJwYWdlIjogMn0='; yourself)).
+  self deny: (resp includesKey: 'result').
+  err := resp at: 'error'.
+  self assert: (err at: 'code') equals: -32602.
+  self assert: ((err at: 'data') at: 'kind') equals: 'invalidParams'
+%
+category: 'tests'
+method: McpDispatcherTest
+testToolsListTreatsANullCursorAsNoCursor
+  "A client that sends `cursor: null` has sent no cursor: the parser answers nil for JSON null, and
+   an absent cursor is the first page. Refusing this one would refuse a legal first request."
+  | result |
+  result := (self dispatch: (self request: 'tools/list'
+    params: (Dictionary new at: 'cursor' put: nil; yourself))) at: 'result'.
+  self deny: (result at: 'tools') isEmpty.
+  self deny: (result includesKey: 'nextCursor')
+%
+category: 'tests'
+method: McpDispatcherTest
 testUncommittedWorkIsReportedInTheResult
   "A dirty session is reported on every result until it is resolved, because the two moves that
    resolve it (commit, abort) are the model's to make and nothing else will make them."

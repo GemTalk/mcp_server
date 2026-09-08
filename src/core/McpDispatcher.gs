@@ -137,7 +137,8 @@ handle: requestDict
   method isNil ifTrue: [^self errorFor: id code: -32600 message: 'Invalid Request'].
   method = 'initialize' ifTrue: [^self resultFor: id with: (self initializeResultFor: (requestDict at: 'params' ifAbsent: [Dictionary new]))].
   method = 'ping' ifTrue: [^self resultFor: id with: self pingResult].
-  method = 'tools/list' ifTrue: [^self resultFor: id with: self toolsListResult].
+  method = 'tools/list' ifTrue: [
+    ^self handleToolsList: (requestDict at: 'params' ifAbsent: [Dictionary new]) id: id].
   method = 'tools/call' ifTrue: [
     ^self handleToolsCall: (requestDict at: 'params' ifAbsent: [Dictionary new]) id: id].
   (method beginsWith: 'notifications/') ifTrue: [^nil].
@@ -193,6 +194,42 @@ handleToolsCall: params id: id
        with: (self annotateContent: (self contentText: (tool callWith: args) isError: false)) ]
    on: Error
    do: [:ex | self resultFor: id with: (self annotateContent: (self toolErrorContentFrom: ex)) ]
+%
+category: 'dispatch'
+method: McpDispatcher
+handleToolsList: params id: id
+  "tools/list, and the one place MCP's own pagination touches this server.
+
+   WHAT THE SPEC PAGINATES. Both revisions this server speaks -- 2025-06-18 and 2025-11-25, whose
+   Utilities/Pagination pages are word for word identical, as is 2025-03-26's before them -- define
+   pagination for exactly four LIST operations: resources/list, resources/templates/list,
+   prompts/list and tools/list. tools/list is the only one of the four this server implements. The
+   mechanism is an opaque `cursor` in and an optional `nextCursor` out; the PAGE SIZE is the
+   server's to choose and a client 'MUST NOT assume a fixed page size'; a client 'MUST treat cursors
+   as opaque tokens'; and an invalid cursor 'SHOULD result in an error with code -32602 (Invalid
+   params)'. Nothing in the protocol paginates a tools/call RESULT, which is why the list-shaped
+   tools page in arguments of their own -- see McpToolset>>page:args:defaultLimit:.
+
+   THIS SERVER ANSWERS EVERY TOOL IN ONE PAGE, which is conformant: `nextCursor` is optional, and
+   its absence is defined as the end of the results. The surface is a few dozen tools whose
+   descriptors are already in memory, so there is nothing a second round trip would buy. Because no
+   nextCursor is ever issued, a cursor arriving here cannot have come from this server -- it is a
+   token from somewhere else, or a client persisting one across sessions, which the spec forbids in
+   the same paragraph -- so every cursor is an invalid cursor and gets the -32602 the spec asks for.
+   Answering the whole list instead, which this did before, is the one wrong answer available: the
+   client asked to resume at a position and was silently handed the beginning, with no way to tell
+   that its cursor had been ignored.
+
+   A cursor of JSON null is no cursor: the parser answers nil for it, and an absent cursor means the
+   first page.
+
+   IF THE SURFACE EVER OUTGROWS ONE PAGE, this is where a page size and a cursor go, and the README's
+   Protocol conformance table is where the choice is recorded either way."
+  (params at: 'cursor' ifAbsent: [nil]) isNil ifFalse: [
+    ^self errorFor: id code: -32602
+      message: 'Invalid cursor. This server answers tools/list in a single page and issues no nextCursor, so there is no position to resume from; repeat the request with no cursor.'
+      kind: 'invalidParams'].
+  ^self resultFor: id with: self toolsListResult
 %
 category: 'responses'
 method: McpDispatcher
