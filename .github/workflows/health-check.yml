@@ -1,0 +1,99 @@
+name: Health Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-workflows:
+    name: Lint GitHub Actions workflows
+    timeout-minutes: 1
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            .github/workflows
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Run actionlint
+        run: docker run --rm -v "$(pwd)":/repo --workdir /repo rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -color # 1.7.12
+      - name: Run zizmor
+        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+        with:
+          advanced-security: false
+
+  test:
+    name: ubuntu-latest / GemStone ${{ matrix.gemstone-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      matrix:
+        # Add more versions here to widen coverage -- each gets its own job.
+        gemstone-version: ['3.7.5']
+    env:
+      GEMSTONE_VERSION: ${{ matrix.gemstone-version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Cache GemStone download
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: downloads
+          key: gemstone-${{ matrix.gemstone-version }}-x86_64-linux
+
+      - name: Download and install GemStone
+        run: |
+          FILENAME="GemStone64Bit${GEMSTONE_VERSION}-x86_64.Linux.zip"
+          mkdir -p downloads
+          if [ ! -f "downloads/$FILENAME" ]; then
+            curl -fL --progress-bar -o "downloads/$FILENAME" \
+              "https://downloads.gemtalksystems.com/pub/GemStone64/${GEMSTONE_VERSION}/${FILENAME}"
+          fi
+          mkdir -p "$HOME/gemstone"
+          unzip -q "downloads/$FILENAME" -d "$HOME/gemstone"
+          echo "GEMSTONE=$HOME/gemstone/GemStone64Bit${GEMSTONE_VERSION}-x86_64.Linux" >> "$GITHUB_ENV"
+
+      - name: Configure environment
+        run: |
+          echo "GEMSTONE_GLOBAL_DIR=$GEMSTONE/global" >> "$GITHUB_ENV"
+          echo "$GEMSTONE/bin" >> "$GITHUB_PATH"
+
+      # GemStone ships a pristine extent0.dbf under bin/ as a template; copydbf
+      # instantiates the actual database from it. The stone also expects its
+      # lock/log directories to already exist at first start.
+      - name: Create a fresh extent
+        run: |
+          mkdir -p "$GEMSTONE_GLOBAL_DIR/locks" "$GEMSTONE_GLOBAL_DIR/log" "$GEMSTONE/data"
+          copydbf "$GEMSTONE/bin/extent0.dbf" "$GEMSTONE/data/"
+          chmod 600 "$GEMSTONE/data/extent0.dbf"
+
+      - name: Start Stone and NetLDI
+        run: |
+          startstone gs64stone
+          startnetldi -g -a "$USER" gs64ldi
+
+      - name: Install mcp_server
+        run: ./install.sh
+
+      - name: Run unit tests
+        run: ./run-unit-tests.sh
+
+      - name: Run wire-level integration test
+        run: ./test.sh
+
+      - name: Stop Stone and NetLDI
+        if: always()
+        run: |
+          stopnetldi gs64ldi || true
+          echo swordfish | stopstone gs64stone DataCurator -i || true
