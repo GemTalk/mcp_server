@@ -12,6 +12,36 @@ pre-release: breaking changes are expected and are called out rather than shimme
 
 ## Unreleased
 
+* **Two new optional Grail tools, `find_python_senders` and `search_python_source`** — the Python
+  sender search the toolset has been missing, and a text search over the checkout's `.py` files.
+  Both are **read-only safe**. The stock sender search is not merely incomplete for Python: it scans
+  environment 0 and Grail compiles Python into environment 1, so it answers *nothing*, confidently.
+  Measured on 3.7.5 with `_grail_session` imported, `ClassOrganizer new sendersOf: #'_dict'` and
+  `sendersOf: #'__dict:kw:'` each answer an empty pair of arrays where **12** senders exist.
+  `find_python_senders` searches all three shapes a Python reference compiles into — **compiled**
+  call sites (a generated method's selector pool, positioned from its source), **references** (a
+  first-class use or an unresolved attribute call, which leave a Symbol literal and no selector) and
+  **source** (the `.py` text, the only shape that answers for a module nothing has imported) — and
+  every answer ends with a `searched:` and a `not searched:` block naming each gap and the argument
+  that closes it, because "no senders" is only worth reading if it can be told from "I could not look
+  there". Matching is syntactic and **never imports**, which is what keeps a search from being a
+  database write and both tools out of the read-only gate. `shapes`, `scope` (narrowing at a dot
+  boundary, so `flask` does not select `flask_login`), `includeNative` and `includeTests` are all
+  optional; both tools page with `limit`/`offset`. `tests/python` is excluded by default as a
+  relevance choice rather than a cost one — the stdlib is 1,412 files and 426,131 lines and reads in
+  248 ms, and the fixtures would add about 75 ms.
+
+  Three interfaces that would let the tool stop reading Grail's internals are filed upstream:
+  [GemTalk/Grail#883](https://github.com/GemTalk/Grail/issues/883) (a public call-site position API,
+  instead of parsing the `___curPos___` literal out of generated source),
+  [#884](https://github.com/GemTalk/Grail/issues/884) (the name/selector mangling as API) and
+  [#885](https://github.com/GemTalk/Grail/issues/885) (an enumeration of the Python classes in an
+  image, which is what makes the searched-class count a floor rather than a total).
+
+  Renamed `McpGrailToolsetTest>>testRunPythonTestsIsTheOnlyReadOnlySafeTool`, which had already
+  stopped being true and was wrong by three. 7 new tests and 2 updated (38 in the suite, 556 across
+  22); README's tool table now reads 31 base + 9 optional Grail.
+
 * **A router now caps how many sessions it will hold at once** — `maxSessions`, **3 by default**
   (`MCP_MAX_SESSIONS`; `none` for no cap, which is the behaviour every earlier release had). Past the
   cap an `initialize` is refused with a JSON-RPC `-32001` naming the limit and `data.kind`

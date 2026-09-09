@@ -98,6 +98,19 @@ declaredOptionNames
 ! ------------------- Instance methods for McpGrailToolset
 category: 'private'
 method: McpGrailToolset
+absentSenderReport: aName searched: aSearchedString notSearched: aNotSearchedString
+  "The #absent refusal, carrying the coverage evidence rather than a bare no.
+
+   `no senders` and `I could not look there` are different answers, and a tool that renders both as
+   nothing is the failure this one exists to remove -- so the message names what WAS searched. The
+   kind is #absent rather than #notFound because the NAME may well exist: nothing called it in the
+   places reachable from here."
+  ^McpError signalKind: #absent message:
+    'No reference to ''' , aName , ''' found. searched: ' , aSearchedString
+      , '. not searched: ' , aNotSearchedString , '.'
+%
+category: 'private'
+method: McpGrailToolset
 callSitesIn: aSourceString forSelector: aSelector
   "Where the sends of aSelector are in aSourceString, as an OrderedCollection of
    {pythonLineOrNil. callSiteTextOrNil} -- one entry per send, in source order.
@@ -499,6 +512,40 @@ lastDotSegmentOf: aName
 %
 category: 'private'
 method: McpGrailToolset
+lastPathSegmentOf: aPath
+  "The final segment of aPath -- `flask` from `/g/src/python/stdlib/flask`, and `..` from a
+   directory listing's parent entry, which is the whole reason this exists (see
+   #pythonSourceFilesUnder:)."
+  | i |
+  i := aPath size.
+  [i > 0 and: [(aPath at: i) ~= $/]] whileTrue: [i := i - 1].
+  ^aPath copyFrom: i + 1 to: aPath size
+%
+category: 'private'
+method: McpGrailToolset
+line: aLine hasWholeName: aName
+  "Whether aName occurs in aLine as a whole identifier rather than inside a longer one -- so
+   `self._dict()` matches a search for `_dict` and `self.__dict__` does not.
+
+   The rule is identifier boundaries on BOTH sides, and unlike #source:hasSendOf:at: a following
+   colon is not a boundary violation: this reads Python, where `_dict: int` is an annotation on the
+   name, not a Smalltalk keyword message."
+  | at size nameSize |
+  size := aLine size.
+  nameSize := aName size.
+  nameSize = 0 ifTrue: [^false].
+  at := aLine findString: aName startingAt: 1.
+  [at > 0] whileTrue: [
+    | before after |
+    before := at > 1 and: [self isIdentifierCharacter: (aLine at: at - 1)].
+    after := (at + nameSize <= size)
+      and: [self isIdentifierCharacter: (aLine at: at + nameSize)].
+    (before or: [after]) ifFalse: [^true].
+    at := aLine findString: aName startingAt: at + 1].
+  ^false
+%
+category: 'private'
+method: McpGrailToolset
 lineOfLocation: aLocation
   "'12' from '/a/b.py:12', or '?' when the location carries no line."
   | idx |
@@ -747,6 +794,65 @@ pythonNameOfSelector: aSelector
 %
 category: 'private'
 method: McpGrailToolset
+pythonReferenceMarkers
+  "The generated-code markers that carry a Python name as a Symbol literal rather than as a
+   selector, and so are the only trace a NON-CALL reference leaves.
+
+   Measured by transpiling each form (compile_python) on 3.7.5:
+
+     `g = abs` emits
+       `(builtins instance) @env1:___globalAt___: #'abs' otherwise: [BoundMethod receiver: ...
+        selector: #abs]`
+     `self._name` emits `self @env1:___pyAttrLoad___: #'_name'`
+     a module-scope def read as a value emits `self @env1:___moduleAttrLoad___: #'helper'`
+
+   `selector:` is deliberately NOT a marker even though the name appears after it: it only ever
+   occurs inside the `otherwise:` block of a ___globalAt___: load, so keying on it would report
+   every builtin reference twice.
+
+   ___pyAttrLoad___: earns its place twice over. It is how an ATTRIBUTE CALL on a receiver Grail
+   cannot resolve statically is emitted -- `os.path.isdir(dst)` becomes
+   `(... ___pyAttrLoad___: #'isdir') @env1:value: {...} value: nil` -- so a call written that way
+   has no selector to find and would be invisible to the compiled scan entirely."
+  ^#( '___globalAt___:' '___pyAttrLoad___:' '___moduleAttrLoad___:' )
+%
+category: 'private'
+method: McpGrailToolset
+pythonReferencesOfName: aName in: aClass
+  "Every reference to the Python name aName from aClass's env-1 methods that is NOT a resolvable
+   call, as an OrderedCollection of {containingPythonName. marker. lineOrNil. callSiteTextOrNil}.
+
+   A first-class reference (`g = abs`, `f = helper`) compiles to a Symbol literal after one of
+   #pythonReferenceMarkers, and there is no selector anywhere to find it by -- so this shape cannot
+   be answered from the selector pool the way #pythonSendersOfName:in: answers a call. It is text
+   matching, and it is bounded by matching the marker first and then parsing the Symbol literal
+   that follows: the name is compared as a whole Symbol, so `absolute` is not a reference to `abs`."
+  | hits markers |
+  hits := OrderedCollection new.
+  markers := self pythonReferenceMarkers.
+  (aClass selectorsForEnvironment: 1) asSortedCollection do: [:sel |
+    | src ownName stores |
+    src := [aClass sourceCodeAt: sel environmentId: 1] on: Error do: [:ex | nil].
+    src ifNotNil: [
+      ownName := self pythonNameOfSelector: sel.
+      stores := self positionStoresIn: src.
+      markers do: [:marker |
+        | at |
+        at := src findString: marker startingAt: 1.
+        [at > 0] whileTrue: [
+          | after sym |
+          after := at + marker size.
+          [after <= src size and: [(src at: after) isSeparator]] whileTrue: [after := after + 1].
+          sym := self symbolLiteralAt: after in: src.
+          (sym notNil and: [sym = aName asString]) ifTrue: [
+            | pos |
+            pos := self storeInEffectAt: at in: stores.
+            hits add: (Array with: ownName with: marker with: (pos at: 1) with: (pos at: 2))].
+          at := src findString: marker startingAt: after]]]].
+  ^hits
+%
+category: 'private'
+method: McpGrailToolset
 pythonScope
   "This session's persistent Python namespace: one SymbolDictionary, created on first use and kept in
    SessionTemps for the life of the worker gem. Per gem means per CLIENT (each MCP session gets its
@@ -860,6 +966,60 @@ pythonSendersOfName: aName in: aClass
 %
 category: 'private'
 method: McpGrailToolset
+pythonSourceFilesUnder: aDirectory
+  "Every .py file under aDirectory, walked breadth-unspecified, as an OrderedCollection of absolute
+   paths.
+
+   THE DOT ENTRIES ARE THE WHOLE DIFFICULTY. GsFile class>>contentsOfDirectory:onClient: answers
+   `.` and `..` AS FULL PATHS -- `/g/src/python/stdlib/flask/..` is in flask's listing -- so a walk
+   that pushes what it is given lists the parent again, and again, until the gem dies. Measured:
+   it took the worker gem down with `VM temporary object memory is full, old space overflow` in
+   about 20 seconds, which looks exactly like a corpus too large to read and is not. Skipping the
+   two dot segments, the same walk over Grail's stdlib takes 75ms.
+
+   A directory is told from a file by what its own listing says: a file's listing is the file
+   itself, so an entry that lists only itself is a file. There is no isDirectory: on GsFile, and
+   isServerDirectory: answered nil for both on 3.7.5."
+  | stack files |
+  stack := OrderedCollection with: aDirectory.
+  files := OrderedCollection new.
+  [stack isEmpty] whileFalse: [
+    | p entries |
+    p := stack removeLast.
+    entries := [GsFile contentsOfDirectory: p onClient: false] on: Error do: [:ex | #()].
+    (entries size = 1 and: [(entries at: 1) = p])
+      ifTrue: [(self string: p endsWith: '.py') ifTrue: [files add: p]]
+      ifFalse: [
+        entries do: [:e |
+          | seg |
+          seg := self lastPathSegmentOf: e.
+          (seg = '.' or: [seg = '..' or: [e = p]]) ifFalse: [stack add: e]]]].
+  ^files
+%
+category: 'private'
+method: McpGrailToolset
+pythonSourceRootsIncludingTests: aBoolean
+  "The .py trees a text search reads, as an OrderedCollection of {label. absolutePath}, or empty
+   when no grailDirectory is configured or the tree is not where it is expected.
+
+   The stdlib is always searched; Grail's test fixtures only on request. That is a RELEVANCE
+   decision rather than a cost one, and the measurement says so: the stdlib is 1,412 files and
+   426,131 lines and reads in 248ms, and tests/python would add 644 files and 99,115 lines -- about
+   75ms. What it would also add is test code among the answers to `who calls this`, which is
+   usually not what the question meant."
+  | dir roots add |
+  dir := self grailDirectory.
+  roots := OrderedCollection new.
+  dir isNil ifTrue: [^roots].
+  add := [:label :path |
+    (GsFile existsOnServer: path) == true ifTrue: [
+      roots add: (Array with: label with: path)]].
+  add value: 'src/python/stdlib' value: dir , '/src/python/stdlib'.
+  aBoolean ifTrue: [add value: 'tests/python' value: dir , '/tests/python'].
+  ^roots
+%
+category: 'private'
+method: McpGrailToolset
 pythonTracebackFor: anException
   "The formatted Python traceback for anException, or nil if one cannot be produced.
 
@@ -911,7 +1071,7 @@ quotedStringAt: anIndex in: aSourceString
 category: 'read-only'
 method: McpGrailToolset
 readOnlySafeToolNames
-  "Two, for different reasons.
+  "Four, for three different reasons.
 
    python_module_state only READS -- registries, a session dictionary, and the .py on disk to hash.
    It deliberately does not import the module it describes, which is what lets it answer questions
@@ -921,11 +1081,18 @@ readOnlySafeToolNames
    committed in, so a read-only session running it can persist nothing, and the tests it runs are
    already-committed code -- the same argument McpTestingToolset makes for the Smalltalk SUnit tools.
 
+   find_python_senders and search_python_source read compiled methods, two registries and the .py
+   files on disk, and that is all -- which is the direct consequence of matching a name
+   SYNTACTICALLY rather than resolving it. Resolving would buy exact arities and would make a search
+   a database write, since a cold import in Grail compiles and commits nothing but writes plenty;
+   it would also put both tools in this comment's second paragraph instead of this one. Read-only
+   safety was a design input here, not a discovery about the finished tools.
+
    Everything else stays gated, deliberately. eval_python runs arbitrary Python. compile_python looks
    pure but shares that path. get_python_source, describe_python_class and list_python_methods all
    RESOLVE their subject, which imports the module it lives in, and in Grail a cold import is a
    database write."
-  ^#( 'python_module_state' 'run_python_tests' )
+  ^#( 'find_python_senders' 'python_module_state' 'run_python_tests' 'search_python_source' )
 %
 category: 'registration'
 method: McpGrailToolset
@@ -986,7 +1153,49 @@ registerOn: aToolRegistry
       defaultLimit: nil
       noun: 'lines')
     do: [:args | self tool_get_python_source: args].
+  aToolRegistry name: 'find_python_senders'
+    description: 'Who calls or refers to a Python name, across every shape Grail compiles a reference into -- resolvable calls in compiled methods, first-class references and unresolved attribute calls, and the .py text on disk. The stock find_senders cannot see any of them: it scans environment 0 and Grail compiles Python into environment 1, so it answers (none) where senders exist. Every answer ends with what was and was not searched. Pages with limit/offset.'
+    inputSchema: (self pagedSchema:
+      (Dictionary new
+        at: 'name' put: (self propString:
+          'Python name, bare or dotted: "copyfile", "shutil.copyfile", "SessionDict._dict". The LAST segment is matched; earlier segments narrow and label, so a bare name answers hits in every module that has one.');
+        at: 'shapes' put: (self stringArrayProperty:
+          'Optional: any of "compiled", "references", "source" (default: all three). A shape left out is reported as not searched rather than silently missing.');
+        at: 'scope' put: (self propString:
+          'Optional: restrict to a module or dotted prefix, e.g. "flask" or "flask.json". Matches at a dot boundary, so "flask" does not select "flask_login".');
+        at: 'includeNative' put: (self boolProperty:
+          'Optional: also search Grail''s native, Smalltalk-implemented modules (os, sys, math, ...). Default false: they answer with an implementation rather than a call site.');
+        at: 'includeTests' put: (self boolProperty:
+          'Optional: also search tests/python for the source shape (default false).');
+        yourself)
+      required: (Array with: 'name')
+      defaultLimit: 50
+      noun: 'hits')
+    do: [:args | self tool_find_python_senders: args].
+  aToolRegistry name: 'search_python_source'
+    description: 'Case-sensitive substring search over the .py files of the configured Grail checkout -- the Python analogue of search_method_source, and the only tool here that answers for a module nothing has imported in this session. Answers path:line and the line. Pages with limit/offset.'
+    inputSchema: (self pagedSchema:
+      (Dictionary new
+        at: 'pattern' put: (self propString: 'Substring to look for. Case-sensitive.');
+        at: 'scope' put: (self propString:
+          'Optional: restrict to a module or dotted prefix, e.g. "flask" or "flask.json", which is read as a path under the source tree.');
+        at: 'includeTests' put: (self boolProperty:
+          'Optional: also search tests/python (default false).');
+        yourself)
+      required: (Array with: 'pattern')
+      defaultLimit: 50
+      noun: 'hits')
+    do: [:args | self tool_search_python_source: args].
   ^self
+%
+category: 'private'
+method: McpGrailToolset
+relativePathOf: aPath under: aRoot
+  "aPath as written relative to aRoot, so a hit reads `flask/app.py:117` rather than repeating an
+   absolute path nobody typed."
+  ^(aPath size > aRoot size and: [(aPath copyFrom: 1 to: aRoot size) = aRoot])
+    ifTrue: [aPath copyFrom: aRoot size + 2 to: aPath size]
+    ifFalse: [aPath]
 %
 category: 'private'
 method: McpGrailToolset
@@ -1043,6 +1252,33 @@ resolvePythonObjectNamed: aDottedName
 %
 category: 'private'
 method: McpGrailToolset
+scope: aScopeOrNil matchesLabel: aLabel
+  "Whether a dotted scope selects aLabel: itself, or anything under it. `flask` selects `flask` and
+   `flask.app`, and not `flask_login` -- the boundary is a dot, not a prefix, or a scope would
+   quietly widen to every module whose name starts the same way."
+  aScopeOrNil isNil ifTrue: [^true].
+  aLabel = aScopeOrNil ifTrue: [^true].
+  ^(aLabel size > aScopeOrNil size)
+    and: [(aLabel copyFrom: 1 to: aScopeOrNil size) = aScopeOrNil
+      and: [(aLabel at: aScopeOrNil size + 1) = $.]]
+%
+category: 'private'
+method: McpGrailToolset
+scope: aScopeOrNil matchesRelativePath: aRelativePath
+  "Whether a dotted scope selects a .py path. The scope is written in PYTHON (`flask.json`) and the
+   path in the filesystem (`flask/json/__init__.py`), so the dots become slashes and the match is
+   against a path prefix at a segment boundary -- plus the single-module case, where `flask.app`
+   selects the file `flask/app.py`."
+  | asPath |
+  aScopeOrNil isNil ifTrue: [^true].
+  asPath := aScopeOrNil collect: [:c | c = $. ifTrue: [$/] ifFalse: [c]].
+  aRelativePath = (asPath , '.py') ifTrue: [^true].
+  ^(aRelativePath size > asPath size)
+    and: [(aRelativePath copyFrom: 1 to: asPath size) = asPath
+      and: [(aRelativePath at: asPath size + 1) = $/]]
+%
+category: 'private'
+method: McpGrailToolset
 selector: aSelector callsPythonName: aName
   "Whether the env-1 selector aSelector is a call to the Python name aName.
 
@@ -1083,6 +1319,103 @@ selectorDerivedSignatureFor: aMethodName on: aClass
     ^aMethodName , '(' , (self placeholderArgs: n) , ')'].
   varargs ifTrue: [^aMethodName , '(*args, **kwargs)'].
   ^aMethodName , '()'
+%
+category: 'private'
+method: McpGrailToolset
+senderCoverageFor: aShapeSet classCount: aCount roots: aRootCollection includeNative: nativeBool includeTests: testsBool
+  "The two lines every answer ends with: what was searched, and what was not.
+
+   THIS IS THE POINT OF THE TOOL, not decoration on it. The failure being replaced is a confident
+   `(none)` from a search that could not see environment 1 at all, and an answer of `no senders`
+   is only worth anything if the reader can tell it from `I could not look there`. So the coverage
+   is stated whether or not anything was found, the counts say what they are, and every gap names
+   the argument that closes it where one exists.
+
+   The class count is a FLOOR and is not dressed up as a total: Grail registers module-scope class
+   statements only, so a nested class is not in it, and there is no enumeration of Python classes to
+   compare against (GemTalk/Grail#885)."
+  | searched not |
+  searched := OrderedCollection new.
+  not := OrderedCollection new.
+  (aShapeSet includes: 'compiled') | (aShapeSet includes: 'references') ifTrue: [
+    searched add: aCount printString , ' compiled '
+      , (aCount = 1 ifTrue: ['class'] ifFalse: ['classes'])
+      , ' (module classes and Python classes) in this session'].
+  aRootCollection do: [:r | searched add: (r at: 1)].
+  searched isEmpty ifTrue: [searched add: 'nothing'].
+  nativeBool ifFalse: [
+    not add: 'Grail''s native (Smalltalk-implemented) modules -- pass includeNative: true'].
+  (aShapeSet includes: 'source') ifTrue: [
+    testsBool ifFalse: [not add: 'tests/python -- pass includeTests: true'].
+    aRootCollection isEmpty ifTrue: [
+      not add: 'the .py files on disk: no grailDirectory is configured for this server']].
+  (aShapeSet includes: 'source') ifFalse: [not add: 'the .py files on disk -- not among the shapes asked for'].
+  (aShapeSet includes: 'compiled') ifFalse: [not add: 'compiled call sites -- not among the shapes asked for'].
+  not add: 'modules whose .py nothing has imported in this session, which have nothing compiled to search'.
+  not add: 'nested classes, and functions defined in an eval scope, which compile to blocks with no selector pool (GemTalk/Grail#885)'.
+  "One gap per line. As a comma list this ran to four clauses on one line and stopped being read,
+   which defeats the only thing it is for."
+  ^'searched: ' , (self commaListOf: searched) , Character lf asString
+    , 'not searched:' , Character lf asString
+    , (not inject: '' into: [:acc :e | acc , '  ' , e , Character lf asString])
+%
+category: 'private'
+method: McpGrailToolset
+senderLineFor: aHit shape: aShapeLabel label: aLabel class: aClass
+  "One hit, one line, machine-splittable and addressable.
+
+   Every line carries the DOTTED PYTHON name a follow-up call can use (`get_python_source
+   _grail_session.SessionDict`), because that is the address the reader thinks in, and then the
+   Smalltalk identity in parentheses so get_method_source remains a way in when the Python answer
+   is not enough. An absent line number is printed as `line ?` rather than omitted: the column
+   staying put is what lets a reader scan the answer, and the reason it is absent is in the tool's
+   own comment."
+  | line text |
+  line := aHit at: 3.
+  text := aHit at: 4.
+  ^(self shapeTag: aShapeLabel) , aLabel , '.' , (aHit at: 1)
+    , '  line ' , (line isNil ifTrue: ['?'] ifFalse: [line printString])
+    , (text isNil ifTrue: [''] ifFalse: ['  ' , (self trimmedLine: text)])
+    , '  (' , aClass name asString , '>>' , (aHit at: 2) asString , ' env 1)'
+%
+category: 'private'
+method: McpGrailToolset
+shapeSetFrom: args
+  "The shapes to search, defaulting to all three. An unknown shape is refused rather than ignored:
+   a client that asks for `compile` and is silently given nothing would read the empty answer as
+   `no senders`, which is the one mistake this tool must not make."
+  | given known set |
+  known := #( 'compiled' 'references' 'source' ).
+  given := args at: 'shapes' ifAbsent: [nil].
+  (given isNil or: [given isEmpty]) ifTrue: [^known asSet].
+  "An equality Set, NOT an IdentitySet: each occurrence of a String literal in compiled code is its
+   own object, so `#includes: 'compiled'` in another method would answer false for an identity set
+   however right the contents looked in an inspector."
+  set := Set new.
+  given do: [:raw |
+    | v |
+    v := raw asString.
+    (known detect: [:k | k = v] ifNone: [nil])
+      ifNil: [
+        ^McpError signalKind: #invalidParams message:
+          '''' , v , ''' is not a shape. The shapes are: ' , (self commaListOf: known) , '.']
+      ifNotNil: [:k | set add: k]].
+  ^set
+%
+category: 'private'
+method: McpGrailToolset
+shapeTag: aShapeLabel
+  "aShapeLabel padded to a fixed width, so the columns of an answer line up whichever shape found
+   the hit and a reader can scan down one of them.
+
+   Padded with a stream and timesRepeat: rather than `String new: n withAll: $ `, which does not
+   exist on 3.7.5 -- and, GemStone having no notion of an optional method, showed up as a
+   doesNotUnderstand from inside a finished tool rather than as anything a compile could catch."
+  | s |
+  s := WriteStream on: String new.
+  s nextPutAll: aShapeLabel.
+  ((10 - aShapeLabel size) max: 1) timesRepeat: [s nextPut: $ ].
+  ^s contents
 %
 category: 'private'
 method: McpGrailToolset
@@ -1131,6 +1464,47 @@ source: aSourceString hasSendOf: aKey at: anIndex
       | next |
       next := aSourceString at: endIndex + 1.
       (self isIdentifierCharacter: next) or: [next = $:]]) not
+%
+category: 'private'
+method: McpGrailToolset
+sourceHitsForPattern: aPattern under: aRootPair scope: aScopeOrNil wholeName: aBoolean
+  "Every line under one .py root holding aPattern, as an OrderedCollection of
+   {relativePath. lineNumber. trimmedLine}, in path order.
+
+   Read a LINE AT A TIME and only the matches kept, because the whole point is to answer over a
+   corpus far larger than a gem's temporary object memory: 426,131 lines here, and holding even the
+   file contents would not fit. The line number comes free from the read, which is what makes a hit
+   addressable.
+
+   The search is a case-SENSITIVE substring: Python names are case-sensitive, and String>>
+   includesString: is not.
+
+   aBoolean asks for whole-NAME matching, which is what separates the two callers. A sender search
+   for `_dict` must not answer every line holding `__dict__`: measured over the stdlib, plain
+   substring gave 1,153 hits and whole-name 15, and the difference is entirely noise a reader would
+   have to filter by hand. search_python_source keeps the substring behaviour, because a pattern
+   there is arbitrary text -- a decorator fragment, half a comment -- and boundaries would refuse
+   the searches it exists for."
+  | hits root |
+  root := aRootPair at: 2.
+  hits := OrderedCollection new.
+  (self pythonSourceFilesUnder: root) asSortedCollection do: [:p |
+    | rel |
+    rel := self relativePathOf: p under: root.
+    (self scope: aScopeOrNil matchesRelativePath: rel) ifTrue: [
+      | f line n |
+      f := [GsFile openReadOnServer: p] on: Error do: [:ex | nil].
+      f ifNotNil: [
+        n := 0.
+        [[(line := f nextLine) isNil] whileFalse: [
+          n := n + 1.
+          (aBoolean
+            ifTrue: [self line: line hasWholeName: aPattern]
+            ifFalse: [(line findString: aPattern startingAt: 1) > 0]) ifTrue: [
+            hits add: (Array with: (aRootPair at: 1) , '/' , rel with: n
+                         with: (self trimmedLine: line))]]]
+          ensure: [[f close] on: Error do: [:ex | nil]]]]].
+  ^hits
 %
 category: 'private'
 method: McpGrailToolset
@@ -1229,6 +1603,25 @@ string: aString endsWith: aSuffix
    is not present in every version this server files into."
   aString size < aSuffix size ifTrue: [^false].
   ^(aString copyFrom: aString size - aSuffix size + 1 to: aString size) = aSuffix
+%
+category: 'private'
+method: McpGrailToolset
+symbolLiteralAt: anIndex in: aSourceString
+  "The text of the Symbol literal at anIndex -- `abs` from either `#abs` or `#'abs'` -- or nil when
+   there is no literal there. Both forms occur in generated code, sometimes for the same name in
+   the same statement."
+  | i size out |
+  size := aSourceString size.
+  i := anIndex.
+  (i <= size and: [(aSourceString at: i) = $#]) ifFalse: [^nil].
+  i := i + 1.
+  i > size ifTrue: [^nil].
+  (aSourceString at: i) = $' ifTrue: [^self quotedStringAt: i in: aSourceString].
+  out := WriteStream on: String new.
+  [i <= size and: [self isIdentifierCharacter: (aSourceString at: i)]] whileTrue: [
+    out nextPut: (aSourceString at: i).
+    i := i + 1].
+  ^out contents isEmpty ifTrue: [nil] ifFalse: [out contents]
 %
 category: 'private'
 method: McpGrailToolset
@@ -1395,6 +1788,84 @@ _mcp_captured'] on: Error, BaseException do: [:ex | nil]]].
     detail := (self pythonTracebackFor: ex) ifNil: [self pythonMessageFor: ex].
     ^McpError signalKind: #pythonError message: (self capResult: detail)].
   ^self capResult: (self renderValue: value printed: printed)
+%
+category: 'tools - python'
+method: McpGrailToolset
+tool_find_python_senders: args
+  "Who calls, or refers to, a Python name -- across every shape Grail compiles a reference into,
+   saying which shapes it searched.
+
+   WHY THIS EXISTS. The stock Smalltalk sender search scans environment 0, and Grail compiles Python
+   into environment 1, so it does not under-report -- it reports NOTHING, confidently. Measured on
+   3.7.5 with `_grail_session` imported: `ClassOrganizer new sendersOf: #'_dict'` answers an empty
+   pair of arrays where 12 senders exist, and `find_senders` through MCP answers `(none)`. A false
+   negative about code is worse than a slow answer about it.
+
+   THREE SHAPES, because a Python reference compiles to three unrelated things and no one of them is
+   the answer:
+
+     compiled   -- a resolvable call, found in the selector pool of a generated method and positioned
+                   from the source (#pythonSendersOfName:in:). Exact: the pool is what the method
+                   really sends.
+     references -- a first-class reference (`g = abs`) or a call on a receiver Grail could not
+                   resolve (`os.path.isdir(x)`), which leave a Symbol literal and NO selector
+                   (#pythonReferencesOfName:in:).
+     source     -- the .py text on disk, which is the only shape that can answer for a module
+                   nothing has imported in this session.
+
+   MATCHING IS SYNTACTIC AND NEVER IMPORTS. The last segment of the name is what is matched; leading
+   segments narrow and label. Resolving the name instead would give exact arities, and would make a
+   SEARCH a database write -- a cold import in Grail compiles and writes -- which is both surprising
+   and the reason it could not be read-only safe. Over-matching is reported instead: a bare name
+   answers hits in every module, each labelled with the module it is in, and `scope` narrows.
+
+   Nothing here imports, resolves or compiles."
+  | name shapes scope includeNative includeTests classes lines total roots compiledCount refCount sourceCount |
+  self ensureGrailConfigured.
+  name := (args at: 'name') asString.
+  shapes := self shapeSetFrom: args.
+  scope := args at: 'scope' ifAbsent: [nil].
+  scope ifNotNil: [scope := scope asString].
+  includeNative := (args at: 'includeNative' ifAbsent: [false]) == true.
+  includeTests := (args at: 'includeTests' ifAbsent: [false]) == true.
+  lines := OrderedCollection new.
+  compiledCount := 0.
+  refCount := 0.
+  sourceCount := 0.
+  classes := (self pythonSearchScopeIncludingNative: includeNative)
+    select: [:e | self scope: scope matchesLabel: (e at: 1)].
+  classes do: [:entry |
+    | label cls |
+    label := entry at: 1.
+    cls := entry at: 2.
+    (shapes includes: 'compiled') ifTrue: [
+      (self pythonSendersOfName: (self lastDotSegmentOf: name) in: cls) do: [:h |
+        compiledCount := compiledCount + 1.
+        lines add: (self senderLineFor: h shape: 'compiled' label: label class: cls)]].
+    (shapes includes: 'references') ifTrue: [
+      (self pythonReferencesOfName: (self lastDotSegmentOf: name) in: cls) do: [:h |
+        refCount := refCount + 1.
+        lines add: (self senderLineFor: h shape: 'reference' label: label class: cls)]]].
+  roots := (shapes includes: 'source')
+    ifTrue: [self pythonSourceRootsIncludingTests: includeTests]
+    ifFalse: [OrderedCollection new].
+  roots do: [:r |
+    (self sourceHitsForPattern: (self lastDotSegmentOf: name) under: r scope: scope
+       wholeName: true) do: [:h |
+      sourceCount := sourceCount + 1.
+      lines add: (self shapeTag: 'source') , (h at: 1) , ':' , (h at: 2) printString
+                    , '  ' , (h at: 3)]].
+  total := lines size.
+  total = 0 ifTrue: [
+    ^self absentSenderReport: name
+      searched: (self commaListOf: (Array with: classes size printString , ' compiled classes'
+                   with: roots size printString , ' .py trees'))
+      notSearched: 'see the shapes and flags on this tool'].
+  ^self capResult: (self page: lines args: args defaultLimit: 50)
+    , 'compiled ' , compiledCount printString , ', references ' , refCount printString
+    , ', .py text ' , sourceCount printString , Character lf asString
+    , (self senderCoverageFor: shapes classCount: classes size roots: roots
+         includeNative: includeNative includeTests: includeTests)
 %
 category: 'tools - python'
 method: McpGrailToolset
@@ -1615,11 +2086,65 @@ tool_run_python_tests: args
     self capResult: sess lastResult asString]
       ensure: [[sess logout] on: Error do: [:ex | nil]]
 %
+category: 'tools - python'
+method: McpGrailToolset
+tool_search_python_source: args
+  "Substring search over the .py files of the configured Grail checkout -- the Python analogue of
+   search_method_source, and the only tool here that can answer about a module nothing has imported.
+
+   Separate from find_python_senders rather than folded into it because the questions differ. A
+   sender search is about ONE name and wants every shape it compiles to; this is about arbitrary
+   text -- a decorator, a comment, a TODO, an import line -- and wants nothing but the file and the
+   line. Measured cost of the whole stdlib: 1,412 files, 426,131 lines, 248ms, so it runs
+   synchronously and reports a true total.
+
+   Case-SENSITIVE, like every other search here: Python names are, and GemStone's
+   String>>includesString: is not."
+  | pattern scope includeTests roots hits lines |
+  self ensureGrailConfigured.
+  pattern := (args at: 'pattern') asString.
+  scope := args at: 'scope' ifAbsent: [nil].
+  scope ifNotNil: [scope := scope asString].
+  includeTests := (args at: 'includeTests' ifAbsent: [false]) == true.
+  roots := self pythonSourceRootsIncludingTests: includeTests.
+  roots isEmpty ifTrue: [
+    ^McpError signalKind: #unknown message:
+      'No Python source tree to search: this server has no grailDirectory configured, so the .py '
+        , 'files are not reachable from here. The compiled shapes are still searchable with '
+        , 'find_python_senders.'].
+  hits := OrderedCollection new.
+  roots do: [:r |
+    hits addAll: (self sourceHitsForPattern: pattern under: r scope: scope wholeName: false)].
+  hits isEmpty ifTrue: [
+    ^self absentSenderReport: pattern
+      searched: (self commaListOf: (roots collect: [:r | r at: 1]))
+      notSearched: (includeTests
+        ifTrue: ['nothing else under the checkout']
+        ifFalse: ['tests/python -- pass includeTests: true'])].
+  lines := hits collect: [:h | (h at: 1) , ':' , (h at: 2) printString , '  ' , (h at: 3)].
+  ^self capResult: (self page: lines args: args defaultLimit: 50)
+    , 'searched: ' , (self commaListOf: (roots collect: [:r | r at: 1]))
+    , (includeTests ifTrue: [''] ifFalse: ['. not searched: tests/python -- pass includeTests: true'])
+%
 category: 'accessing'
 method: McpGrailToolset
 toolNames
-  ^#( 'compile_python' 'describe_python_class' 'eval_python' 'get_python_source'
-      'list_python_methods' 'python_module_state' 'run_python_tests' )
+  ^#( 'compile_python' 'describe_python_class' 'eval_python' 'find_python_senders'
+      'get_python_source' 'list_python_methods' 'python_module_state' 'run_python_tests'
+      'search_python_source' )
+%
+category: 'private'
+method: McpGrailToolset
+trimmedLine: aString
+  "aString without leading or trailing whitespace, its line terminator included. Written out rather
+   than sent #trimSeparators, which this project cannot rely on across the GemStone versions it
+   supports."
+  | first last |
+  first := 1.
+  last := aString size.
+  [first <= last and: [(aString at: first) isSeparator]] whileTrue: [first := first + 1].
+  [last >= first and: [(aString at: last) isSeparator]] whileTrue: [last := last - 1].
+  ^aString copyFrom: first to: last
 %
 category: 'private'
 method: McpGrailToolset
