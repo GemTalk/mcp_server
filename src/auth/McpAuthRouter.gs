@@ -557,8 +557,11 @@ serveInitialize: req on: conn
    Order: (1) no token -> 401; (2) RS-layer checks (exp/issuer/audience -> 401 invalid_token,
    missing scope -> 403 insufficient_scope); (3) userId claim missing -> 401; (4) GemStone login
    (signature + JwtSecurityData) fails -> 401. On success the worker runs as the JWT's GemStone
-   user and the MCP-Session-Id is returned as usual."
-  | token rejection userId sess |
+   user and the MCP-Session-Id is returned as usual.
+   The concurrency cap is answered last, by the inherited wrapper, and it is deliberately the last
+   thing an unauthenticated caller can learn: a client is told this server is full only once it has
+   proved it was entitled to a session at all."
+  | token rejection userId |
   token := self bearerTokenOf: req.
   token isNil ifTrue: [^self writeAuthError: 401 oauthError: nil
     description: 'Missing or malformed Authorization: Bearer token' on: conn].
@@ -568,17 +571,25 @@ serveInitialize: req on: conn
   userId := self userIdFromToken: token.
   userId isNil ifTrue: [^self writeAuthError: 401 oauthError: 'invalid_token'
     description: 'Token has no ' , self userIdClaim , ' claim' on: conn].
-  sess := [self openSessionForUser: userId jwt: token
-    readOnly: (self readOnly or: [(self tokenGrantsWrite: token) not])]
-    on: Error
-    do: [:e |
-      self log: 'McpAuthRouter login failed for ' , userId printString , ': '
-        , ([e description] on: Error do: [:x | e class name asString]).
-      nil].
-  sess isNil ifTrue: [^self writeAuthError: 401 oauthError: 'invalid_token'
-    description: 'Authentication failed' on: conn].
-  conn writeJson: (sess forward: (req at: 'body' ifAbsent: [''])
-    lifetimeBounds: (self lifetimeBoundsFor: sess)) sessionId: sess id
+  ^self refusingOverSessionLimit: req on: conn do: [
+    | sess |
+    sess := [self openSessionForUser: userId jwt: token
+      readOnly: (self readOnly or: [(self tokenGrantsWrite: token) not])]
+      on: Error
+      do: [:e |
+        "A refused session is a capacity answer and not a failed login, so it must not be reported
+         as one: let it out to the wrapper, which says what actually happened. Answered as a 401 it
+         would send a well-behaved client off to re-authenticate against an authorization server
+         that was never the problem, in a loop, which is the worst reading of this available."
+        (self isSessionLimitError: e) ifTrue: [e pass].
+        self log: 'McpAuthRouter login failed for ' , userId printString , ': '
+          , ([e description] on: Error do: [:x | e class name asString]).
+        nil].
+    sess isNil
+      ifTrue: [self writeAuthError: 401 oauthError: 'invalid_token'
+        description: 'Authentication failed' on: conn]
+      ifFalse: [conn writeJson: (sess forward: (req at: 'body' ifAbsent: [''])
+        lifetimeBounds: (self lifetimeBoundsFor: sess)) sessionId: sess id]]
 %
 category: 'routing'
 method: McpAuthRouter

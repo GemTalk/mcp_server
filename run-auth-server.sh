@@ -54,6 +54,12 @@
 #                         Advertised automatically so clients can request it -- an unrequestable write
 #                         scope would leave every session read-only.
 #   MCP_READONLY        - 1 to force EVERY session read-only regardless of scope (default: 0)
+#   MCP_MAX_SESSIONS    - how many client sessions this server holds AT ONCE (default 3; `none`
+#                         for no cap). Documented with the family below, but named here because the
+#                         default is sized for a localhost server on a small stone and a shared
+#                         deployment will want a larger number -- chosen against what its stone
+#                         actually allows, since a login past that limit fails for every gem on the
+#                         stone rather than only for the client that asked.
 #   Session lifetime    - the MCP_IDLE_TIMEOUT family, documented in ./session-lifetime.sh. A
 #                         hosted server usually wants a SHORTER idle timeout than the 30-minute
 #                         default, since every live session is a gem holding a transaction view. Note

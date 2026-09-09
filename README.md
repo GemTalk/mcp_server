@@ -763,6 +763,13 @@ tools itself (those run in the per-client `McpServer` workers):
   handleJsonString: ' , body printString`, naming the class the router resolved — the worker runs
   the tool in its own session and returns the response, which the front end relays. Missing id →
   `400`; unknown/expired → `404` (a compliant client re-initializes).
+- **At most `maxSessions` at once — 3 by default.** A session *is* a GemStone login, and a
+  repository has a finite number of them, so past the cap `initialize` is refused with a JSON-RPC
+  error (`-32001`, `data.kind` `sessionLimit`) naming the limit, and **no login is attempted**. The
+  failure this prevents is not the client's: the login that exhausts a stone fails for *every* gem on
+  it — `topaz` included — and a client that reconnects in a loop gets there without doing anything
+  reckless, since reconnecting opens a *new* session. Set `MCP_MAX_SESSIONS` (a count, or `none` for
+  no cap) once you know what your stone allows. See [Session lifetime](docs/session-lifetime.md).
 - **DELETE** closes the worker; and a **background maintenance `GsProcess`** (every 60s) probes,
   warns and reaps idle sessions, so abandoned test gems don't pile up. A session is reaped after
   **30 minutes** idle by default (`sessionIdleTimeoutSeconds`, configurable and optional) — or
@@ -951,11 +958,13 @@ is discarded and re-sent down the new stream on the next pass. (Measured against
 
 How long a session lives is deployment policy, not a constant: the idle deadline, the liveness-probe
 interval, the absolute cap, how long a single request may run, and what an authenticated router does
-with a token's own `exp`. Because
+with a token's own `exp`. How **many** live at once is policy too — `maxSessions`, 3 by default, the
+one bound here that refuses rather than releases. Because
 a session here **is a gem holding a transaction view**, those choices decide when uncommitted work
 is thrown away — so they have their own document: **[docs/session-lifetime.md](docs/session-lifetime.md)**.
-It covers every knob and its default, what actually ends a session, why nothing is measured in
-elapsed time, and why a host suspend needs no handling at all.
+It covers every knob and its default, what actually ends a session, why running out of sessions is
+the stone's problem rather than the client's, why nothing is measured in elapsed time, and why a host
+suspend needs no handling at all.
 
 From the shell, `MCP_IDLE_TIMEOUT` and friends set all of it on either launcher — see
 [session-lifetime.sh](session-lifetime.sh), which documents each, along with the view-hygiene family
@@ -1319,8 +1328,10 @@ flag, so a missing suite is a skip and not an error:
 - `McpTransportTest` — `handleConnection:` driven over a **`McpMockSocket`** wrapped in a
   real `McpHttpConnection`, so the genuine HTTP parsing/writing runs with no TCP. Covers the
   paths that spawn **no** worker gem: a session-less GET→`400`, DELETE→`400`/`404`, unknown verb→405,
-  malformed→`-32700`, a session-less POST→`400`, chunked delivery, EOF, Content-Length. (initialize
-  and a routed tool call spawn a real worker, so they're exercised by the integration test instead.)
+  malformed→`-32700`, a session-less POST→`400`, chunked delivery, EOF, Content-Length — and the one
+  `initialize` that belongs here, the one **refused at `maxSessions`**, which is answerable without a
+  login. (A successful initialize and a routed tool call spawn a real worker, so they're exercised by
+  the integration test instead.)
   Also the **message trace**: off by default, the body text on the line, one line per message however
   many newlines the body holds, the cap and its `...(+N more)`, a `403`-refused request traced anyway,
   the `Authorization` header staying out, and both settings surviving the fork-string round-trip.
@@ -1348,6 +1359,10 @@ flag, so a missing suite is a skip and not an error:
   itself running without binding a socket, so the drain loop can be driven at all.
 - `McpLifetimeTest` — the *policy* riding on that pathway, which is a separate thing: that the
   intervals are config and survive the fork (including the JSON `null` that means "no deadline"),
+  that **`maxSessions` is enforced before any login is attempted** — including from inside a
+  creation block, which stages deterministically the race a client arriving mid-login would
+  otherwise have to win — and that a slot comes back whether the session was released or the login
+  failed,
   that an unworkable combination of them is refused at startup, that a probe lost to a stream
   handover is **discarded rather than condemned** while one lost on the
   current stream still condemns,
@@ -1406,13 +1421,13 @@ Run a single suite while a server is up via the `run_test_class` tool (e.g. `run
 McpToolTest`). `./run-unit-tests.sh` runs them all and exits 0 when every test passes: the
 socket-less suites `McpJsonTest` (12), `McpUtf8Test` (7), `McpBlindWriteTest` (41),
 `McpToolTest` (65), `McpDispatcherTest` (21), `McpSessionTest` (24), `McpOutboxTest` (9),
-`McpProgressTest` (19), `McpStreamTest` (18), `McpLifetimeTest` (49), `McpViewHygieneTest` (46),
-`McpTransportTest` (43), `McpContractTest` (35), `McpExtensionTest` (14) and `McpGemNameTest` (16),
+`McpProgressTest` (19), `McpStreamTest` (18), `McpLifetimeTest` (56), `McpViewHygieneTest` (46),
+`McpTransportTest` (44), `McpContractTest` (35), `McpExtensionTest` (14) and `McpGemNameTest` (16),
 plus `McpConcurrentEditTest` (18), `McpExternalSessionTest` (5), `McpTransactionTest` (8) and
-`McpWorkerDeadlineTest` (4) — **454 tests**,
+`McpWorkerDeadlineTest` (4) — **462 tests**,
 which is the whole suite on a base install. Where the optional groups are installed the runner picks
-their suites up automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **510
-tests** — and **539 with the 29 in `McpGrailToolsetTest`** on a Grail image.
+their suites up automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **518
+tests** — and **547 with the 29 in `McpGrailToolsetTest`** on a Grail image.
 
 Six suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
 `McpAuthConformanceTest` commit a throwaway JWT user and spawn real worker gems; they are in the
