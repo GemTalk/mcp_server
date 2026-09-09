@@ -128,10 +128,27 @@ McpStreamTest McpLifetimeTest McpViewHygieneTest McpTransportTest McpContractTes
 McpExtensionTest McpExternalSessionTest McpTransactionTest McpWorkerDeadlineTest
 McpAuthTest McpAuthConformanceTest McpGrailToolsetTest"
 
+# Colored, curated output. Topaz itself never emits ANSI codes and echoes back every line it is
+# fed (login banner, the doit source, etc.), which is most of what used to reach the terminal --
+# the actual per-suite answer was always just the one line matched below. Disabled for NO_COLOR, or
+# when stdout is neither a terminal nor a CI runner (e.g. redirected straight to a plain log file).
+if [ -n "${NO_COLOR:-}" ] || { [ ! -t 1 ] && [ -z "${CI:-}" ]; }; then
+  RED="" GREEN="" YELLOW="" BOLD="" RESET=""
+else
+  # YELLOW is the bright variant (93, not 33): standard yellow reads as a dim olive in most
+  # terminal/log-viewer palettes, GitHub Actions' included, unlike red/green which stay vivid at
+  # their standard codes.
+  RED=$'\033[31m'; GREEN=$'\033[32m'; YELLOW=$'\033[93m'; BOLD=$'\033[1m'; RESET=$'\033[0m'
+fi
+
 # Run each suite in its own topaz session. `iferr 1 stk` still prints the stack for a suite that
-# blows up, and PIPESTATUS still gives topaz's own exit code -- but now that only decides the fate
-# of ONE suite. A suite whose tally line never appears is ABORTED, which is a failure, not a skip:
-# an aborted suite has told us nothing, and reporting it as anything else would be a false pass.
+# blows up, and topaz's own exit code still decides the fate of ONE suite. A suite whose tally line
+# never appears is ABORTED, which is a failure, not a skip: an aborted suite has told us nothing,
+# and reporting it as anything else would be a false pass.
+#
+# The full topaz transcript goes only to $TMP, not to the terminal: on a normal pass or a test
+# failure it is noise (login banner, echoed source) around the one line and the FAIL/ERROR lines
+# extracted below; on an ABORT it is the only diagnostic there is, so that branch prints it in full.
 FAILED=0
 ABORTED=""
 SKIPPED=""
@@ -140,7 +157,7 @@ TOTAL_RUN=0
 for nm in $SUITES; do
   TMP="$(mktemp "${TMPDIR:-/tmp}/mcp-unit.XXXXXX")"
   set +e
-  "$TOPAZ" -l 2>&1 <<TPZ | tee "$TMP"
+  "$TOPAZ" -l > "$TMP" 2>&1 <<TPZ
 set gemstone $GS_STONE
 set username $GS_USER
 set password $GS_PASS
@@ -148,17 +165,32 @@ login
 iferr 1 stk
 $GRAIL_PREAMBLE
 run
-| cls res |
+| cls res failed errorOnly passed report |
 cls := System myUserProfile objectNamed: #$nm.
 cls isNil ifTrue: [ ^'$nm: NOT INSTALLED' ].
 res := cls suite run.
-'$nm: ' , res runCount printString , ' run, ' , res passedCount printString , ' passed, '
-  , res failureCount printString , ' failed, ' , res errorCount printString , ' errors'
+"Same formatting as McpTestingToolset>>formatTestResult:label: (the run_test_class MCP tool), so a
+ test failure reads the same way here as it does over the wire. failures/errors already answer
+ descriptive Strings -- never call printString on a TestResult itself, see GemStone_Notes.md#sunit.
+ On 3.6.2 the two sets are the SAME set, so errorOnly excludes what is already in failed; on 3.7.x
+ they are disjoint and this is a no-op."
+failed := res failures collect: [:t | t asString].
+errorOnly := (res errors collect: [:t | t asString]) reject: [:k | failed includes: k].
+passed := res passedCount.
+report := WriteStream on: String new.
+report nextPutAll: '$nm: ' , (passed + failed size + errorOnly size) printString , ' run, '
+  , passed printString , ' passed, ' , failed size printString , ' failed, '
+  , errorOnly size printString , ' errors'.
+(failed isEmpty and: [errorOnly isEmpty]) ifFalse: [
+  report nextPut: Character lf.
+  failed asSortedCollection do: [:k | report nextPutAll: '  FAIL  ' , k; nextPut: Character lf].
+  errorOnly asSortedCollection do: [:k | report nextPutAll: '  ERROR ' , k; nextPut: Character lf]].
+report contents
 %
 logout
 exit
 TPZ
-  rc=${PIPESTATUS[0]}
+  rc=$?
   set -e
   # Read the ANSWER, not the transcript. topaz echoes the source it is given, so grepping the
   # output for any literal in the Smalltalk above matches the echo as well -- which silently made
@@ -166,10 +198,11 @@ TPZ
   # "[oop size:N Class] " prefix, so strip that and take the last one: the suite's own answer,
   # after the optional GRAIL_DIR preamble's.
   LINE="$(sed -n 's/^\[[0-9]* size:[0-9]*  *[A-Za-z0-9]*\] //p' "$TMP" | tail -1)"
-  rm -f "$TMP"
   case "$LINE" in
     "$nm: NOT INSTALLED")
+      echo "${YELLOW}SKIP${RESET}    $nm: not installed"
       SKIPPED="$SKIPPED $nm"
+      rm -f "$TMP"
       continue ;;
   esac
   case "$LINE" in
@@ -177,7 +210,9 @@ TPZ
     *) LINE="" ;;
   esac
   if [ -z "$LINE" ]; then
-    echo "$nm: ABORTED (topaz exited $rc; see the stack above)"
+    echo "${RED}${BOLD}ABORTED${RESET} $nm (topaz exited $rc) -- full transcript:"
+    cat "$TMP"
+    rm -f "$TMP"
     ABORTED="$ABORTED $nm"
     FAILED=1
     continue
@@ -185,9 +220,26 @@ TPZ
   # Counts are authoritative, so a tainted session that still produced them is not itself a failure.
   [ "$rc" -ne 0 ] && echo "note: $nm left topaz exit $rc -- session status tainted, counts below stand."
   case "$LINE" in
-    *' 0 failed, 0 errors') ;;
-    *) FAILED=1 ;;
+    *' 0 failed, 0 errors')
+      echo "${GREEN}PASS${RESET}    $LINE" ;;
+    *)
+      FAILED=1
+      echo "${RED}${BOLD}FAIL${RESET}    $LINE"
+      # The FAIL/ERROR sub-lines the doit above wrote, exactly as GsTestCase names them (e.g.
+      # "SomeTest debug: #testFoo"). Matched by the literal two-space + tag prefix the doit writes
+      # -- ONE space after the tag, not two: '  FAIL  ' and '  ERROR ' are both 8 characters, so
+      # FAIL (4 letters) gets two trailing spaces and ERROR (5) gets one. (Verified against a real
+      # ERROR in CI: an earlier version of this pattern required two spaces after both tags and
+      # silently matched zero ERROR lines, discarding the detail with no sign anything was wrong.)
+      # Topaz's echo of the *source* that builds these strings never itself starts a line with
+      # this prefix (that source reads "failed asSortedCollection do: ...", not "  FAIL  ...").
+      # `|| true`: with pipefail active, grep finding nothing here (it shouldn't -- this branch
+      # only runs when failed/errorOnly is nonempty -- would otherwise abort the whole run via -e.
+      grep -E '^  (FAIL|ERROR) ' "$TMP" | while IFS= read -r detail; do
+        echo "        ${RED}${detail#  }${RESET}"
+      done || true ;;
   esac
+  rm -f "$TMP"
   N="$(printf '%s' "$LINE" | sed -n 's/.*: \([0-9][0-9]*\) run,.*/\1/p')"
   TOTAL_RUN=$(( TOTAL_RUN + ${N:-0} ))
   RAN=$(( RAN + 1 ))
@@ -199,15 +251,15 @@ if [ -n "$SKIPPED" ]; then
   echo "not installed in $GS_STONE, skipped:$SKIPPED"
 fi
 if [ -n "$ABORTED" ]; then
-  echo "COULD NOT RUN:$ABORTED"
+  echo "${RED}COULD NOT RUN:${RESET}$ABORTED"
 fi
 # Guard against a "0 run" false pass: every suite reporting zero tests is not a clean run.
 if [ "$TOTAL_RUN" -eq 0 ]; then
-  echo "UNIT TESTS DID NOT RUN"
+  echo "${RED}${BOLD}UNIT TESTS DID NOT RUN${RESET}"
   exit 1
 fi
 if [ "$FAILED" -ne 0 ]; then
-  echo "UNIT TESTS FAILED"
+  echo "${RED}${BOLD}UNIT TESTS FAILED${RESET}"
   exit 1
 fi
-echo "ALL UNIT TESTS PASSED"
+echo "${GREEN}${BOLD}ALL UNIT TESTS PASSED${RESET}"
