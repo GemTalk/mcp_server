@@ -302,7 +302,7 @@ parseBody: aString
    characters are all accepted. Those need a real parser to fix, they are measured in the kernel
    JSON Unicode report and awaiting a kernel fix, and none of them corrupts text -- the worst a
    client gets is one wrong value from a request its own encoder built wrong. The codec that did
-   answer them all is preserved on the emoji-safe branch.
+   answer them all is preserved in this repository''s history, at fb2559b.
    Unicode16>>decodeFromUTF8 belongs in that report as well: a class that can hold the bytes in
    question should narrow and delegate, or signal something that names the problem, rather than
    answer a bare MessageNotUnderstood.
