@@ -276,8 +276,8 @@ raw-UTF-8 body is the one defect a real client *does* hit — `£` arriving as t
 and being written into the image that way. `decodeFromUTF8` **raises** on malformed input, naming the
 byte offset, so a bad body is refused whole rather than silently corrupted; and it is a primitive,
 ~30× faster than a Smalltalk character loop. A full hand-written codec was built and then reverted;
-it survives on the `emoji-safe` branch, so adopting it again is a merge, not a rewrite. See
-[utf8-wire.md](utf8-wire.md).
+it survives in this repository's history — `git show fb2559b:src/core/McpJson.gs` — so adopting it
+again is a checkout, not a rewrite. See [utf8-wire.md](utf8-wire.md).
 
 Two related surface facts: writing a `DoubleByteString` with `GsFile nextPutAll:` writes UTF-16, so
 `encodeAsUTF8` first; and error text returned raw over GCI can render as spaced-out gibberish

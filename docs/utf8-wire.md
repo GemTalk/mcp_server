@@ -30,8 +30,8 @@ U+1F600, grinning face, as it leaves the server:
 | Writer | Wire bytes | Length | Result |
 |---|---|---|---|
 | kernel `Object>>asJson` | `5C 75 46 36 30 30` | 6 | **U+F600** — silently the wrong character |
-| `McpJson`, ASCII escaping (`emoji-safe`) | `5C 75 44 38 33 44 5C 75 44 45 30 30` | 12 | correct |
-| `McpJson`, UTF-8 (`utf8-wire`) | `F0 9F 98 80` | 4 | correct |
+| `McpJson`, ASCII — superseded [A] | `5C 75 44 38 33 44 5C 75 44 45 30 30` | 12 | correct |
+| `McpJson`, UTF-8 — what ships | `F0 9F 98 80` | 4 | correct |
 
 `CharacterCollection>>printJsonOn:` keeps only bits 12-15 of a codepoint above U+FFFF instead of
 emitting a surrogate pair, so U+1F600 goes out as `"\uF600"` — U+F600, a Private Use Area
@@ -46,18 +46,18 @@ escapes and of UTF-16, and UTF-8 spells an astral codepoint directly in four byt
 
 ## What changed
 
-Three commits on `utf8-wire`, each standing on its own.
+Three commits, each standing on its own.
 
-1. **`Put UTF-8 on the wire instead of \u-escaped ASCII`** — new `McpJson class>>write:` replaces
-   `Object>>asJson` at all thirteen production render sites and answers a byte `String` of UTF-8.
-   Kernel `JsonParser` is kept inbound. Only what RFC 8259 §7 actually requires is escaped: the
-   quote, the backslash, and the C0 controls.
-2. **`Repair a surrogate-pair escape on the way in, too`** — `McpBase class>>combineSurrogateEscapesIn:`,
-   so a client that escapes non-ASCII works as well as one that sends it raw. Its own commit
-   because it is droppable: the defect it answers is the kernel's, and reporting rather than
-   working around it remains a defensible choice.
-3. **`Decode a forwarded body whatever class the worker compiled it as`** — a pre-existing bug, its
-   own section below.
+1. **`Put UTF-8 on the wire instead of \u-escaped ASCII`** (`7acbab5`) — new
+   `McpJson class>>write:` replaces `Object>>asJson` at all thirteen production render sites and
+   answers a byte `String` of UTF-8. Kernel `JsonParser` is kept inbound. Only what RFC 8259 §7
+   actually requires is escaped: the quote, the backslash, and the C0 controls.
+2. **`Repair a surrogate-pair escape on the way in, too`** (`221c8f8`) —
+   `McpBase class>>combineSurrogateEscapesIn:`, so a client that escapes non-ASCII works as well as
+   one that sends it raw. Its own commit because it is droppable: the defect it answers is the
+   kernel's, and reporting rather than working around it remains a defensible choice.
+3. **`Decode a forwarded body whatever class the worker compiled it as`** (`ad69870`) — a
+   pre-existing bug, its own section below.
 
 
 ## The round trip, both client styles
@@ -136,7 +136,7 @@ Code mcp_server owns forever, excluding comments and excluding test suites [A]:
 | `McpJson` — UTF-8 writer | 79 | 250 |
 | `combineSurrogateEscapesIn:` + `hexUnitIn:at:` | 48 | 92 |
 | **UTF-8 design, total owned** | **127** | **342** |
-| `McpJson` — ASCII parser + writer (`emoji-safe`) | 299 | 588 |
+| `McpJson` — ASCII parser + writer, superseded | 299 | 588 |
 | — of which the writer half alone | 69 | — |
 | **ASCII design, total owned** | **299** | **588** |
 | **kernel only — what was owned before** | **0** | **0** |
@@ -223,8 +223,9 @@ Everything on gs64stone (3.7.5, Darwin, Grail loaded) unless stated. Re-measured
 canonical file-out fixed points.
 
 **[A] Code owned.** Counted from the file-outs with method comments and topaz directives stripped:
-`McpJson` on this branch, 79 code lines of 250; the `emoji-safe` codec, 299 of 588, its writer half
-69; `combineSurrogateEscapesIn:` 33 and `hexUnitIn:at:` 15.
+`McpJson` as it ships, 79 code lines of 250; the superseded ASCII codec, 299 of 588, its writer
+half 69; `combineSurrogateEscapesIn:` 33 and `hexUnitIn:at:` 15. That codec was added in `b57af7d`
+and removed in `f3b54c1`; `git show fb2559b:src/core/McpJson.gs` is the last revision holding it.
 
 **[B] The kernel writer.** `(String with: (Character codePoint: 16r1F600)) asJson` answers
 `"\uF600"`; codepoint 16r1D800 answers `"\uD800"`, a lone surrogate. Both asserted against, side

@@ -164,9 +164,10 @@ breaking changes are expected and are called out rather than shimmed.
   as UTF-8 whatever class the worker compiled it as, and a surrogate-pair escape is repaired on the
   way in. See [docs/utf8-wire.md](docs/utf8-wire.md).
 * A hand-written JSON codec was added and then **reverted** in favour of the kernel's `JsonParser`
-  plus a UTF-8 decode. The codec is preserved on the `emoji-safe` branch; adopting it again is a
-  merge, not a rewrite. Rationale: all the defects it covered are about astral characters, and no
-  user has hit one live.
+  plus a UTF-8 decode. The codec is preserved in this repository's history — added in `b57af7d`,
+  removed in `f3b54c1`, last present at `fb2559b` — so adopting it again is a checkout, not a
+  rewrite. Rationale: all the defects it covered are about astral characters, and no user has hit
+  one live.
 * **No request deadline by default.** The old 45-second default was the only thing killing long
   calls — measured, no client-side deadline bites. See
   [docs/MCP_Client_Notes.md](docs/MCP_Client_Notes.md).
