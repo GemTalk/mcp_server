@@ -182,7 +182,9 @@ version-to-version behaviour differences this has surfaced.
   a version bump is neither a feature nor a fix. Push the branch as soon as it exists; there is no
   value in one only a single machine can see.
 * **A pull request into `main`** ends it. Nothing is assumed to depend on a topic branch, so
-  renaming it, amending its commits and force-pushing are all free right up to the merge.
+  renaming it, amending its commits and force-pushing are all free right up to the merge — but
+  **merge it unsquashed**. Commits are where a decision keeps its reasoning; shape the history on
+  the branch, and let `main` keep what you shaped.
 
 The repository is **public**. Anything pushed is world-visible immediately: no secrets, no signing
 keys, no real hostnames or customer detail in commits, and assume all history is readable.
