@@ -115,7 +115,11 @@ name to that list.
 
 ## Testing
 
-There is no CI. The suites are the whole safety net, and they are cheap:
+`.github/workflows/health-check.yml` runs the suites below on every push to `main` and every pull
+request, as a two-entry matrix: one leg installs plain, the other clones
+[GemTalk/Grail](https://github.com/GemTalk/Grail), installs it, and installs mcp_server with
+`--grail`, so `McpGrailToolsetTest` runs there too. Locally, the suites are the whole safety net,
+and they are cheap:
 
 | | what it covers | needs |
 |---|---|---|
