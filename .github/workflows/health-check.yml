@@ -140,6 +140,9 @@ jobs:
       - name: Run wire-level integration test
         run: ./test.sh
 
+      - name: Run wire-level integration test over TLS
+        run: ./test-tls.sh
+
       - name: Stop Stone and NetLDI
         if: always()
         run: |
