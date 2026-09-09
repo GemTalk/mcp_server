@@ -173,32 +173,42 @@ version-to-version behaviour differences this has surfaced.
 
 ## Branches and releases
 
-> **This section describes a single-developer convention and is due to change as more people
-> contribute.** Confirm the current policy before assuming it.
-
-* **`dev`** — where development happens, auth included.
-* **`main`** — the release line. Advanced only at milestones judged well tested, by merging `dev`
-  in (`--ff-only`, so a surprise divergence surfaces instead of becoming a merge commit).
+* **`main`** — the only long-lived line, and the release line. Nothing is committed to it directly.
+* **A branch per change**, cut from an up-to-date `main` and named the way
+  [GemTalk/Grail](https://github.com/GemTalk/Grail) names its branches: a `feat/`, `fix/`, `ci/` or
+  `docs/` prefix followed by a short kebab-case phrase describing the change —
+  `feat/python-search-tools`, `fix/metaclass-call`, `docs/utf8-wire-measurements`. A release takes
+  `release/<version>` instead — `release/0.8.0` — the one prefix here that Grail does not use, since
+  a version bump is neither a feature nor a fix. Push the branch as soon as it exists; there is no
+  value in one only a single machine can see.
+* **A pull request into `main`** ends it. Nothing is assumed to depend on a topic branch, so
+  renaming it, amending its commits and force-pushing are all free right up to the merge — but
+  **merge it unsquashed**. Commits are where a decision keeps its reasoning; shape the history on
+  the branch, and let `main` keep what you shaped.
 
 The repository is **public**. Anything pushed is world-visible immediately: no secrets, no signing
 keys, no real hostnames or customer detail in commits, and assume all history is readable.
 
-Older material describes a two-line layout in which `main` was a deliberately auth-*less* release
-line and `auth` carried the auth files, with one-directional merges and shared files kept
-byte-identical across branches. That was retired on 2026-08-21 and the `auth` branch is deleted. If
-a note tells you to `git checkout auth`, it is stale.
+Two earlier layouts are described in older material, and both are gone. A two-line layout in which
+`main` was a deliberately auth-*less* release line and `auth` carried the auth files was retired on
+2026-08-21. A long-lived `dev` line merged into `main` at milestones, alongside the parallel `dev2`
+and `dev372` lines, was retired on 2026-09-09; `dev` and `dev2` are deleted. If a note tells you to
+`git checkout auth` or to commit on `dev`, it is stale.
 
 ### Releases
 
-Merging to `main` is a deliberate act, not the end of the per-change loop:
+Merging to `main` is a deliberate act, not the end of the per-change loop. The version bump and the
+changelog entry go in the **same** pull request, so a reviewer sees the new number beside the claim
+it makes, and `main` never carries one without the other.
 
-1. Bump `McpServer class>>defaultServerVersion` — the single home for the literal.
+1. Cut `release/<version>` from an up-to-date `main`.
+2. Bump `McpServer class>>defaultServerVersion` — the single home for the literal.
    `McpContractTest` asserts `initialize`'s `serverInfo.version` equals that selector's answer, so a
    bump does not break tests. Deployments can relabel per instance, so this is the *product*
    version.
-2. File out, test, commit on `dev`.
-3. Merge `dev` into `main`.
-4. Update [CHANGELOG.md](../CHANGELOG.md).
+3. Write that version's [CHANGELOG.md](../CHANGELOG.md) entry in the same branch.
+4. File out, test, commit.
+5. Open the pull request and merge it into `main`.
 
 Never bump unilaterally: someone may be running a server against a published version.
 
