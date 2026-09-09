@@ -234,8 +234,8 @@ testAuthRouterResolvesWorkerConfigForItsSessions
    hands them to each session it opens -- openSessionForUser:jwt: goes through openSessionCreating:,
    so nothing here is auth-specific except who the worker logs in as. Uses a stub session, so no JWT
    user and no gem are needed.
-   Worth pinning on this branch because it is the path a per-token surface will hook into: narrowing
-   toolsetNames by the token's scopes can only happen where the token is, i.e. in the front end."
+   Worth pinning because it is the path a per-token surface will hook into: narrowing toolsetNames
+   by the token's scopes can only happen where the token is, i.e. in the front end."
   | r sess |
   r := McpAuthRouter new.
   self assert: r effectiveWorkerClassName equals: 'McpServer'.
