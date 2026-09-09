@@ -65,7 +65,7 @@ Three commits on `utf8-wire`, each standing on its own.
 Measured through a real socket, storing the character in a method comment with `compile_method` and
 reading it back with `get_method_source` [C]:
 
-| How the client encodes it | `dev` | `utf8-wire` |
+| How the client encodes it | before this change | after |
 |---|---|---|
 | raw UTF-8 — `JSON.stringify`, and so most clients | corrupted to U+F600 | U+1F600 |
 | escaped `\uD83D\uDE00` — Python's `json.dumps` default | `-32700` parse error | U+1F600 |
@@ -80,9 +80,10 @@ survive — as two characters no 3.7.x image will construct (report §6).
 
 The most consequential thing in this exploration, and it is not about escapes.
 
-**On `dev`, any request body carrying a single non-ASCII byte is refused with `-32700`** — not just
-an emoji, a `café` in a `compile_method` source — on any image whose `#StringConfiguration` is
-`Unicode16`. That is every Grail image, including the one the live server runs on.
+**Before this change, any request body carrying a single non-ASCII byte was refused with
+`-32700`** — not just an emoji, a `café` in a `compile_method` source — on any image whose
+`#StringConfiguration` is `Unicode16`. That is every Grail image, including the one the live
+server runs on.
 
 The front end parses a body only to classify it, then forwards the raw bytes to the worker gem
 embedded in a Smalltalk expression via `printString`
@@ -138,13 +139,13 @@ Code mcp_server owns forever, excluding comments and excluding test suites [A]:
 | `McpJson` — ASCII parser + writer (`emoji-safe`) | 299 | 588 |
 | — of which the writer half alone | 69 | — |
 | **ASCII design, total owned** | **299** | **588** |
-| **`dev` today — kernel only** | **0** | **0** |
+| **kernel only — what was owned before** | **0** | **0** |
 
 Suites track the code rather than the design, so they are left out of both columns: `McpJsonTest`
 is 336 lines against the ASCII codec's 390.
 
-The `dev` row is the honest baseline. Adopting either design means owning JSON code that does not
-exist there now, and no line count settles whether a defect nobody has reported is worth a
+The kernel-only row is the honest baseline. Adopting either design means owning JSON code that did
+not exist before, and no line count settles whether a defect nobody has reported is worth a
 permanent maintenance surface.
 
 
@@ -168,7 +169,7 @@ permanent maintenance surface.
 
 **Three things it costs.**
 
-- **127 lines not owned yesterday.** See the `dev` row above. This is the real trade.
+- **127 lines not owned yesterday.** See the kernel-only row above. This is the real trade.
 - **The weaker invariant takes more words.** "Every byte below `0x80`" is one loop to assert. "A
   byte `String` whose `#size` is its byte count" is weaker and easier to satisfy, but harder to
   state and easier to let rot.
@@ -217,9 +218,9 @@ in question.
 
 ## Appendix: what was measured
 
-Everything on gs64stone (3.7.5, Darwin, Grail loaded) unless stated. Re-measured after the merge
-into `dev`: 457 unit tests green; `test.sh` 100/100 over the wire; all twelve touched classes
-byte-exact canonical file-out fixed points.
+Everything on gs64stone (3.7.5, Darwin, Grail loaded) unless stated. Re-measured after the merge:
+457 unit tests green; `test.sh` 100/100 over the wire; all twelve touched classes byte-exact
+canonical file-out fixed points.
 
 **[A] Code owned.** Counted from the file-outs with method comments and topaz directives stripped:
 `McpJson` on this branch, 79 code lines of 250; the `emoji-safe` codec, 299 of 588, its writer half

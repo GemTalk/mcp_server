@@ -6,9 +6,9 @@ Notable changes to the native GemStone MCP server. The version is
 
 Entries before 0.7.0 were reconstructed from git history when this file was started, so they group
 work by theme rather than recording every commit, and the dates are the version bump on the line
-that made it. Development ran on several lines at once during that period (`dev`, `dev2`, `dev372`),
-each carrying its own bumps, so attribution to a release is approximate before 0.7.0. The project is
-pre-release: breaking changes are expected and are called out rather than shimmed.
+that made it. Development ran on several long-lived lines at once during that period, each carrying
+its own bumps, so attribution to a release is approximate before 0.7.0. The project is pre-release:
+breaking changes are expected and are called out rather than shimmed.
 
 ## Unreleased
 
@@ -235,8 +235,8 @@ pre-release: breaking changes are expected and are called out rather than shimme
 ## 0.3.0 — 2026-08-21
 
 * `serverInfo.title` for per-deployment display names.
-* **The `auth` and `main` branches were consolidated onto `dev`.** The auth-less release line no
-  longer exists; every `load.gs` now pulls the auth classes in on an image that can compile them.
+* **The auth-less release line was retired**, and the auth branch folded into the development line.
+  Every `load.gs` now pulls the auth classes in on an image that can compile them.
 
 ## 0.2.0 — 2026-08-20
 
