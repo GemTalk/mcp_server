@@ -48,7 +48,12 @@ breaking changes are expected and are called out rather than shimmed.
   `McpMockWorker>>dieOnComplete` that models both failures a dying gem produces. 4 new tests in
   `McpTransportTest` (48 in the suite, 560 across 22) and 9 wire checks in `test.sh`, which is the
   only place the *first* failure's number can be pinned — a mock can raise 4100 but cannot die.
-  Closes #6. See *Session lifetime* in [docs/session-lifetime.md](docs/session-lifetime.md).
+  Closes #6. See *Session lifetime* in [docs/session-lifetime.md](docs/session-lifetime.md), which
+  also records what the view-hygiene pass makes of a dead worker: nothing, because the stone answers
+  a zero-filled description for a session id nobody holds, so it reads as zero commits behind and is
+  never sent anything. The one exception is documented with it — a recycled session id, which can
+  make that arm log a line naming the right session with a stranger's commits-behind figure and a
+  GCI error about a gem that no longer exists, once per pass until the session is released.
 
 * **Two new optional Grail tools, `find_python_senders` and `search_python_source`** — the Python
   sender search the toolset has been missing, and a text search over the checkout's `.py` files.
