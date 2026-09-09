@@ -177,8 +177,10 @@ version-to-version behaviour differences this has surfaced.
 * **A branch per change**, cut from an up-to-date `main` and named the way
   [GemTalk/Grail](https://github.com/GemTalk/Grail) names its branches: a `feat/`, `fix/`, `ci/` or
   `docs/` prefix followed by a short kebab-case phrase describing the change —
-  `feat/python-search-tools`, `fix/metaclass-call`, `docs/utf8-wire-measurements`. Push it as soon
-  as it exists; there is no value in a branch only one machine can see.
+  `feat/python-search-tools`, `fix/metaclass-call`, `docs/utf8-wire-measurements`. A release takes
+  `release/<version>` instead — `release/0.8.0` — the one prefix here that Grail does not use, since
+  a version bump is neither a feature nor a fix. Push the branch as soon as it exists; there is no
+  value in one only a single machine can see.
 * **A pull request into `main`** ends it. Nothing is assumed to depend on a topic branch, so
   renaming it, amending its commits and force-pushing are all free right up to the merge.
 
@@ -197,7 +199,7 @@ Merging to `main` is a deliberate act, not the end of the per-change loop. The v
 changelog entry go in the **same** pull request, so a reviewer sees the new number beside the claim
 it makes, and `main` never carries one without the other.
 
-1. Branch from an up-to-date `main`, as for any other change.
+1. Cut `release/<version>` from an up-to-date `main`.
 2. Bump `McpServer class>>defaultServerVersion` — the single home for the literal.
    `McpContractTest` asserts `initialize`'s `serverInfo.version` equals that selector's answer, so a
    bump does not break tests. Deployments can relabel per instance, so this is the *product*
