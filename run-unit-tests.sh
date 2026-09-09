@@ -58,7 +58,8 @@ MCP_GRAIL_DIR="${MCP_GRAIL_DIR:-}"
 
 # Five suites fork a real worker gem and so need a NETLDI: McpExternalSessionTest,
 # McpTransactionTest, McpWorkerDeadlineTest and McpConcurrentEditTest (all always installed, see
-# below) and McpAuthTest (only where the auth group could be). Ask the image which are present
+# below), McpAuthTest (only where the auth group could be) and McpGrailToolsetTest (only on a Grail
+# image -- run_python_tests forks the gem it runs Grail's classes in). Ask the image which are present
 # rather than asserting a netldi unconditionally -- the check still has to survive an image where
 # none is installed, and discovering the lack up front beats hitting it as a GciError partway
 # through a suite run.
@@ -69,7 +70,8 @@ MCP_GRAIL_DIR="${MCP_GRAIL_DIR:-}"
 # passing on an image the server could not actually run on.
 mcp_require_netldi_if_forking_suite_installed() {
   local nm have
-  for nm in McpExternalSessionTest McpTransactionTest McpWorkerDeadlineTest McpAuthTest McpConcurrentEditTest; do
+  for nm in McpExternalSessionTest McpTransactionTest McpWorkerDeadlineTest McpAuthTest \
+            McpConcurrentEditTest McpGrailToolsetTest; do
     gs_env_image_has "$nm" && have=0 || have=$?
     case "$have" in
       0) gs_env_require_netldi; return $? ;;

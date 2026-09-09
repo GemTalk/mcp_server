@@ -159,6 +159,53 @@ SIGTERM and SIGKILL on the parent. So a leaked worker is bounded by the lifetime
 created it: a script that exits takes its gems with it, while repeated runs inside one long-lived
 gem compound until the login ceiling.
 
+**A gem forked by a NetLDI is configured through the NRS body, not through the session object.**
+`GsTsExternalSession` has no configuration hook, and a forked gem gets whatever
+`GEM_TEMPOBJ_CACHE_SIZE` and friends *its NetLDI's* environment hands out. That is not a constant to
+rely on: the product default is **50MB** (`data/system.conf`), but a NetLDI started with a larger one
+passes that on — measured 3.7.5, gems forked on one host got 488MB while a linked topaz on the same
+host got 50MB. Starved, anything that compiles heavily dies with `VM temporary object memory is
+full`, raised as a `GciError` out of a session whose gem has already gone, so it carries no result
+and does not name memory. The lever is the NRS **body**, which *is* the `gemnetobject` command line:
+
+```smalltalk
+GsNetworkResourceString defaultGemNRSFromCurrent
+  node: 'localhost';
+  body: 'gemnetobject -C GEM_TEMPOBJ_CACHE_SIZE=900000;GEM_TEMPOBJ_CODE_SIZE=300000;';
+  yourself
+```
+
+`gemnetobject` takes `-T <cacheKB>`, `-N <0|1|2>` (native code), `-e`/`-E` (a configuration file)
+and `-C <params>`, where params are `NAME=value` separated by `;` **with no spaces** — a space ends
+the argument and the rest is silently ignored, which applies half a budget and looks exactly like
+applying none. So the budget travels with the login and needs no `gem.conf`, no
+`GEMSTONE_EXE_CONF` and no NetLDI restart, none of which a gem answering a request can reach anyway.
+**Naming a parameter this version does not have is safe**: for a gem (unlike `startstone`) a
+configuration syntax error is not fatal — the parameter is ignored and its default applies; an
+out-of-range value warns and clamps. Verified 3.7.5 by reading the value back in the child
+(`System configurationAt: #GemTempObjCacheSize`): 50MB → 900MB, and a second `;`-separated parameter
+arrives intact. Not every parameter has a runtime symbol to read back — `GEM_TEMPOBJ_CODE_SIZE` has
+none, so `configurationAt:` answers nil for it whether or not it was set. `data/system.conf` in the
+product tree is the authority on which exist, and it carries several the online appendix omits.
+See also the System Administration Guide, *Command Reference → gemnetobject* and appendices A and C.
+
+**A `GciError` in the fatal band carries the gem's whole NRS in its message text — never show one to
+a client.** `GciError>>_error:in:` (kernel source, `Filein3A/GciError.class.st`) ends with
+
+```smalltalk
+(originalNumber between: 4000 and: 4999) ifTrue: [
+  messageText add: ' original number: ' , originalNumber asString,
+    ' for session ' , externalSession _describe ]
+```
+
+and `_describe` yields the stone NRS, the GemStone **user name**, and the gem NRS — host, netldi and
+the entire `gemnetobject` command line. Report `originalNumber` instead and leave the text in the gem
+log. **4067** is a gem out of temporary object memory, **4100** an invalid session (what
+`_error:in:` answers when there is no error buffer left to read a number from, i.e. the connection is
+already closed). A `GciError` also **cannot be fabricated** for a test — it answers `instVarAt:put:`
+with `structural updates disallowed`, and the only other route into the band sends `_describe` to a
+real external session, which is itself forbidden here.
+
 **`InterSessionSignal`**, if you reach for it: the Stone-to-session buffer holds exactly **50** and
 the 51st raises `SignalBufferFull` (2254) — so nothing is lost silently, the *sender* is told, and
 the 50 slots are shared by everyone signalling one target. Never send `#signal` to a polled

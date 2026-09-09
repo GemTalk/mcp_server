@@ -1028,14 +1028,72 @@ testSelectorMatchesAPythonNameByDecodingRatherThanEncoding
 %
 category: 'tests'
 method: McpGrailToolsetTest
+testTestGemDeathNamesTheGciNumberAndNeverTheNrs
+  "A dead test gem's GciError must never be quoted to the client. Measured 2026-09-09 on 3.7.5,
+   GciError>>_error:in: appends `for session ' , externalSession _describe' to every error in the
+   4000-4999 band, and _describe yields the stone NRS, the GemStone user and the gem NRS -- host,
+   netldi and the whole gemnetobject command line. So the number is what goes out, and the text
+   stays in the gem log: the same split, for the same error out of the same band, that
+   McpRouter>>sessionGoneErrorFor:id: makes.
+
+   Driven by NUMBER rather than by a fabricated GciError because one cannot be fabricated: GciError
+   answers instVarAt:put: with `structural updates disallowed', and the only other route into the
+   band sends #_describe to an external session, which this project may not do. A genuine 4067
+   therefore needs a gem that really died -- staged by hand rather than in the suite, because this
+   file spawns exactly ONE gem on purpose (testRunPythonTestsRunsFreshAndLeavesTheCallerAlone) and
+   a stone here has few session slots."
+  | ts oom |
+  ts := McpGrailToolset new.
+  oom := ts testGemDeathCauseForGciNumber: 4067.
+  self assert: (self includesCS: 'ran out of temporary object memory' in: oom).
+  "the budget that was in force, so 'raise it' is an instruction rather than advice"
+  self assert: (self includesCS: 'GEM_TEMPOBJ_CACHE_SIZE' in: oom).
+  "any other number is reported AS a number, and points at the log rather than guessing"
+  self assert: (self includesCS: 'GCI error 4100'
+    in: (ts testGemDeathCauseForGciNumber: 4100)).
+  self assert: (self includesCS: 'stopped answering'
+    in: (ts testGemDeathCauseForGciNumber: 4100)).
+  "an error that is not a GciError at all carries no number, and none is invented"
+  self deny: (self includesCS: 'GCI error'
+    in: (ts testGemDeathCauseForGciNumber: nil)).
+  "and the error object's own text never survives into the sentence"
+  self deny: (self includesCS: 'something else entirely' in: (ts testGemDeathCauseFor:
+    ([Error signal: 'something else entirely'] on: Error do: [:ex | ex])))
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testTestGemIsForkedWithGrailsMemoryBudget
+  "The test gem is forked with the budget Grail's own runner uses, not the netldi's default. A
+   netldi hands out GEM_TEMPOBJ_CACHE_SIZE=50MB, and a Grail test class does not fit in it -- the
+   gem dies mid-class and the run answers nothing at all, which is the failure this option exists
+   to remove.
+
+   The value travels into an NRS, where whitespace and the NRS metacharacters would end the -C
+   argument early and apply half of it. Half a budget looks exactly like no budget, so it is refused
+   rather than passed on."
+  | dflt |
+  self assert: (McpGrailToolset declaredOptionNames includes: 'testGemConfig').
+  dflt := McpGrailToolset new testGemConfig.
+  self assert: (self includesCS: 'GEM_TEMPOBJ_CACHE_SIZE' in: dflt).
+  self assert: (self includesCS: 'GEM_TEMPOBJ_CODE_SIZE' in: dflt).
+  "a deployment on a smaller host sets its own, and gets exactly what it set"
+  self assert: ((McpGrailToolset on: nil options:
+    (Dictionary new at: 'testGemConfig' put: 'GEM_TEMPOBJ_CACHE_SIZE=200000;'; yourself))
+      testGemConfig) equals: 'GEM_TEMPOBJ_CACHE_SIZE=200000;'.
+  self should: [(McpGrailToolset on: nil options:
+    (Dictionary new at: 'testGemConfig' put: 'A=1; B=2;'; yourself)) testGemConfig]
+      raise: McpError
+%
+category: 'tests'
+method: McpGrailToolsetTest
 testTestRunnerExpressionQuotesNamesRatherThanCompilingThem
-  "Class names come from the client and are interpolated into an expression run in another gem, so
+  "Class names come from the client and are interpolated into expressions run in another gem, so
    they must travel as STRING LITERALS resolved there by objectNamed: -- never as code. printString
    doubles an embedded quote, so a name containing one closes nothing.
-   Checked on the built expression rather than by running it: what matters is what would be sent."
-  | expr |
+   Checked on the built expressions rather than by running them: what matters is what would be sent."
+  | expr perClass |
   expr := (McpGrailToolset new)
-    testRunnerExpressionFor: (Array with: 'FooTest' with: 'It''s')
+    testRunnerClassListExpressionFor: (Array with: 'FooTest' with: 'It''s')
     directory: '/tmp/grail'.
   self assert: (self includesCS: '''FooTest''' in: expr).
   "the apostrophe is doubled, so the literal still closes where it should"
@@ -1044,7 +1102,11 @@ testTestRunnerExpressionQuotesNamesRatherThanCompilingThem
   "the directory travels the same way"
   self assert: (self includesCS: '''/tmp/grail''' in: expr).
   "and it is $GRAIL_DIR that is set -- see the method comment for why, and the Grail defect behind it"
-  self assert: (self includesCS: 'GRAIL_DIR' in: expr)
+  self assert: (self includesCS: 'GRAIL_DIR' in: expr).
+  "the per-class expression names one class, quoted the same way, and runs its suite"
+  perClass := (McpGrailToolset new) testRunnerExpressionForClassNamed: 'FooTest'.
+  self assert: (self includesCS: '''FooTest'' asSymbol' in: perClass).
+  self assert: (self includesCS: 'c suite run: result' in: perClass)
 %
 category: 'tests'
 method: McpGrailToolsetTest
