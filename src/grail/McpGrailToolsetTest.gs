@@ -132,6 +132,52 @@ request: methodName params: paramsDict
 %
 category: 'tests'
 method: McpGrailToolsetTest
+testCallSitesReadThePositionLiteralGrailEmits
+  "The position derivation, pinned against generated text this test writes itself -- so it needs no
+   import, no compiled module and no Grail checkout, and can state both literal shapes exactly.
+
+   Grail writes a position store before each statement, either the 5-element PEP 657 literal
+   #(beginLine colno endLine endColno sourceLine) or a bare line number. A sender search reports a
+   Python line by reading the nearest store ABOVE the send, so the two sends below must come back
+   attributed to 117 WITH the call text and to 120 WITHOUT it -- a bare store carries no text. Both
+   attributed to the first store is what a scan that stops looking after one store would answer.
+
+   The last two assertions pin the degradation, which matters more than the happy path: a send with
+   no store above it reports its line as ABSENT rather than guessing one, and a direct-to-IR method
+   (GRAIL_IR_CODEGEN), whose source is the user's Python rather than generated Smalltalk, yields no
+   text-locatable send at all -- so the caller reports the method with no position instead of
+   reporting no sender. See GemTalk/Grail#883."
+  | ts src sites |
+  ts := McpGrailToolset new.
+  src := 'copy: src kw: kwargs
+  | ___curPos___ |
+  ___curPos___ := #(117 4 117 22 ''  copyfile(src, dst)'').
+  (self _copyfile: { (src). (dst). } kw: nil).
+  ___curPos___ := 120.
+  ^self _copyfile: { (src). } kw: nil'.
+  sites := ts callSitesIn: src forSelector: #'_copyfile:kw:'.
+  self assert: sites size equals: 2.
+  self assert: ((sites at: 1) at: 1) equals: 117.
+  self assert: ((sites at: 1) at: 2) equals: '  copyfile(src, dst)'.
+  self assert: ((sites at: 2) at: 1) equals: 120.
+  self assert: ((sites at: 2) at: 2) isNil.
+  "A store whose text could not be embedded keeps its line."
+  sites := ts callSitesIn: '  ___curPos___ := #(9 0 9 4 nil).
+  ^self _copyfile: { (src). } kw: nil' forSelector: #'_copyfile:kw:'.
+  self assert: sites size equals: 1.
+  self assert: ((sites at: 1) at: 1) equals: 9.
+  self assert: ((sites at: 1) at: 2) isNil.
+  "No store at all: the send is found, the position is absent."
+  sites := ts callSitesIn: 'copy: src kw: kwargs
+  ^self _copyfile: { (src). } kw: nil' forSelector: #'_copyfile:kw:'.
+  self assert: sites size equals: 1.
+  self assert: ((sites at: 1) at: 1) isNil.
+  "Python source, as a direct-to-IR method carries: nothing to locate by keyword."
+  self assert: (ts callSitesIn: 'def copy(src, dst):
+    return _copyfile(src, dst)' forSelector: #'_copyfile:kw:') isEmpty
+%
+category: 'tests'
+method: McpGrailToolsetTest
 testCompilePython
   "Transpile a Python assignment to Smalltalk. Pins Grail's CURRENT codegen for a multiplication,
    which as of 2026-08-18 is ___binOpMul___: (it was __mul__ when this test was written) -- so a
@@ -627,6 +673,33 @@ testRunPythonTestsRunsFreshAndLeavesTheCallerAlone
   self assert: (self includesCS: '1 class(es)' in: out).
   "and the caller's transaction is exactly where it was"
   self assert: System needsCommit equals: before
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testSelectorMatchesAPythonNameByDecodingRatherThanEncoding
+  "Matching a Python name against a method's selector pool DECODES each pooled selector rather than
+   generating the selectors a call to that name could have compiled to.
+
+   That is not a stylistic choice. The fixed-arity encoding grows a selector per argument count, so
+   a candidate list has no upper bound, and a search that stops generating at some arity misses
+   every call above it while still answering -- a false negative, which is the whole failure this
+   tool exists to remove. Decoding needs no arity at all.
+
+   The denials are the assertions that matter. A Python name is case-sensitive, and `_copyfile:_:`
+   is a two-argument call to `_copyfile` -- NOT a varargs call to `copyfile`, which is what reading
+   the leading underscore as the varargs marker without checking for the `kw:` keyword would make
+   it. See #testPythonNameOfSelectorDecodesTheWholeEncoding for the decoding itself."
+  | ts |
+  ts := McpGrailToolset new.
+  self assert: (ts selector: #'copyfile:' callsPythonName: 'copyfile').
+  self assert: (ts selector: #'copyfile:_:' callsPythonName: 'copyfile').
+  self assert: (ts selector: #'copyfile:_:_:_:' callsPythonName: 'copyfile').
+  self assert: (ts selector: #'_copyfile:kw:' callsPythonName: 'copyfile').
+  self assert: (ts selector: #dumps callsPythonName: 'dumps').
+  self deny: (ts selector: #'Copyfile:' callsPythonName: 'copyfile').
+  self deny: (ts selector: #'copyfile2:' callsPythonName: 'copyfile').
+  self deny: (ts selector: #'_copyfile:_:' callsPythonName: 'copyfile').
+  self assert: (ts selector: #'_copyfile:_:' callsPythonName: '_copyfile')
 %
 category: 'tests'
 method: McpGrailToolsetTest

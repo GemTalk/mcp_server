@@ -98,6 +98,48 @@ declaredOptionNames
 ! ------------------- Instance methods for McpGrailToolset
 category: 'private'
 method: McpGrailToolset
+callSitesIn: aSourceString forSelector: aSelector
+  "Where the sends of aSelector are in aSourceString, as an OrderedCollection of
+   {pythonLineOrNil. callSiteTextOrNil} -- one entry per send, in source order.
+
+   HOW A GENERATED METHOD CARRIES ITS PYTHON POSITION. Grail's codegen writes a store before each
+   statement (AbstractNode>>___emitCurPosStore___:on:) in one of two shapes: a bare line,
+   `___curPos___ := 117`, or the 5-element PEP 657 literal
+   `___curPos___ := #(117 4 117 22 ' copyfile(src, dst)')` -- beginLine, colno, endLine, endColno and
+   the raw source line (AbstractLocationNode>>___pyPositionLiteralArray). So a send's position is
+   whatever the nearest store ABOVE it says. That is the same derivation Grail itself makes at run
+   time in BaseException class>>___pythonLineForMethod___:ip:, which it reaches from an instruction
+   pointer this search does not have.
+
+   WHY THIS READS TEXT, AND WHERE IT STOPS. Grail publishes no way to ask a method for its call
+   sites: both readers that do it properly are private and ip-keyed, which is asked about in
+   GemTalk/Grail#883. Two limits follow, and each reports an ABSENT position rather than a wrong
+   one -- the literal layout is an assumption, and a direct-to-IR method (GRAIL_IR_CODEGEN set)
+   carries the Python source with no store in it at all. A hit whose line is nil still names the
+   method it is in, which is the part a caller can get nowhere else.
+
+   Sends are found by first keyword rather than by parsing Smalltalk, because the caller has
+   already established from the selector pool that aSelector really is sent here; this only has to
+   say where. A store that codegen emits as a COMMENT -- LambdaAst does, for this very scan -- reads
+   identically to it, which is what its author intended."
+  | stores key sites idx |
+  stores := self positionStoresIn: aSourceString.
+  key := self firstKeywordOf: aSelector.
+  sites := OrderedCollection new.
+  idx := aSourceString findString: key startingAt: 1.
+  [idx > 0] whileTrue: [
+    | found |
+    "The stores are in ascending source order, so the last one before this send is the one in
+     effect at it."
+    found := Array with: nil with: nil.
+    stores do: [:st |
+      (st at: 1) < idx ifTrue: [found := Array with: (st at: 2) with: (st at: 3)]].
+    sites add: found.
+    idx := aSourceString findString: key startingAt: idx + key size].
+  ^sites
+%
+category: 'private'
+method: McpGrailToolset
 canonicalClassNamed: aName
   "The Smalltalk class behind the Python class aName, or refuse (#notFound) saying what to try.
 
@@ -324,6 +366,16 @@ firstContentIndexIn: aLine
 %
 category: 'private'
 method: McpGrailToolset
+firstKeywordOf: aSelector
+  "aSelector's first keyword, `copyfile:` from #'copyfile:_:', or the whole selector when it is
+   unary. What a text scan looks for to find the sends of a selector it already knows is sent."
+  | s i |
+  s := aSelector asString.
+  i := s indexOf: $:.
+  ^i = 0 ifTrue: [s] ifFalse: [s copyFrom: 1 to: i]
+%
+category: 'private'
+method: McpGrailToolset
 grailDirectory
   "The Grail checkout this deployment configured, or nil. See class>>declaredOptionNames."
   ^self optionNamed: 'grailDirectory' ifAbsent: [nil]
@@ -506,6 +558,63 @@ placeholderArgs: aCount
 %
 category: 'private'
 method: McpGrailToolset
+positionLiteralAt: anIndex in: aSourceString
+  "The {lineOrNil. sourceTextOrNil} a Grail position literal starting at anIndex denotes.
+
+   Both emitted shapes are read: `#(117 4 117 22 ' copyfile(src, dst)')` answers the line and the
+   text, a bare `117` answers the line and nil, and `#(117 4 117 22 nil)` -- which codegen writes
+   when the source line holds a double quote it could not embed -- answers the line and nil too.
+
+   The text is bounded by the literal's own quotes rather than by a character count, which is what
+   keeps a source line containing a bracket or a period from running the parse into the next
+   statement: everything before the first quote is the four integers, and the closing quote ends
+   the text. A doubled quote inside it is one quote, as codegen wrote it."
+  | i size line inLiteral text digits |
+  size := aSourceString size.
+  i := anIndex.
+  [i <= size and: [(aSourceString at: i) isSeparator]] whileTrue: [i := i + 1].
+  inLiteral := false.
+  (i <= size and: [(aSourceString at: i) = $#]) ifTrue: [
+    inLiteral := true.
+    i := i + 1.
+    [i <= size and: [(aSourceString at: i) ~= $(]] whileTrue: [i := i + 1].
+    i := i + 1].
+  digits := WriteStream on: String new.
+  [i <= size and: [(aSourceString at: i) isDigit]] whileTrue: [
+    digits nextPut: (aSourceString at: i).
+    i := i + 1].
+  line := digits contents isEmpty ifTrue: [nil] ifFalse: [digits contents asNumber].
+  text := nil.
+  inLiteral ifTrue: [
+    [i <= size and: [(aSourceString at: i) ~= $' and: [(aSourceString at: i) ~= $)]]]
+      whileTrue: [i := i + 1].
+    (i <= size and: [(aSourceString at: i) = $'])
+      ifTrue: [text := self quotedStringAt: i in: aSourceString]].
+  ^Array with: line with: text
+%
+category: 'private'
+method: McpGrailToolset
+positionStoresIn: aSourceString
+  "Every Grail position store in aSourceString, as an OrderedCollection of
+   {sourceIndex. lineOrNil. textOrNil} in ascending index order -- the index being where the store
+   begins, which is what tells a send which store is in effect at it.
+
+   Collected in ONE pass and reused for every send, rather than re-scanning backwards from each:
+   a generated module method can hold hundreds of statements, and this is the whole cost of a
+   compiled-shape hit."
+  | marker stores at |
+  marker := '___curPos___ := '.
+  stores := OrderedCollection new.
+  at := aSourceString findString: marker startingAt: 1.
+  [at > 0] whileTrue: [
+    | parsed |
+    parsed := self positionLiteralAt: at + marker size in: aSourceString.
+    stores add: (Array with: at with: (parsed at: 1) with: (parsed at: 2)).
+    at := aSourceString findString: marker startingAt: at + marker size].
+  ^stores
+%
+category: 'private'
+method: McpGrailToolset
 pyAttr: aSelector of: aClass default: aDefault
   "An env-1 class attribute of aClass (__module__, __bases__, __doc__, ...), or aDefault. Guarded
    because each is a Python-side read that a class may simply not carry."
@@ -644,6 +753,26 @@ pythonTracebackFor: anException
 "".join(traceback.format_exception(_mcp_exc))']
     on: Error, BaseException do: [:ex | nil]
 %
+category: 'private'
+method: McpGrailToolset
+quotedStringAt: anIndex in: aSourceString
+  "The contents of the Smalltalk string literal whose opening quote is at anIndex, with each
+   doubled quote read back as one. Answers what is there when the literal is unterminated, which a
+   truncated source read can produce and which must not loop."
+  | i size out c |
+  size := aSourceString size.
+  i := anIndex + 1.
+  out := WriteStream on: String new.
+  [i <= size] whileTrue: [
+    c := aSourceString at: i.
+    c = $'
+      ifTrue: [
+        (i < size and: [(aSourceString at: i + 1) = $'])
+          ifTrue: [out nextPut: $'. i := i + 2]
+          ifFalse: [^out contents]]
+      ifFalse: [out nextPut: c. i := i + 1]].
+  ^out contents
+%
 category: 'read-only'
 method: McpGrailToolset
 readOnlySafeToolNames
@@ -776,6 +905,27 @@ resolvePythonObjectNamed: aDottedName
           obj isNil ifTrue: [ok := false]]].
       ok ifTrue: [^obj]]].
   ^nil
+%
+category: 'private'
+method: McpGrailToolset
+selector: aSelector callsPythonName: aName
+  "Whether the env-1 selector aSelector is a call to the Python name aName.
+
+   DECODING, NOT ENCODING. The obvious way to find the senders of `copyfile` is to build the
+   selectors a call to it could have compiled to -- `copyfile:`, `copyfile:_:`, `copyfile:_:_:`,
+   ... , `_copyfile:kw:` -- and look for those in each method's selector pool. That needs an arity
+   nobody has: a Python name has as many fixed-arity selectors as it has call sites with differing
+   argument counts, so the candidate list has no upper bound, and a search that stops at some arity
+   misses every call above it SILENTLY -- the failure this tool exists to remove. Decoding each
+   selector a method actually sends is exact, needs no arity, and reuses the single rule this class
+   already states (#pythonNameOfSelector:) instead of maintaining its inverse. Grail publishes
+   neither direction; see GemTalk/Grail#884.
+
+   A SYMBOL IS NOT A STRING HERE: GemStone answers false for #abs = 'abs' (measured), so both sides
+   are compared as Strings. String>>= is case-SENSITIVE, which is what Python names need -- several
+   of its neighbours, includesString: among them, are not -- so `Copyfile` must not answer a search
+   for `copyfile`."
+  ^(self pythonNameOfSelector: aSelector) = aName asString
 %
 category: 'private'
 method: McpGrailToolset
