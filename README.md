@@ -5,7 +5,7 @@ GemStone Smalltalk. It runs **inside** the image and executes tool calls directl
 Node.js process, no GCI/FFI bridge. The goal is to replace the GCI-based Jasper MCP
 server with one that any MCP client can reach over plain HTTP.
 
-**Status:** the Streamable HTTP transport, per-client worker gems, 31 base tools (+2 optional
+**Status:** the Streamable HTTP transport, per-client worker gems, 31 base tools (+9 optional
 Python), OAuth 2.1 / JWT + TLS, per-router read-only mode and server-initiated messages are built
 and verified end-to-end — by curl, by a TLS run, and by the in-image suites. What is *not* built is
 listed under [Future work](#future-work).
@@ -290,7 +290,7 @@ Results that are one *value* rather than a list — `execute_code`, `eval_python
 capped at 50,000 characters, but the marker now names what was dropped:
 `...[truncated: showing 50000 of 60002 characters]`.
 
-## Tools (31 base + 7 optional Grail)
+## Tools (31 base + 9 optional Grail)
 
 **Execution**
 
@@ -430,6 +430,45 @@ an image without Grail. Once loaded the toolset joins the default tool surface a
 | `describe_python_class` | `name` | a Python class: backing Smalltalk class, storage base, `__bases__`/`__mro__`, `__slots__`, class attributes, method names |
 | `list_python_methods` | `name`, `limit?`, `offset?` | its methods with real signatures (parameter names *and* defaults) and the `.py` line each was defined at, in source order |
 | `python_module_state` | `name` | what a module **is** here — native or `.py`, canonical, committed, current or stale, in `sys.modules` — and what the next import would do |
+| `find_python_senders` | `name`, `shapes?`, `scope?`, `includeNative?`, `includeTests?`, `limit?`, `offset?` | who calls or refers to a Python name, across all three shapes Grail compiles a reference into; every answer ends with what was and was not searched |
+| `search_python_source` | `pattern`, `scope?`, `includeTests?`, `limit?`, `offset?` | case-sensitive substring search over the checkout's `.py` files — the Python analogue of `search_method_source`, and the only tool here that answers for a module nothing has imported |
+
+> **`find_python_senders` exists because the stock sender search is not merely incomplete — it is
+> wrong.** `ClassOrganizer` scans environment 0 and Grail compiles Python into environment 1, so
+> asking it who calls a Python name gets an empty answer rather than a partial one. Measured on
+> 3.7.5 with `_grail_session` imported: `sendersOf: #'_dict'` and `sendersOf: #'__dict:kw:'` each
+> answer an empty pair of arrays where **12** senders exist, and `find_senders` through MCP answers
+> `(none)`. A false negative about code costs more than a slow answer about it.
+>
+> A Python reference compiles to three unrelated things, and no one of them is the answer, so the
+> tool searches all three and *says which it searched*: **compiled** call sites, found in a
+> generated method's selector pool and positioned from the source; **references**, where a
+> first-class use (`g = abs`) or an unresolved attribute call (`os.path.isdir(x)`) leaves a Symbol
+> literal and no selector at all; and **source**, the `.py` text, which is the only shape that can
+> answer for a module nothing has imported in this session. Every answer ends with a `searched:` and
+> a `not searched:` block, each gap naming the argument that closes it — because "no senders" is
+> only worth reading if it can be told apart from "I could not look there".
+>
+> **It never imports, and that is why it is read-only safe.** Matching is syntactic: the last
+> segment of the name is what is matched, and leading segments narrow and label. Resolving the name
+> instead would buy exact arities and would make a *search* a database write, since a cold import in
+> Grail compiles. Over-matching is reported rather than avoided — a bare name answers hits in every
+> module that has one, each labelled — and `scope` narrows at a dot boundary, so `flask` does not
+> select `flask_login`.
+>
+> **What it cannot see, it says.** Grail registers module-scope class statements only, so a nested
+> class is not enumerable; a function defined in an `eval` scope compiles to a block with no
+> selector pool; a module whose `.py` nothing has imported has nothing compiled to search; and under
+> `GRAIL_IR_CODEGEN` a method carries the user's Python with no position store, so a hit's line
+> reads `?` rather than a guess. Three public interfaces that would close these gaps are filed as
+> [GemTalk/Grail#883](https://github.com/GemTalk/Grail/issues/883),
+> [#884](https://github.com/GemTalk/Grail/issues/884) and
+> [#885](https://github.com/GemTalk/Grail/issues/885).
+>
+> **`tests/python` is excluded by default** — a relevance choice, not a cost one. The stdlib is
+> 1,412 files and 426,131 lines and reads in 248 ms; the fixtures would add about 75 ms. What they
+> would also add is test code among the answers to "who calls this". `includeTests: true` includes
+> them, and the trailer says so when they are left out.
 
 > **Why a Python class needs its own describe tool.** Grail creates every user Python class
 > **anonymously** (`inDictionary: nil`), so nothing in any symbol dictionary names it: `list_classes`

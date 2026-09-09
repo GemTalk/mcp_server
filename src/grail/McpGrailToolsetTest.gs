@@ -132,6 +132,85 @@ request: methodName params: paramsDict
 %
 category: 'tests'
 method: McpGrailToolsetTest
+testCallSitesIgnoreLiteralsCommentsAndLongerNames
+  "The four ways a substring scan for a sent selector finds something that is not a send. Each was
+   measured against `_grail_session.SessionDict`, where the naive version reported 27 sites for the
+   12 that exist -- so these are regression assertions, not hypotheticals.
+
+   The last one is the one with teeth: `_dict` is a substring of `__dict:`, the SAME Python name's
+   varargs selector, so without an identifier boundary every fast-path method appeared to be called
+   from its own arity glue."
+  | ts src sites |
+  ts := McpGrailToolset new.
+  "1: the position literal embeds the Python source line, which names what is being searched for.
+   2: codegen writes the method name into a TypeError message.
+   3: the selector pattern on line one is the name itself.
+   4: `_dict` inside `__dict:` is a different selector."
+  src := '_dict
+| ___curPos___ |
+___curPos___ := #(43 15 43 47 ''        return self._dict()'').
+TypeError ___signal___: ''SessionDict._dict() takes 0 positional arguments''.
+"a comment mentioning _dict".
+^self __dict: { } kw: nil'.
+  sites := ts callSitesIn: src forSelector: #'_dict'.
+  self assert: sites isEmpty.
+  "The same source DOES report the send it really makes, positioned by the store above it."
+  sites := ts callSitesIn: src forSelector: #'__dict:kw:'.
+  self assert: sites size equals: 1.
+  self assert: ((sites at: 1) at: 1) equals: 43.
+  "A doubled quote inside a literal does not end it, so what follows stays excluded."
+  self assert: (ts callSitesIn: '_dict
+x := ''it''''s _dict here''.
+^1' forSelector: #'_dict') isEmpty
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testCallSitesReadThePositionLiteralGrailEmits
+  "The position derivation, pinned against generated text this test writes itself -- so it needs no
+   import, no compiled module and no Grail checkout, and can state both literal shapes exactly.
+
+   Grail writes a position store before each statement, either the 5-element PEP 657 literal
+   #(beginLine colno endLine endColno sourceLine) or a bare line number. A sender search reports a
+   Python line by reading the nearest store ABOVE the send, so the two sends below must come back
+   attributed to 117 WITH the call text and to 120 WITHOUT it -- a bare store carries no text. Both
+   attributed to the first store is what a scan that stops looking after one store would answer.
+
+   The last two assertions pin the degradation, which matters more than the happy path: a send with
+   no store above it reports its line as ABSENT rather than guessing one, and a direct-to-IR method
+   (GRAIL_IR_CODEGEN), whose source is the user's Python rather than generated Smalltalk, yields no
+   text-locatable send at all -- so the caller reports the method with no position instead of
+   reporting no sender. See GemTalk/Grail#883."
+  | ts src sites |
+  ts := McpGrailToolset new.
+  src := 'copy: src kw: kwargs
+  | ___curPos___ |
+  ___curPos___ := #(117 4 117 22 ''  copyfile(src, dst)'').
+  (self _copyfile: { (src). (dst). } kw: nil).
+  ___curPos___ := 120.
+  ^self _copyfile: { (src). } kw: nil'.
+  sites := ts callSitesIn: src forSelector: #'_copyfile:kw:'.
+  self assert: sites size equals: 2.
+  self assert: ((sites at: 1) at: 1) equals: 117.
+  self assert: ((sites at: 1) at: 2) equals: '  copyfile(src, dst)'.
+  self assert: ((sites at: 2) at: 1) equals: 120.
+  self assert: ((sites at: 2) at: 2) isNil.
+  "A store whose text could not be embedded keeps its line."
+  sites := ts callSitesIn: '  ___curPos___ := #(9 0 9 4 nil).
+  ^self _copyfile: { (src). } kw: nil' forSelector: #'_copyfile:kw:'.
+  self assert: sites size equals: 1.
+  self assert: ((sites at: 1) at: 1) equals: 9.
+  self assert: ((sites at: 1) at: 2) isNil.
+  "No store at all: the send is found, the position is absent."
+  sites := ts callSitesIn: 'copy: src kw: kwargs
+  ^self _copyfile: { (src). } kw: nil' forSelector: #'_copyfile:kw:'.
+  self assert: sites size equals: 1.
+  self assert: ((sites at: 1) at: 1) isNil.
+  "Python source, as a direct-to-IR method carries: nothing to locate by keyword."
+  self assert: (ts callSitesIn: 'def copy(src, dst):
+    return _copyfile(src, dst)' forSelector: #'_copyfile:kw:') isEmpty
+%
+category: 'tests'
+method: McpGrailToolsetTest
 testCompilePython
   "Transpile a Python assignment to Smalltalk. Pins Grail's CURRENT codegen for a multiplication,
    which as of 2026-08-18 is ___binOpMul___: (it was __mul__ when this test was written) -- so a
@@ -272,6 +351,163 @@ outer()').
 %
 category: 'tests'
 method: McpGrailToolsetTest
+testFindPythonSendersAnswersEveryShapeAndSaysWhatItDidNotSearch
+  "The tool end to end, and the coverage trailer that is the point of it.
+
+   An answer of `no senders` is only worth something if the reader can tell it from `I could not
+   look there`, so every answer names what was searched AND what was not, with the argument that
+   closes each gap where there is one. This asserts the trailer as carefully as the hits: a shape
+   left out of `shapes` is reported as not searched rather than silently contributing nothing, which
+   is the difference between an honest partial answer and a false negative."
+  | checkout ts out compiled |
+  checkout := self grailCheckoutOrNil.
+  checkout isNil ifTrue: [^self assert: true].
+  ts := self grailToolsetOn: checkout.
+  self withFreshScopeDo: [
+    ts ensureGrailConfigured.
+    ts canonicalClassNamed: '_grail_session.SessionDict'].
+  compiled := ts tool_find_python_senders: (Dictionary new
+    at: 'name' put: '_dict'; at: 'shapes' put: #( 'compiled' ); yourself).
+  "The 12 senders, each addressed in PYTHON with the Smalltalk identity behind it."
+  self assert: (self includesCS: 'compiled 12, references 0, .py text 0' in: compiled).
+  self assert: (self includesCS: '_grail_session.SessionDict.__contains__' in: compiled).
+  self assert: (self includesCS: 'line 55' in: compiled).
+  self assert: (self includesCS: 'return key in self._dict()' in: compiled).
+  self assert: (self includesCS: '(SessionDict>>__contains__: env 1)' in: compiled).
+  "The trailer: what was searched, and every gap with its remedy."
+  self assert: (self includesCS: 'searched: ' in: compiled).
+  self assert: (self includesCS: 'compiled classes' in: compiled).
+  self assert: (self includesCS: 'not searched:' in: compiled).
+  self assert: (self includesCS: 'pass includeNative: true' in: compiled).
+  "A shape not asked for is NAMED, not silently empty."
+  self assert: (self includesCS: 'the .py files on disk -- not among the shapes asked for' in: compiled).
+  self assert: (self includesCS: 'GemTalk/Grail#885' in: compiled).
+  "With the source shape in, the .py trees are searched and reported as such."
+  out := ts tool_find_python_senders: (Dictionary new
+    at: 'name' put: '_dict'; at: 'shapes' put: #( 'source' ); at: 'limit' put: 0; yourself).
+  self assert: (self includesCS: 'src/python/stdlib' in: out).
+  self assert: (self includesCS: 'compiled call sites -- not among the shapes asked for' in: out).
+  self assert: (self includesCS: 'tests/python -- pass includeTests: true' in: out)
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testFindPythonSendersMatchesWholeNamesOnDiskAndSearchSourceDoesNot
+  "The two tools search the same files by different rules, and the reason is the question each
+   answers.
+
+   find_python_senders is asked about a NAME, so a line holding `__dict__` is not an answer to
+   `_dict`: measured over Grail's stdlib, substring matching gave 1,153 hits and whole-name 15, and
+   the 1,138 others are noise the reader would have to filter by hand. search_python_source is asked
+   about arbitrary TEXT -- half a decorator, a fragment of a comment -- where boundaries would
+   refuse the searches it exists for. So the same corpus and the same needle must give the text
+   search MORE hits than the sender search, and that relation is what is asserted rather than either
+   count, which belongs to whatever Grail happens to ship."
+  | checkout ts senders text |
+  checkout := self grailCheckoutOrNil.
+  checkout isNil ifTrue: [^self assert: true].
+  ts := self grailToolsetOn: checkout.
+  ts ensureGrailConfigured.
+  senders := ts pythonSourceRootsIncludingTests: false.
+  self deny: senders isEmpty.
+  senders := (ts sourceHitsForPattern: '_dict' under: (senders at: 1) scope: nil wholeName: true) size.
+  text := ts pythonSourceRootsIncludingTests: false.
+  text := (ts sourceHitsForPattern: '_dict' under: (text at: 1) scope: nil wholeName: false) size.
+  self assert: senders > 0.
+  self assert: text > senders.
+  "A name is not matched inside a longer identifier, in either direction."
+  self assert: (ts line: 'return self._dict()[key]' hasWholeName: '_dict').
+  self deny: (ts line: 'return self.__dict__' hasWholeName: '_dict').
+  self deny: (ts line: 'x = _dictionary' hasWholeName: '_dict').
+  "...but a Python annotation colon is not a boundary violation, unlike a Smalltalk keyword."
+  self assert: (ts line: '_dict: int = None' hasWholeName: '_dict')
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testFindPythonSendersRefusesWhatItCannotDoRatherThanAnsweringNothing
+  "Three refusals, each a distinct kind, because collapsing them is how a tool tells a caller
+   something false.
+
+   #absent -- searched, nothing found. Not #notFound: the NAME may well exist, nothing called it
+   where this could look, and the message carries the evidence so the caller can widen.
+   #invalidParams -- an unknown shape. Silently ignoring it would answer an empty result to a
+   caller who asked for something this does not have, which reads as `no senders`.
+   #unknown -- search_python_source with no grailDirectory. The .py files are not reachable, which
+   is not the same as their holding no match."
+  | checkout ts kind msg |
+  checkout := self grailCheckoutOrNil.
+  ts := checkout isNil ifTrue: [McpGrailToolset new] ifFalse: [self grailToolsetOn: checkout].
+  kind := [ts tool_find_python_senders: (Dictionary new
+      at: 'name' put: 'no_such_python_name_xyz'; at: 'shapes' put: #( 'compiled' ); yourself).
+    #noRaise]
+    on: McpError do: [:e | msg := e messageText. e kind].
+  self assert: kind equals: #absent.
+  self assert: (self includesCS: 'searched:' in: msg).
+  kind := [ts tool_find_python_senders: (Dictionary new
+      at: 'name' put: '_dict'; at: 'shapes' put: #( 'compile' ); yourself).
+    #noRaise]
+    on: McpError do: [:e | msg := e messageText. e kind].
+  self assert: kind equals: #invalidParams.
+  self assert: (self includesCS: 'is not a shape' in: msg).
+  "No checkout configured: the text search says the tree is unreachable, and says which tool still
+   works."
+  kind := [(McpGrailToolset new) tool_search_python_source:
+      (Dictionary new at: 'pattern' put: 'def copyfile'; yourself).
+    #noRaise]
+    on: McpError do: [:e | msg := e messageText. e kind].
+  self assert: kind equals: #unknown.
+  self assert: (self includesCS: 'grailDirectory' in: msg).
+  self assert: (self includesCS: 'find_python_senders' in: msg)
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testFindsTheRealSendersOfAPythonMethodNotGrailsArityGlue
+  "The measurement the whole tool exists for, against a module in Grail's own stdlib.
+
+   `_grail_session.SessionDict` calls `self._dict()` in exactly 12 of its methods -- countable in
+   the .py, and each at a line this asserts -- while the stock Smalltalk sender search answers
+   NOTHING for either selector that name compiles to. Measured on 3.7.5:
+   `ClassOrganizer new sendersOf: #'_dict'` and `sendersOf: #'__dict:kw:'` each answer an empty
+   pair of arrays, because they scan environment 0 and Grail compiles Python into environment 1.
+   That is a false negative rather than a shortfall, which is why a Python-aware search is worth
+   having at all -- so this test asserts the stock answer too, and will start failing if some later
+   GemStone makes it right.
+
+   The counts are exact on purpose: 12 hits, every one carrying a position, is what says the scan
+   neither missed a call nor invented one. An earlier substring-matching version of this reported
+   27 for the same class (see #testCallSitesIgnoreLiteralsCommentsAndLongerNames).
+
+   And `_dict` must NOT be among the senders. Grail compiles each def twice -- a fixed-arity fast
+   path holding the body, and a varargs entry point that checks the argument count and delegates --
+   so `__dict:kw:` really does send `_dict`, and a scan that reports that makes every Python name a
+   caller of itself."
+  | checkout ts cls hits names contains |
+  checkout := self grailCheckoutOrNil.
+  checkout isNil ifTrue: [^self assert: true].
+  ts := self grailToolsetOn: checkout.
+  cls := self withFreshScopeDo: [
+    ts ensureGrailConfigured.
+    ts canonicalClassNamed: '_grail_session.SessionDict'].
+  hits := ts pythonSendersOfName: '_dict' in: cls.
+  self assert: hits size equals: 12.
+  names := (hits collect: [:h | h at: 1]) asSortedCollection asArray.
+  self assert: names equals: #( '__contains__' '__delitem__' '__getitem__' '__iter__' '__len__'
+    '__setitem__' 'clear' 'get' 'items' 'keys' 'pop' 'values' ).
+  "Every one is positioned -- nothing degraded to an unplaced hit on a module Grail compiles from
+   text."
+  self assert: (hits select: [:h | (h at: 3) isNil]) isEmpty.
+  "The Python line and the call-site text come from the position literal, not from the .py."
+  contains := hits detect: [:h | (h at: 1) = '__contains__'].
+  self assert: (contains at: 3) equals: 55.
+  self assert: (contains at: 4) equals: '        return key in self._dict()'.
+  self assert: ((hits detect: [:h | (h at: 1) = '__getitem__']) at: 3) equals: 46.
+  "The arity glue is not a sender."
+  self deny: (names includes: '_dict').
+  "What the stock search answers for the same two selectors, and the reason for all of the above."
+  self assert: (ClassOrganizer new sendersOf: #'_dict') equals: (Array with: #() with: #()).
+  self assert: (ClassOrganizer new sendersOf: #'__dict:kw:') equals: (Array with: #() with: #())
+%
+category: 'tests'
+method: McpGrailToolsetTest
 testGetPythonSourceReadsTheDefinitionFromDisk
   "The end-to-end path: locate a Python object through __code__ and read its source off disk.
    Needs a Grail CHECKOUT, which no test can know the location of, so it is discovered
@@ -323,10 +559,15 @@ testGrailDirectoryIsADeclaredOption
 category: 'tests'
 method: McpGrailToolsetTest
 testGrailToolsetIsGatedInReadOnlySession
-  "A read-only worker keeps exactly ONE of these tools -- run_python_tests, which runs in a fresh gem
-   that is thrown away and never committed in, so it can persist nothing. Every other one is dropped:
-   running arbitrary Python can persist anything, and get_python_source imports the module it is
-   asked about, which in Grail is a database write.
+  "A read-only worker keeps FOUR of these tools, for three different reasons. run_python_tests runs
+   in a fresh gem that is thrown away and never committed in, so it can persist nothing.
+   python_module_state only reads. find_python_senders and search_python_source only read too, and
+   that is a consequence of a design decision rather than luck: they match a Python name
+   SYNTACTICALLY and never resolve it, because resolving would import, and in Grail a cold import
+   is a database write.
+
+   Every other one is dropped: running arbitrary Python can persist anything, and
+   get_python_source imports the module it is asked about.
 
    The gated ones must still be reported as FORBIDDEN rather than unknown -- 'you may not' and 'no
    such tool' are different answers and only one of them is worth showing a user as a permissions
@@ -334,14 +575,16 @@ testGrailToolsetIsGatedInReadOnlySession
   | ts |
   ts := McpGrailToolset on: McpServer new.
   self assert: ts readOnlySafeToolNames asSortedCollection asArray
-    equals: (Array with: 'python_module_state' with: 'run_python_tests').
+    equals: #( 'find_python_senders' 'python_module_state' 'run_python_tests'
+               'search_python_source' ).
   SessionTemps current removeKey: #McpReadOnly ifAbsent: [nil].
   [ | names err |
     McpServer sessionReadOnly: true.
     names := (McpServer newWithToolsetNames: (Array with: 'McpGrailToolset'))
       toolRegistry descriptors collect: [:d | d at: 'name'].
     self assert: names asSortedCollection asArray
-      equals: (Array with: 'python_module_state' with: 'run_python_tests').
+      equals: #( 'find_python_senders' 'python_module_state' 'run_python_tests'
+                 'search_python_source' ).
     err := (self dispatch: (self toolCall: 'eval_python'
       args: (Dictionary new at: 'code' put: '1'; yourself))) at: 'error'.
     self assert: (err at: 'code') equals: -32601.
@@ -571,14 +814,20 @@ six
 %
 category: 'tests'
 method: McpGrailToolsetTest
-testRunPythonTestsIsTheOnlyReadOnlySafeTool
-  "run_python_tests is safe in a read-only session because of WHERE it runs -- a fresh gem that is
-   thrown away and never committed in -- so it can persist nothing and the caller's transaction is
-   not even reachable from it. The others stay gated: eval_python runs arbitrary Python, and
-   get_python_source IMPORTS the module it is asked about, which in Grail is a database write."
+testReadOnlySafeGrailToolsAreTheOnesThatCannotPersist
+  "Renamed from testRunPythonTestsIsTheOnlyReadOnlySafeTool, which stopped being true when
+   python_module_state joined the list and is now wrong by three.
+
+   run_python_tests is safe because of WHERE it runs -- a fresh gem that is thrown away and never
+   committed in, so the caller's transaction is not even reachable from it. The two search tools are
+   safe because they never resolve a name, which is what keeps them from importing. The others stay
+   gated: eval_python runs arbitrary Python, and get_python_source IMPORTS the module it is asked
+   about, which in Grail is a database write."
   | safe |
   safe := McpGrailToolset new readOnlySafeToolNames.
   self assert: (safe includes: 'run_python_tests').
+  self assert: (safe includes: 'find_python_senders').
+  self assert: (safe includes: 'search_python_source').
   self deny: (safe includes: 'eval_python').
   self deny: (safe includes: 'get_python_source').
   self deny: (safe includes: 'compile_python')
@@ -627,6 +876,100 @@ testRunPythonTestsRunsFreshAndLeavesTheCallerAlone
   self assert: (self includesCS: '1 class(es)' in: out).
   "and the caller's transaction is exactly where it was"
   self assert: System needsCommit equals: before
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testSearchPythonSourceAnswersAPathAndLineAndPagesLikeEveryOtherTool
+  "The Python analogue of search_method_source: path, line, and the line itself, paged with the same
+   limit/offset every list-shaped tool here takes.
+
+   It is the ONLY tool in this toolset that can answer about a module nothing has imported -- the
+   compiled shapes have nothing to look at until something has been -- which is why it exists
+   separately rather than as a shape of the sender search."
+  | checkout ts out page |
+  checkout := self grailCheckoutOrNil.
+  checkout isNil ifTrue: [^self assert: true].
+  ts := self grailToolsetOn: checkout.
+  ts ensureGrailConfigured.
+  out := ts tool_search_python_source: (Dictionary new at: 'pattern' put: 'def copyfile'; yourself).
+  self assert: (self includesCS: 'shutil.py:' in: out).
+  self assert: (self includesCS: 'def copyfile' in: out).
+  self assert: (self includesCS: 'searched: src/python/stdlib' in: out).
+  "limit: 0 answers the count alone, which is how a client asks how many there are."
+  page := ts tool_search_python_source: (Dictionary new
+    at: 'pattern' put: 'def copyfile'; at: 'limit' put: 0; yourself).
+  self assert: (self includesCS: 'pass a limit above 0 to see them' in: page).
+  "A scope narrows to a module, at a path boundary."
+  self assert: (ts scope: 'flask' matchesRelativePath: 'flask/app.py').
+  self assert: (ts scope: 'flask.json' matchesRelativePath: 'flask/json/__init__.py').
+  self assert: (ts scope: 'flask.app' matchesRelativePath: 'flask/app.py').
+  self deny: (ts scope: 'flask' matchesRelativePath: 'flask_login/utils.py').
+  "and the same rule for a compiled label, where the boundary is the dot it is written with."
+  self assert: (ts scope: 'flask' matchesLabel: 'flask.app').
+  self deny: (ts scope: 'flask' matchesLabel: 'flask_login')
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testSearchScopeEnumeratesWhatCanBeSearchedAndNamesItInPython
+  "What a compiled-shape search can look in, and under what name.
+
+   Every entry is labelled with the DOTTED PYTHON name a follow-up call can use, because a Python
+   class is anonymous in GemStone -- `SessionDict` is the Smalltalk class name of every class of
+   that name in every module, so it addresses nothing. After importing one module this image can
+   search its module class (`_grail_session`, where a module-level def lives) and its module-scope
+   class (`_grail_session.SessionDict`).
+
+   Grail's 47 native modules are excluded by default and included on request: they are hand-written
+   Smalltalk, so a Python-name search over them reports an implementation rather than a call site.
+
+   The de-duplication assertion is the one that would otherwise go unnoticed: a class reachable
+   from two sources must be searched once, or every hit in it is reported twice."
+  | checkout ts labels withNative classes |
+  checkout := self grailCheckoutOrNil.
+  checkout isNil ifTrue: [^self assert: true].
+  ts := self grailToolsetOn: checkout.
+  self withFreshScopeDo: [
+    ts ensureGrailConfigured.
+    ts canonicalClassNamed: '_grail_session.SessionDict'].
+  labels := (ts pythonSearchScopeIncludingNative: false) collect: [:e | e at: 1].
+  self assert: (labels includes: '_grail_session').
+  self assert: (labels includes: '_grail_session.SessionDict').
+  self deny: (labels includes: 'os').
+  "No class is listed twice, however many sources reach it."
+  classes := (ts pythonSearchScopeIncludingNative: false) collect: [:e | e at: 2].
+  self assert: classes asIdentitySet size equals: classes size.
+  "Native modules on request, and they are additional rather than instead."
+  withNative := (ts pythonSearchScopeIncludingNative: true) collect: [:e | e at: 1].
+  self assert: (withNative includes: 'os').
+  self assert: (withNative includes: '_grail_session').
+  self assert: withNative size > labels size
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testSelectorMatchesAPythonNameByDecodingRatherThanEncoding
+  "Matching a Python name against a method's selector pool DECODES each pooled selector rather than
+   generating the selectors a call to that name could have compiled to.
+
+   That is not a stylistic choice. The fixed-arity encoding grows a selector per argument count, so
+   a candidate list has no upper bound, and a search that stops generating at some arity misses
+   every call above it while still answering -- a false negative, which is the whole failure this
+   tool exists to remove. Decoding needs no arity at all.
+
+   The denials are the assertions that matter. A Python name is case-sensitive, and `_copyfile:_:`
+   is a two-argument call to `_copyfile` -- NOT a varargs call to `copyfile`, which is what reading
+   the leading underscore as the varargs marker without checking for the `kw:` keyword would make
+   it. See #testPythonNameOfSelectorDecodesTheWholeEncoding for the decoding itself."
+  | ts |
+  ts := McpGrailToolset new.
+  self assert: (ts selector: #'copyfile:' callsPythonName: 'copyfile').
+  self assert: (ts selector: #'copyfile:_:' callsPythonName: 'copyfile').
+  self assert: (ts selector: #'copyfile:_:_:_:' callsPythonName: 'copyfile').
+  self assert: (ts selector: #'_copyfile:kw:' callsPythonName: 'copyfile').
+  self assert: (ts selector: #dumps callsPythonName: 'dumps').
+  self deny: (ts selector: #'Copyfile:' callsPythonName: 'copyfile').
+  self deny: (ts selector: #'copyfile2:' callsPythonName: 'copyfile').
+  self deny: (ts selector: #'_copyfile:_:' callsPythonName: 'copyfile').
+  self assert: (ts selector: #'_copyfile:_:' callsPythonName: '_copyfile')
 %
 category: 'tests'
 method: McpGrailToolsetTest
