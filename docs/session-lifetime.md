@@ -70,6 +70,22 @@ a ping can only be sent down a stream the client itself opened. So `MCP_IDLE_TIM
 mean "no limit" — it means the client's own answers are the limit, and a client that stops answering,
 that hangs up, or that never opened a stream, is still released.
 
+**A worker gem that DIES ends its session, on the request that discovers it.** This is the one
+ending here that is about neither the client nor the repository: the gem is simply not there any
+more — out of temporary object memory, stopped from the stone side, its process gone — and a session
+whose gem is unreachable can serve nothing further. The front end recognizes it by the GCI **fatal**
+error band (4000–4999, `McpRouter>>isSessionGoneError:`), which is the kernel's own verdict and not a
+guess: it closes the external session's connection when it sees one. The request that found it is
+answered `-32001` with `data.kind` `sessionGone` bearing its own id, and the session is unmapped as
+part of answering, so its slot goes back at once and the client's **next** request gets the 404 that
+tells it to re-initialize. Both halves matter, and for different clients: the kind lets a client
+recover on *this* request, the 404 lets one that reads no kind recover on the next. The reaper is not
+the mechanism for this and could not be — its probe asks whether the *client* is still there, on a
+stream that client keeps answering, so a dead gem behind a live client answers every ping and trips
+no ground above. The reason the gem died is written to the gem log in full; the client gets the GCI
+number, because the kernel appends the gem's whole NRS — host, stone, user, extent and log paths —
+to any error in that band.
+
 **One request is bounded too, and that is a different question.** Everything above decides when a
 session is released; `requestTimeoutSeconds` decides how long a single call inside one may run.
 A call that outruns it is **ended** — the front end breaks the worker and answers the client a
