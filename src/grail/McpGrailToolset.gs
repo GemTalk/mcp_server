@@ -765,6 +765,57 @@ pythonScope
 %
 category: 'private'
 method: McpGrailToolset
+pythonSearchScopeIncludingNative: aBoolean
+  "The classes a compiled-shape search can look in, as an OrderedCollection of
+   {pythonLabel. class} -- the label being the dotted name a follow-up call can use
+   (`_grail_session`, `_grail_session.SessionDict`), not the Smalltalk class name, which for a
+   Python class is anonymous.
+
+   THREE SOURCES, AND NONE OF THEM IS THE IMAGE. Grail creates every Python class with
+   `inDictionary: nil`, so no symbol dictionary names one and ClassOrganizer cannot find them --
+   Grail says so itself in importlib class>>___subclassRegistry___ (`that is not a small gap: it is
+   every user class in the system`). What can be enumerated is:
+
+     PythonModules -- the module classes, where a module-level def lives. Its own name is a key in
+       it, mapping to the dictionary rather than a class, so values are filtered by Behavior.
+     GrailCanonicalClasses -- the module-scope class statements, keyed `module.Class`, which is the
+       label wanted anyway. A class decorator may have bound something that is not a class, so this
+       is filtered by Behavior too.
+     the Python dictionary -- Grail's 47 hand-written NATIVE modules (os, sys, math, builtins ...),
+       only when aBoolean. They are Smalltalk, not generated, so a Python-name search over them
+       reports the implementation rather than a call site; useful sometimes, noise by default.
+
+   WHAT THIS CANNOT REACH, and what the caller must therefore report as not searched: a nested class
+   (the registry records module-scope statements only), a module with a .py that nothing has imported
+   in this session (nothing is compiled to search), and a function defined in an eval scope, which
+   compiles to a block with no selector pool. An enumeration that answers honestly for all of them
+   is asked for in GemTalk/Grail#885; until there is one, a count from here is a floor and is
+   reported as one.
+
+   Deduplicated by class IDENTITY: a module-scope class reachable from both the registry and a
+   module attribute must be searched once, or every hit in it is reported twice."
+  | scope seen add pm reg |
+  scope := OrderedCollection new.
+  seen := IdentitySet new.
+  add := [:label :value |
+    ((value isKindOf: Behavior) and: [(seen includes: value) not]) ifTrue: [
+      seen add: value.
+      scope add: (Array with: label asString with: value)]].
+  pm := self dictNamed: 'PythonModules'.
+  pm ifNotNil: [
+    [pm keysAndValuesDo: [:k :v | add value: k value: v]] on: Error do: [:ex | nil]].
+  reg := System myUserProfile objectNamed: #GrailCanonicalClasses.
+  reg ifNotNil: [
+    [reg keysAndValuesDo: [:k :v | add value: k value: v]] on: Error do: [:ex | nil]].
+  aBoolean ifTrue: [
+    (self dictNamed: 'Python') ifNotNil: [:d |
+      [d keysAndValuesDo: [:k :v |
+        (self isNativeModuleNamed: k) ifTrue: [add value: k value: v]]]
+        on: Error do: [:ex | nil]]].
+  ^scope
+%
+category: 'private'
+method: McpGrailToolset
 pythonSendersOfName: aName in: aClass
   "Every call to the Python name aName from aClass's env-1 methods, as an OrderedCollection of
    {containingPythonName. smalltalkSelector. lineOrNil. callSiteTextOrNil} -- one entry per call

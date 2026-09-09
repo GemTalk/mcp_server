@@ -757,6 +757,42 @@ testRunPythonTestsRunsFreshAndLeavesTheCallerAlone
 %
 category: 'tests'
 method: McpGrailToolsetTest
+testSearchScopeEnumeratesWhatCanBeSearchedAndNamesItInPython
+  "What a compiled-shape search can look in, and under what name.
+
+   Every entry is labelled with the DOTTED PYTHON name a follow-up call can use, because a Python
+   class is anonymous in GemStone -- `SessionDict` is the Smalltalk class name of every class of
+   that name in every module, so it addresses nothing. After importing one module this image can
+   search its module class (`_grail_session`, where a module-level def lives) and its module-scope
+   class (`_grail_session.SessionDict`).
+
+   Grail's 47 native modules are excluded by default and included on request: they are hand-written
+   Smalltalk, so a Python-name search over them reports an implementation rather than a call site.
+
+   The de-duplication assertion is the one that would otherwise go unnoticed: a class reachable
+   from two sources must be searched once, or every hit in it is reported twice."
+  | checkout ts labels withNative classes |
+  checkout := self grailCheckoutOrNil.
+  checkout isNil ifTrue: [^self assert: true].
+  ts := self grailToolsetOn: checkout.
+  self withFreshScopeDo: [
+    ts ensureGrailConfigured.
+    ts canonicalClassNamed: '_grail_session.SessionDict'].
+  labels := (ts pythonSearchScopeIncludingNative: false) collect: [:e | e at: 1].
+  self assert: (labels includes: '_grail_session').
+  self assert: (labels includes: '_grail_session.SessionDict').
+  self deny: (labels includes: 'os').
+  "No class is listed twice, however many sources reach it."
+  classes := (ts pythonSearchScopeIncludingNative: false) collect: [:e | e at: 2].
+  self assert: classes asIdentitySet size equals: classes size.
+  "Native modules on request, and they are additional rather than instead."
+  withNative := (ts pythonSearchScopeIncludingNative: true) collect: [:e | e at: 1].
+  self assert: (withNative includes: 'os').
+  self assert: (withNative includes: '_grail_session').
+  self assert: withNative size > labels size
+%
+category: 'tests'
+method: McpGrailToolsetTest
 testSelectorMatchesAPythonNameByDecodingRatherThanEncoding
   "Matching a Python name against a method's selector pool DECODES each pooled selector rather than
    generating the selectors a call to that name could have compiled to.
