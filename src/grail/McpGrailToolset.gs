@@ -104,38 +104,71 @@ callSitesIn: aSourceString forSelector: aSelector
 
    HOW A GENERATED METHOD CARRIES ITS PYTHON POSITION. Grail's codegen writes a store before each
    statement (AbstractNode>>___emitCurPosStore___:on:) in one of two shapes: a bare line,
-   `___curPos___ := 117`, or the 5-element PEP 657 literal
-   `___curPos___ := #(117 4 117 22 ' copyfile(src, dst)')` -- beginLine, colno, endLine, endColno and
-   the raw source line (AbstractLocationNode>>___pyPositionLiteralArray). So a send's position is
-   whatever the nearest store ABOVE it says. That is the same derivation Grail itself makes at run
-   time in BaseException class>>___pythonLineForMethod___:ip:, which it reaches from an instruction
-   pointer this search does not have.
+   `___curPos___ := 42`, or the 5-element PEP 657 literal
+   `___curPos___ := #(43 15 43 47 '        return gemstone.sessionDict(self._name)')` -- beginLine,
+   colno, endLine, endColno and the raw source line (AbstractLocationNode>>___pyPositionLiteralArray).
+   So a send's position is whatever the nearest store ABOVE it says. That is the derivation Grail
+   itself makes at run time in BaseException class>>___pythonLineForMethod___:ip:, which it reaches
+   from an instruction pointer this search does not have.
 
-   WHY THIS READS TEXT, AND WHERE IT STOPS. Grail publishes no way to ask a method for its call
-   sites: both readers that do it properly are private and ip-keyed, which is asked about in
+   WHAT IS NOT A SEND, measured against `_grail_session.SessionDict` on 3.7.5. A naive substring
+   scan for the sent selector reported 27 sites where there are 12, and every extra one came from
+   one of four places:
+
+     1. THE POSITION LITERAL'S OWN TEXT. The store embeds the Python source line, so searching for
+        `_dict` inside `#(55 ... '        return key in self._dict()')` finds the very name being
+        searched for and doubles every real hit.
+     2. A GENERATED STRING LITERAL. The varargs entry point raises
+        `TypeError: 'SessionDict._dict() takes 0 positional arguments'`, which names the method in
+        prose.
+     3. THE METHOD'S OWN SELECTOR PATTERN. Line one of `_dict` is the word `_dict`.
+     4. A LONGER IDENTIFIER. `_dict` is a substring of `__dict:`, which is the SAME name's varargs
+        selector -- so every fast path appeared to be sent from its own arity glue.
+
+   So this walks the source once tracking string-literal and comment state, starts after the
+   selector pattern, and requires an identifier boundary on each side of the match. Comments are
+   skipped for consistency, not because codegen writes prose into them: the one comment it does
+   write is a position store (___emitCurPosRestoreCommentFor___:on:), which is already read from the
+   raw text by #positionStoresIn: before this walk begins.
+
+   WHY IT READS TEXT AT ALL, AND WHERE THAT STOPS. Grail publishes no way to ask a method for its
+   call sites: both readers that do it properly are private and ip-keyed, which is asked about in
    GemTalk/Grail#883. Two limits follow, and each reports an ABSENT position rather than a wrong
    one -- the literal layout is an assumption, and a direct-to-IR method (GRAIL_IR_CODEGEN set)
-   carries the Python source with no store in it at all. A hit whose line is nil still names the
-   method it is in, which is the part a caller can get nowhere else.
-
-   Sends are found by first keyword rather than by parsing Smalltalk, because the caller has
-   already established from the selector pool that aSelector really is sent here; this only has to
-   say where. A store that codegen emits as a COMMENT -- LambdaAst does, for this very scan -- reads
-   identically to it, which is what its author intended."
-  | stores key sites idx |
+   carries the user's Python with no store in it at all. A hit whose line is nil still names the
+   method it is in, which is the part a caller can get nowhere else."
+  | stores key sites i size c inString inComment |
   stores := self positionStoresIn: aSourceString.
   key := self firstKeywordOf: aSelector.
   sites := OrderedCollection new.
-  idx := aSourceString findString: key startingAt: 1.
-  [idx > 0] whileTrue: [
-    | found |
-    "The stores are in ascending source order, so the last one before this send is the one in
-     effect at it."
-    found := Array with: nil with: nil.
-    stores do: [:st |
-      (st at: 1) < idx ifTrue: [found := Array with: (st at: 2) with: (st at: 3)]].
-    sites add: found.
-    idx := aSourceString findString: key startingAt: idx + key size].
+  size := aSourceString size.
+  "Start after the selector pattern: no Python call site is in it, and its own name is."
+  i := (aSourceString indexOf: Character lf) + 1.
+  i = 1 ifTrue: [i := size + 1].
+  inString := false.
+  inComment := false.
+  [i <= size] whileTrue: [
+    c := aSourceString at: i.
+    inString
+      ifTrue: [
+        c = $' ifTrue: [
+          "A doubled quote is one quote INSIDE the literal, not the end of it."
+          (i < size and: [(aSourceString at: i + 1) = $'])
+            ifTrue: [i := i + 1]
+            ifFalse: [inString := false]]]
+      ifFalse: [
+        inComment
+          ifTrue: [c = $" ifTrue: [inComment := false]]
+          ifFalse: [
+            c = $'
+              ifTrue: [inString := true]
+              ifFalse: [
+                c = $"
+                  ifTrue: [inComment := true]
+                  ifFalse: [
+                    (self source: aSourceString hasSendOf: key at: i)
+                      ifTrue: [sites add: (self storeInEffectAt: i in: stores)]]]]].
+    i := i + 1].
   ^sites
 %
 category: 'private'
@@ -412,6 +445,13 @@ isGrailInternalName: aName
   s := aName asString.
   s size < 7 ifTrue: [^false].
   ^((s copyFrom: 1 to: 3) = '___') and: [(s copyFrom: s size - 2 to: s size) = '___']
+%
+category: 'private'
+method: McpGrailToolset
+isIdentifierCharacter: aCharacter
+  "Whether aCharacter can be part of a Smalltalk or Python identifier, which is what decides
+   whether a match is a whole name or the middle of a longer one."
+  ^aCharacter isLetter or: [aCharacter isDigit or: [aCharacter = $_]]
 %
 category: 'private'
 method: McpGrailToolset
@@ -725,6 +765,50 @@ pythonScope
 %
 category: 'private'
 method: McpGrailToolset
+pythonSendersOfName: aName in: aClass
+  "Every call to the Python name aName from aClass's env-1 methods, as an OrderedCollection of
+   {containingPythonName. smalltalkSelector. lineOrNil. callSiteTextOrNil} -- one entry per call
+   site, so a method calling aName twice is reported twice.
+
+   THE SELECTOR POOL DECIDES WHETHER, THE SOURCE DECIDES WHERE. A method's pool is the exact set of
+   selectors it sends, so decoding each one (#selector:callsPythonName:) answers the question
+   `is this a sender` without parsing anything. Only then is the source read, to say where.
+
+   GRAIL COMPILES EACH DEF TWICE, and the difference is why the last clause is here. A def gets a
+   fixed-arity fast path holding the body (`__contains__:`) and a varargs entry point that checks
+   the argument count and delegates to it (`___contains__:kw:`) -- so `__dict:kw:` genuinely sends
+   `_dict`, and every Python name would otherwise be reported as calling itself once. That
+   delegation sits ahead of the body's first position store, so it is recognised as glue by having
+   NO position while standing in a method of the very name being searched for. A real recursive
+   call has a store above it and is reported. Measured on `_grail_session.SessionDict`: 12 real
+   senders of `_dict`, plus exactly one glue send from `__dict:kw:`.
+
+   Nothing here imports, resolves or compiles: it reads compiled methods and their source."
+  | hits |
+  hits := OrderedCollection new.
+  (aClass selectorsForEnvironment: 1) asSortedCollection do: [:sel |
+    | meth ownName pool |
+    meth := [aClass compiledMethodAt: sel environmentId: 1] on: Error do: [:ex | nil].
+    meth ifNotNil: [
+      ownName := self pythonNameOfSelector: sel.
+      pool := [meth _selectorPool] on: Error do: [:ex | #()].
+      pool do: [:sent |
+        (self selector: sent callsPythonName: aName) ifTrue: [
+          | src sites |
+          src := [aClass sourceCodeAt: sel environmentId: 1] on: Error do: [:ex | nil].
+          sites := src isNil
+            ifTrue: [OrderedCollection new]
+            ifFalse: [self callSitesIn: src forSelector: sent].
+          "The pool proved the send; a source that cannot be read or located still reports it,
+           without a position."
+          sites isEmpty ifTrue: [sites := OrderedCollection with: (Array with: nil with: nil)].
+          sites do: [:site |
+            ((site at: 1) isNil and: [ownName = aName]) ifFalse: [
+              hits add: (Array with: ownName with: sel with: (site at: 1) with: (site at: 2))]]]]]].
+  ^hits
+%
+category: 'private'
+method: McpGrailToolset
 pythonTracebackFor: anException
   "The formatted Python traceback for anException, or nil if one cannot be produced.
 
@@ -976,6 +1060,29 @@ signatureFor: aMethodName from: aSigTableOrNil on: aClass
 %
 category: 'private'
 method: McpGrailToolset
+source: aSourceString hasSendOf: aKey at: anIndex
+  "Whether aKey occurs at anIndex as a whole name rather than inside a longer one.
+
+   The leading boundary is what separates the fast path `_dict` from the varargs selector `__dict:`
+   of the SAME Python name -- without it every method appeared to be sent from its own arity glue.
+   The trailing boundary is only needed for a unary key: a keyword key already ends in the colon
+   that terminates it, and what follows is the argument."
+  | size keySize endIndex |
+  size := aSourceString size.
+  keySize := aKey size.
+  endIndex := anIndex + keySize - 1.
+  endIndex > size ifTrue: [^false].
+  (aSourceString copyFrom: anIndex to: endIndex) = aKey ifFalse: [^false].
+  (anIndex > 1 and: [self isIdentifierCharacter: (aSourceString at: anIndex - 1)])
+    ifTrue: [^false].
+  aKey last = $: ifTrue: [^true].
+  ^(endIndex < size and: [
+      | next |
+      next := aSourceString at: endIndex + 1.
+      (self isIdentifierCharacter: next) or: [next = $:]]) not
+%
+category: 'private'
+method: McpGrailToolset
 sourceLinesFrom: aPath startingAt: aLineNumber label: aName
   "Read aPath and answer the definition beginning at aLineNumber, as an Array
    {path . firstFileLine . lines}. aLineNumber 0 means the whole file (a module), which begins at
@@ -1051,6 +1158,18 @@ storageBaseOf: aClass
   c := aClass superclass.
   [c notNil and: [registered includes: c]] whileTrue: [c := c superclass].
   ^c ifNil: [aClass]
+%
+category: 'private'
+method: McpGrailToolset
+storeInEffectAt: anIndex in: aStoreCollection
+  "The {lineOrNil. textOrNil} of the last position store before anIndex, or two nils when there is
+   none. The stores arrive in ascending source order (#positionStoresIn:), so the last one that
+   starts before the send is the one in effect at it."
+  | found |
+  found := Array with: nil with: nil.
+  aStoreCollection do: [:st |
+    (st at: 1) < anIndex ifTrue: [found := Array with: (st at: 2) with: (st at: 3)]].
+  ^found
 %
 category: 'private'
 method: McpGrailToolset

@@ -132,6 +132,39 @@ request: methodName params: paramsDict
 %
 category: 'tests'
 method: McpGrailToolsetTest
+testCallSitesIgnoreLiteralsCommentsAndLongerNames
+  "The four ways a substring scan for a sent selector finds something that is not a send. Each was
+   measured against `_grail_session.SessionDict`, where the naive version reported 27 sites for the
+   12 that exist -- so these are regression assertions, not hypotheticals.
+
+   The last one is the one with teeth: `_dict` is a substring of `__dict:`, the SAME Python name's
+   varargs selector, so without an identifier boundary every fast-path method appeared to be called
+   from its own arity glue."
+  | ts src sites |
+  ts := McpGrailToolset new.
+  "1: the position literal embeds the Python source line, which names what is being searched for.
+   2: codegen writes the method name into a TypeError message.
+   3: the selector pattern on line one is the name itself.
+   4: `_dict` inside `__dict:` is a different selector."
+  src := '_dict
+| ___curPos___ |
+___curPos___ := #(43 15 43 47 ''        return self._dict()'').
+TypeError ___signal___: ''SessionDict._dict() takes 0 positional arguments''.
+"a comment mentioning _dict".
+^self __dict: { } kw: nil'.
+  sites := ts callSitesIn: src forSelector: #'_dict'.
+  self assert: sites isEmpty.
+  "The same source DOES report the send it really makes, positioned by the store above it."
+  sites := ts callSitesIn: src forSelector: #'__dict:kw:'.
+  self assert: sites size equals: 1.
+  self assert: ((sites at: 1) at: 1) equals: 43.
+  "A doubled quote inside a literal does not end it, so what follows stays excluded."
+  self assert: (ts callSitesIn: '_dict
+x := ''it''''s _dict here''.
+^1' forSelector: #'_dict') isEmpty
+%
+category: 'tests'
+method: McpGrailToolsetTest
 testCallSitesReadThePositionLiteralGrailEmits
   "The position derivation, pinned against generated text this test writes itself -- so it needs no
    import, no compiled module and no Grail checkout, and can state both literal shapes exactly.
@@ -315,6 +348,54 @@ outer()').
   self assert: (self includesCS: 'line 8' in: text).   "the outer() call"
   self assert: (self includesCS: 'line 2' in: text).   "return inner()"
   self assert: (self includesCS: 'line 6' in: text)    "the failing subscript"
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testFindsTheRealSendersOfAPythonMethodNotGrailsArityGlue
+  "The measurement the whole tool exists for, against a module in Grail's own stdlib.
+
+   `_grail_session.SessionDict` calls `self._dict()` in exactly 12 of its methods -- countable in
+   the .py, and each at a line this asserts -- while the stock Smalltalk sender search answers
+   NOTHING for either selector that name compiles to. Measured on 3.7.5:
+   `ClassOrganizer new sendersOf: #'_dict'` and `sendersOf: #'__dict:kw:'` each answer an empty
+   pair of arrays, because they scan environment 0 and Grail compiles Python into environment 1.
+   That is a false negative rather than a shortfall, which is why a Python-aware search is worth
+   having at all -- so this test asserts the stock answer too, and will start failing if some later
+   GemStone makes it right.
+
+   The counts are exact on purpose: 12 hits, every one carrying a position, is what says the scan
+   neither missed a call nor invented one. An earlier substring-matching version of this reported
+   27 for the same class (see #testCallSitesIgnoreLiteralsCommentsAndLongerNames).
+
+   And `_dict` must NOT be among the senders. Grail compiles each def twice -- a fixed-arity fast
+   path holding the body, and a varargs entry point that checks the argument count and delegates --
+   so `__dict:kw:` really does send `_dict`, and a scan that reports that makes every Python name a
+   caller of itself."
+  | checkout ts cls hits names contains |
+  checkout := self grailCheckoutOrNil.
+  checkout isNil ifTrue: [^self assert: true].
+  ts := self grailToolsetOn: checkout.
+  cls := self withFreshScopeDo: [
+    ts ensureGrailConfigured.
+    ts canonicalClassNamed: '_grail_session.SessionDict'].
+  hits := ts pythonSendersOfName: '_dict' in: cls.
+  self assert: hits size equals: 12.
+  names := (hits collect: [:h | h at: 1]) asSortedCollection asArray.
+  self assert: names equals: #( '__contains__' '__delitem__' '__getitem__' '__iter__' '__len__'
+    '__setitem__' 'clear' 'get' 'items' 'keys' 'pop' 'values' ).
+  "Every one is positioned -- nothing degraded to an unplaced hit on a module Grail compiles from
+   text."
+  self assert: (hits select: [:h | (h at: 3) isNil]) isEmpty.
+  "The Python line and the call-site text come from the position literal, not from the .py."
+  contains := hits detect: [:h | (h at: 1) = '__contains__'].
+  self assert: (contains at: 3) equals: 55.
+  self assert: (contains at: 4) equals: '        return key in self._dict()'.
+  self assert: ((hits detect: [:h | (h at: 1) = '__getitem__']) at: 3) equals: 46.
+  "The arity glue is not a sender."
+  self deny: (names includes: '_dict').
+  "What the stock search answers for the same two selectors, and the reason for all of the above."
+  self assert: (ClassOrganizer new sendersOf: #'_dict') equals: (Array with: #() with: #()).
+  self assert: (ClassOrganizer new sendersOf: #'__dict:kw:') equals: (Array with: #() with: #())
 %
 category: 'tests'
 method: McpGrailToolsetTest
