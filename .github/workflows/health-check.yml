@@ -32,18 +32,41 @@ jobs:
           advanced-security: false
 
   test:
-    name: ubuntu-latest / GemStone ${{ matrix.gemstone-version }}
+    name: ubuntu-latest / GemStone ${{ matrix.gemstone-version }}${{ matrix.grail && ' + Grail' || '' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # The Grail leg clones GemTalk/Grail and builds its CPython shim on top of the ordinary
+    # install; the plain leg stays fast, so give the matrix a shared ceiling generous enough for
+    # the slower one rather than branching the timeout too. Measured: plain ~1m40s, Grail ~2m20s.
+    timeout-minutes: 8
     strategy:
+      fail-fast: false
       matrix:
-        # Add more versions here to widen coverage -- each gets its own job.
+        # Crossed with `grail` below, so each version gets both a plain job and a Grail job.
+        # `grail: true` clones GemTalk/Grail (see below) and installs mcp_server with --grail, the
+        # only way to exercise src/grail; `grail: false` is the base install every other
+        # contributor runs. This doubles with every version added -- add an `exclude:` entry for a
+        # version with no Grail support (see docs/Development.md's version matrix) rather than
+        # letting that leg fail.
         gemstone-version: ['3.7.5']
+        grail: [false, true]
     env:
       GEMSTONE_VERSION: ${{ matrix.gemstone-version }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out mcp_server
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+
+      # Cloned into its own directory so it never lands in this repo's working tree. Tracks
+      # Grail's default branch rather than a pinned commit -- see the job comment above; if an
+      # upstream Grail change ever breaks this leg, pin `ref:` here to the last known-good commit
+      # while it gets sorted out upstream.
+      - name: Check out Grail
+        if: matrix.grail
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: GemTalk/Grail
+          path: grail
           persist-credentials: false
 
       - name: Cache GemStone download
@@ -83,10 +106,35 @@ jobs:
           startstone gs64stone
           startnetldi -g -a "$USER" gs64ldi
 
+      # Grail needs a C toolchain to build its CPython shim (src/c/shim), on top of the stone
+      # this job already started. install_base.sh (once per extent, as SystemUser) then
+      # install.sh (per user, as the DataCurator ./install.sh itself logs in as) are Grail's own
+      # two-step install -- see https://github.com/GemTalk/Grail#installation. The login line
+      # matches install.sh's own GS_STONE/GS_USER/GS_PASS defaults, since this job never
+      # overrides them.
+      - name: Install Grail
+        if: matrix.grail
+        run: |
+          # `|| true`: the runner image's own third-party apt sources (e.g. dl.google.com's
+          # Chrome repo) can fail an index refresh with an unrelated Hash Sum mismatch, which
+          # apt-get update reports as a nonzero exit even though the Ubuntu archives we actually
+          # need (build-essential lives in main) refreshed fine. Failing here would blame Grail
+          # for a flaky, unrelated repo on the runner image.
+          sudo apt-get update || true
+          sudo apt-get install -y --no-install-recommends build-essential
+          echo "set user DataCurator pass swordfish gems gs64stone" > ~/.topazini
+          cd grail
+          ./install_base.sh
+          ./install.sh
+
       - name: Install mcp_server
-        run: ./install.sh
+        run: ./install.sh${{ matrix.grail && ' --grail' || '' }}
 
       - name: Run unit tests
+        # McpGrailToolsetTest resolves by class name once installed, so this only matters on the
+        # Grail leg -- but it is harmless to leave unset on the other one, see run-unit-tests.sh.
+        env:
+          MCP_GRAIL_DIR: ${{ matrix.grail && format('{0}/grail', github.workspace) || '' }}
         run: ./run-unit-tests.sh
 
       - name: Run wire-level integration test
