@@ -12,6 +12,24 @@ breaking changes are expected and are called out rather than shimmed.
 
 ## Unreleased
 
+* **`get_python_source` no longer over-reads a method into the next one.** The end of a definition
+  is found by indentation, and the rule asked for the next line with content in **column zero** —
+  which is right for a module-level `def` and wrong for anything inside a `class`, because a
+  method's `def` is not in column zero either. Asked for `textwrap.TextWrapper.wrap` the tool
+  answered `wrap` *and* `fill`, under a header naming the line `wrap` starts at, so nothing in the
+  answer said where the method it was asked about ended.
+
+  A block now ends at the first later line whose content begins at or to the left of the
+  definition's own first line — Python's actual rule, and it still needs no parser and no knowledge
+  of decorators or nesting. `startsABlockAfter:` becomes `line:endsBlockIndentedAt:`, and
+  `sourceLinesFrom:startingAt:label:` reads the definition's indentation off its own first line.
+  Module answers (line 0) and module-level defs are unchanged, since for a `def` in column zero the
+  new rule *is* the old one. Two edges the old rule could not reach: a recorded line number that
+  lands on a blank line falls back to column zero rather than answering the rest of the file, and
+  one past the end of the file answers nothing rather than erroring. Found by driving the toolset
+  live against a real stdlib file; 1 new test in `McpGrailToolsetTest` (39 in the suite, 561 across
+  22).
+
 * **A session whose worker gem dies is now ended, rather than wedged for the life of the server.**
   A dead gem used to leave its session registered: every later call on it answered a generic
   JSON-RPC `-32603 "Internal error"` with no `data.kind`, inside a healthy HTTP 200 — which means
