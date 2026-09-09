@@ -193,15 +193,18 @@ and `dev372` lines, was retired on 2026-09-09; `dev` and `dev2` are deleted. If 
 
 ### Releases
 
-Merging to `main` is a deliberate act, not the end of the per-change loop:
+Merging to `main` is a deliberate act, not the end of the per-change loop. The version bump and the
+changelog entry go in the **same** pull request, so a reviewer sees the new number beside the claim
+it makes, and `main` never carries one without the other.
 
-1. Bump `McpServer class>>defaultServerVersion` — the single home for the literal.
+1. Branch from an up-to-date `main`, as for any other change.
+2. Bump `McpServer class>>defaultServerVersion` — the single home for the literal.
    `McpContractTest` asserts `initialize`'s `serverInfo.version` equals that selector's answer, so a
    bump does not break tests. Deployments can relabel per instance, so this is the *product*
    version.
-2. File out, test, commit on the branch.
-3. Open the pull request and merge it into `main`.
-4. Update [CHANGELOG.md](../CHANGELOG.md).
+3. Write that version's [CHANGELOG.md](../CHANGELOG.md) entry in the same branch.
+4. File out, test, commit.
+5. Open the pull request and merge it into `main`.
 
 Never bump unilaterally: someone may be running a server against a published version.
 
