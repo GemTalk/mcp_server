@@ -70,6 +70,22 @@ a ping can only be sent down a stream the client itself opened. So `MCP_IDLE_TIM
 mean "no limit" — it means the client's own answers are the limit, and a client that stops answering,
 that hangs up, or that never opened a stream, is still released.
 
+**A worker gem that DIES ends its session, on the request that discovers it.** This is the one
+ending here that is about neither the client nor the repository: the gem is simply not there any
+more — out of temporary object memory, stopped from the stone side, its process gone — and a session
+whose gem is unreachable can serve nothing further. The front end recognizes it by the GCI **fatal**
+error band (4000–4999, `McpRouter>>isSessionGoneError:`), which is the kernel's own verdict and not a
+guess: it closes the external session's connection when it sees one. The request that found it is
+answered `-32001` with `data.kind` `sessionGone` bearing its own id, and the session is unmapped as
+part of answering, so its slot goes back at once and the client's **next** request gets the 404 that
+tells it to re-initialize. Both halves matter, and for different clients: the kind lets a client
+recover on *this* request, the 404 lets one that reads no kind recover on the next. The reaper is not
+the mechanism for this and could not be — its probe asks whether the *client* is still there, on a
+stream that client keeps answering, so a dead gem behind a live client answers every ping and trips
+no ground above. The reason the gem died is written to the gem log in full; the client gets the GCI
+number, because the kernel appends the gem's whole NRS — host, stone, user, extent and log paths —
+to any error in that band.
+
 **One request is bounded too, and that is a different question.** Everything above decides when a
 session is released; `requestTimeoutSeconds` decides how long a single call inside one may run.
 A call that outruns it is **ended** — the front end breaks the worker and answers the client a
@@ -316,3 +332,37 @@ the pass that *discovers* a stuck view is the same pass that would reap it, so t
 strictly greater. `stuckViewGraceSeconds=0` therefore means what it says — released on the pass that
 finds it — and 60 seconds against a 60-second reaper means one whole interval of grace, not none. A
 positive grace shorter than one pass is refused at startup rather than silently rounded up.
+
+**A worker gem that has DIED is measured by this arm too, and reads as perfectly current.** The
+stone session id it is measured by was cached at that gem's login (`McpSession>>cacheWorkerIds`) and
+nothing re-reads it, so once the gem is gone that id is a number no session holds — and
+`System descriptionOfSession:` does not refuse it. Measured on 3.7.5, it answers a zero-filled
+description: 29 fields, the first `nil` and the rest `0`. Field 16 is therefore `0` commits behind,
+under any configured limit, so the arm sends the dead gem nothing and writes nothing — the log line
+lives inside the same test as the refresh. That is the right answer for a better reason than luck: a
+gem that has exited pins nothing, because its view went with the process. What it left registered is
+a `maxSessions` slot and nothing more, released by the request that discovers it or by whichever
+ordinary ground reaps it first.
+
+**The exception is a recycled session id, and it costs one confusing log line.** Stone session ids
+are handed out again. If the number the dead worker was logged in as is given to another gem — any
+gem, not necessarily one of this server's workers — the figure this arm reads belongs to a stranger.
+Should that stranger be far enough behind, the front end sends *its own* dead worker a refresh, gets
+the fatal `4100 invalid session`, and the pass's handler logs `maintainViewHygiene error: ...`.
+Nothing is corrupted and nothing reaches the stranger: the refresh only ever travels the dead
+worker's own GCI channel, which is closed, and the stranger's number was only ever read from the
+stone. What is left is a line that names the right session, quotes a commits-behind figure belonging
+to a different gem, and reports a GCI error about a gem that no longer exists — worth recognizing,
+because none of the three is wrong on its own terms.
+
+**It recurs once per pass, and what bounds it is the dead session's own release.** That handler has
+no dedup, and nothing here can move a view belonging to a gem that is not this server's worker, so
+waiting for the stranger to catch up is not the mechanism. The line stops when the dead session
+leaves the table, on whichever ordinary ground fires first — half an hour at the default idle
+deadline, a minute for a client that never opened a stream, one grace period for a client whose
+stream has closed — or, far more usually, on that client's own next request. The one configuration
+with no bound is `MCP_IDLE_TIMEOUT=none` behind a client that holds a stream open, answers every ping
+and never calls again: no ground applies, and the line repeats for the life of the front end. That is
+the same corner as the dead worker's slot itself, and it has the same answer — the client is
+occupying a session it opened and has not finished with, which it would occupy identically with a
+healthy gem.

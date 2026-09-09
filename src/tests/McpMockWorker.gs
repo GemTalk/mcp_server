@@ -8,7 +8,8 @@ Object subclass: 'McpMockWorker'
                     lastResult errorOnComplete waitCount blockingExecuteCount
                     overlapDetected staleReadAttempted loginCount stoneSessionId
                     gemProcessId idFetchCount softBreakCount hardBreakCount
-                    breakPending resistSoftBreak resistHardBreak logoutCount)
+                    breakPending resistSoftBreak resistHardBreak logoutCount
+                    dieOnComplete dead)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -36,6 +37,10 @@ each verified against GemStone 3.7.5:
   - the two identity accessors, stoneSessionId and gemProcessId, memoize a REMOTE call, so the
     first send of each overwrites lastResult -- the clobber McpSession>>cacheWorkerIds defuses by
     fetching them at login, before any request can be in flight;
+  - a worker gem that DIES leaves BOTH of the failures the real one leaves: the call in flight
+    raises a GciError in the fatal 4000-4999 band, and the connection is closed with it, so every
+    later send raises `invalid session` too (see #dieOnComplete). Modelled because it is the pair,
+    not either half, that McpRouter has to recognize;
   - a break (softBreak/hardBreak) is taken at the pending WAIT, not at the send: the wait ends the
     call and raises, as the real one raises `a Break occurred` (error 6003), and lastResult is left
     holding the previous call''s value exactly as the real class leaves it. #resistSoftBreak: and
@@ -58,12 +63,37 @@ new
   ^super new initialize
 %
 ! ------------------- Instance methods for McpMockWorker
+category: 'session protocol'
+method: McpMockWorker
+_describe
+  "How the real class names itself inside a GciError's message text, which GciError>>_error:in:
+   appends for any error in the fatal band. Sent to a mock only by the kernel, and only once
+   #dieOnComplete has been used."
+  ^'a McpMockWorker'
+%
 category: 'instrumentation'
 method: McpMockWorker
 blockingExecuteCount
   "How many times the BLOCKING executeString: was used. The whole point of the non-blocking
    forward is that this stays zero."
   ^blockingExecuteCount
+%
+category: 'configuring'
+method: McpMockWorker
+dieOnComplete
+  "Make the in-flight call fail the way a call in a worker gem that DIED fails, and leave this
+   worker dead: every later send raises as well.
+   Both halves are the real class's, and it is the pair rather than either half that a front end has
+   to recognize. A fatal GCI failure -- any number in 4000-4999 -- is signalled as a GciError
+   carrying that number as #originalNumber, and GsTsExternalSession>>_signalError: closes the
+   external session's connection on the way past. So the next send finds no session to send to and
+   raises 4100, invalid session, from GciTsNbExecute, whatever the first failure was: measured on
+   3.7.5, a worker that exhausted its temporary object memory failed once with 4067 and then
+   identically with 4100 for every request after it.
+   The error object itself is built by GciError rather than imitated (#signalGoneSession:), so a
+   test asserting on the number is asserting against the kernel's own answer. The details strings
+   name the callout that failed in each case, as the real ones do."
+  dieOnComplete := true
 %
 category: 'configuring'
 method: McpMockWorker
@@ -137,6 +167,8 @@ initialize
   resistSoftBreak := false.
   resistHardBreak := false.
   logoutCount := 0.
+  dieOnComplete := false.
+  dead := false.
   waitMs := 20.
   waitCount := 0.
   blockingExecuteCount := 0.
@@ -195,7 +227,10 @@ method: McpMockWorker
 nbExecute: aString
   "Start a call. A second one while another is in flight is what the real GCI refuses with
    `session has a GciTsNb operation in progress`; record it as well as raise, so the failure
-   survives being raised inside a forked GsProcess."
+   survives being raised inside a forked GsProcess.
+   A DEAD worker raises before any of that (#dieOnComplete): there is no connection left to start a
+   call on, and this is the failure every request after the fatal one meets."
+  dead ifTrue: [^self signalGoneSession: 'GciTsNbExecute failed'].
   inProgress ifTrue: [
     overlapDetected := true.
     ^self error: 'session has a GciTsNb operation in progress'].
@@ -236,6 +271,17 @@ method: McpMockWorker
 resistSoftBreak: aBoolean
   "Make this worker ignore a soft break, so a test can drive the escalation to a hard one."
   resistSoftBreak := aBoolean
+%
+category: 'private'
+method: McpMockWorker
+signalGoneSession: aDetailString
+  "Raise the GciError a worker gem that is gone raises. No GciErrSType is passed, which is exactly
+   the case GciError>>_error:in: answers with #originalNumber 4100 and the text `invalid session`:
+   the connection is closed, so there is no error buffer left to read a number out of."
+  | err |
+  err := GciError new.
+  err error: nil in: self details: aDetailString.
+  ^err signal
 %
 category: 'session protocol'
 method: McpMockWorker
@@ -320,6 +366,11 @@ waitForResultForSeconds: anInteger otherwise: aBlock
   waitsRemaining := waitsRemaining - 1.
   waitsRemaining > 0 ifTrue: [^aBlock value].
   inProgress := false.
+  "A gem that died is not a call that failed: the call is over AND the worker is finished, which is
+   what the real class reports by closing the connection along with the error (#dieOnComplete)."
+  dieOnComplete ifTrue: [
+    dead := true.
+    ^self signalGoneSession: 'GciTsNbResult failed'].
   errorOnComplete ifNotNil: [
     msg := errorOnComplete.
     errorOnComplete := nil.

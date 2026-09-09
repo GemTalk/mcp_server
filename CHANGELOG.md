@@ -12,6 +12,49 @@ breaking changes are expected and are called out rather than shimmed.
 
 ## Unreleased
 
+* **A session whose worker gem dies is now ended, rather than wedged for the life of the server.**
+  A dead gem used to leave its session registered: every later call on it answered a generic
+  JSON-RPC `-32603 "Internal error"` with no `data.kind`, inside a healthy HTTP 200 — which means
+  *something went wrong at our end*, not *your session is finished*, so a well-behaved client
+  retried, got the same answer forever and never re-initialized, while the session kept its
+  `maxSessions` slot for as long as the front end ran. Nothing reaped it either, and not for want of
+  a rule: the liveness probe asks whether the **client** is still there, down a stream that client
+  keeps answering, so a dead gem behind a live client trips no ground in `reapReasonFor:`.
+
+  Both halves of the fix are in `McpRouter`, the only component that knows the state of its own
+  workers. `isSessionGoneError:` classifies the failure — a `GciError` whose `originalNumber` is in
+  the GCI **fatal band, 4000–4999**, which is the kernel's own verdict rather than a guess about
+  which failures are serious: `GsTsExternalSession>>_signalError:` closes the session's connection
+  when it sees one, which is why the *second* such request fails with 4100 `invalid session`
+  however the *first* one failed. The request is then answered `-32001` with `data.kind`
+  `sessionGone`, bearing its own id, in an HTTP 200 — as a frame on the stream where the call was
+  already being streamed. And the session is **released as part of answering**, which is the half
+  that asks nothing of a client that branches on nothing: the slot goes back at once and the *next*
+  request on that id gets the **404** that the transport already defines for a session that no
+  longer exists, and that clients already recover from by re-initializing.
+
+  The client is told the GCI error number and not the `GciError`'s text: measured on 3.7.5, the
+  kernel appends the gem's whole NRS to a fatal error — host, stone, GemStone user, extent and log
+  paths — which is not a thing to hand an MCP client, least of all on the network-facing front end.
+  The failure in full goes to the gem log, beside the session id, which is the same split a reap
+  already makes.
+
+  Measured end to end on 3.7.5 with the reported reproduction — an `execute_code` that exhausts the
+  worker's temporary object memory — the gem dies in about three seconds, the call is answered
+  `sessionGone` (GCI 4067), the next request 404s, and a fresh `initialize` succeeds on a router
+  capped at one session, so the slot really came back. New: `McpRouter>>isSessionGoneError:`,
+  `releaseSessionWithGoneWorker:because:`, `sessionGoneErrorFor:id:`,
+  `writeSessionGoneError:forSession:id:on:` and `writeSessionGoneFrame:forSession:id:on:`; a
+  `McpMockWorker>>dieOnComplete` that models both failures a dying gem produces. 4 new tests in
+  `McpTransportTest` (48 in the suite, 560 across 22) and 9 wire checks in `test.sh`, which is the
+  only place the *first* failure's number can be pinned — a mock can raise 4100 but cannot die.
+  Closes #6. See *Session lifetime* in [docs/session-lifetime.md](docs/session-lifetime.md), which
+  also records what the view-hygiene pass makes of a dead worker: nothing, because the stone answers
+  a zero-filled description for a session id nobody holds, so it reads as zero commits behind and is
+  never sent anything. The one exception is documented with it — a recycled session id, which can
+  make that arm log a line naming the right session with a stranger's commits-behind figure and a
+  GCI error about a gem that no longer exists, once per pass until the session is released.
+
 * **Two new optional Grail tools, `find_python_senders` and `search_python_source`** — the Python
   sender search the toolset has been missing, and a text search over the checkout's `.py` files.
   Both are **read-only safe**. The stock sender search is not merely incomplete for Python: it scans
