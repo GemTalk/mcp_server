@@ -189,6 +189,39 @@ none, so `configurationAt:` answers nil for it whether or not it was set. `data/
 product tree is the authority on which exist, and it carries several the online appendix omits.
 See also the System Administration Guide, *Command Reference → gemnetobject* and appendices A and C.
 
+**Running *out* of temporary object memory is the benign failure. Running *nearly* out is the one
+that lies.** A gem that exhausts its cache dies with `VM temporary object memory is full` and a
+number to report. A gem that merely gets *close* keeps going and raises **`AlmostOutOfMemory`
+(notification 6013)**, and because it is a notification it surfaces wherever the session happened to
+be — under SUnit, against whichever test was running at the time. So a run that ends near its
+ceiling reports red tests that are memory artifacts: a different, innocent test each run, only under
+load, each one passing when run alone. There is no error to catch and nothing in the result that
+says memory. Grail hit exactly this in its own CI and its `scripts/run_tests.sh` records both the
+diagnosis and the numbers — a shard ending at **96%** of its cap failed intermittently, one ending
+at **75%** passed — along with the lesson worth copying: *"that took a while to recognise precisely
+because nothing reported the number."*
+
+So report the number. Three private `System` selectors give it, all present on 3.7.5 and 3.7.6:
+
+```smalltalk
+System _tempObjSpaceUsed          "bytes in use"
+System _tempObjSpaceMax           "bytes available"
+System _tempObjSpacePercentUsed   "the kernel's own percentage"
+```
+
+Use the kernel's percentage rather than dividing `used` by `max`: it is the figure 6013 is raised
+against, and the two need not agree. Note that `_tempObjSpaceMax` is **not** the configured
+`GEM_TEMPOBJ_CACHE_SIZE` — it is the part left for objects after the code space and overhead come
+out of it, so it reads a good deal smaller. Measured 3.7.5 on one host: a gem forked with
+`GEM_TEMPOBJ_CACHE_SIZE=900000;GEM_TEMPOBJ_CODE_SIZE=300000;` reported `_tempObjSpaceMax` of 659MB,
+the same host's default fork 366MB, and a linked topaz 36MB. Judge headroom as a percentage, never
+against the number you asked for.
+
+The corollary for anything that drives a lot of compilation in one forked gem: a bigger ceiling
+raises what a session *may* hold and does nothing about what it *has* to hold. Both are needed —
+Grail keeps the ceiling *and* partitions its corpus across eight sessions, and says so in as many
+words. Bound the work per session as well as raising the ceiling.
+
 **A `GciError` in the fatal band carries the gem's whole NRS in its message text — never show one to
 a client.** `GciError>>_error:in:` (kernel source, `Filein3A/GciError.class.st`) ends with
 

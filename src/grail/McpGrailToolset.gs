@@ -63,8 +63,10 @@ exactly the session that accumulates that state, cannot report the truth about i
 same three classes: 132 defects in a worker session, 386/386 clean in a fresh one. That fresh gem is
 forked with Grail''s own memory budget and driven ONE CLASS PER SEND, because it is a gem that can
 die: a run compiles everything it imports into one session''s temporary object memory, and a netldi''s
-default 50MB is not enough for a single Grail test class. See newGrailTestSession, testGemConfig and
-tool_run_python_tests:.
+default 50MB is not enough for a single Grail test class. Memory is BOUNDED as well as raised -- the
+run reports its peak and stops starting classes near the ceiling, because a Grail run that ends full
+does not crash, it reports AlmostOutOfMemory against an innocent test. See newGrailTestSession,
+testGemConfig, testGemMemoryCeilingPercent and tool_run_python_tests:.
 
 The handlers DO catch Python exceptions, unlike every core tool, and they have to: Grail models them
 outside the Smalltalk Error hierarchy (NameError is Exception < BaseException < Exception <
@@ -100,9 +102,13 @@ declaredOptionNames
    McpGrailToolset>>testGemConfig for the default, and for why the one a netldi hands out is not
    enough to run a Grail test class to the end.
 
-   Both are deployment knowledge, not something a worker can work out, which is why they are
+   testGemMemoryCeilingPercent -- how full that gem may get before run_python_tests stops starting
+   new classes. The budget above raises what a session MAY hold; this bounds what one call asks it
+   to hold, which is the other half of the same defect (see testGemMemoryCeilingPercent).
+
+   All three are deployment knowledge, not something a worker can work out, which is why they are
    configured rather than probed."
-  ^#( 'grailDirectory' 'testGemConfig' )
+  ^#( 'grailDirectory' 'testGemConfig' 'testGemMemoryCeilingPercent' )
 %
 ! ------------------- Instance methods for McpGrailToolset
 category: 'private'
@@ -608,6 +614,19 @@ lineOfLocation: aLocation
   | idx |
   idx := self lastColonIn: aLocation.
   ^idx = 0 ifTrue: ['?'] ifFalse: [aLocation copyFrom: idx + 1 to: aLocation size]
+%
+category: 'private'
+method: McpGrailToolset
+memoryNoteFor: usedBytes of: maxBytes percent: aPercent
+  "One reading of a test gem's temporary object memory, as `432MB of 659MB (65%)'.
+
+   MB rather than bytes because the number is read to judge headroom, and the percentage is the
+   kernel's own rather than usedBytes/maxBytes: it is the figure AlmostOutOfMemory is raised
+   against, and the two do not have to agree. Both are carried anyway -- a percentage alone cannot
+   say whether the budget is the one that was asked for, which is the first thing to check when a
+   run stops short unexpectedly."
+  ^(usedBytes // 1048576) printString , 'MB of ' , (maxBytes // 1048576) printString , 'MB ('
+    , aPercent printString , '%)'
 %
 category: 'private'
 method: McpGrailToolset
@@ -1780,6 +1799,37 @@ testGemDeathCauseForGciNumber: aNumberOrNil
     , (aNumberOrNil isNil ifTrue: [''] ifFalse: [' (GCI error ' , aNumberOrNil printString , ')'])
     , '. Its own gem log says what happened to it.'
 %
+category: 'options'
+method: McpGrailToolset
+testGemMemoryCeilingPercent
+  "The percentage of the test gem's temporary object memory at which run_python_tests stops starting
+   new classes, or 0 to run every class asked for whatever the gem reports.
+
+   85 BECAUSE OF WHERE GRAIL MEASURED THE CLIFF, not as a round number. scripts/run_tests.sh records
+   both ends: a shard that ends at 96% of its cap fails intermittently with AlmostOutOfMemory
+   blamed on an innocent test, and one that ends at 75% `is the difference between a suite with
+   headroom and one that fails whenever anything is added to it'. 85 sits above the figure Grail
+   calls comfortable, so an ordinary run is never cut short, and below the one it measured breaking.
+
+   STOPPING LOSES NOTHING. Each class's counts are already in the caller by the time this is
+   consulted, so a run that stops short answers with every class that completed; only the classes
+   not yet started are given up, and the answer names them. That is the whole point: past the cliff
+   the gem does not fail, it MISREPORTS -- so continuing would trade a short, attributable answer
+   for a long one with memory artifacts in it, which is the worse of the two.
+
+   0 disables it, for a deployment that would rather have the gem's own verdict than ours -- a host
+   with a much larger budget than Grail's, or a single class that cannot fit under the ceiling at
+   all and must be attempted anyway."
+  | pct |
+  pct := self optionNamed: 'testGemMemoryCeilingPercent' ifAbsent: [85].
+  pct := [pct asString asNumber] on: Error do: [:ex | nil].
+  (pct isNil or: [pct < 0 or: [pct > 100]]) ifTrue: [
+    ^McpError signalKind: #refused message:
+      'The McpGrailToolset option testGemMemoryCeilingPercent is a percentage of the test gem''s '
+        , 'temporary object memory, so it must be a whole number from 0 (never stop) to 100. It was '
+        , (self optionNamed: 'testGemMemoryCeilingPercent' ifAbsent: [nil]) printString , '.'].
+  ^pct truncated
+%
 category: 'private'
 method: McpGrailToolset
 testRunnerClassListExpressionFor: aNamesCollectionOrNil directory: aDirectory
@@ -1826,8 +1876,22 @@ testRunnerClassListExpressionFor: aNamesCollectionOrNil directory: aDirectory
 category: 'private'
 method: McpGrailToolset
 testRunnerExpressionForClassNamed: aName
-  "One class's run, in the gem the class list came from: its four counts on the first line, then its
-   defect report when it has one.
+  "One class's run, in the gem the class list came from: its four counts and the gem's memory
+   reading on the first line, then its defect report when it has one.
+
+   THE MEMORY READING IS WHY THIS IS WORTH A ROUND TRIP PER CLASS. A run that ends near its
+   temporary-object ceiling does not die -- it reports AlmostOutOfMemory (notification 6013) against
+   whichever test the session happened to be running, a different innocent test every time, so the
+   answer is plausible red tests rather than a crash. Grail met exactly this in its own CI and
+   records the diagnosis in scripts/run_tests.sh: at four shards the heaviest ended at 96% of the
+   cap and failed intermittently, at eight it ends at 75% and passes -- and `that took a while to
+   recognise precisely because nothing reported the number'. Reading it HERE, at the only boundary
+   where the caller is in control, is what lets tool_run_python_tests: stop before the cliff instead
+   of reporting memory artifacts as defects.
+
+   `_tempObjSpaceUsed`, `_tempObjSpaceMax` and `_tempObjSpacePercentUsed` are the three
+   runTestsShard.gs itself emits as GRAIL_SHARD_MEM. The percentage is taken from the kernel rather
+   than divided out here: it is the number the kernel raises 6013 against, and used//max is not it.
 
    ONE CLASS PER SEND IS WHAT MAKES A DEAD GEM REPORTABLE. A single send that ran every class
    answered nothing at all when the gem died on memory -- the caller got a GciError from a session
@@ -1857,8 +1921,13 @@ testRunnerExpressionForClassNamed: aName
   s nextPutAll: 'ws := WriteStream on: String new.'; nextPut: Character lf.
   s nextPutAll: 'ws nextPutAll: result runCount printString, '' '', result passedCount printString,';
     nextPut: Character lf.
-  s nextPutAll: '  '' '', result failureCount printString, '' '', result errorCount printString.';
+  s nextPutAll: '  '' '', result failureCount printString, '' '', result errorCount printString,';
     nextPut: Character lf.
+  s nextPutAll: '  '' '', System _tempObjSpacePercentUsed printString,';
+    nextPut: Character lf.
+  s nextPutAll: '  '' '', System _tempObjSpaceUsed printString,';
+    nextPut: Character lf.
+  s nextPutAll: '  '' '', System _tempObjSpaceMax printString.'; nextPut: Character lf.
   s nextPutAll: '(result respondsTo: #reportOn:prefix:) ifTrue: [';
     nextPut: Character lf.
   s nextPutAll: '  result details isEmpty ifFalse: [ws nextPut: Character lf.';
@@ -2245,8 +2314,23 @@ tool_run_python_tests: args
    Grail's own budget, which is the fix; driving the classes one at a time is what makes the
    remaining failure legible. The counts and defect reports accumulate HERE rather than in the
    child, so a gem that dies at class nine still leaves eight classes' results behind, and the
-   answer names the class it died on instead of a GciError from a session with no gem in it."
-  | dir names sess startedAt listed runs passed failed errors defects died atClass i out reply |
+   answer names the class it died on instead of a GciError from a session with no gem in it.
+
+   MEMORY IS BOUNDED AS WELL AS RAISED, because a bigger ceiling alone does not make an unbounded
+   run safe -- and Grail says so in the same breath it states the budget: `THIS AND THE
+   EIGHT-PARTITION CHANGE BELOW ARE TWO FIXES FOR ONE DEFECT ... Partitioning lowers what a session
+   HAS to hold; the ceiling raises what it MAY hold' (scripts/run_tests.sh). Grail's own corpus --
+   648 concrete classes, 6582 tests, measured here 2026-09-10 -- needs EIGHT sessions at that
+   budget, so classNames-less calls cannot be made to fit in one gem however large the ceiling is.
+   What matters is that the failure past the ceiling is not a crash: the gem reports
+   AlmostOutOfMemory against whichever test it happened to be running, so the answer becomes
+   plausible red tests that are memory artifacts. So the peak reading is REPORTED (measured
+   climbing 3MB -> 19 -> 28 -> 32 -> 43MB over four stdlib classes, a clean monotonic signal) and
+   the run stops starting classes once it crosses testGemMemoryCeilingPercent. Every class that
+   completed is still answered for; only the unstarted ones are given up, and the answer names how
+   many and where to resume."
+  | dir names sess startedAt listed runs passed failed errors defects died atClass i out reply
+    ceiling peakPct peakUsed peakMax stoppedAfter |
   dir := self grailDirectory.
   dir isNil ifTrue: [
     ^McpError signalKind: #refused message:
@@ -2256,16 +2340,18 @@ tool_run_python_tests: args
         , 'which is the stone''s and holds no src/python/stdlib -- every test would report an error '
         , 'that says more about the session than about Grail.'].
   names := args at: 'classNames' ifAbsent: [nil].
+  ceiling := self testGemMemoryCeilingPercent.
   startedAt := System timeGmt.
   sess := self newGrailTestSession.
   ^[runs := 0. passed := 0. failed := 0. errors := 0.
+    peakPct := 0. peakUsed := 0. peakMax := 0.
     defects := WriteStream on: String new.
     listed := (self childResultFrom: sess
       expression: (self testRunnerClassListExpressionFor: names directory: dir)
       progress: 'starting a fresh gem for Grail''s tests'
       since: startedAt) subStrings: ' '.
     i := 1.
-    [died isNil and: [i <= listed size]] whileTrue: [
+    [died isNil and: [stoppedAfter isNil and: [i <= listed size]]] whileTrue: [
       atClass := listed at: i.
       "Only the SEND is guarded. A gem that dies raises here and nowhere else, so a failure to read
        an answer we built ourselves must not be reported as one."
@@ -2276,17 +2362,27 @@ tool_run_python_tests: args
         since: startedAt]
           on: Error do: [:ex | died := ex. nil].
       reply ifNotNil: [ | counts brk |
-        "first line: run passed failed errors. Anything after it is this class's defect report."
+        "first line: run passed failed errors pct used max. Anything after it is the defect report."
         brk := reply indexOf: Character lf.
         counts := (brk = 0 ifTrue: [reply] ifFalse: [reply copyFrom: 1 to: brk - 1]) subStrings: ' '.
         runs := runs + (counts at: 1) asNumber.
         passed := passed + (counts at: 2) asNumber.
         failed := failed + (counts at: 3) asNumber.
         errors := errors + (counts at: 4) asNumber.
+        "The peak, not the last reading: memory is reclaimed between classes, so the last one
+         understates how close the run came to the ceiling it has to be judged against."
+        (counts at: 5) asNumber >= peakPct ifTrue: [
+          peakPct := (counts at: 5) asNumber.
+          peakUsed := (counts at: 6) asNumber.
+          peakMax := (counts at: 7) asNumber].
         brk = 0 ifFalse: [
           defects nextPut: Character lf;
             nextPutAll: (reply copyFrom: brk + 1 to: reply size)].
-        i := i + 1]].
+        "Checked AFTER this class's results are banked, and only when another class would follow, so
+         stopping never discards work and never reports a stop that changed nothing."
+        (ceiling > 0 and: [(counts at: 5) asNumber >= ceiling and: [i < listed size]])
+          ifTrue: [stoppedAfter := i]
+          ifFalse: [i := i + 1]]].
     died ifNotNil: [
       ^McpError signalKind: #testGemDied message: (self capResult:
         'run_python_tests did not finish: ' , (self testGemDeathCauseFor: died)
@@ -2298,11 +2394,39 @@ tool_run_python_tests: args
               ifFalse: ['Completed first: ' , (self commaListOf: (listed copyFrom: 1 to: i - 1))
                 , ' -- ' , runs printString , ' run, ' , passed printString , ' passed, '
                 , failed printString , ' failed, ' , errors printString , ' errors.'])
+          , (peakMax > 0
+              ifTrue: [' Memory peaked at ' , (self memoryNoteFor: peakUsed of: peakMax
+                percent: peakPct) , ' across the classes that finished.']
+              ifFalse: [''])
           , defects contents)].
     out := WriteStream on: String new.
-    out nextPutAll: listed size printString , ' class(es), ' , runs printString , ' run, '
+    out nextPutAll: (stoppedAfter ifNil: [listed size] ifNotNil: [stoppedAfter]) printString
+      , ' class(es), ' , runs printString , ' run, '
       , passed printString , ' passed, ' , failed printString , ' failed, '
       , errors printString , ' errors'.
+    peakMax > 0 ifTrue: [
+      out nextPut: Character lf; nextPutAll: 'peak memory: ' , (self memoryNoteFor: peakUsed
+        of: peakMax percent: peakPct)].
+    stoppedAfter ifNotNil: [
+      out nextPut: Character lf; nextPut: Character lf;
+        nextPutAll: 'STOPPED SHORT after ' , (listed at: stoppedAfter) , ' (' , stoppedAfter printString
+          , ' of ' , listed size printString , '): the test gem had reached ' , peakPct printString
+          , '% of its temporary object memory, at or over the ' , ceiling printString
+          , '% ceiling (the McpGrailToolset option testGemMemoryCeilingPercent). Past that a Grail '
+          , 'run does not fail, it MISREPORTS -- the gem raises AlmostOutOfMemory against whichever '
+          , 'test it happens to be running, so anything reported after this point would be as '
+          , 'likely a memory artifact as a defect. The ' , stoppedAfter printString
+          , ' class(es) above completed before the ceiling was crossed and their results stand. '
+          , (listed size - stoppedAfter) printString , ' class(es) were not started, beginning with '
+          , (listed at: stoppedAfter + 1)
+          , '. Call again with classNames from there, in batches, rather than raising the ceiling.'].
+    (stoppedAfter isNil and: [ceiling > 0 and: [peakPct >= ceiling]]) ifTrue: [
+      out nextPut: Character lf; nextPut: Character lf;
+        nextPutAll: 'WARNING: the test gem reached ' , peakPct printString , '% of its temporary '
+          , 'object memory on the last class of this run, so it was never asked for another. The '
+          , 'counts above are complete, but a Grail run that ends this close to the ceiling can '
+          , 'report AlmostOutOfMemory against an innocent test -- so treat any defect above as '
+          , 'worth reproducing in a smaller call before believing it.'].
     names ifNotNil: [ | missing |
       missing := names reject: [:n | listed includes: n asString].
       missing isEmpty ifFalse: [

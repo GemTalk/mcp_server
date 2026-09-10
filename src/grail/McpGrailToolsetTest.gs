@@ -1086,6 +1086,70 @@ testTestGemIsForkedWithGrailsMemoryBudget
 %
 category: 'tests'
 method: McpGrailToolsetTest
+testTestGemMemoryIsBoundedAsWellAsRaised
+  "Raising the ceiling is only half the fix, and Grail's own runner says so in the same breath it
+   states the budget: `THIS AND THE EIGHT-PARTITION CHANGE BELOW ARE TWO FIXES FOR ONE DEFECT ...
+   Partitioning lowers what a session HAS to hold; the ceiling raises what it MAY hold'
+   (scripts/run_tests.sh). Grail needs EIGHT sessions at that budget for its 648 classes, so no
+   ceiling makes a classNames-less call fit in one gem -- and the failure past the ceiling is the
+   dangerous kind: the gem does not die, it raises AlmostOutOfMemory against whichever test it
+   happened to be running. So the run has to bound what it asks one gem to hold.
+
+   The threshold is checked against the two figures Grail measured rather than as a round number:
+   96% is where its CI broke and 75% is what it calls comfortable, so the default must sit between
+   them or it is either useless or a nuisance. 0 is the escape hatch for a host that would rather
+   have the gem's own verdict.
+
+   Driven through the option and the formatter rather than by staging a full gem: this file spawns
+   exactly ONE gem on purpose (testRunPythonTestsRunsFreshAndLeavesTheCallerAlone) and a stone here
+   has few session slots."
+  | ceilingFor |
+  self assert: (McpGrailToolset declaredOptionNames includes: 'testGemMemoryCeilingPercent').
+  ceilingFor := [:v | (McpGrailToolset on: nil options:
+    (Dictionary new at: 'testGemMemoryCeilingPercent' put: v; yourself))
+      testGemMemoryCeilingPercent].
+  "the default sits between the figure Grail measured breaking and the one it calls comfortable"
+  self assert: McpGrailToolset new testGemMemoryCeilingPercent < 96.
+  self assert: McpGrailToolset new testGemMemoryCeilingPercent > 75.
+  "a deployment gets exactly what it set, and 0 disables stopping altogether"
+  self assert: (ceilingFor value: 90) equals: 90.
+  self assert: (ceilingFor value: 0) equals: 0.
+  "a percentage that is not one is refused rather than silently treated as 'never stop', which is
+   the reading that would put the misreporting back"
+  self should: [ceilingFor value: 101] raise: McpError.
+  self should: [ceilingFor value: -1] raise: McpError.
+  self should: [ceilingFor value: 'lots'] raise: McpError
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testTestGemMemoryNoteCarriesTheBudgetAndNotJustThePercentage
+  "The reading a run reports is the number Grail says it needed and lacked -- `that took a while to
+   recognise precisely because nothing reported the number' (scripts/run_tests.sh). It carries the
+   budget as well as the percentage, because a percentage alone cannot say whether the gem got the
+   budget it was asked for, which is the first thing to check when a run stops short unexpectedly:
+   the same 85% means something different at 659MB than at 29MB."
+  | note |
+  note := McpGrailToolset new memoryNoteFor: 452984832 of: 691142656 percent: 65.
+  self assert: (self includesCS: '432MB' in: note).
+  self assert: (self includesCS: '659MB' in: note).
+  self assert: (self includesCS: '65%' in: note)
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testTestGemPerClassReplyCarriesItsMemoryReading
+  "The per-class expression reports the gem's memory alongside its counts, which is what lets the
+   caller judge headroom at the only boundary where it is still in control. The three selectors are
+   the ones Grail's own runTestsShard.gs emits as GRAIL_SHARD_MEM, and the percentage is taken from
+   the kernel rather than divided out in the caller because it is the figure the kernel raises
+   AlmostOutOfMemory against."
+  | perClass |
+  perClass := McpGrailToolset new testRunnerExpressionForClassNamed: 'FooTest'.
+  self assert: (self includesCS: '_tempObjSpacePercentUsed' in: perClass).
+  self assert: (self includesCS: '_tempObjSpaceUsed' in: perClass).
+  self assert: (self includesCS: '_tempObjSpaceMax' in: perClass)
+%
+category: 'tests'
+method: McpGrailToolsetTest
 testTestRunnerExpressionQuotesNamesRatherThanCompilingThem
   "Class names come from the client and are interpolated into expressions run in another gem, so
    they must travel as STRING LITERALS resolved there by objectNamed: -- never as code. printString

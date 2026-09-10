@@ -58,10 +58,35 @@ breaking changes are expected and are called out rather than shimmed.
 
   `testRunnerExpressionFor:directory:` is replaced by `testRunnerClassListExpressionFor:directory:`
   (which sets `$GRAIL_DIR` once and answers the classes to run) and
-  `testRunnerExpressionForClassNamed:` (one class, four counts and its defect report). Client-sent
-  names still travel as string literals resolved in the child by `objectNamed:`, never as code, and
-  an unresolved name is still reported as `NOT FOUND` — computed in the caller now, against the name
-  it asked for. 2 new tests in `McpGrailToolsetTest` (41 in the suite, 563 across 22).
+  `testRunnerExpressionForClassNamed:` (one class, its four counts, the gem's memory reading and its
+  defect report). Client-sent names still travel as string literals resolved in the child by
+  `objectNamed:`, never as code, and an unresolved name is still reported as `NOT FOUND` — computed
+  in the caller now, against the name it asked for.
+
+  **The run is also bounded, not just given more room — and that is the half that was missing.**
+  Grail's own runner states both in one breath: *"THIS AND THE EIGHT-PARTITION CHANGE BELOW ARE TWO
+  FIXES FOR ONE DEFECT … Partitioning lowers what a session HAS to hold; the ceiling raises what it
+  MAY hold."* Grail splits its corpus — 648 concrete classes, 6582 tests — across **eight** sessions
+  at this same budget, so no ceiling makes a `classNames`-less call fit in one gem. And past the
+  ceiling a run does not die: the gem raises `AlmostOutOfMemory` (notification 6013) against
+  whichever test it happened to be running, a different innocent one every time, so the answer
+  becomes *plausible red tests* instead of an error. That is strictly worse than the crash this
+  entry started with, and Grail's note on why it took so long to find is the reason it is fixed
+  here: *"that took a while to recognise precisely because nothing reported the number."*
+
+  So every answer now carries the gem's **peak memory** (`peak memory: 432MB of 659MB (65%)`), read
+  at each class boundary — the same three values `runTestsShard.gs` emits as `GRAIL_SHARD_MEM`, with
+  the percentage taken from the kernel because that is what 6013 is raised against. And a run
+  **stops starting classes** once the gem crosses the new option
+  **`testGemMemoryCeilingPercent`** — default **85**, chosen from Grail's two measurements rather
+  than as a round number: above the 75% it calls comfortable, below the 96% it measured failing.
+  Stopping costs nothing but a follow-up call: every class that completed is reported, and the
+  answer names how many were not started and which to resume from. `0` disables it. A run whose
+  *last* class ends over the ceiling cannot be stopped short, so it carries a warning instead.
+  Verified on 3.7.5: a gem starved to 120000KB stopped after `ArgparseTestCase` at 34% against a
+  25% ceiling, reported its 21 passing tests and named `ShutilTestCase` as the resume point; memory
+  measured climbing 3MB → 19 → 28 → 32 → 43MB across four stdlib classes. 5 new tests in
+  `McpGrailToolsetTest` (44 in the suite, 566 across 22).
 
 * **`get_python_source` no longer over-reads a method into the next one.** The end of a definition
   is found by indentation, and the rule asked for the next line with content in **column zero** —
