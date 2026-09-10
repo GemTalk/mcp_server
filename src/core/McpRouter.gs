@@ -1135,8 +1135,9 @@ method: McpRouter
 internalErrorFor: anIdOrNil
   "A JSON-RPC -32603 body bearing anIdOrNil, as a JSON String, for a failure the front end could not
    turn into anything more specific.
-   It exists for exactly one caller: a streamed call whose forward raised something other than an
-   ended call (#serveStreamedCall:id:forSession:on:). handleConnection: answers an escaped error with
+   It exists for exactly one caller: a streamed call whose forward raised something that is
+   neither an ended call nor a gone worker gem (#isSessionGoneError:) --
+   #serveStreamedCall:id:forSession:on:. handleConnection: answers an escaped error with
    a complete HTTP 500 response, which on a connection already carrying SSE frames would be appended
    to the stream and read as junk -- so that path has to end itself, with a frame, and a frame needs
    a body. Everywhere else the 500 is the right answer and this is not used."
@@ -1154,6 +1155,29 @@ isRunning
    (not the instance variable) by the SSE drain loop, so a test can hold a stream open against a
    router that never bound a socket -- see McpFixtureRouter."
   ^isRunning == true
+%
+category: 'sessions'
+method: McpRouter
+isSessionGoneError: anError
+  "Whether anError means this session's WORKER GEM is gone -- it died, or the connection to it was
+   closed by whatever killed it -- as opposed to a call that merely failed inside a worker that is
+   still there and still usable.
+   The NUMBER is the test, not the message text. A GciError carries the number the C layer reported
+   as #originalNumber, and 4000-4999 is that layer's FATAL band. The band is not this method's own
+   judgement about which failures are serious: GciError>>_error:in: declines to map one of those
+   onto a Smalltalk error number at all, and GsTsExternalSession>>_signalError: CLOSES the external
+   session's connection when it sees one -- so by the time this is asked, the kernel has already
+   decided that worker is finished and cleared the handle to it. Which is also why the second such
+   request fails with 4100, invalid session, however the first one failed: 4067, out of temporary
+   object memory, in the run this was written for.
+   Matching the band rather than either number is what keeps this from being a list to maintain.
+   Every way a gem can die -- out of memory, killed from the stone side, its netldi gone, the process
+   segfaulting -- arrives here as some number in it, and none of them leaves a worker that can serve
+   another request."
+  | number |
+  (anError isKindOf: GciError) ifFalse: [^false].
+  number := anError originalNumber.
+  ^number notNil and: [number >= 4000 and: [number <= 4999]]
 %
 category: 'session limit'
 method: McpRouter
@@ -2167,6 +2191,32 @@ releaseSessionIfAbandoned: sess
     , ' -- a request was ended and its worker gem could not be interrupted, so the gem was stopped.'.
   ^self
 %
+category: 'session lifetime'
+method: McpRouter
+releaseSessionWithGoneWorker: sess because: anError
+  "End a session whose worker gem is gone (#isSessionGoneError:), as the request that discovered it
+   is answered.
+   This is the half of the answer that asks nothing of the client. A session whose gem is unreachable
+   can serve nothing further, so leaving it registered turns one dead gem into a permanently wedged
+   session: every later request resolves the id, fails the same way, and is answered an error that
+   says nothing about the session being over -- while the slot it holds counts against #maxSessions
+   for as long as the front end runs. Unmapping it here converts that into the one condition the
+   transport already has a signal for, and clients already recover from: the NEXT request gets the
+   404 that tells it to initialize again, exactly as a reaped session's would.
+   The reaper cannot do this instead, and not for want of a rule. Its liveness probe asks whether the
+   CLIENT is still there, down a stream the client itself keeps answering, so a session whose gem died
+   while its client is alive and retrying answers every ping and trips no ground in #reapReasonFor:.
+   Closing marks the outbox closing, so an open stream is drained and ended rather than dropped --
+   the same courtesy a reap pays. The logout inside it is a GCI call on a connection the kernel has
+   already closed, so it fails; McpSession>>close swallows that, and there is nothing left to log out
+   anyway."
+  mutex critical: [sessions removeKey: sess id ifAbsent: [nil]].
+  [sess close] on: Error do: [:ex | ex return: nil].
+  self log: 'Ended MCP session ' , sess id printString
+    , ' -- its worker gem is gone, so the session can serve nothing further: '
+    , ([anError description] on: Error do: [:x | anError class name asString]).
+  ^self
+%
 category: 'routing'
 method: McpRouter
 requestAuthorized: req on: conn
@@ -2409,7 +2459,7 @@ serveCall: body id: anIdOrNil forSession: sess on: conn
    answer is empty because a notification gets no response.
    The session gates already ran in #serveRouted:id:progressToken:sessionId:on:."
   | resp |
-  resp := [sess forward: body lifetimeBounds: (self lifetimeBoundsFor: sess) requestId: anIdOrNil]
+  resp := [[sess forward: body lifetimeBounds: (self lifetimeBoundsFor: sess) requestId: anIdOrNil]
     on: McpError
     do: [:ex |
       "A cancellation is the one ending the client is owed SILENCE about -- it asked for it, and the
@@ -2418,7 +2468,14 @@ serveCall: body id: anIdOrNil forSession: sess on: conn
       ex kind = #cancelled ifTrue: [^self acknowledgeCancelledCall: sess on: conn].
       (McpSession isEndedCallKind: ex kind)
         ifTrue: [^self writeEndedCallError: ex forSession: sess id: anIdOrNil on: conn]
-        ifFalse: [ex pass]].
+        ifFalse: [ex pass]]]
+    on: Error
+    do: [:ex |
+      "The worker gem itself being gone is the one failure that is about the SESSION rather than the
+       call, so it is the one this method answers instead of letting escape to the 500 in
+       #handleConnection:. Everything else keeps the answer it had."
+      (self isSessionGoneError: ex) ifFalse: [ex pass].
+      ^self writeSessionGoneError: ex forSession: sess id: anIdOrNil on: conn].
   resp isEmpty
     ifTrue: [conn writeStatus: 202 reason: 'Accepted' body: '']
     ifFalse: [conn writeJson: resp]
@@ -2691,6 +2748,11 @@ serveStreamedCall: body id: anIdOrNil progressToken: aToken forSession: sess on:
         ifFalse: [ex pass]]]
     on: Error
     do: [:ex |
+      "A gone worker gem is answered specifically and logged by the release, because -32603 with no
+       kind is precisely what a client cannot recover from: it reads as this call failing, not as
+       this session being over. See #writeSessionGoneFrame:forSession:id:on:."
+      (self isSessionGoneError: ex) ifTrue: [
+        ^self writeSessionGoneFrame: ex forSession: sess id: anIdOrNil on: conn].
       self log: 'Streamed call failed for MCP session ' , sess id printString , ': '
         , ([ex description] on: Error do: [:x | ex class name asString]).
       ^conn writeSseData: (self internalErrorFor: anIdOrNil)]]
@@ -2726,6 +2788,41 @@ sessionCount
    its first initialize. Every other caller wants the number for a log line or a test, where a count
    that may have moved since is no worse than one that moved immediately after."
   ^sessions size + sessionsOpening
+%
+category: 'routing'
+method: McpRouter
+sessionGoneErrorFor: anError id: anIdOrNil
+  "The JSON-RPC error body for a request whose worker gem turned out to be gone, as a JSON String.
+   -32001 with a `data.kind` of sessionGone -- the convention sessionLimit, timeout and the
+   dispatcher's own kinds already follow (McpDispatcher>>kindForError:) -- so a client that branches
+   on the kind can re-initialize on THIS request rather than waiting to be told by the 404 its next
+   one gets. It bears the request's own id, for the reason #endedCallErrorFor:id: gives: an answer
+   the client cannot match to the request it is waiting on is no better than silence.
+   The message is written for the realistic client, which branches on nothing and shows the prose to
+   a person or a model, so it says the two things that can be acted on: this session is over, and a
+   fresh initialize works. What it deliberately does NOT carry is the GciError's own text. Measured
+   on 3.7.5, the kernel appends the whole of the gem's NRS to any error in the fatal band -- host
+   name, stone name, GemStone user, extent directory and log path -- and that is not a thing to hand
+   an MCP client, least of all on the network-facing front end. The GCI error number goes instead:
+   it is small, stable, and ties this answer to the line #releaseSessionWithGoneWorker:because: wrote
+   in the gem log, which carries the failure in full. That split is the one a reap already makes --
+   the client is told to re-initialize, the operator is told why.
+   #originalNumber is read without a guard because the only caller reached this through
+   #isSessionGoneError:, which has already vouched that this is a GciError carrying one."
+  | err message |
+  message := 'This session''s worker gem is gone (GCI error '
+    , anError originalNumber printString
+    , '), so the session has ended and no further request on it can be served. Call initialize to '
+    , 'open a new session -- this server is running normally, and its gem log says what happened to '
+    , 'the gem.'.
+  err := Dictionary new.
+  err at: 'jsonrpc' put: '2.0'; at: 'id' put: anIdOrNil.
+  err at: 'error' put: (Dictionary new
+    at: 'code' put: -32001;
+    at: 'message' put: message;
+    at: 'data' put: (Dictionary new at: 'kind' put: 'sessionGone'; yourself);
+    yourself).
+  ^McpJson write: err
 %
 category: 'session lifetime'
 method: McpRouter
@@ -3373,6 +3470,31 @@ writeSessionError: aMessage code: httpCode reason: reasonString on: conn
   err at: 'jsonrpc' put: '2.0'; at: 'id' put: nil.
   err at: 'error' put: (Dictionary new at: 'code' put: -32600; at: 'message' put: aMessage; yourself).
   conn writeStatus: httpCode reason: reasonString body: (McpJson write: err)
+%
+category: 'routing'
+method: McpRouter
+writeSessionGoneError: anError forSession: sess id: anIdOrNil on: conn
+  "Answer a request that found its worker gem gone, on a call being answered as ordinary JSON, and
+   end the session as part of answering it (#releaseSessionWithGoneWorker:because:).
+   HTTP 200 with a JSON-RPC error rather than an HTTP error status, for the reason
+   #writeEndedCallError:forSession:id:on: gives: the request was accepted, routed and served, and
+   what failed is inside it. The 404 belongs to the NEXT request, where the session genuinely no
+   longer exists -- and that ordering is the point, because a 404 on THIS one would answer a request
+   whose id the client is still waiting on with a transport refusal it may not read as JSON-RPC."
+  self releaseSessionWithGoneWorker: sess because: anError.
+  conn writeJson: (self sessionGoneErrorFor: anError id: anIdOrNil)
+%
+category: 'routing'
+method: McpRouter
+writeSessionGoneFrame: anError forSession: sess id: anIdOrNil on: conn
+  "The same answer as #writeSessionGoneError:forSession:id:on:, framed for a call already being
+   answered as a stream: the SSE headers went out before the worker was called, so there is no second
+   HTTP response to be had and the news has to travel as a frame on the stream that is open. See
+   #writeEndedCallFrame:forSession:id:on: for why a TERMINATING message matters more here than the
+   framing does -- a stream that simply stops leaves the client on a socket that will never speak
+   again, which is the failure this whole change is about."
+  self releaseSessionWithGoneWorker: sess because: anError.
+  ^conn writeSseData: (self sessionGoneErrorFor: anError id: anIdOrNil)
 %
 category: 'session limit'
 method: McpRouter

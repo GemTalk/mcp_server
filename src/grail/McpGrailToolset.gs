@@ -523,6 +523,28 @@ lastPathSegmentOf: aPath
 %
 category: 'private'
 method: McpGrailToolset
+line: aLine endsBlockIndentedAt: anIndentIndex
+  "Whether aLine ends the definition that preceded it -- i.e. it has content, and that content
+   begins at or to the left of anIndentIndex, the first-content index of the definition's own first
+   line. Python's own block rule: a definition continues through every blank line and every line
+   indented FURTHER than its header, and stops at the next statement at its own level or outside it.
+
+   Comparing against the definition's own indentation, rather than against the first column, is
+   what makes this right for a METHOD as well as a module-level def. The first column alone -- what
+   this used to ask for -- ends a module def correctly and runs a method on through every later
+   method of its class, because an indented `def` does not start in the first column: asked for
+   `textwrap.TextWrapper.wrap`, get_python_source answered `wrap` AND `fill`.
+
+   Blankness and indentation are read with #firstContentIndexIn:, which uses at:/size alone rather
+   than a trimming selector, because this toolset should file into as many GemStone versions as the
+   rest of the server does and #withoutTrailingSeparators is not present in all of them (measured
+   missing on 3.7.5)."
+  | i |
+  i := self firstContentIndexIn: aLine.
+  ^i ~= 0 and: [i <= anIndentIndex]
+%
+category: 'private'
+method: McpGrailToolset
 line: aLine hasWholeName: aName
   "Whether aName occurs in aLine as a whole identifier rather than inside a longer one -- so
    `self._dict()` matches a search for `_dict` and `self.__dict__` does not.
@@ -1513,15 +1535,16 @@ sourceLinesFrom: aPath startingAt: aLineNumber label: aName
    {path . firstFileLine . lines}. aLineNumber 0 means the whole file (a module), which begins at
    file line 1.
 
-   The definition ends at the first line after it that is neither blank nor indented -- Python's own
-   block rule, which needs no parser and no knowledge of decorators, nesting or continuation lines.
-   Blank lines are kept rather than ending the block, and trailing ones are dropped (by
-   #headed:line:body:) so a definition does not come back padded to the next one.
+   The definition ends at the first line after it whose content begins at or to the left of the
+   definition's OWN indentation -- Python's own block rule, which needs no parser and no knowledge
+   of decorators, nesting or continuation lines. Blank lines are kept rather than ending the block,
+   and trailing ones are dropped (by #headed:line:body:) so a definition does not come back padded
+   to the next one.
 
    THE LINES, NOT THE TEXT, and the file line they start at: #pagedSource:args: needs both to head a
    page with the line the PAGE starts at rather than the line the definition does. This answered the
    rendered String before it could page."
-  | f all keep done |
+  | f all keep base done |
   f := GsFile openReadOnServer: aPath.
   f isNil ifTrue: [
     ^McpError signalKind: #notFound message:
@@ -1531,12 +1554,18 @@ sourceLinesFrom: aPath startingAt: aLineNumber label: aName
   all := OrderedCollection new.
   [ | line | [(line := f nextLine) isNil] whileFalse: [all add: line] ] ensure: [f close].
   aLineNumber = 0 ifTrue: [^Array with: aPath with: 1 with: all].
+  aLineNumber > all size ifTrue: [
+    ^Array with: aPath with: aLineNumber with: OrderedCollection new].
+  "The definition's own indentation sets where the block ends. A blank first line means the line
+   number the image recorded no longer matches the file, so fall back to column one -- the whole
+   file after it is a worse answer than the old rule's."
+  base := (self firstContentIndexIn: (all at: aLineNumber)) max: 1.
   keep := OrderedCollection new.
   done := false.
   aLineNumber to: all size do: [:i | | l |
     done ifFalse: [
       l := all at: i.
-      (i > aLineNumber and: [self startsABlockAfter: l])
+      (i > aLineNumber and: [self line: l endsBlockIndentedAt: base])
         ifTrue: [done := true]
         ifFalse: [keep add: l]]].
   ^Array with: aPath with: aLineNumber with: keep
@@ -1557,17 +1586,6 @@ sourceLocationFor: aMethodName from: aCodeTableOrNil
   line := [code dynamicInstVarAt: #co_firstlineno] on: Error do: [:ex | nil].
   file isNil ifTrue: [^nil].
   ^file asString , (line isNil ifTrue: [''] ifFalse: [':' , line printString])
-%
-category: 'private'
-method: McpGrailToolset
-startsABlockAfter: aLine
-  "Whether aLine ends the definition that preceded it -- i.e. it has content and begins at column
-   zero. Python's own block rule: a definition continues through every indented and blank line and
-   stops at the next unindented statement.
-   Written with at:/size alone rather than a trimming selector, because this toolset should file into
-   as many GemStone versions as the rest of the server does and #withoutTrailingSeparators is not
-   present in all of them (measured missing on 3.7.5)."
-  ^(self firstContentIndexIn: aLine) = 1
 %
 category: 'private'
 method: McpGrailToolset
@@ -1879,11 +1897,12 @@ tool_get_python_source: args
    Grail checkout, and the worker gem can read it. So this asks Python where the thing came from and
    then reads the file, recovering exactly what the image has lost.
 
-   The end of a definition is found by INDENTATION -- the first later line that is neither blank nor
-   indented -- which is how Python delimits a block and needs no parser. A module answers its whole
-   file. Both are capped by capResult:, and both page -- limit/offset count LINES here, and the
-   `# <path>:<line>` header names where the page starts, not where the definition does. See
-   #pagedSource:args:."
+   The end of a definition is found by INDENTATION -- the first later line that is not blank and is
+   indented no further than the definition's own first line -- which is how Python delimits a block
+   and needs no parser, for a method inside a class as much as for a module-level def. A module
+   answers its whole file. Both are capped by capResult:, and both page -- limit/offset count LINES
+   here, and the `# <path>:<line>` header names where the page starts, not where the definition
+   does. See #pagedSource:args:."
   | name obj code path firstLine |
   self ensureGrailConfigured.
   ^self withPythonErrorsAsMcpError: [

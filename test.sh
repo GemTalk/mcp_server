@@ -4,8 +4,10 @@
 # Starts the server in its own gem (one session) via run-server.sh, then acts as an
 # MCP client (a separate process) driving the Streamable HTTP transport end-to-end:
 # initialize, the initialized notification, tools/list, every core tool, the error
-# paths, the SSE GET stream, DELETE, and (on a second, differently-configured front end)
-# that a session-lifetime policy survives the fork into its own gem. Compiles + runs a throwaway method to exercise
+# paths, the SSE GET stream, DELETE, and -- each on its own differently-configured front end --
+# that a session-lifetime policy survives the fork into its own gem, that the concurrency cap
+# refuses a client rather than the stone, and that a session whose worker gem DIES is ended rather
+# than left wedged. Compiles + runs a throwaway method to exercise
 # compile_method/commit, then cleans it up. Shuts the server down on exit.
 #
 # Configure (or export before running):
@@ -41,6 +43,8 @@ LIFE_WRAPPER_PID=""
 LIFE_LOG=""
 CAP_WRAPPER_PID=""
 CAP_LOG=""
+DEAD_WRAPPER_PID=""
+DEAD_LOG=""
 SID=""
 
 cleanup() {
@@ -63,7 +67,10 @@ cleanup() {
   # and the third, the one-session router the concurrency-cap section starts (see [3/4])
   MCP_PORT="$((PORT + 3))" ./stop-server.sh >/dev/null 2>&1
   [ -n "$CAP_WRAPPER_PID" ] && kill "$CAP_WRAPPER_PID" 2>/dev/null
-  rm -f "$SERVER_LOG" "${LIFE_LOG:-}" "${CAP_LOG:-}"
+  # and the fourth, the router the dead-worker section starts (see [3/4])
+  MCP_PORT="$((PORT + 4))" ./stop-server.sh >/dev/null 2>&1
+  [ -n "$DEAD_WRAPPER_PID" ] && kill "$DEAD_WRAPPER_PID" 2>/dev/null
+  rm -f "$SERVER_LOG" "${LIFE_LOG:-}" "${CAP_LOG:-}" "${DEAD_LOG:-}"
 }
 trap cleanup EXIT
 
@@ -784,6 +791,53 @@ else
 fi
 MCP_PORT="$CAP_PORT" ./stop-server.sh >/dev/null 2>&1 || true
 rm -f "$CAP_LOG"
+
+# --- a worker gem that DIES: the session must END rather than wedge ---
+# On real wires because the answer turns on a number the front end reads out of a GciError
+# (McpRouter>>isSessionGoneError:), and only a gem that really died produces the first one: the unit
+# suite drives a mock worker, which can raise the 4100 `invalid session' every request after the
+# fatal one meets, but not the number the fatal one itself carries (4067 here -- out of temporary
+# object memory). The recipe is the reported one, and it kills the gem in about three seconds.
+# What this replaces: every later call on such a session answered -32603 Internal error with no
+# kind, inside a healthy HTTP 200 -- which correctly means "something went wrong at our end" and is
+# therefore worth retrying, so a client retried forever, learned nothing, and its maxSessions slot
+# was never released. Forked with MCP_MAX_SESSIONS=1 so the slot coming back is checked by the only
+# thing that can check it: a fresh initialize on a router with no second slot to give.
+DEAD_PORT=$((PORT + 4))
+DEAD_URL="http://127.0.0.1:$DEAD_PORT/mcp"
+DEAD_LOG="$(mktemp -t gsmcp-dead.XXXXXX)"
+DEAD_INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}'
+DEAD_FILL='| c | c := OrderedCollection new. [true] whileTrue: [c add: (String new: 100000)]'
+DEAD_CALL='{"jsonrpc":"2.0","id":31,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"'"$DEAD_FILL"'"}}}'
+DEAD_NEXT='{"jsonrpc":"2.0","id":32,"method":"tools/list"}'
+MCP_PORT="$DEAD_PORT" MCP_MAX_SESSIONS=1 ./run-server.sh > "$DEAD_LOG" 2>&1 &
+DEAD_WRAPPER_PID=$!
+for i in $(seq 1 60); do nc -z 127.0.0.1 "$DEAD_PORT" 2>/dev/null && break; sleep 0.5; done
+if nc -z 127.0.0.1 "$DEAD_PORT" 2>/dev/null; then
+  check "a router for the dead-worker check starts" 'listening'       "$(cat "$DEAD_LOG")"
+  r=$(curl -s -i -m 20 "$DEAD_URL" --data-binary "$DEAD_INIT")
+  check "...and serves the session that is about to lose its gem" 'MCP-Session-Id' "$r"
+  DEAD_SID=$(printf '%s' "$r" | grep -i '^mcp-session-id:' | tr -d '\r' | awk '{print $2}')
+  r=$(curl -s -m 120 "$DEAD_URL" -H "MCP-Session-Id: $DEAD_SID" --data-binary "$DEAD_CALL")
+  check "the call that kills the gem is answered"   '"id":31'         "$r"
+  check "...as a server error the client can act on" '-32001'         "$r"
+  check "...classified for a client to branch on"   '"kind":"sessionGone"'  "$r"
+  deny  "...and not as a generic internal error"    '-32603'          "$r"
+  # The GciError's own text carries the gem's whole NRS -- host, stone, GemStone user, extent and
+  # log paths. That belongs in the gem log, which gets it in full; the client gets the number.
+  deny  "...leaking no gem NRS to the client"       'gemNrs'          "$r"
+  code=$(curl -s -m 10 -o /dev/null -w '%{http_code}' "$DEAD_URL" \
+    -H "MCP-Session-Id: $DEAD_SID" --data-binary "$DEAD_NEXT")
+  check "the next request on that id => 404"        '404'             "$code"
+  r=$(curl -s -i -m 20 "$DEAD_URL" --data-binary "$DEAD_INIT")
+  check "and the dead session gave its slot back"   'MCP-Session-Id'  "$r"
+  DEAD_SID=$(printf '%s' "$r" | grep -i '^mcp-session-id:' | tr -d '\r' | awk '{print $2}')
+  curl -s -m 10 -X DELETE "$DEAD_URL" -H "MCP-Session-Id: $DEAD_SID" >/dev/null 2>&1
+else
+  check "a router for the dead-worker check starts" 'listening'  "did not start. log: $(cat "$DEAD_LOG")"
+fi
+MCP_PORT="$DEAD_PORT" ./stop-server.sh >/dev/null 2>&1 || true
+rm -f "$DEAD_LOG"
 
 # ---------------------------------------------------------------------------
 echo

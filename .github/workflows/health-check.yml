@@ -1,0 +1,159 @@
+name: Health Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-workflows:
+    name: Lint GitHub Actions workflows
+    timeout-minutes: 1
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            .github/workflows
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Run actionlint
+        run: docker run --rm -v "$(pwd)":/repo --workdir /repo rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -color # 1.7.12
+      - name: Run zizmor
+        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+        with:
+          advanced-security: false
+
+  test:
+    name: ubuntu-latest / GemStone ${{ matrix.gemstone-version }}${{ matrix.grail && ' + Grail' || '' }}
+    runs-on: ubuntu-latest
+    # The Grail leg clones GemTalk/Grail and builds its CPython shim on top of the ordinary
+    # install; the plain leg stays fast, so give the matrix a shared ceiling generous enough for
+    # the slower one rather than branching the timeout too. Measured: plain ~1m40s, Grail ~2m20s.
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        # Crossed with `grail` below, so each version gets both a plain job and a Grail job.
+        # `grail: true` clones GemTalk/Grail (see below) and installs mcp_server with --grail, the
+        # only way to exercise src/grail; `grail: false` is the base install every other
+        # contributor runs. This doubles with every version added -- add an `exclude:` entry for a
+        # version with no Grail support (see docs/Development.md's version matrix) rather than
+        # letting that leg fail.
+        gemstone-version: ['3.7.5']
+        grail: [false, true]
+    env:
+      GEMSTONE_VERSION: ${{ matrix.gemstone-version }}
+    steps:
+      - name: Check out mcp_server
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Cloned into its own directory so it never lands in this repo's working tree. Tracks
+      # Grail's default branch rather than a pinned commit -- see the job comment above; if an
+      # upstream Grail change ever breaks this leg, pin `ref:` here to the last known-good commit
+      # while it gets sorted out upstream.
+      - name: Check out Grail
+        if: matrix.grail
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: GemTalk/Grail
+          path: grail
+          persist-credentials: false
+
+      - name: Cache GemStone download
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: downloads
+          key: gemstone-${{ matrix.gemstone-version }}-x86_64-linux
+
+      - name: Download and install GemStone
+        run: |
+          FILENAME="GemStone64Bit${GEMSTONE_VERSION}-x86_64.Linux.zip"
+          mkdir -p downloads
+          if [ ! -f "downloads/$FILENAME" ]; then
+            curl -fL --progress-bar -o "downloads/$FILENAME" \
+              "https://downloads.gemtalksystems.com/pub/GemStone64/${GEMSTONE_VERSION}/${FILENAME}"
+          fi
+          mkdir -p "$HOME/gemstone"
+          unzip -q "downloads/$FILENAME" -d "$HOME/gemstone"
+          echo "GEMSTONE=$HOME/gemstone/GemStone64Bit${GEMSTONE_VERSION}-x86_64.Linux" >> "$GITHUB_ENV"
+
+      - name: Configure environment
+        run: |
+          echo "GEMSTONE_GLOBAL_DIR=$GEMSTONE/global" >> "$GITHUB_ENV"
+          echo "$GEMSTONE/bin" >> "$GITHUB_PATH"
+
+      # GemStone ships a pristine extent0.dbf under bin/ as a template; copydbf
+      # instantiates the actual database from it. The stone also expects its
+      # lock/log directories to already exist at first start.
+      - name: Create a fresh extent
+        run: |
+          mkdir -p "$GEMSTONE_GLOBAL_DIR/locks" "$GEMSTONE_GLOBAL_DIR/log" "$GEMSTONE/data"
+          copydbf "$GEMSTONE/bin/extent0.dbf" "$GEMSTONE/data/"
+          chmod 600 "$GEMSTONE/data/extent0.dbf"
+
+      - name: Start Stone and NetLDI
+        run: |
+          startstone gs64stone
+          startnetldi -g -a "$USER" gs64ldi
+
+      # Grail needs a C toolchain to build its CPython shim (src/c/shim), on top of the stone
+      # this job already started. install_base.sh (once per extent, as SystemUser) then
+      # install.sh (per user, as the DataCurator ./install.sh itself logs in as) are Grail's own
+      # two-step install -- see https://github.com/GemTalk/Grail#installation. The login line
+      # matches install.sh's own GS_STONE/GS_USER/GS_PASS defaults, since this job never
+      # overrides them.
+      - name: Install Grail
+        if: matrix.grail
+        run: |
+          # `|| true`: the runner image's own third-party apt sources (e.g. dl.google.com's
+          # Chrome repo) can fail an index refresh with an unrelated Hash Sum mismatch, which
+          # apt-get update reports as a nonzero exit even though the Ubuntu archives we actually
+          # need (build-essential lives in main) refreshed fine. Failing here would blame Grail
+          # for a flaky, unrelated repo on the runner image.
+          sudo apt-get update || true
+          sudo apt-get install -y --no-install-recommends build-essential
+          echo "set user DataCurator pass swordfish gems gs64stone" > ~/.topazini
+          cd grail
+          ./install_base.sh
+          ./install.sh
+
+      - name: Install mcp_server
+        run: ./install.sh${{ matrix.grail && ' --grail' || '' }}
+
+      - name: Run unit tests
+        # McpGrailToolsetTest resolves by class name once installed, so this only matters on the
+        # Grail leg -- but it is harmless to leave unset on the other one, see run-unit-tests.sh.
+        env:
+          MCP_GRAIL_DIR: ${{ matrix.grail && format('{0}/grail', github.workspace) || '' }}
+        run: ./run-unit-tests.sh
+
+      - name: Run wire-level integration test
+        run: ./test.sh
+
+      - name: Run wire-level integration test over TLS
+        run: ./test-tls.sh
+
+      - name: Stop Stone and NetLDI
+        if: always()
+        run: |
+          stopnetldi gs64ldi || true
+          echo swordfish | stopstone gs64stone DataCurator -i || true
+
+  all-checks-passed:
+    name: "All Checks Passed"
+    needs: [lint-workflows, test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Success
+        run: echo "All required checks have completed successfully!"

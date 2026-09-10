@@ -102,11 +102,11 @@ stages a **real** second session reaches the code that runs when a commit genuin
 * **Prefer a clean break to a compatibility shim.** The project is pre-release; say plainly what
   breaks, in the commit message and the README, rather than absorbing it in code. A specific
   instruction to preserve compatibility overrides this.
-* **Write for as many GemStone versions as possible.** Kernel classes present in 3.6.2 may be
-  referenced directly; the live concern is *selectors* newer than that. Prefer the most basic,
-  long-stable selector that works. GemStone has no notion of an "optional" method — absence shows up
-  only as a `doesNotUnderstand` at runtime, so there is no list to check against; the live suite on
-  the loaded extent is the test. See
+* **Write for the supported versions, 3.7.5 and 3.7.6+.** Anything present in 3.7.5 may be
+  referenced directly; the live concern is only what is newer than that. Prefer the most basic,
+  long-stable selector that works. GemStone has no notion of an "optional"
+  method — absence shows up only as a `doesNotUnderstand` at runtime, so there is no list to check
+  against; the live suite on the loaded extent is the test. See
   [docs/Development.md](../docs/Development.md#version-support) for the current matrix.
 * **`Mcp` is the home dictionary**, not `Published`. Any new code that provisions a GemStone user
   for MCP must add it to that user's symbol list:

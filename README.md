@@ -10,22 +10,21 @@ Python), OAuth 2.1 / JWT + TLS, per-router read-only mode and server-initiated m
 and verified end-to-end — by curl, by a TLS run, and by the in-image suites. What is *not* built is
 listed under [Future work](#future-work).
 
-**A note about versions.** What you get depends on the image, and `install.sh` works it out for you:
+**A note about versions.** The supported images are **3.7.5 and 3.7.6+**, whose implementation of
+`System continueTransaction` the server's view handling relies on — see
+[docs/GemStone_Notes.md](docs/GemStone_Notes.md#version-to-version-differences) for the
+measurements. Within that range what you get depends on the image, and `install.sh` works it out
+for you:
 
 | image | base server (`run-server.sh`) | OAuth/OIDC front end (`run-auth-server.sh`) |
 |---|---|---|
-| **3.7.2** | yes | **no** — the image has no kernel JWT classes, so `src/auth` is skipped |
 | **3.7.5** | yes | yes, against a local IdP |
 | **3.7.6+** | yes | yes, including an external OIDC IdP |
 
 `src/auth` needs `JsonWebToken` and `JwtSecurityData` (and, to log a worker in,
-`GsTsExternalSession>>jwtPassword:`), none of which exist before 3.7.5; on 3.7.2 those methods
-cannot compile at all, so `install.sh` detects the image and leaves the group out. Everything else —
-the server, all 31 base tools, per-client sessions, read-only mode, server-initiated messages — is
-unaffected. Note that 3.7.2 carries a separate *kernel* defect that this repository does not work
-around: responses over 1024 bytes can come back corrupted (#51438, fixed in 3.7.4.1).
-`McpExternalSessionTest` fails there on purpose to say so — see the testing section. The 3.7.6 line
-is a separate matter: earlier releases have a bug connecting to an *external* OIDC IdP.
+`GsTsExternalSession>>jwtPassword:`), none of which exist before 3.7.5, so `install.sh` detects what
+the image has rather than asking. The 3.7.6 line is a separate matter: earlier releases have a bug
+connecting to an *external* OIDC IdP.
 
 ## Other documentation
 
@@ -801,7 +800,12 @@ tools itself (those run in the per-client `McpServer` workers):
   by a mutex) and **forwards the raw JSON-RPC body** to it — `worker nbExecute: '<workerClass>
   handleJsonString: ' , body printString`, naming the class the router resolved — the worker runs
   the tool in its own session and returns the response, which the front end relays. Missing id →
-  `400`; unknown/expired → `404` (a compliant client re-initializes).
+  `400`; unknown/expired → `404` (a compliant client re-initializes). A worker gem that **dies** —
+  the GCI fatal error band, which is the kernel's own verdict, since it closes the connection with
+  one — takes its session with it: the request that found it is answered `-32001` with `data.kind`
+  `sessionGone`, the session is unmapped as part of answering so its slot goes back, and the next
+  request on that id is the ordinary `404`. Leaving it registered used to mean a generic `-32603`
+  forever and a slot held for the life of the front end.
 - **At most `maxSessions` at once — 3 by default.** A session *is* a GemStone login, and a
   repository has a finite number of them, so past the cap `initialize` is refused with a JSON-RPC
   error (`-32001`, `data.kind` `sessionLimit`) naming the limit, and **no login is attempted**. The
@@ -1371,6 +1375,13 @@ flag, so a missing suite is a skip and not an error:
   `initialize` that belongs here, the one **refused at `maxSessions`**, which is answerable without a
   login. (A successful initialize and a routed tool call spawn a real worker, so they're exercised by
   the integration test instead.)
+  Also the **dead worker**: that a call whose gem died is answered `-32001` with `data.kind`
+  `sessionGone` bearing its own id (and as a *frame* where the call was already streamed), that the
+  session is unmapped as part of answering so the next request on it `404`s, that the reason in full
+  goes to the log while the client gets the number rather than the gem's NRS, and — the reason the
+  classifier has to be narrow — that an ordinary worker-side error leaves the session registered and
+  serving. `McpMockWorker>>dieOnComplete` raises through `GciError` itself, so the number under test
+  is the kernel's; the *first* failure's number needs a gem that really died, which is `test.sh`.
   Also the **message trace**: off by default, the body text on the line, one line per message however
   many newlines the body holds, the cap and its `...(+N more)`, a `403`-refused request traced anyway,
   the `Authorization` header staying out, and both settings surviving the fork-string round-trip.
@@ -1461,12 +1472,12 @@ McpToolTest`). `./run-unit-tests.sh` runs them all and exits 0 when every test p
 socket-less suites `McpJsonTest` (12), `McpUtf8Test` (7), `McpBlindWriteTest` (41),
 `McpToolTest` (65), `McpDispatcherTest` (21), `McpSessionTest` (24), `McpOutboxTest` (9),
 `McpProgressTest` (19), `McpStreamTest` (18), `McpLifetimeTest` (56), `McpViewHygieneTest` (46),
-`McpTransportTest` (44), `McpContractTest` (35), `McpExtensionTest` (14) and `McpGemNameTest` (16),
+`McpTransportTest` (48), `McpContractTest` (35), `McpExtensionTest` (14) and `McpGemNameTest` (16),
 plus `McpConcurrentEditTest` (18), `McpExternalSessionTest` (5), `McpTransactionTest` (8) and
-`McpWorkerDeadlineTest` (4) — **462 tests**,
+`McpWorkerDeadlineTest` (4) — **466 tests**,
 which is the whole suite on a base install. Where the optional groups are installed the runner picks
-their suites up automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **518
-tests** — and **547 with the 29 in `McpGrailToolsetTest`** on a Grail image.
+their suites up automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **522
+tests** — and **561 with the 39 in `McpGrailToolsetTest`** on a Grail image.
 
 Six suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
 `McpAuthConformanceTest` commit a throwaway JWT user and spawn real worker gems; they are in the
@@ -1485,15 +1496,14 @@ nothing to do with the code: each spawns worker gems of its own, so a stone whos
 is already consumed by running servers fails them with *"the maximum number of users are already
 logged in."* Stop the servers, or raise the limit, before reading such a failure as a regression.
 
-> **On 3.7.2 two of those five tests fail, and that is the suite working.** Every GemStone before
-> 3.7.4.1 carries kernel defect #51438: `GsTsExternalSession>>resolveResult:` refetches an object
-> only when its 1024-byte fetch buffer has to *grow*, so once one large result has enlarged the
-> buffer, every later result between 1025 bytes and that size arrives as 1024 good bytes followed by
-> the tail of an earlier result — right length, plausible bytes, no error raised. mcp_server meets this
-> on its main path, since every MCP response is a String of JSON pulled out of a worker gem. Nothing
-> in `src/` can make those two tests pass; the fix is to run on 3.7.4.1 or later. The three that do
-> pass everywhere are controls that localise the failure — see the `McpExternalSessionTest` class
-> comment for the mechanism.
+> **`McpExternalSessionTest` checks the image as much as this code.** GemStone before 3.7.4.1
+> carries kernel defect #51438: `GsTsExternalSession>>resolveResult:` refetches an object only when
+> its 1024-byte fetch buffer has to *grow*, so a later result can arrive as 1024 good bytes followed
+> by the tail of an earlier one — right length, plausible bytes, no error raised. mcp_server would
+> meet that on its main path, since every MCP response is a String of JSON pulled out of a worker
+> gem, which is why the suite pins it. All five pass on a supported image; two of them fail on an
+> older one to say why it is not supported, and the other three are controls that localise the
+> failure. See the `McpExternalSessionTest` class comment for the mechanism.
 
 > Note: a test helper must never reuse a SUnit framework selector (`run:`, `setUp`, …) — doing
 > so shadows the framework method and silently breaks `suite run`. The transport helper is named
@@ -1503,7 +1513,11 @@ logged in."* Stop the servers, or raise the limit, before reading such a failure
 full Streamable HTTP transport with `curl`: it `initialize`s, captures the `MCP-Session-Id`, and
 sends it on every subsequent request (tools/list of the 31 base tools, every core tool, a
 compile_method/commit round-trip, error paths, the SSE GET stream, DELETE), then shuts the server
-down. It targets the **base** server — run it against a base install. Uses port `8011` by default
+down. Three further front ends are forked for the things only a differently-configured server shows:
+that a session-lifetime policy survives the fork, that the concurrency cap refuses a client rather
+than the stone, and — the one check that needs a gem to really die — that a worker killed by
+exhausting its temporary object memory ends its session with a `sessionGone` error, a `404` on the
+next request, and its slot back. It targets the **base** server — run it against a base install. Uses port `8011` by default
 (set `MCP_PORT`). Exit status 0 = all passed.
 
 **TLS test (real HTTPS socket)** — `./test-tls.sh` forks a TLS-enabled server and drives the same

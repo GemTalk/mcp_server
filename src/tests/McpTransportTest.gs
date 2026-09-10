@@ -177,6 +177,48 @@ testAbsentOriginServed
   self deny: (self includesCS: '403' in: out).
   self assert: (self includesCS: '-32600' in: out)
 %
+category: 'tests - dead worker'
+method: McpTransportTest
+testACallWhoseWorkerGemIsGoneEndsTheSessionAndSaysWhy
+  "A worker gem that has DIED -- out of temporary object memory, in the run this was written for --
+   is the one failure that is about the session rather than the call, and both halves of the answer
+   are asserted here because a client needs only one of them.
+   The answer to THIS request says what happened in a form a client can branch on: -32001 with
+   data.kind sessionGone, bearing the request's own id, in an HTTP 200. What it used to say was
+   -32603 Internal error with no kind at all, which correctly means `something went wrong at our
+   end` and is therefore worth retrying -- so a client retried, met the same answer, and never
+   learned that its session could not serve another request as long as the server ran.
+   The session is released as part of answering, which is the half that asks nothing of the client:
+   its slot goes back, and the NEXT request on that id is answered 404 -- the transport's own way of
+   saying the session is gone, which clients already recover from by re-initializing.
+   The GCI number reaches the client and the GciError's text does not, which is the trim
+   #sessionGoneErrorFor:id: exists for: the kernel appends the gem's whole NRS to a fatal error, and
+   what stands in for that NRS here is the mock's own #_describe -- the same place the real one goes.
+   The reason in full is the LOG's, and that is asserted too, since an operator diagnosing this has
+   nothing else to read."
+  | r sess out |
+  r := McpFixtureRouter new.
+  sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
+  sess mockWorker dieOnComplete.
+  out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":11,"method":"tools/list"}' sessionId: sess id)
+    onRouter: r) output.
+  self assert: (self includesCS: '200 OK' in: out).
+  self assert: (self includesCS: '"id":11' in: out).
+  self assert: (self includesCS: '-32001' in: out).
+  self assert: (self includesCS: '"kind":"sessionGone"' in: out).
+  self assert: (self includesCS: 'GCI error 4100' in: out).
+  self deny: (self includesCS: '-32603' in: out).
+  self deny: (self includesCS: 'McpMockWorker' in: out).
+  self assert: (r loggedLines detect: [:line |
+    (self includesCS: 'worker gem is gone' in: line)
+      and: [(self includesCS: 'McpMockWorker' in: line)
+      and: [self includesCS: sess id in: line]]] ifNone: [nil]) notNil.
+  self assert: (r sessionAt: sess id) isNil.
+  self assert: r sessionCount equals: 0.
+  out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":12,"method":"tools/list"}' sessionId: sess id)
+    onRouter: r) output.
+  self assert: (self includesCS: '404' in: out)
+%
 category: 'tests - cancellation'
 method: McpTransportTest
 testACancellationIsHandledByTheRouterAndNeverReachesTheWorker
@@ -253,6 +295,37 @@ testACancelledStreamedCallJustEndsItsStream
   self deny: (self includesCS: 'event: message' in: out).
   self deny: (self includesCS: '-32001' in: out)
 %
+category: 'tests - dead worker'
+method: McpTransportTest
+testAFatalGciErrorIsToldFromEveryOtherFailure
+  "The classifier the whole answer turns on. It reads GciError>>originalNumber against the GCI fatal
+   band (4000-4999) rather than matching the message text, so what it is asserted against here is a
+   GciError the KERNEL built -- McpMockWorker>>dieOnComplete signals through GciError itself -- and
+   this test is what would notice if that number or that band ever moved.
+   Both failures a dead gem produces are checked, because they are different numbers on the way in
+   and must be one answer on the way out: the call in flight fails with whatever killed the gem, and
+   every send after it fails with 4100, invalid session, the connection having been closed by the
+   first. Nothing else counts: an ordinary worker-side error leaves a usable gem, and this server's
+   own McpErrors are not about the gem at all."
+  | r w caught |
+  r := McpRouter new.
+  w := McpMockWorker new.
+  w dieOnComplete.
+  w nbExecute: 'McpServer handleJsonString: ''{}'''.
+  caught := [w waitForResultForSeconds: 1 otherwise: [nil]. nil]
+    on: Error do: [:ex | ex return: ex].
+  self assert: (caught isKindOf: GciError).
+  self assert: caught originalNumber equals: 4100.
+  self assert: (r isSessionGoneError: caught).
+  caught := [w nbExecute: 'anything at all'. nil] on: Error do: [:ex | ex return: ex].
+  self assert: (r isSessionGoneError: caught).
+  caught := [self error: 'a MessageNotUnderstood occurred (error 2010)']
+    on: Error do: [:ex | ex return: ex].
+  self deny: (r isSessionGoneError: caught).
+  caught := [McpError signalKind: #notFound message: 'no such class']
+    on: Error do: [:ex | ex return: ex].
+  self deny: (r isSessionGoneError: caught)
+%
 category: 'tests - progress'
 method: McpTransportTest
 testAnAcceptHeaderWithoutAProgressTokenStaysPlainJson
@@ -267,6 +340,29 @@ testAnAcceptHeaderWithoutAProgressTokenStaysPlainJson
     sessionId: sess id accepting: 'application/json, text/event-stream') onRouter: r) output.
   self assert: (self includesCS: 'Content-Type: application/json' in: out).
   self deny: (self includesCS: 'text/event-stream' in: out)
+%
+category: 'tests - dead worker'
+method: McpTransportTest
+testAnOrdinaryWorkerFailureLeavesTheSessionRegistered
+  "The other side of #testACallWhoseWorkerGemIsGoneEndsTheSessionAndSaysWhy, and the reason the
+   classifier has to be narrow: a call that failed INSIDE a live worker costs the client that call
+   and nothing else. Its gem, its view and its uncommitted work are all intact, so the session stays
+   registered and keeps serving -- and the answer stays the 500 it always was, since a failure the
+   front end cannot classify is exactly what -32603 is for."
+  | r sess out |
+  r := McpFixtureRouter new.
+  sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
+  sess mockWorker errorOnComplete: 'a MessageNotUnderstood occurred (error 2010)'.
+  out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":13,"method":"tools/list"}' sessionId: sess id)
+    onRouter: r) output.
+  self assert: (self includesCS: '500' in: out).
+  self assert: (self includesCS: '-32603' in: out).
+  self deny: (self includesCS: '"kind":"sessionGone"' in: out).
+  self assert: (r sessionAt: sess id) notNil.
+  "and it really does serve the next request, rather than merely still being in the map"
+  out := (self runRequest: (self postRequest: '{"jsonrpc":"2.0","id":14,"method":"tools/list"}' sessionId: sess id)
+    onRouter: r) output.
+  self assert: (self includesCS: '200 OK' in: out)
 %
 category: 'tests - progress'
 method: McpTransportTest
@@ -387,6 +483,29 @@ testAStreamedCallEndedOnTheDeadlineIsTerminatedByAFrame
   self assert: (self includesCS: '"id":9' in: out).
   "the worker took the break, so the client keeps its session"
   self assert: (r sessionAt: sess id) notNil
+%
+category: 'tests - dead worker'
+method: McpTransportTest
+testAStreamedCallWhoseWorkerGemIsGoneIsTerminatedByAFrame
+  "A gem that died under a call already being answered as a STREAM. The SSE headers went out before
+   the worker was called, so there is no second HTTP response available and the news travels as a
+   frame -- same -32001 and same data.kind as the plain-JSON path, because it is the same news, and
+   the frame is what stops the client waiting on a socket that will never speak again.
+   The session is released here too, so the client's next request gets the 404 rather than another
+   stream that can only end this way."
+  | r sess out |
+  r := McpFixtureRouter new.
+  sess := r openSessionCreating: [:newId | McpMockSession startWithId: newId].
+  sess mockWorker dieOnComplete.
+  out := (self runRequest: (self postRequest: (self toolsCallWithProgressToken: 9)
+    sessionId: sess id accepting: 'text/event-stream') onRouter: r) output.
+  self assert: (self includesCS: 'Content-Type: text/event-stream' in: out).
+  self assert: (self includesCS: 'event: message' in: out).
+  self assert: (self includesCS: '-32001' in: out).
+  self assert: (self includesCS: '"kind":"sessionGone"' in: out).
+  self assert: (self includesCS: '"id":9' in: out).
+  self deny: (self includesCS: '-32603' in: out).
+  self assert: (r sessionAt: sess id) isNil
 %
 category: 'tests - worker config'
 method: McpTransportTest

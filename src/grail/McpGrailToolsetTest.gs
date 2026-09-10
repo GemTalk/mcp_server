@@ -734,10 +734,12 @@ testPythonNameOfSelectorDecodesTheWholeEncoding
 category: 'tests'
 method: McpGrailToolsetTest
 testPythonSourceBlockEndsAtTheNextUnindentedLine
-  "The block rule, tested against a file this test writes -- so it needs no Grail checkout and no
-   import, and can state the boundary cases exactly. A definition runs through every indented AND
-   blank line and stops at the next line with content in column zero; trailing blanks are dropped so
-   a definition does not come back padded to the one after it."
+  "The block rule for a module-level def, tested against a file this test writes -- so it needs no
+   Grail checkout and no import, and can state the boundary cases exactly. A definition runs through
+   every blank line and every line indented further than itself, and stops at the first line
+   indented no further; for a def in column zero that is the next line with content in column zero.
+   Trailing blanks are dropped so a definition does not come back padded to the one after it. The
+   indented case -- a method -- is #testPythonSourceBlockOfAMethodEndsAtTheNextMethod."
   | path f out |
   path := '/tmp/mcp_grail_source_probe.py'.
   f := GsFile openWriteOnServer: path.
@@ -773,6 +775,59 @@ def after():
     self assert: (self includesCS: path , ':3' in: out).
     "and an unpaged answer carries no page header at all"
     self deny: (self includesCS: '(showing' in: out) ]
+      ensure: [GsFile removeServerFile: path]
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testPythonSourceBlockOfAMethodEndsAtTheNextMethod
+  "The block rule for an INDENTED definition, which is the case a column-zero rule gets wrong: a
+   method's block ran on through every later method of its class, because an indented `def` does not
+   start in column zero, and get_python_source('textwrap.TextWrapper.wrap') answered `wrap` AND
+   `fill`. The end of the block is set by the definition's OWN indentation, so it stops at the next
+   method -- and at a dedent out of the class as well.
+   Written against a file this test creates, for the same reason the module-level case is
+   (#testPythonSourceBlockEndsAtTheNextUnindentedLine): no checkout, no import, exact line numbers."
+  | path f ts wanted after |
+  path := '/tmp/mcp_grail_method_probe.py'.
+  f := GsFile openWriteOnServer: path.
+  self assert: f notNil.
+  f nextPutAll: 'class Wrapper:
+    """Class doc."""
+
+    def wanted(self, text):
+        """Doc."""
+        if text:
+            return 1
+
+        return 0
+
+    def after(self, text):
+        return 2
+
+
+class Other:
+    pass
+'; close.
+  [ ts := McpGrailToolset new.
+    "line 4 is `def wanted`, indented four"
+    wanted := ts pagedSource: (ts sourceLinesFrom: path startingAt: 4 label: 'wanted')
+      args: Dictionary new.
+    self assert: (self includesCS: 'def wanted(self, text):' in: wanted).
+    self assert: (self includesCS: '"""Doc."""' in: wanted).
+    "the blank line inside the method is kept, so what follows it comes too"
+    self assert: (self includesCS: 'return 0' in: wanted).
+    "and none of the class around it: not the next method, not the class body above"
+    self deny: (self includesCS: 'def after' in: wanted).
+    self deny: (self includesCS: 'return 2' in: wanted).
+    self deny: (self includesCS: 'Class doc.' in: wanted).
+    self deny: (self includesCS: 'class Other' in: wanted).
+    self assert: (self includesCS: path , ':4' in: wanted).
+    "line 11 is `def after`, the last method -- its block ends at the dedent to `class Other`"
+    after := ts pagedSource: (ts sourceLinesFrom: path startingAt: 11 label: 'after')
+      args: Dictionary new.
+    self assert: (self includesCS: 'return 2' in: after).
+    self deny: (self includesCS: 'class Other' in: after).
+    self deny: (self includesCS: 'def wanted' in: after) ]
       ensure: [GsFile removeServerFile: path]
 %
 category: 'tests'

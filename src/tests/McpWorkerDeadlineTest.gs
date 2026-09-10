@@ -27,7 +27,7 @@ cost the client every later one.
 
 So each test here drives a real McpSession over a real worker gem, through the shipping
 #runWorker:. That means A NETLDI MUST BE RUNNING; run-unit-tests.sh insists on one wherever this
-suite is installed, and on this branch it is the only base-install suite that needs one. Tests take a second or two each, because a
+suite -- or any other gem-forking suite -- is installed. Tests take a second or two each, because a
 deadline measured in whole seconds cannot be exercised in less.
 
 The two shapes of a runaway are both here, and they fail differently if a break is not delivered: a
