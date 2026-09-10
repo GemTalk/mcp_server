@@ -1214,7 +1214,7 @@ registerOn: aToolRegistry
       required: (Array with: 'name'))
     do: [:args | self tool_describe_python_class: args].
   aToolRegistry name: 'list_python_methods'
-    description: 'List a Python class''s methods with real signatures (parameter names and defaults) and the .py file and line each was defined at, in source order. Pages with limit/offset.'
+    description: 'List a Python class''s methods with real signatures -- parameter names, kinds (*args, **kwargs, positional-only /, keyword-only *) and defaults -- and the .py file and line each was defined at, in source order. Pages with limit/offset.'
     inputSchema: (self pagedSchema:
       (Dictionary new at: 'name' put:
         (self propString: 'Dotted class name, e.g. "json.JSONDecoder"');
@@ -1516,25 +1516,53 @@ shapeTag: aShapeLabel
 category: 'private'
 method: McpGrailToolset
 signatureFor: aMethodName from: aSigTableOrNil on: aClass
-  "`name(param, other='default')` for a Python method.
+  "`name(a, /, b, *args, key=None, **kwargs)` for a Python method.
 
    From the signature table where there is one: each entry is a parameter as
-   { name . kind . default }, the default being present only when it has one. Without a table, fall
-   back to the arity the SELECTOR encodes -- honest but nameless, which is why the caller says so."
-  | entry s any |
+   { name . kind . default }, the default present only when it has one and the kind an index into
+   inspect._KINDS -- 0 positional-only, 1 positional-or-keyword, 2 *args, 3 keyword-only,
+   4 **kwargs.
+
+   THE KIND IS PART OF THE SIGNATURE, not decoration on it. Reading only the name and the default
+   rendered the entry above as `call(a, b, args, key=None, kwargs)`: not a signature with a piece
+   missing but a DIFFERENT, well-formed one that a reader has no way to tell from a real one, and
+   every call written from it is a TypeError. So the markers are emitted the way inspect.signature
+   emits them -- `*name`, `**name`, a `/` after the last consecutive positional-only parameter, and
+   a bare `*` ahead of the first keyword-only one when no `*args` has already opened that group.
+
+   A missing or unrecognised kind renders as the bare name, which is what the rest of this method
+   does with a surprise: every read off the entry is guarded, because the table is Grail's to build
+   and this tool is one where a confident wrong answer is worse than a vague one.
+
+   Without a table, fall back to the arity the SELECTOR encodes -- honest but nameless, which is why
+   the caller says so."
+  | entry parts s any needSlash sawStar |
   entry := aSigTableOrNil isNil
     ifTrue: [nil]
     ifFalse: [[aSigTableOrNil at: aMethodName ifAbsent: [nil]] on: Error do: [:ex | nil]].
   entry isNil ifTrue: [^self selectorDerivedSignatureFor: aMethodName on: aClass].
+  parts := OrderedCollection new.
+  needSlash := false.
+  sawStar := false.
+  [entry do: [:p | | kind text |
+    kind := [p size >= 2 ifTrue: [p at: 2] ifFalse: [nil]] on: Error do: [:ex | nil].
+    "The `/` closes the positional-only group, so it is emitted when the FIRST parameter of another
+     kind arrives -- or after the loop, if there never is one."
+    (needSlash and: [kind ~= 0]) ifTrue: [parts add: '/'. needSlash := false].
+    (kind = 3 and: [sawStar not]) ifTrue: [parts add: '*'. sawStar := true].
+    kind = 0 ifTrue: [needSlash := true].
+    kind = 2 ifTrue: [sawStar := true].
+    text := [(p at: 1) asString] on: Error do: [:ex | '?'].
+    kind = 2 ifTrue: [text := '*' , text].
+    kind = 4 ifTrue: [text := '**' , text].
+    ([p size >= 3] on: Error do: [:ex | false]) ifTrue: [
+      text := text , '=' , ([(p at: 3) asString] on: Error do: [:ex | '?'])].
+    parts add: text]] on: Error, BaseException do: [:ex | nil].
+  needSlash ifTrue: [parts add: '/'].
   s := WriteStream on: String new.
   s nextPutAll: aMethodName; nextPut: $(.
   any := false.
-  [entry do: [:p |
-    any ifTrue: [s nextPutAll: ', '].
-    s nextPutAll: ([(p at: 1) asString] on: Error do: [:ex | '?']).
-    ([p size >= 3] on: Error do: [:ex | false]) ifTrue: [
-      s nextPut: $=; nextPutAll: ([(p at: 3) asString] on: Error do: [:ex | '?'])].
-    any := true]] on: Error, BaseException do: [:ex | nil].
+  parts do: [:t | any ifTrue: [s nextPutAll: ', ']. s nextPutAll: t. any := true].
   s nextPut: $).
   ^s contents
 %
@@ -2164,9 +2192,11 @@ method: McpGrailToolset
 tool_list_python_methods: args
   "A Python class's methods, with real signatures and the .py line each was defined at.
 
-   Signatures come from the class's own ___methodSignatureTable___ -- parameter names AND defaults,
-   which the Smalltalk selector cannot carry: `pop(key, default=None)` compiles to `_pop:kw:`, and
-   `__setitem__(key, value)` to `__setitem__:_:`. Reading them off the selector would give arity at
+   Signatures come from the class's own ___methodSignatureTable___ -- parameter names, KINDS and
+   defaults, none of which the Smalltalk selector carries: `pop(key, default=None)` compiles to
+   `_pop:kw:` and `update(*args, **kwargs)` to `_update:kw:`, the SAME shape, because the glue takes
+   a positional array and a kwargs dict whatever the Python signature was -- so the stars, the `/`
+   and the bare `*` live in the table or nowhere. Reading them off the selector would give arity at
    best; there is also a documented trap in doing so badly (truncating a selector at its first colon
    once manufactured `perform`, `value` and `with` as Python attributes on 40 of 42 subjects), which
    is why the selector is only a FALLBACK here, for a class with no table.

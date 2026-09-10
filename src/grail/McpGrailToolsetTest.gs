@@ -130,6 +130,17 @@ request: methodName params: paramsDict
   paramsDict ifNotNil: [d at: 'params' put: paramsDict].
   ^d
 %
+category: 'helpers'
+method: McpGrailToolsetTest
+signatureOf: aName fromEntry: anEntry
+  "signatureFor:from:on: driven on ONE table entry -- how the transcripts in issue #19 were
+   produced. No Grail checkout, no class and no import: the entry is the { name . kind . default }
+   triples Grail's compiler emits, which is the whole of what the renderer reads."
+  ^McpGrailToolset new
+    signatureFor: aName
+    from: (KeyValueDictionary new at: aName put: anEntry; yourself)
+    on: Object
+%
 category: 'tests'
 method: McpGrailToolsetTest
 testCallSitesIgnoreLiteralsCommentsAndLongerNames
@@ -555,6 +566,38 @@ testGrailDirectoryIsADeclaredOption
       optionNamed: 'grailDirectory' ifAbsent: [nil]) equals: '/somewhere/Grail'.
   "unconfigured, the toolset still works -- it just leaves Grail to resolve a directory itself"
   self assert: (McpGrailToolset new optionNamed: 'grailDirectory' ifAbsent: [nil]) isNil
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testGrailEmitsTheParameterKindsTheSignatureNeeds
+  "The other half of testSignatureCarriesEveryParameterKind: that the table really does carry the
+   kinds the renderer reads, and that the two varargs kinds carry NO default.
+
+   The second point is load-bearing. The renderer emits a default whenever the entry has a third
+   slot, so an entry `{ 'args' . 2 . x }` would print `*args=x`, which is not Python -- it does not
+   because Grail emits no third slot for kind 2 or kind 4. That is a fact about somebody else's
+   compiler, so it is asserted here rather than assumed.
+
+   Pins Grail's CURRENT emission, like testCompilePython: a failure here means the signature table
+   changed shape, which is exactly the news the renderer needs."
+  | lf q src |
+  lf := Character lf asString.
+  "The table is emitted INSIDE a ___compileMethod: 'source' literal, so every quote in it arrives
+   doubled: the transpiled text reads { ''args''. 2 }, not { 'args'. 2 }. Composing the pair rather
+   than writing four apostrophes in a row keeps the patterns below readable."
+  q := String with: $' with: $'.
+  src := self mcp tool_compile_python: (self oneArg: 'code' value:
+    'class Shim:' , lf ,
+    '    def call(self, a, /, b, *args, key=None, **kwargs):' , lf ,
+    '        return (a, b, args, key, kwargs)' , lf).
+  self assert: (self includesCS: '___methodSignatureTable___' in: src).
+  "each entry matched WHOLE, closing brace included -- that is what says `no third slot` for the
+   two varargs kinds, where a match up to the kind alone would not"
+  self assert: (self includesCS: '{ ' , q , 'a' , q , '. 0 }' in: src).
+  self assert: (self includesCS: '{ ' , q , 'b' , q , '. 1 }' in: src).
+  self assert: (self includesCS: '{ ' , q , 'args' , q , '. 2 }' in: src).
+  self assert: (self includesCS: '{ ' , q , 'key' , q , '. 3. ' , q , 'None' , q , ' }' in: src).
+  self assert: (self includesCS: '{ ' , q , 'kwargs' , q , '. 4 }' in: src)
 %
 category: 'tests'
 method: McpGrailToolsetTest
@@ -1025,6 +1068,44 @@ testSelectorMatchesAPythonNameByDecodingRatherThanEncoding
   self deny: (ts selector: #'copyfile2:' callsPythonName: 'copyfile').
   self deny: (ts selector: #'_copyfile:_:' callsPythonName: 'copyfile').
   self assert: (ts selector: #'_copyfile:_:' callsPythonName: '_copyfile')
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testSignatureCarriesEveryParameterKind
+  "Every parameter kind reaches the rendered signature: `*args`, `**kwargs`, the `/` that closes a
+   positional-only group and the bare `*` that opens a keyword-only one.
+
+   Driven on the TABLE rather than through a class, because that is the only way to reach kinds 0,
+   2, 3 and 4 here: this suite's live fixture (_grail_session.SessionDict) is fourteen methods of
+   kind 1 -- the single kind the old renderer got right -- so `0 failed` said nothing about the
+   other four, and the bug this pins shipped under a green suite.
+
+   What shipped was not a signature with a piece missing. `call(a, b, args, key=None, kwargs)` is a
+   well-formed signature for a DIFFERENT method, indistinguishable from a real one, and every call
+   written from it raises TypeError. The first two entries below are what Grail emits for
+   `def call(self, a, /, b, *args, key=None, **kwargs)` and `def kwonly(self, a, *, b, c=1)`;
+   testGrailEmitsTheParameterKindsTheSignatureNeeds pins that they are still what it emits."
+  self assert: (self signatureOf: 'call' fromEntry:
+      { { 'a'. 0 }. { 'b'. 1 }. { 'args'. 2 }. { 'key'. 3. 'None' }. { 'kwargs'. 4 } })
+    equals: 'call(a, /, b, *args, key=None, **kwargs)'.
+  "keyword-only with no *args: the separator is the bare *, and without it `kwonly(a, b, c=1)`
+   invites Shim2().kwonly(1, 2), which the generated method body itself refuses"
+  self assert: (self signatureOf: 'kwonly' fromEntry: { { 'a'. 1 }. { 'b'. 3 }. { 'c'. 3. '1' } })
+    equals: 'kwonly(a, *, b, c=1)'.
+  "a positional-only group that runs to the end still gets its closing /"
+  self assert: (self signatureOf: 'posonly' fromEntry: { { 'a'. 0 }. { 'b'. 0 } })
+    equals: 'posonly(a, b, /)'.
+  "*args has already opened the keyword-only group, so no bare * is added ahead of it"
+  self assert: (self signatureOf: 'wrapper' fromEntry: { { 'args'. 2 }. { 'k'. 3. '2' }. { 'kw'. 4 } })
+    equals: 'wrapper(*args, k=2, **kw)'.
+  "kind 1 is untouched -- the case that always worked, and the shape of nearly every method"
+  self assert: (self signatureOf: 'pop' fromEntry: { { 'key'. 1 }. { 'default'. 1. 'None' } })
+    equals: 'pop(key, default=None)'.
+  self assert: (self signatureOf: 'keys' fromEntry: { }) equals: 'keys()'.
+  "a missing or unrecognised kind renders as the bare name: every read off an entry is guarded, and
+   a surprise in the table must not cost the parameter it belongs to"
+  self assert: (self signatureOf: 'legacy' fromEntry: { { 'a' }. { 'b'. 99 }. { 'c'. nil } })
+    equals: 'legacy(a, b, c)'
 %
 category: 'tests'
 method: McpGrailToolsetTest
