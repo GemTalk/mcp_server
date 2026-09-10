@@ -10,6 +10,11 @@ that made it. Development ran on several long-lived lines at once during that pe
 its own bumps, so attribution to a release is approximate before 0.7.0. The project is pre-release:
 breaking changes are expected and are called out rather than shimmed.
 
+Keep an entry to a few sentences: what changed, why it mattered, and the tools or options a reader
+has to act on. The measurements, the alternatives weighed and the kernel behaviour behind a change
+belong in its commit message and in `docs/` — an entry that has to carry all of that is a sign the
+reasoning has nowhere better to live, not that the entry should grow.
+
 ## Unreleased
 
 * **The supported images are now 3.7.5 and 3.7.6+.** The server's view handling relies on their
@@ -18,75 +23,12 @@ breaking changes are expected and are called out rather than shimmed.
   [docs/GemStone_Notes.md](docs/GemStone_Notes.md#version-to-version-differences). No code changed.
 
 * **`run_python_tests` no longer dies on memory, and says so when it does.** The tool runs Grail's
-  SUnit classes in a forked gem, and how much temporary object memory that gem gets was *the host's*
-  choice: the product default for `GEM_TEMPOBJ_CACHE_SIZE` is 50MB, and a NetLDI started with a
-  larger one passes that on instead. Everything a run compiles stays in that one session's memory,
-  so a starved gem dies partway through a single class with `VM temporary object memory is full` —
-  arriving as a raw `GciError` from a session with no gem and no process id behind it. No counts, no
-  cause, nothing naming memory, and nothing saying which class was expensive.
-
-  The test gem is now forked with a **stated budget**, Grail's own: the pair its
-  `scripts/run_tests.sh` gives every test session. `GsTsExternalSession` has no configuration hook,
-  but it needs none: the NRS **body** is the `gemnetobject` command line, and `gemnetobject` takes
-  `-C` for gem configuration parameters, so `newGrailTestSession` sends `gemnetobject -C
-  GEM_TEMPOBJ_CACHE_SIZE=900000;GEM_TEMPOBJ_CODE_SIZE=300000;` and the budget travels with the
-  login — no `gem.conf`, no `GEMSTONE_EXE_CONF`, no NetLDI restart, none of which a gem answering a
-  tool call can reach anyway, and no dependence on how the host's NetLDI happens to be configured.
-  Both parameters are needed: the code space defaults to 20% of the cache capped at 150MB, so
-  raising the cache alone leaves it short of what a cold framework import compiles, and `code space
-  overflow` is how the death actually reads. Both are ceilings the gem grows into rather than
-  reservations, so a cheap run costs exactly what it did before. New toolset option
-  **`testGemConfig`** overrides the string; it goes into an NRS verbatim, so whitespace and
-  `! # @ ^` are refused rather than passed on to be truncated into a half-applied budget, which
-  would look exactly like the bug. Verified on 3.7.5: forked gems went from the host's 488MB to the
-  asked-for 900MB, and a second `;`-separated parameter arrives intact.
-
-  The classes are also driven **one per send** instead of in one expression, which is what makes a
-  death legible at all: the counts and defect reports now accumulate in the *caller*, the only place
-  that outlives the child. A gem that dies at class nine leaves eight classes' results behind, and
-  the answer names the class it died on, what had finished, and the budget it was forked with, as an
-  `McpError` kinded **`testGemDied`** — where before every passing class went down with the gem.
-  Progress ticks now name the class and its position rather than only the elapsed seconds.
-
-  The death is reported by **GCI error number, never by the `GciError`'s text** — the same rule, for
-  the same band, that `sessionGoneErrorFor:id:` already follows. Confirmed against the kernel source
-  and a real starved gem: `GciError>>_error:in:` appends `for session <externalSession _describe>` to
-  every error in 4000–4999, and `_describe` yields the stone NRS, the GemStone user and the gem NRS —
-  host, netldi and the whole `gemnetobject` command line. 4067 is the kernel's code for a gem out of
-  temporary object memory and is the one number worth translating; the rest are reported as numbers
-  and point at the test gem's own log.
-
-  `testRunnerExpressionFor:directory:` is replaced by `testRunnerClassListExpressionFor:directory:`
-  (which sets `$GRAIL_DIR` once and answers the classes to run) and
-  `testRunnerExpressionForClassNamed:` (one class, its four counts, the gem's memory reading and its
-  defect report). Client-sent names still travel as string literals resolved in the child by
-  `objectNamed:`, never as code, and an unresolved name is still reported as `NOT FOUND` — computed
-  in the caller now, against the name it asked for.
-
-  **The run is also bounded, not just given more room — and that is the half that was missing.**
-  Grail's own runner states both in one breath: *"THIS AND THE EIGHT-PARTITION CHANGE BELOW ARE TWO
-  FIXES FOR ONE DEFECT … Partitioning lowers what a session HAS to hold; the ceiling raises what it
-  MAY hold."* Grail splits its corpus — 648 concrete classes, 6582 tests — across **eight** sessions
-  at this same budget, so no ceiling makes a `classNames`-less call fit in one gem. And past the
-  ceiling a run does not die: the gem raises `AlmostOutOfMemory` (notification 6013) against
-  whichever test it happened to be running, a different innocent one every time, so the answer
-  becomes *plausible red tests* instead of an error. That is strictly worse than the crash this
-  entry started with, and Grail's note on why it took so long to find is the reason it is fixed
-  here: *"that took a while to recognise precisely because nothing reported the number."*
-
-  So every answer now carries the gem's **peak memory** (`peak memory: 432MB of 659MB (65%)`), read
-  at each class boundary — the same three values `runTestsShard.gs` emits as `GRAIL_SHARD_MEM`, with
-  the percentage taken from the kernel because that is what 6013 is raised against. And a run
-  **stops starting classes** once the gem crosses the new option
-  **`testGemMemoryCeilingPercent`** — default **85**, chosen from Grail's two measurements rather
-  than as a round number: above the 75% it calls comfortable, below the 96% it measured failing.
-  Stopping costs nothing but a follow-up call: every class that completed is reported, and the
-  answer names how many were not started and which to resume from. `0` disables it. A run whose
-  *last* class ends over the ceiling cannot be stopped short, so it carries a warning instead.
-  Verified on 3.7.5: a gem starved to 120000KB stopped after `ArgparseTestCase` at 34% against a
-  25% ceiling, reported its 21 passing tests and named `ShutilTestCase` as the resume point; memory
-  measured climbing 3MB → 19 → 28 → 32 → 43MB across four stdlib classes. 5 new tests in
-  `McpGrailToolsetTest` (44 in the suite, 566 across 22).
+  SUnit classes in a forked gem, which used to get whatever memory the host's NetLDI handed out and
+  now forks with Grail's own stated budget (`scripts/run_tests.sh`). Classes are driven one per
+  send, so a gem that dies reports the class it died on and what had finished, kinded
+  **`testGemDied`**; every answer carries the gem's peak memory, and a run stops starting classes
+  past 85% of it, because beyond that a Grail run does not crash, it blames an innocent test. New
+  toolset options **`testGemConfig`** and **`testGemMemoryCeilingPercent`** set both numbers.
 
 * **`get_python_source` no longer over-reads a method into the next one.** The end of a definition
   is found by indentation, and the rule asked for the next line with content in **column zero** —
