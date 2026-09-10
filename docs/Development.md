@@ -151,29 +151,32 @@ Two long-running harnesses exist for things a suite cannot reach — `session-li
 
 Expected failures are real signal, not noise:
 
-* On **3.7.2**, `McpExternalSessionTest` fails on purpose. The image carries kernel defect #51438
-  and nothing in `src/` can fix it; the failure is the suite reporting the image.
+* `McpExternalSessionTest` fails on purpose on an image older than 3.7.4.1, which carries kernel
+  defect #51438. Nothing in `src/` can fix it; the failure is the suite reporting the image.
 * One blind-write test (`testTheStoneAloneWouldAllowThatClobber`) is written to **fail on good
   news**, so a stone that grows its own read protection gets noticed instead of quietly making a
   whole layer redundant.
 
 ## Version support
 
-The project's standing goal is to run on as many GemStone versions and extents as possible.
+**Supported: 3.7.5 and 3.7.6+.** The server's view handling relies on those images' implementation
+of `System continueTransaction`; earlier ones differ below the Smalltalk, in ways nothing in `src/`
+can detect or work around. Whether the floor settles at 3.7.5 or 3.7.6 is not yet decided.
 
 | image | base server | OAuth/OIDC front end | notes |
 |---|---|---|---|
-| 3.6.2 | **deferred** | no | no `GsTsExternalSession` on macOS (its own header parser crashes), so no worker gems at all |
-| 3.7.2 | yes | no — no kernel JWT classes | carries #51438; `install.sh` leaves `src/auth` out |
+| 3.6.2 | **no** | no | no `GsTsExternalSession` on macOS (its own header parser crashes), so no worker gems at all |
+| 3.7.2 | **no** | no — no kernel JWT classes | dropped 2026-09-10: `System continueTransaction` differs below the image in two ways nothing in `src/` can detect or cover, and it carries #51438 |
 | 3.7.5 | yes | yes, against a local IdP | |
 | 3.7.6+ | yes | yes, including an external OIDC IdP | |
 | 4.0.0 | untested here | untested here | |
 
-The floor for *referencing* a kernel class directly is 3.6.2 — no existence guard needed. Genuinely
-optional things (Grail) still use an `objectNamed:` guard. `src/auth` is detected rather than asked
-about, because loading `McpAuthRouter` is inert; `src/grail` stays opt-in because loading it joins
-the default tool surface. See [GemStone_Notes.md](GemStone_Notes.md) for the concrete
-version-to-version behaviour differences this has surfaced.
+Anything present in **3.7.5** may be referenced directly, with no existence guard; the live concern
+is only what is newer than that. Genuinely optional things (Grail) still use an `objectNamed:`
+guard. `src/auth` is detected rather than asked about, because loading `McpAuthRouter` is inert;
+`src/grail` stays opt-in because loading it joins the default tool surface. See
+[GemStone_Notes.md](GemStone_Notes.md#version-to-version-differences) for the concrete behaviour
+differences this surfaced, and in particular why 3.7.2 was dropped rather than covered.
 
 ## Branches and releases
 
@@ -196,8 +199,10 @@ keys, no real hostnames or customer detail in commits, and assume all history is
 Two earlier layouts are described in older material, and both are gone. A two-line layout in which
 `main` was a deliberately auth-*less* release line and `auth` carried the auth files was retired on
 2026-08-21. A long-lived `dev` line merged into `main` at milestones, alongside the parallel `dev2`
-and `dev372` lines, was retired on 2026-09-09; `dev` and `dev2` are deleted. If a note tells you to
-`git checkout auth` or to commit on `dev`, it is stale.
+and `dev372` lines, was retired on 2026-09-09; `dev` and `dev2` are deleted. `main372` — `main` plus
+an in-image cover for #51438, kept for clients who would not upgrade — was archived on 2026-09-10
+along with 3.7.2 support; it survives as the tag `archive/main372` and is not maintained. If a note
+tells you to `git checkout auth` or to commit on `dev`, it is stale.
 
 ### Releases
 

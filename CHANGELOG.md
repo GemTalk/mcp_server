@@ -12,6 +12,11 @@ breaking changes are expected and are called out rather than shimmed.
 
 ## Unreleased
 
+* **The supported images are now 3.7.5 and 3.7.6+.** The server's view handling relies on their
+  implementation of `System continueTransaction`, which earlier images implement differently in
+  ways nothing in `src/` can detect or work around. The measurements are in
+  [docs/GemStone_Notes.md](docs/GemStone_Notes.md#version-to-version-differences). No code changed.
+
 * **`get_python_source` no longer over-reads a method into the next one.** The end of a definition
   is found by indentation, and the rule asked for the next line with content in **column zero** —
   which is right for a module-level `def` and wrong for anything inside a `class`, because a

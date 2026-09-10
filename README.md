@@ -10,22 +10,21 @@ Python), OAuth 2.1 / JWT + TLS, per-router read-only mode and server-initiated m
 and verified end-to-end — by curl, by a TLS run, and by the in-image suites. What is *not* built is
 listed under [Future work](#future-work).
 
-**A note about versions.** What you get depends on the image, and `install.sh` works it out for you:
+**A note about versions.** The supported images are **3.7.5 and 3.7.6+**, whose implementation of
+`System continueTransaction` the server's view handling relies on — see
+[docs/GemStone_Notes.md](docs/GemStone_Notes.md#version-to-version-differences) for the
+measurements. Within that range what you get depends on the image, and `install.sh` works it out
+for you:
 
 | image | base server (`run-server.sh`) | OAuth/OIDC front end (`run-auth-server.sh`) |
 |---|---|---|
-| **3.7.2** | yes | **no** — the image has no kernel JWT classes, so `src/auth` is skipped |
 | **3.7.5** | yes | yes, against a local IdP |
 | **3.7.6+** | yes | yes, including an external OIDC IdP |
 
 `src/auth` needs `JsonWebToken` and `JwtSecurityData` (and, to log a worker in,
-`GsTsExternalSession>>jwtPassword:`), none of which exist before 3.7.5; on 3.7.2 those methods
-cannot compile at all, so `install.sh` detects the image and leaves the group out. Everything else —
-the server, all 31 base tools, per-client sessions, read-only mode, server-initiated messages — is
-unaffected. Note that 3.7.2 carries a separate *kernel* defect that this repository does not work
-around: responses over 1024 bytes can come back corrupted (#51438, fixed in 3.7.4.1).
-`McpExternalSessionTest` fails there on purpose to say so — see the testing section. The 3.7.6 line
-is a separate matter: earlier releases have a bug connecting to an *external* OIDC IdP.
+`GsTsExternalSession>>jwtPassword:`), none of which exist before 3.7.5, so `install.sh` detects what
+the image has rather than asking. The 3.7.6 line is a separate matter: earlier releases have a bug
+connecting to an *external* OIDC IdP.
 
 ## Other documentation
 
@@ -1497,15 +1496,14 @@ nothing to do with the code: each spawns worker gems of its own, so a stone whos
 is already consumed by running servers fails them with *"the maximum number of users are already
 logged in."* Stop the servers, or raise the limit, before reading such a failure as a regression.
 
-> **On 3.7.2 two of those five tests fail, and that is the suite working.** Every GemStone before
-> 3.7.4.1 carries kernel defect #51438: `GsTsExternalSession>>resolveResult:` refetches an object
-> only when its 1024-byte fetch buffer has to *grow*, so once one large result has enlarged the
-> buffer, every later result between 1025 bytes and that size arrives as 1024 good bytes followed by
-> the tail of an earlier result — right length, plausible bytes, no error raised. mcp_server meets this
-> on its main path, since every MCP response is a String of JSON pulled out of a worker gem. Nothing
-> in `src/` can make those two tests pass; the fix is to run on 3.7.4.1 or later. The three that do
-> pass everywhere are controls that localise the failure — see the `McpExternalSessionTest` class
-> comment for the mechanism.
+> **`McpExternalSessionTest` checks the image as much as this code.** GemStone before 3.7.4.1
+> carries kernel defect #51438: `GsTsExternalSession>>resolveResult:` refetches an object only when
+> its 1024-byte fetch buffer has to *grow*, so a later result can arrive as 1024 good bytes followed
+> by the tail of an earlier one — right length, plausible bytes, no error raised. mcp_server would
+> meet that on its main path, since every MCP response is a String of JSON pulled out of a worker
+> gem, which is why the suite pins it. All five pass on a supported image; two of them fail on an
+> older one to say why it is not supported, and the other three are controls that localise the
+> failure. See the `McpExternalSessionTest` class comment for the mechanism.
 
 > Note: a test helper must never reuse a SUnit framework selector (`run:`, `setUp`, …) — doing
 > so shadows the framework method and silently breaks `suite run`. The transport helper is named
