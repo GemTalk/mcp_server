@@ -30,163 +30,82 @@ reasoning has nowhere better to live, not that the entry should grow.
   past 85% of it, because beyond that a Grail run does not crash, it blames an innocent test. New
   toolset options **`testGemConfig`** and **`testGemMemoryCeilingPercent`** set both numbers.
 
-* **`get_python_source` no longer over-reads a method into the next one.** The end of a definition
-  is found by indentation, and the rule asked for the next line with content in **column zero** —
-  which is right for a module-level `def` and wrong for anything inside a `class`, because a
-  method's `def` is not in column zero either. Asked for `textwrap.TextWrapper.wrap` the tool
-  answered `wrap` *and* `fill`, under a header naming the line `wrap` starts at, so nothing in the
-  answer said where the method it was asked about ended.
-
-  A block now ends at the first later line whose content begins at or to the left of the
-  definition's own first line — Python's actual rule, and it still needs no parser and no knowledge
-  of decorators or nesting. `startsABlockAfter:` becomes `line:endsBlockIndentedAt:`, and
-  `sourceLinesFrom:startingAt:label:` reads the definition's indentation off its own first line.
-  Module answers (line 0) and module-level defs are unchanged, since for a `def` in column zero the
-  new rule *is* the old one. Two edges the old rule could not reach: a recorded line number that
-  lands on a blank line falls back to column zero rather than answering the rest of the file, and
-  one past the end of the file answers nothing rather than erroring. Found by driving the toolset
-  live against a real stdlib file; 1 new test in `McpGrailToolsetTest` (39 in the suite, 561 across
-  22).
+* **`get_python_source` no longer over-reads a method into the next one.** A definition's end is
+  found by indentation, and the rule asked for the next line with content in **column zero** —
+  right for a module-level `def`, wrong for anything inside a `class`, so asking for
+  `textwrap.TextWrapper.wrap` answered `wrap` *and* `fill`. A block now ends at the first later line
+  whose content begins at or to the left of the definition's own first line. Module answers and
+  module-level defs are unchanged.
 
 * **A session whose worker gem dies is now ended, rather than wedged for the life of the server.**
-  A dead gem used to leave its session registered: every later call on it answered a generic
-  JSON-RPC `-32603 "Internal error"` with no `data.kind`, inside a healthy HTTP 200 — which means
-  *something went wrong at our end*, not *your session is finished*, so a well-behaved client
-  retried, got the same answer forever and never re-initialized, while the session kept its
-  `maxSessions` slot for as long as the front end ran. Nothing reaped it either, and not for want of
-  a rule: the liveness probe asks whether the **client** is still there, down a stream that client
-  keeps answering, so a dead gem behind a live client trips no ground in `reapReasonFor:`.
+  A dead gem used to leave its session registered, answering a generic `-32603 "Internal error"` to
+  every later call and holding its `maxSessions` slot until the front end stopped — so a client
+  retried forever and never re-initialized. The call that meets the dead gem is now answered
+  `-32001` with `data.kind` **`sessionGone`**, and the session is released as part of answering: the
+  slot goes back at once and the next request on that id gets the **404** clients already recover
+  from by re-initializing. The client is told the GCI error number; the failure in full goes to the
+  gem log. Closes #6. See *Session lifetime* in
+  [docs/session-lifetime.md](docs/session-lifetime.md).
 
-  Both halves of the fix are in `McpRouter`, the only component that knows the state of its own
-  workers. `isSessionGoneError:` classifies the failure — a `GciError` whose `originalNumber` is in
-  the GCI **fatal band, 4000–4999**, which is the kernel's own verdict rather than a guess about
-  which failures are serious: `GsTsExternalSession>>_signalError:` closes the session's connection
-  when it sees one, which is why the *second* such request fails with 4100 `invalid session`
-  however the *first* one failed. The request is then answered `-32001` with `data.kind`
-  `sessionGone`, bearing its own id, in an HTTP 200 — as a frame on the stream where the call was
-  already being streamed. And the session is **released as part of answering**, which is the half
-  that asks nothing of a client that branches on nothing: the slot goes back at once and the *next*
-  request on that id gets the **404** that the transport already defines for a session that no
-  longer exists, and that clients already recover from by re-initializing.
-
-  The client is told the GCI error number and not the `GciError`'s text: measured on 3.7.5, the
-  kernel appends the gem's whole NRS to a fatal error — host, stone, GemStone user, extent and log
-  paths — which is not a thing to hand an MCP client, least of all on the network-facing front end.
-  The failure in full goes to the gem log, beside the session id, which is the same split a reap
-  already makes.
-
-  Measured end to end on 3.7.5 with the reported reproduction — an `execute_code` that exhausts the
-  worker's temporary object memory — the gem dies in about three seconds, the call is answered
-  `sessionGone` (GCI 4067), the next request 404s, and a fresh `initialize` succeeds on a router
-  capped at one session, so the slot really came back. New: `McpRouter>>isSessionGoneError:`,
-  `releaseSessionWithGoneWorker:because:`, `sessionGoneErrorFor:id:`,
-  `writeSessionGoneError:forSession:id:on:` and `writeSessionGoneFrame:forSession:id:on:`; a
-  `McpMockWorker>>dieOnComplete` that models both failures a dying gem produces. 4 new tests in
-  `McpTransportTest` (48 in the suite, 560 across 22) and 9 wire checks in `test.sh`, which is the
-  only place the *first* failure's number can be pinned — a mock can raise 4100 but cannot die.
-  Closes #6. See *Session lifetime* in [docs/session-lifetime.md](docs/session-lifetime.md), which
-  also records what the view-hygiene pass makes of a dead worker: nothing, because the stone answers
-  a zero-filled description for a session id nobody holds, so it reads as zero commits behind and is
-  never sent anything. The one exception is documented with it — a recycled session id, which can
-  make that arm log a line naming the right session with a stranger's commits-behind figure and a
-  GCI error about a gem that no longer exists, once per pass until the session is released.
-
-* **Two new optional Grail tools, `find_python_senders` and `search_python_source`** — the Python
-  sender search the toolset has been missing, and a text search over the checkout's `.py` files.
-  Both are **read-only safe**. The stock sender search is not merely incomplete for Python: it scans
-  environment 0 and Grail compiles Python into environment 1, so it answers *nothing*, confidently.
-  Measured on 3.7.5 with `_grail_session` imported, `ClassOrganizer new sendersOf: #'_dict'` and
-  `sendersOf: #'__dict:kw:'` each answer an empty pair of arrays where **12** senders exist.
-  `find_python_senders` searches all three shapes a Python reference compiles into — **compiled**
-  call sites (a generated method's selector pool, positioned from its source), **references** (a
-  first-class use or an unresolved attribute call, which leave a Symbol literal and no selector) and
-  **source** (the `.py` text, the only shape that answers for a module nothing has imported) — and
-  every answer ends with a `searched:` and a `not searched:` block naming each gap and the argument
-  that closes it, because "no senders" is only worth reading if it can be told from "I could not look
-  there". Matching is syntactic and **never imports**, which is what keeps a search from being a
-  database write and both tools out of the read-only gate. `shapes`, `scope` (narrowing at a dot
-  boundary, so `flask` does not select `flask_login`), `includeNative` and `includeTests` are all
-  optional; both tools page with `limit`/`offset`. `tests/python` is excluded by default as a
-  relevance choice rather than a cost one — the stdlib is 1,412 files and 426,131 lines and reads in
-  248 ms, and the fixtures would add about 75 ms.
-
-  Three interfaces that would let the tool stop reading Grail's internals are filed upstream:
-  [GemTalk/Grail#883](https://github.com/GemTalk/Grail/issues/883) (a public call-site position API,
-  instead of parsing the `___curPos___` literal out of generated source),
-  [#884](https://github.com/GemTalk/Grail/issues/884) (the name/selector mangling as API) and
-  [#885](https://github.com/GemTalk/Grail/issues/885) (an enumeration of the Python classes in an
-  image, which is what makes the searched-class count a floor rather than a total).
-
-  Renamed `McpGrailToolsetTest>>testRunPythonTestsIsTheOnlyReadOnlySafeTool`, which had already
-  stopped being true and was wrong by three. 7 new tests and 2 updated (38 in the suite, 556 across
-  22); README's tool table now reads 31 base + 9 optional Grail.
+* **Two new optional Grail tools, `find_python_senders` and `search_python_source`** — a Python
+  sender search and a text search over the checkout's `.py` files, both **read-only safe**. The
+  stock sender search is not merely incomplete for Python: it scans environment 0 and Grail compiles
+  Python into environment 1, so it answers *nothing*, confidently. `find_python_senders` searches
+  all three shapes a Python reference compiles into — compiled call sites, Symbol-literal
+  references, and the `.py` source — and every answer names the gaps it did *not* search, because
+  "no senders" is only worth reading if it can be told from "I could not look there". Matching is
+  syntactic and **never imports**, which is what keeps both tools out of the read-only gate.
+  `shapes`, `scope`, `includeNative` and `includeTests` are optional; both page with
+  `limit`/`offset`, and `tests/python` is excluded by default.
 
 * **A router now caps how many sessions it will hold at once** — `maxSessions`, **3 by default**
-  (`MCP_MAX_SESSIONS`; `none` for no cap, which is the behaviour every earlier release had). Past the
-  cap an `initialize` is refused with a JSON-RPC `-32001` naming the limit and `data.kind`
+  (`MCP_MAX_SESSIONS`; `none` for no cap, which is the behaviour every earlier release had). Past
+  the cap an `initialize` is refused with a JSON-RPC `-32001` naming the limit and `data.kind`
   `sessionLimit`, in an HTTP 200 bearing the request's own id and no `MCP-Session-Id` header, and
-  **no login is attempted**. A session is a GemStone login, a repository has a finite number of them,
-  and the login that exhausts them fails for *every* gem on the stone — topaz included — not just for
-  the client that asked: measured on 3.7.5 against a Community Edition database, nine one-shot
-  clients took nine worker gems and the tenth login of any kind failed with error 4039, locking the
-  machine's owner out of their own extent. Nor does it take a careless client to get there —
-  reconnecting opens a *new* session, so reloading an editor window or restarting an agent leaves the
-  old gem behind until the idle rules catch up. The cap is enforced in `openSessionCreating:`, where
-  the slot is taken and the id minted in one critical section, so clients that all arrive during one
-  another's logins cannot talk past it; the slot is released again whether the session registers or
-  the login fails. New: `McpRouter class>>defaultMaxSessions`, `McpRouter>>maxSessions`,
-  `maxSessions:`, `sessionCount`, `isSessionLimitError:`, `refusingOverSessionLimit:on:do:` and
-  `writeSessionLimitError:forRequest:on:`; the startup banner logs `concurrent sessions:`, and each
-  refusal is logged. 7 new tests in `McpLifetimeTest`, 1 in `McpTransportTest`, 7 wire checks in
-  `test.sh`. Closes #2. See *Session lifetime* in the README and
+  **no login is attempted**. The startup banner logs `concurrent sessions:`, and each refusal is
+  logged. Closes #2. See *Session lifetime* in the README and
   [docs/session-lifetime.md](docs/session-lifetime.md).
   **Behaviour change for an existing deployment**: a server that was serving more than three clients
   at once will start refusing the fourth. Set `MCP_MAX_SESSIONS` to what your stone can afford.
+
 * **The gems name themselves in the shared cache**, so a DBA reading
   `System cacheStatisticsForAllSlots` can tell them apart: the front end is
   `<router class>:<port>` (`McpRouter:8000`, `McpAuthRouter:8443`) and each worker is
   `<worker class>:<front-end session>:<first 8 of the MCP session id>` (`McpServer:5:978EC559`).
   Every gem here is a `GsTsExternalSession`'s, so they all used to arrive called `GciTs` — the
   router, every worker and any unrelated external session on the stone, indistinguishable in the one
-  column that is supposed to say who a session is. Both names lead with the class that is actually
-  running — the router's own, and for a worker the class the router told it to be — so a deployment
-  running a subclass sees that rather than a fixed role name. A worker's name identifies its server
-  and its client without reference to a log, and the router's makes the gem findable by name
-  (`cacheStatisticsForProcessWithCacheName:`) instead of by a pid recorded at fork time. The front
-  end also logs the name it actually got. New: `McpBase class>>nameThisGem:`, `gemCacheName`,
-  `gemCacheNameFrom:keeping:`, `maxGemCacheNameSize`, `McpRouter>>cacheNameForPort:` and
-  `McpSession>>workerCacheName`, plus the `McpGemNameTest` suite (16 tests). Closes #1. See
-  *Naming the gems* in the README.
+  column that is supposed to say who a session is. Closes #1. See *Naming the gems* in the README.
   **Breaking for a caller that drives the worker bootstrap directly**:
   `McpServer class>>prepareWorkerWithToolsets:options:readOnly:serverName:title:version:frontEnd:`
-  gains a final `cacheName:` keyword. Nothing else sends it — the front end builds the name, because
-  `System cacheName:` names only the session that sends it, so a worker cannot be named from outside.
+  gains a final `cacheName:` keyword.
+
 * **The list-shaped tools page**: `limit` and `offset` on `list_all_classes`, `list_classes`,
   `list_dictionary_entries`, `list_test_classes`, `find_implementors`, `find_references_to`,
   `find_senders` and `search_method_source`, with a header naming the window, the total and the
-  offset that fetches the next page. Defaults preserve what each tool answered before: the two that
-  capped at 200 make 200 their default limit, and the rest still return everything unless a limit
-  is passed. `limit: 0` answers the count alone. Not a breaking change to any existing call, but
-  the truncation notes on `find_senders` and `search_method_source` are new text, and
-  `search_method_source` now answers in scan order rather than sorted — sorting a collected prefix
-  would let a name belonging on page 1 turn up on page 2.
+  offset that fetches the next page. Defaults preserve what each tool answered before, and
+  `limit: 0` answers the count alone. Not a breaking change to any existing call, but
+  `search_method_source` now answers in **scan order rather than sorted** — sorting a collected
+  prefix would let a name belonging on page 1 turn up on page 2.
+
 * **`search_method_source` says when it does not know the total** (`of at least 201 … the total is
   not known`) instead of reporting the size of what it happened to collect. Its scan is the cost,
   so it stops one hit past the page rather than reading every method in the image to print a number.
+
 * **The 50,000-character result cap names what it dropped**:
   `...[truncated: showing 50000 of 60002 characters]`, where it used to say only `...[truncated]`.
   Shared by `execute_code` and the Python tools.
+
 * **The two long-output Grail tools page**: `list_python_methods` (the method lines page; the class
-  name, its `.py` and the signature-table note stay outside the page) and `get_python_source`,
-  which pages over **lines** and heads each page with the file line that page actually starts at —
-  a page 2 still headed with the definition's first line would point at the wrong place in the file.
-  `McpGrailToolset>>sourceFrom:startingAt:label:` split into `sourceLinesFrom:startingAt:label:`
-  (finds the block, answers its lines and their first file line) and `pagedSource:args:` (renders
-  one page); source lines are re-emitted verbatim rather than re-joined, so a `.py` comes back with
-  its own line endings.
+  name, its `.py` and the signature-table note stay outside the page) and `get_python_source`, which
+  pages over **lines** and heads each page with the file line that page actually starts at — a page 2
+  still headed with the definition's first line would point at the wrong place in the file. Source
+  lines are re-emitted verbatim rather than re-joined, so a `.py` comes back with its own line
+  endings.
+
 * **`tools/list` refuses a cursor** with `-32602`, as the spec asks, instead of silently answering
   page 1. This server returns every tool in one page and issues no `nextCursor`, so a cursor
   arriving here came from somewhere else. See *Pagination* in the README.
+
 
 ## 0.7.0 — 2026-09-07
 
