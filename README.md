@@ -516,6 +516,52 @@ an image without Grail. Once loaded the toolset joins the default tool surface a
 > keeps only the failing `TestCase`, so a report could otherwise say no more than
 > `SomeTest debug: #testThing`. A class name that does not resolve is listed as `NOT FOUND` rather
 > than skipped — "ran nothing" and "you misspelled it" must not look alike.
+>
+> **A fresh gem is also a gem that can die, and it dies on memory.** Everything a run compiles stays
+> in one session's temporary object memory, and how much of it a forked gem gets is *the host's*
+> choice, not this server's: the product default is `GEM_TEMPOBJ_CACHE_SIZE` = 50MB, and a NetLDI
+> started with something larger passes that on instead. Starved, a run dies partway through a single
+> class with `VM temporary object memory is full` — arriving as a raw `GciError` from a session with
+> no gem left in it, so there were no counts, no cause and nothing naming memory. Two changes:
+>
+> * The test gem is forked with a **stated budget**, Grail's own: the pair its `scripts/run_tests.sh`
+>   gives every test session. `GsTsExternalSession` has no configuration hook, but the NRS *body* is
+>   the `gemnetobject` command line and `gemnetobject` takes `-C`, so the budget travels with the
+>   login — no `gem.conf`, no `GEMSTONE_EXE_CONF`, no NetLDI restart, and no dependence on how this
+>   host's NetLDI happens to be configured. Both parameters are ceilings the gem grows into rather
+>   than reservations, so a small run costs no more than it did. Change them with the `testGemConfig`
+>   option below.
+> * The classes are driven **one per send** rather than in one expression, so the counts and defect
+>   reports accumulate in the *caller* — the only place that outlives the child. A gem that dies at
+>   class nine leaves eight classes' results behind, and the answer names the class it died on, what
+>   had finished, and the budget it was forked with, as an error kinded **`testGemDied`**. It reports
+>   the **GCI error number**, never the `GciError`'s text: the kernel appends the dead gem's whole
+>   NRS — host, stone, GemStone user, netldi, command line — to any error in the fatal band, which is
+>   not a thing to hand a client. The full failure stays in the test gem's own log.
+>
+> **Raising the ceiling is only half of it, and the other half is the dangerous half.** Grail's own
+> runner says so in the same breath it states the budget: *"THIS AND THE EIGHT-PARTITION CHANGE BELOW
+> ARE TWO FIXES FOR ONE DEFECT … Partitioning lowers what a session HAS to hold; the ceiling raises
+> what it MAY hold."* Grail splits its corpus — 648 concrete classes, 6582 tests — across **eight**
+> sessions at that same budget, so no ceiling makes a `classNames`-less call fit in one gem. And past
+> the ceiling a Grail run does not crash: the gem raises `AlmostOutOfMemory` (notification 6013)
+> against whichever test it happened to be running, a different innocent one every time. The answer
+> is then *plausible red tests* rather than an error — the failure mode that lies. Grail's note on why
+> it took so long to find is the point: *"that took a while to recognise precisely because nothing
+> reported the number."* So `run_python_tests` reports the number and bounds the run:
+>
+> * Every answer carries the gem's **peak memory** — `peak memory: 432MB of 659MB (65%)` — read at
+>   each class boundary, the same three values Grail's own `runTestsShard.gs` emits as
+>   `GRAIL_SHARD_MEM`. The percentage is the kernel's own, because that is the figure 6013 is raised
+>   against.
+> * A run **stops starting classes** once the gem crosses `testGemMemoryCeilingPercent` (default
+>   **85** — above the 75% Grail calls comfortable, below the 96% it measured breaking). Every class
+>   that completed is still reported; the answer says how many were not started and which to resume
+>   from, so a stop costs a follow-up call and never any results. Set it to `0` to run everything
+>   asked for and take the gem's own verdict.
+> * A run whose *last* class ends over the ceiling cannot be stopped short, so it carries a
+>   **warning** instead: the counts are complete, but treat any defect in them as worth reproducing
+>   in a smaller call first.
 
 > **`eval_python` is a REPL, not a series of one-shot evaluations.** Names bound by one call are
 > visible to the next — `counter = 41`, then `counter + 1` → `42` — because the toolset keeps one
@@ -539,10 +585,11 @@ an image without Grail. Once loaded the toolset joins the default tool surface a
 > **Requirement:** these tools call Grail's `ModuleAst` directly with no capability check, so they
 > need an image with GemStone-Python installed.
 >
-> **Configuration — `grailDirectory`.** Grail's Python lives in the image, but its `.py` stdlib and
-> its test fixtures live on **disk** under the checkout. A worker gem cannot work out where: its own
-> working directory is the *stone's*, which holds no `src/python/stdlib`, so every `.py`-backed
-> import fails. Name the checkout with the toolset option:
+> **Configuration — `grailDirectory`, `testGemConfig` and `testGemMemoryCeilingPercent`.** Grail's
+> Python lives in the image, but
+> its `.py` stdlib and its test fixtures live on **disk** under the checkout. A worker gem cannot
+> work out where: its own working directory is the *stone's*, which holds no `src/python/stdlib`, so
+> every `.py`-backed import fails. Name the checkout with the toolset option:
 >
 > ```bash
 > MCP_GRAIL_DIR=/opt/Grail ./run-server.sh
@@ -564,6 +611,27 @@ an image without Grail. Once loaded the toolset joins the default tool surface a
 > is exactly how a misconfigured session comes to read as a broken Python subsystem.
 > `run-auth-server.sh` takes the same variable. See **Toolset options** for the general mechanism and
 > `MCP_TOOLSET_OPTIONS` for other toolsets.
+>
+> `testGemConfig` is the gem configuration `run_python_tests` forks its test gem with, as one
+> `gemnetobject -C` string — `NAME=value` pairs separated by semicolons, no whitespace and none of
+> `! # @ ^`, which would end the argument early inside the NRS and apply half of it (refused rather
+> than passed on). It defaults to Grail's own,
+> `GEM_TEMPOBJ_CACHE_SIZE=900000;GEM_TEMPOBJ_CODE_SIZE=300000;`. Both matter: the code space
+> defaults to 20% of the cache capped at 150MB, so raising the cache alone still leaves it short of
+> what a cold framework import compiles. Lower them on a host too small for that, or raise them for a
+> whole-suite run — naming the checkout again, because `MCP_TOOLSET_OPTIONS` *replaces*
+> `MCP_GRAIL_DIR` rather than adding to it:
+>
+> ```bash
+> MCP_TOOLSET_OPTIONS='{"McpGrailToolset":
+>   {"grailDirectory":"/opt/Grail","testGemConfig":"GEM_TEMPOBJ_CACHE_SIZE=300000;"}}' \
+>   ./run-server.sh
+> ```
+>
+> `testGemMemoryCeilingPercent` is the other half of the same setting: `testGemConfig` raises what
+> that gem *may* hold, this bounds what one call asks it to hold. It is how full the gem may get
+> before a run stops starting new classes, default **85**, or `0` to never stop. A percentage rather
+> than a byte figure so it tracks whatever budget is in force; anything outside 0–100 is refused.
 >
 > **Python errors are converted, not propagated.** Grail models its exceptions *outside* the
 > Smalltalk `Error` hierarchy (`NameError` is `Exception < BaseException < Exception <
@@ -1477,9 +1545,9 @@ plus `McpConcurrentEditTest` (18), `McpExternalSessionTest` (5), `McpTransaction
 `McpWorkerDeadlineTest` (4) — **466 tests**,
 which is the whole suite on a base install. Where the optional groups are installed the runner picks
 their suites up automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **522
-tests** — and **561 with the 39 in `McpGrailToolsetTest`** on a Grail image.
+tests** — and **566 with the 44 in `McpGrailToolsetTest`** on a Grail image.
 
-Six suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
+Seven suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
 `McpAuthConformanceTest` commit a throwaway JWT user and spawn real worker gems; they are in the
 runner anyway, because they are the only cover for the token → session path.
 `McpExternalSessionTest` checks that a result arrives out of a real worker gem carrying the bytes
@@ -1488,10 +1556,11 @@ this session in the state a failed commit really produces, and `McpWorkerDeadlin
 which outruns the request deadline is really broken in a real one, and `McpConcurrentEditTest` that
 the blind-write guardrail holds against a real second session — so the runner asks for a netldi on
 any image where they are installed, which is every image, since all four are part of the base
-install. That is no new burden in practice: mcp_server gives every
+install. `McpGrailToolsetTest` joins them on a Grail image, because `run_python_tests` forks the gem
+it runs Grail's classes in. That is no new burden in practice: mcp_server gives every
 client its own worker gem, so it cannot serve a single request without a netldi either.
 
-Those six also need **spare login slots**, which is the likeliest reason for a failure that is
+Those seven also need **spare login slots**, which is the likeliest reason for a failure that is
 nothing to do with the code: each spawns worker gems of its own, so a stone whose `StnMaxSessions`
 is already consumed by running servers fails them with *"the maximum number of users are already
 logged in."* Stop the servers, or raise the limit, before reading such a failure as a regression.
