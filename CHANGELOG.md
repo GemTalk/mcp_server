@@ -17,6 +17,14 @@ reasoning has nowhere better to live, not that the entry should grow.
 
 ## Unreleased
 
+* **`list_python_methods` no longer drops `*args`, `**kwargs`, `/` and `*` from a signature.** The
+  renderer read each parameter's name and default out of the class's signature table and ignored its
+  *kind*, so `call(a, /, b, *args, key=None, **kwargs)` was answered as
+  `call(a, b, args, key=None, kwargs)` — not a signature with a piece missing but a well-formed one
+  for a *different* method, which a reader cannot tell from a real one and from which every call
+  written is a `TypeError`. Signatures are now written the way `inspect.signature` writes them.
+  No option to set, and nothing else changed.
+
 * **The supported images are now 3.7.5 and 3.7.6+.** The server's view handling relies on their
   implementation of `System continueTransaction`, which earlier images implement differently in
   ways nothing in `src/` can detect or work around. The measurements are in

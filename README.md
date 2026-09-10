@@ -481,12 +481,16 @@ an image without Grail. Once loaded the toolset joins the default tool surface a
 > by the generation guard after a Grail install.
 >
 > **`list_python_methods` carries what a selector cannot.** `pop(key, default=None)` compiles to the
-> Smalltalk selector `_pop:kw:`, and `__setitem__(key, value)` to `__setitem__:_:` — arity survives,
-> names and defaults do not. So signatures come from the class's own signature table, and the
-> selector is only a fallback (the tool says so when it had to use one). Reading a name *off* a
-> selector is done by recognising the whole encoding: truncating at the first colon is a documented
-> way to invent attributes that do not exist — it manufactured `perform`, `value` and `with` on 40 of
-> 42 subjects in Grail's own `dir()` census.
+> Smalltalk selector `_pop:kw:` and `update(*args, **kwargs)` to `_update:kw:` — the same shape,
+> because the generated glue takes a positional array and a kwargs dict whatever the Python
+> signature was; `__setitem__(key, value)` becomes `__setitem__:_:`. Arity is the most a selector
+> carries and often not even that. The names, the defaults, and which parameters are `*args`,
+> `**kwargs`, positional-only or keyword-only all come from the class's own signature table, and
+> the signature is written the way `inspect.signature` writes it, `/` and bare `*` included — so a
+> signature here can be called as it reads. The selector is only a fallback (the tool says so when
+> it had to use one). Reading a name *off* a selector is done by recognising the whole encoding:
+> truncating at the first colon is a documented way to invent attributes that do not exist — it
+> manufactured `perform`, `value` and `with` on 40 of 42 subjects in Grail's own `dir()` census.
 >
 > **`python_module_state` answers a question CPython has no vocabulary for.** A Grail module is a
 > compiled artifact in the *database*. It can be committed (deployed) or merely session-built; its
