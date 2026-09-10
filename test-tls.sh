@@ -36,6 +36,14 @@ KEY="$(pwd)/certs/server.key"
 TOPAZ="$GEMSTONE/bin/topaz"
 SERVER_LOG="$(mktemp -t gsmcp-tls-server.XXXXXX)"
 
+# GemStone's own bin/ ships an openssl built with a compiled-in OPENSSLDIR
+# (/usr/local/ssl) that does not exist outside GemStone's own build environment.
+# $GEMSTONE/bin is on PATH ahead of the system directories (every caller of this
+# script needs GemStone's own binaries first), so a plain `openssl` resolves to
+# that one and fails to read its own config -- not the system openssl this
+# script actually wants. Resolve explicitly with $GEMSTONE/bin filtered out.
+OPENSSL="$(PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -vF "$GEMSTONE/bin" | paste -sd: -)" command -v openssl)"
+
 PASS=0; FAIL=0; SID=""
 
 cleanup() {
@@ -74,11 +82,17 @@ echo
 # ---------------------------------------------------------------------------
 echo "[1/4] Ensuring a self-signed localhost certificate exists ..."
 if [ ! -f "$CERT" ] || [ ! -f "$KEY" ]; then
-  echo "  generating certs/server.crt + certs/server.key (self-signed, CN=localhost) ..."
+  : "${OPENSSL:?No system openssl found on PATH outside $GEMSTONE/bin}"
+  echo "  generating certs/server.crt + certs/server.key (self-signed, CN=localhost) via $OPENSSL ..."
   mkdir -p certs
-  openssl req -x509 -newkey rsa:2048 -nodes -keyout "$KEY" -out "$CERT" \
+  OPENSSL_OUT="$("$OPENSSL" req -x509 -newkey rsa:2048 -nodes -keyout "$KEY" -out "$CERT" \
     -days 825 -subj "/CN=localhost" \
-    -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" >/dev/null 2>&1
+    -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" 2>&1)"
+  if [ ! -f "$CERT" ] || [ ! -f "$KEY" ]; then
+    echo "  ERROR: openssl did not produce certs/server.crt + certs/server.key:" >&2
+    printf '%s\n' "$OPENSSL_OUT" | sed 's/^/      /' >&2
+    exit 1
+  fi
   chmod 600 "$KEY"
 else
   echo "  using existing certs/server.crt + certs/server.key"

@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
 
 permissions:
   contents: read
@@ -140,8 +141,19 @@ jobs:
       - name: Run wire-level integration test
         run: ./test.sh
 
+      - name: Run wire-level integration test over TLS
+        run: ./test-tls.sh
+
       - name: Stop Stone and NetLDI
         if: always()
         run: |
           stopnetldi gs64ldi || true
           echo swordfish | stopstone gs64stone DataCurator -i || true
+
+  all-checks-passed:
+    name: "All Checks Passed"
+    needs: [lint-workflows, test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Success
+        run: echo "All required checks have completed successfully!"

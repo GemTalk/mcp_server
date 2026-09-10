@@ -12,6 +12,11 @@ breaking changes are expected and are called out rather than shimmed.
 
 ## Unreleased
 
+* **The supported images are now 3.7.5 and 3.7.6+.** The server's view handling relies on their
+  implementation of `System continueTransaction`, which earlier images implement differently in
+  ways nothing in `src/` can detect or work around. The measurements are in
+  [docs/GemStone_Notes.md](docs/GemStone_Notes.md#version-to-version-differences). No code changed.
+
 * **`run_python_tests` no longer dies on memory, and says so when it does.** The tool runs Grail's
   SUnit classes in a forked gem, and how much temporary object memory that gem gets was *the host's*
   choice: the product default for `GEM_TEMPOBJ_CACHE_SIZE` is 50MB, and a NetLDI started with a

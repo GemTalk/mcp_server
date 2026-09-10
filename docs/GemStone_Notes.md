@@ -508,6 +508,68 @@ Consequence for reading old results: a green 3.7.2 `test.sh` on an older commit 
 of absence. It passed once only because a smaller class put the method being checked inside the good
 first kilobyte.
 
+**3.7.2's `System continueTransaction` is a weaker operation than 3.7.5's**, in two ways that
+together are why this project stopped developing for 3.7.2. `(System class compiledMethodAt:
+#continueTransaction) sourceString` is byte-identical on 3.7.2, 3.7.5 and 3.7.6, so the whole
+difference lives in the `_zeroArgPrim: 9` stone primitive — below the image, where no `respondsTo:`
+or other feature test can reach it. Both were measured with two **real** gems (topaz plus a
+`GsTsExternalSession`) and reduce to a one-slot `Array`: no method dictionaries, no toolset, nothing
+of this project's own involved.
+
+**(1) A successful refresh does not rebase the conflict baseline.** S1 reads X; S2 commits a change
+to X; S1 sends `continueTransaction`; S1 writes X; S1 commits:
+
+| | 3.7.2 | 3.7.5 / 3.7.6 |
+|---|---|---|
+| `continueTransaction` answers | `true` | `true` |
+| S1's view of X afterwards | S2's value | S2's value |
+| S1's following commit | **`false`**, `#'Write-Write'` naming X | **`true`** |
+
+The view moves on both. But on 3.7.2 the write-write intersection is still taken against the commit
+record the transaction *started* at, so a write S1 has already adopted still counts as concurrent.
+Substituting `abortTransaction` for the `continueTransaction` makes 3.7.2 behave exactly like 3.7.5,
+which is what isolates this to the primitive rather than to anything about the objects written.
+
+This is **not** read protection, and 3.7.2 is not the safer image for having it. Writing an object
+the other session did not touch commits just as cleanly on 3.7.2 as on 3.7.5, so the laundering
+described under [Transactions and conflicts](#transactions-and-conflicts) still happens there in
+every case where the write lands somewhere other than the read — which is the shape
+[blind-write-guardrail.md](blind-write-guardrail.md) exists to cover. 3.7.2 refuses only the
+same-object case, and refuses it spuriously: the session had legitimately adopted the newer version
+before writing. Fails `testTheStoneAloneWouldAllowThatClobber` — which is written to fail on good
+news, and on 3.7.2 is reporting something that is not good news — and
+`testRefreshAdoptsTheOtherVersionAsTheStartingPoint`.
+
+**(2) A failed refresh does not record its failure.** More precisely, 3.7.2's `continueTransaction`
+never writes `System transactionConflicts at: #commitResult` at all, in either direction:
+
+| `#commitResult` after… | 3.7.2 | 3.7.5 / 3.7.6 |
+|---|---|---|
+| a fresh login | `#success` | `#success` |
+| a **successful** `continueTransaction` | `#success` | `#readOnly` |
+| a **failed** `continueTransaction` (S1 wrote X, S2 committed over it) | **`#success`** | **`#failure`** |
+
+The `false` answer itself does arrive on both, so the tool layer still sees the refusal in the
+moment; what 3.7.2 loses is the durable trace of it. `McpToolset class>>commitConflictPending` tests
+for `#retryFailure or: [#failure]`, so on 3.7.2 it answers `false` for a session that is genuinely
+stuck — view moved, pending writes doomed, no commit possible — and everything gated on it goes
+quiet: `McpDispatcher>>transactionStateNote` emits no `[session]` line, and
+`McpServer>>stuckViewReason` finds no reason to report. Fails
+`testAFailedRefreshClearsTheWritesAndReChecksTheReads`,
+`testAServerRefreshOfDoomedWorkSaysSoAndNamesWhatCollided` and
+`testAClientWhoseWorkWasDoomedIsNotToldItsOwnCommitFailed`. Note that the reverse hazard the
+`commitConflictPending` comment warns about — reading `not #success` and so calling a session jammed
+from its first successful refresh onward — cannot occur on 3.7.2, because the `#readOnly` that
+causes it is never set there either.
+
+Consequence, and the reason to drop 3.7.2 rather than work around it: on 3.7.2 the server cannot see
+a session that its own front-end maintenance refresh has doomed. That client is told nothing — no
+`[session]` line, no named collision, no "abort is the only way out" — so the worst state the
+session layer knows how to explain is exactly the one it goes silent for. Unlike #51438, which the
+image can at least detect and cover from inside, there is nothing here to test for: the selector
+exists on every version, answers a plausible Boolean, and differs only in the state it leaves
+behind.
+
 ## Where to look things up
 
 **The product tree ships the kernel in readable form** — grepping it beats a live-image round trip,
