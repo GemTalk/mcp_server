@@ -149,3 +149,11 @@ jobs:
         run: |
           stopnetldi gs64ldi || true
           echo swordfish | stopstone gs64stone DataCurator -i || true
+
+  all-checks-passed:
+    name: "All Checks Passed"
+    needs: [lint-workflows, test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Success
+        run: echo "All required checks have completed successfully!"
