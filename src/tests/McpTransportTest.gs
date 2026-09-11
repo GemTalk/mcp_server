@@ -553,6 +553,7 @@ testConfigJsonRoundTrips
   | src dst |
   src := McpRouter new.
   src workerUserId: 'McpReadOnly';
+    reapWriteLockHolders: true;
     requestTimeoutSeconds: 5;
     allowedOriginHosts: #('example.com');
     workerClassName: 'McpServer';
@@ -566,6 +567,7 @@ testConfigJsonRoundTrips
   "the worker's GemStone user is a plain IDENTIFIER, which is why it is allowed on the fixed key
    allow-list at all -- no credential travels with it (McpSession>>startWithId:workerUser:)"
   self assert: dst workerUserId equals: 'McpReadOnly'.
+  self assert: dst reapWriteLockHolders.
   self assert: dst allowedOriginHosts equals: #('example.com').
   self assert: dst workerClassName equals: 'McpServer'.
   self assert: dst toolsetNames equals: #('McpBrowsingToolset').
@@ -581,6 +583,7 @@ testConfigJsonRoundTrips
   "an unconfigured router round-trips to its safe defaults -- workers as the front end's own user,
    loopback origins, trace off"
   self assert: (McpRouter new applyConfigJson: McpRouter new configJson) workerUserId isNil.
+  self deny: (McpRouter new applyConfigJson: McpRouter new configJson) reapWriteLockHolders.
   self deny: (McpRouter new applyConfigJson: McpRouter new configJson) messageTrace
 %
 category: 'tests'

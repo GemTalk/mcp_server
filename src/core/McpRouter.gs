@@ -12,7 +12,8 @@ McpBase subclass: 'McpRouter'
                     reapOnFailedProbe streamLossGraceSeconds messageTrace messageTraceLimit
                     requestTimeoutSeconds callChannels callMutex callCounter
                     frontEndTransactionMode maxCommitsBehind sessionAccessWarned maintenanceCallTimeoutSeconds
-                    stuckViewGraceSeconds pinnedViewGraceSeconds maxSessions sessionsOpening)
+                    stuckViewGraceSeconds pinnedViewGraceSeconds maxSessions sessionsOpening
+                    reapWriteLockHolders)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -465,6 +466,7 @@ applyConfig: aConfigDict
    be written straight past the refusal into the ivar."
   (aConfigDict includesKey: 'workerUserId')
     ifTrue: [self workerUserId: (aConfigDict at: 'workerUserId')].
+  reapWriteLockHolders := aConfigDict at: 'reapWriteLockHolders' ifAbsent: [reapWriteLockHolders].
   "Through the SETTER, not the ivar: it is the one thing here whose value has a fixed vocabulary, and
    a name that is not in it must fail in the child gem rather than be handed to #asSymbol."
   (aConfigDict includesKey: 'frontEndTransactionMode')
@@ -677,6 +679,7 @@ configDict
   d at: 'tlsCertificateFile' put: tlsCertificateFile.
   d at: 'tlsPrivateKeyFile' put: tlsPrivateKeyFile.
   d at: 'workerUserId' put: workerUserId.
+  d at: 'reapWriteLockHolders' put: reapWriteLockHolders.
   d at: 'frontEndTransactionMode' put: frontEndTransactionMode.
   d at: 'workerClassName' put: workerClassName.
   d at: 'toolsetNames' put: toolsetNames.
@@ -1088,6 +1091,7 @@ initialize
   tlsCertificateFile := nil.
   tlsPrivateKeyFile := nil.
   workerUserId := nil.    "nil = the front end gem's own user"
+  reapWriteLockHolders := false.   "off: a write lock is legitimate in some applications"
   workerClassName := nil.  "nil = McpServer"
   toolsetNames := nil.     "nil = the core default surface (McpServer defaultToolsetNames), resolved per session"
   toolsetOptions := nil.   "nil = no toolset needs configuring, which is the ordinary case"
@@ -1329,9 +1333,13 @@ maintainSessions
      * there is no pass that times out server-initiated requests, because a probe is counted at the
        moment it is SENT (McpSession>>noteProbeSent) and an inadmissible one has its count taken back
        at stream handover (#retirePendingProbesFor:) -- so nothing is waiting on a clock to be
-       declared unanswered."
+       declared unanswered.
+   #maintainWriteLockHolders sits between them because it is the one arm that must act on a BUSY
+   session: the reap in step 3 never touches one (see #reapReasonFor:), and a session holding locks
+   inside a long call is exactly the case that matters."
   self refreshFrontEndView.
   self maintainViewHygiene.
+  self maintainWriteLockHolders.
   self probeIdleSessions.
   ^self reapIdleSessions
 %
@@ -1456,6 +1464,40 @@ maintainViewHygiene
       do: [:e | self log: 'maintainViewHygiene error: ' ,
              ([e description] on: Error do: [:x | e class name asString])]].
   ^acted
+%
+category: 'write locks'
+method: McpRouter
+maintainWriteLockHolders
+  "End the in-flight call of any BUSY session found holding write locks, and answer how many were
+   asked. Off unless #reapWriteLockHolders is set.
+   This arm exists only for the busy case. An IDLE lock holder is reaped by #reapReasonFor: in the
+   same pass, which is where the policy lives; but that method answers nil for a busy session on
+   every ground -- deliberately, since reaping one would log its gem out from under a running
+   request -- and a session that took a lock and is still inside a long call is precisely the one an
+   adversary would arrange. Waiting for it to go idle is not a bound: a client that keeps calling
+   never does, and one client can hold several sessions.
+   Ending the call does not release the locks; they belong to the SESSION. What it does is tell the
+   client why, with a kind it can branch on (McpSession class>>endedCallKinds, #lockRelease), instead
+   of leaving it to meet a bare 404 later. The session is then no longer busy, so the NEXT pass reaps
+   it on the ordinary ground -- unless the break could not be taken at all, in which case
+   #endCallBecause: has already stopped the gem, which releases the locks outright.
+   Asking only sets a flag (McpSession>>requestLockRelease); the ending is done by the GsProcess that
+   owns the worker mutex, on its next wait. Same shape as the pinned-view arm above."
+  | asked |
+  self reapWriteLockHolders ifFalse: [^0].
+  asked := 0.
+  (mutex critical: [sessions values asArray]) do: [:sess |
+    [ (sess isBusy and: [sess writeLockCount > 0]) ifTrue: [
+        (sess requestLockRelease) ifTrue: [
+          asked := asked + 1.
+          self log: 'write locks: ending the call in session ' , sess id printString
+            , ' -- its worker gem holds ' , sess writeLockCount printString
+            , ' write lock(s), which block other sessions from committing. '
+            , 'The session will be released.']] ]
+      on: Error
+      do: [:e | self log: 'maintainWriteLockHolders error: ' ,
+             ([e description] on: Error do: [:x | e class name asString])]].
+  ^asked
 %
 category: 'view hygiene'
 method: McpRouter
@@ -2022,6 +2064,9 @@ reapReasonFor: sess
        aborted so that it is LOUD -- logged here, and a 404 on the client's next call -- where a
        silent abort would leave a live session working from a view it never chose."
   sess isBusy ifTrue: [^nil].
+  (self reapWriteLockHolders and: [sess writeLockCount > 0]) ifTrue: [
+    ^'it held ' , sess writeLockCount printString
+      , ' write lock(s), which block other sessions from committing'].
   sess isExpired ifTrue: [^'its access credential expired'].
   (sess streamClosedByClient and: [sess outbox hasStream not])
     ifTrue: [^'its client closed the event stream and did not reopen one'].
@@ -2044,6 +2089,34 @@ reapReasonFor: sess
     ifTrue: [^'no event stream was open to ping it for over '
       , (self phraseForSeconds: self streamlessIdleTimeoutSeconds)].
   ^nil
+%
+category: 'write locks'
+method: McpRouter
+reapWriteLockHolders
+  "Whether this router ends a session as soon as it is found holding a GemStone WRITE LOCK. Default
+   false.
+   WHAT A LOCK DOES, and why this exists. System writeLock: is gated by no privilege, so any session
+   that can run code can take one -- including a browsing-only worker that cannot change anything
+   (McpRouter>>workerUserId). A lock changes nothing itself; it stops every OTHER session on the
+   repository from COMMITTING the objects it covers, for as long as the locking session lives.
+   Measured on 3.7.5: a commit-locked, privilege-less worker locked McpServer's method dictionary and
+   a DataCurator session's compile-and-commit then failed with Write-WriteLock; one execute_code
+   statement walking Globals took 2,291 locks. So the worst a confined session can do is not to
+   change the repository but to stop everyone else changing it.
+   Nothing else here bounds that on any useful timescale. Locks die with the gem, and the reaper does
+   collect idle sessions -- but a client that keeps calling never becomes idle, and one client can
+   hold several sessions, so idleness is not a bound an adversary has to respect.
+   OFF BY DEFAULT because a lock is legitimate in an application that takes one deliberately: this
+   would end that session mid-call. Turn it on wherever a session's user is confined and a lock could
+   only be an attack -- which is exactly the browsing-only deployment docs/read-only-user.md
+   describes."
+  ^reapWriteLockHolders
+%
+category: 'write locks'
+method: McpRouter
+reapWriteLockHolders: aBoolean
+  "End sessions found holding write locks (see #reapWriteLockHolders)."
+  reapWriteLockHolders := aBoolean
 %
 category: 'transaction mode'
 method: McpRouter

@@ -46,6 +46,18 @@ reasoning has nowhere better to live, not that the entry should grow.
   risk of granting it, the cost of withholding it, and what remains open afterwards (broad reads;
   a session can take a write lock that blocks *other* sessions' commits; resource use).
 
+* **`MCP_REAP_LOCK_HOLDERS` ends sessions that hold GemStone write locks.** A session that can change
+  nothing can still take a write lock, which blocks *other* sessions from committing the objects it
+  covers — measured: a commit-locked, privilege-less worker locked `McpServer`'s method dictionary and
+  a `DataCurator` compile-and-commit then failed `Write-WriteLock`; one `execute_code` statement
+  walking `Globals` took 2,291 locks. Idleness is no bound on it, because a client that keeps calling
+  never goes idle and one client can hold several sessions. `McpRouter>>reapWriteLockHolders`
+  (default **off**) makes holding a lock the ground for ending a session, with no grace period:
+  an idle holder is reaped on the next pass, and a busy one — the case an adversary would arrange —
+  has its call ended first by `maintainWriteLockHolders`, so the client is answered with the new
+  `lockRelease` ended-call kind instead of a bare 404. Off by default because an application may take
+  a lock deliberately. See [docs/read-only-user.md](docs/read-only-user.md).
+
 * **The `[session]` line no longer tells a commit-locked session to commit.** Where
   `System sessionCanCommit` is false, pending work is reported as uncommittable and the line points
   at `abort` — previously it advised `commit`, which such a session can only ever fail.

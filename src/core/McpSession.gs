@@ -11,7 +11,7 @@ Object subclass: 'McpSession'
                     passesSinceProbe streamClosedByClient requestTimeoutSeconds workerAbandoned
                     inFlightRequestId cancelRequested waitAction commitsBehind
                     maintenanceCallTimeoutSeconds stuckViewPasses stuckViewReason pinnedViewPasses
-                    viewReleaseRequested)
+                    viewReleaseRequested lockReleaseRequested)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -71,10 +71,11 @@ endedCallKinds
      #cancelled    the client said it no longer wants it
      #maintenance  the front end's own send into the worker did not answer in time
      #viewRelease  its view was pinning the repository's oldest commit record under real pressure
+     #lockRelease  its session held write locks, which block OTHER sessions from committing
    #maintenance cannot reach a client -- a maintenance send only happens when no client call is in
    flight -- and is named here anyway, because a list that is the definition of a category should not
    omit a member on the grounds that one caller cannot see it."
-  ^#( #timeout #cancelled #maintenance #viewRelease )
+  ^#( #timeout #cancelled #maintenance #viewRelease #lockRelease )
 %
 category: 'ended calls'
 classmethod: McpSession
@@ -174,6 +175,8 @@ awaitWorkerResultUntil: aDeadlineOrNil because: aReasonSymbol
       ifTrue: [^self endCallBecause: #cancelled].
     (worker isCallInProgress and: [viewReleaseRequested == true])
       ifTrue: [^self endCallBecause: #viewRelease].
+    (worker isCallInProgress and: [lockReleaseRequested == true])
+      ifTrue: [^self endCallBecause: #lockRelease].
     (worker isCallInProgress and: [aDeadlineOrNil notNil and: [System timeGmt >= aDeadlineOrNil]])
       ifTrue: [^self endCallBecause: aReasonSymbol]].
   ^self
@@ -298,6 +301,12 @@ endingPhraseFor: aReasonSymbol
   aReasonSymbol == #maintenance ifTrue: [
     ^'This server''s own maintenance call into the worker gem did not finish within '
       , self maintenanceCallTimeoutSeconds printString , ' seconds and was ended. '].
+  aReasonSymbol == #lockRelease ifTrue: [
+    ^'This request was ended, and this session is being closed, because it holds WRITE LOCKS on '
+      , 'committed objects. A write lock changes nothing by itself, but it stops every OTHER '
+      , 'session on this repository from committing the objects it covers, for as long as this '
+      , 'session lives -- so it is not something a session here may hold. Locks are released when '
+      , 'the session ends; open a new one to continue. '].
   aReasonSymbol == #viewRelease ifTrue: [
     ^'This request was ended because its database view was holding the repository''s oldest commit '
       , 'record open while the repository was over its commit-record backlog threshold, and no other '
@@ -384,12 +393,13 @@ forward: aRawJsonString lifetimeBounds: anArrayOrNil requestId: anIdOrNil progre
   ^[inFlightRequestId := anIdOrNil.
     cancelRequested := false.
     viewReleaseRequested := false.
+    lockReleaseRequested := false.
     pinnedViewPasses := 0.
     waitAction := aBlockOrNil.
     self runWorker: (self workerExpressionFor: aRawJsonString lifetimeBounds: anArrayOrNil
       progressCallId: aCallIdOrNil)]
       ensure: [inFlightRequestId := nil. cancelRequested := false. viewReleaseRequested := false.
-        pinnedViewPasses := 0. waitAction := nil]
+        lockReleaseRequested := false. pinnedViewPasses := 0. waitAction := nil]
 %
 category: 'accessing'
 method: McpSession
@@ -436,6 +446,7 @@ initialize
   stuckViewReason := nil.
   pinnedViewPasses := 0.
   viewReleaseRequested := false.
+  lockReleaseRequested := false.
   ^self
 %
 category: 'activity'
@@ -737,6 +748,23 @@ requestCancel: anId
   cancelRequested := true.
   ^true
 %
+category: 'write locks'
+method: McpSession
+requestLockRelease
+  "Ask for the in-flight call to be ended because this session holds write locks. Answers whether
+   there was one to end.
+   Sets a flag and NOTHING else, exactly as #requestViewRelease and #requestCancel: do and for the
+   same reason: this runs in the reaper's GsProcess while another process is inside #runWorker:
+   holding the worker mutex with a GCI call in progress. #awaitWorkerResultUntil:because: picks it up
+   on its next wait and does the ending from the process that owns the mutex.
+   Ending the call does NOT release the locks -- they are held by the SESSION and go when it logs
+   out -- so the caller reaps the session too (McpRouter>>maintainWriteLockHolders). The ending
+   exists so the client is told why, with a reason it can branch on, rather than meeting a bare 404
+   on its next call."
+  self isBusy ifFalse: [^false].
+  lockReleaseRequested := true.
+  ^true
+%
 category: 'session lifetime'
 method: McpSession
 requestTimeoutSeconds
@@ -876,7 +904,14 @@ signalCallEnded: aReasonSymbol
    both with it. It also says what an interrupted call does NOT guarantee -- it was cut partway, so
    whatever it had already done in that gem's view is still there, uncommitted. That last sentence
    matters more for a cancellation than for a deadline: a user who pressed a key to stop something
-   may well assume it did not happen, and it half did."
+   may well assume it did not happen, and it half did.
+   #lockRelease is the exception to the middle case: the call is ended AND the session is then
+   reaped, because ending the call does not release the locks -- they belong to the session. So it
+   must not be told the session is still usable, which is what the ordinary phrasing would say."
+  (aReasonSymbol == #lockRelease and: [workerAbandoned not]) ifTrue: [
+    ^McpError signalKind: aReasonSymbol message: (self endingPhraseFor: aReasonSymbol)
+      , 'This session is being released so its locks are given up, so it is finished: call '
+      , 'initialize again to continue. Anything the call had already done is discarded with it.'].
   ^McpError signalKind: aReasonSymbol message: (self endingPhraseFor: aReasonSymbol)
     , (workerAbandoned
         ifTrue: ['Its worker gem could not be interrupted and has been stopped, so this session is '
@@ -1218,4 +1253,22 @@ workerWaitSeconds
    done. It bounds the re-check interval only, not latency: the wait answers as soon as the worker
    does, because it is waiting on the session's socket."
   ^1
+%
+category: 'write locks'
+method: McpSession
+writeLockCount
+  "How many GemStone WRITE LOCKS this session's worker gem holds, or 0 if that cannot be asked.
+   STONE-SIDE, via System sessionLocks: on the worker's stone session id, rather than by sending
+   anything into the worker. Two reasons, and the first is what matters: a worker that has taken a
+   lock and is still inside a long call cannot answer a maintenance send at all, and that is exactly
+   the session this has to be able to see. The second is that it costs no round trip.
+   Only the SIZE of the answer is read. #sessionLocks: answers arrays of the locked OBJECTS, and the
+   front end is transactionless and must not fault committed objects in (see McpRouter's class
+   comment); taking size builds no such reference.
+   Guarded, answering 0 on any error, because the call needs the SessionAccess privilege, which the
+   front end's user may not have. A router that cannot ask sees every session as holding nothing --
+   fail-open, matching the default of the setting that reads this
+   (McpRouter>>reapWriteLockHolders)."
+  workerStoneSession isNil ifTrue: [^0].
+  ^[((System sessionLocks: workerStoneSession) at: 2) size] on: Error do: [:e | e return: 0]
 %

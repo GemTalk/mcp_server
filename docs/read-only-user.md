@@ -157,12 +157,12 @@ This bounds what a session can **change**. It does not make a sandbox, and three
    (measured: 19 of them). If some of the data in the repository is more sensitive than the rest,
    the answer is object security policies, not this document.
 
-2. **Locks — the sharpest residue, and the one worth understanding in detail.** See
-   [the section below](#what-a-lock-can-and-cannot-reach); briefly, a browsing-only session can take
-   a write lock on any *committed* object and thereby block **other, privileged** sessions from
-   committing changes to it. It cannot change anything; it can stop others changing things. Bounded
-   by the worker gem's lifetime, which the router already controls, and reachable only from
-   `execute_code`.
+2. **Locks** — a browsing-only session can take a write lock on any *committed* object and thereby
+   block **other, privileged** sessions from committing it. It cannot change anything; it can stop
+   others changing things. **`MCP_REAP_LOCK_HOLDERS=1` closes this** — see
+   [the section below](#what-a-lock-can-and-cannot-reach) for what a lock reaches and how the
+   setting behaves. Leave it off and the only bound is session lifetime, which an active client
+   never reaches.
 
 3. **Resources.** A loop, a full-repository scan, temp object space, cache churn, and a pinned view.
    Bounded by the router's call and session lifetimes (`docs/session-lifetime.md`), not by privileges.
@@ -236,6 +236,57 @@ Locking a transient object "succeeds" and means nothing: no other session can se
 there is nothing for the lock to exclude. (This is the same property that lets two differently
 configured routers run at once with no shared state.)
 
+## Ending lock holders automatically: `MCP_REAP_LOCK_HOLDERS`
+
+**Idleness is not a bound.** Locks die with the gem, and the reaper does collect idle sessions — but a
+client that keeps calling never goes idle, and one client can hold several sessions at once. Waiting
+for quiet is waiting for something an adversary need never give you.
+
+So `McpRouter>>reapWriteLockHolders` (`MCP_REAP_LOCK_HOLDERS=1`) makes holding a write lock itself the
+ground for ending a session, with **no grace period and no idleness test**:
+
+```bash
+MCP_WORKER_USER=McpReadOnly MCP_REAP_LOCK_HOLDERS=1 ./run-server.sh
+```
+
+* An **idle** holder is reaped on the next maintenance pass — the ground lives in
+  `McpRouter>>reapReasonFor:` with all the others.
+* A **busy** holder — one that took a lock and stayed inside a long call, which is what an adversary
+  would actually do — is reached by `McpRouter>>maintainWriteLockHolders`. The reap deliberately never
+  touches a busy session, so this arm ends its call first, the way the pinned-view arm does.
+
+The client is told, rather than left to meet a bare 404. Measured over the wire, with a session that
+locked `Object` and then sat in a 120-second `Delay`, on a router with a 10-second pass:
+
+```
+after 10s
+kind: lockRelease
+This request was ended, and this session is being closed, because it holds WRITE LOCKS on committed
+objects. ... This session is being released so its locks are given up, so it is finished: call
+initialize again to continue.
+```
+
+`#lockRelease` is a first-class ended-call kind (`McpSession class>>endedCallKinds`), so a client can
+branch on it. The gem log records both steps:
+
+```
+write locks: ending the call in session '0CF…' -- its worker gem holds 2 write lock(s) ... The session will be released.
+Reaped MCP session '0CF…' -- it held 2 write lock(s), which block other sessions from committing.
+```
+
+**It is OFF by default**, because a write lock is legitimate in an application that takes one
+deliberately, and this would end that session mid-call. Turn it on wherever the worker's user is
+confined and a lock could only be an attack — which is exactly the deployment this document
+describes. The bound it gives is the maintenance interval (`MCP_REAPER_INTERVAL`, default 60s), not
+zero: a lock can be held for up to one pass before the router sees it.
+
+The count is read **stone-side** (`McpSession>>writeLockCount` → `System sessionLocks:` on the
+worker's stone session id), never by sending into the worker — because a worker inside a long call
+cannot answer a maintenance send, and that is precisely the session that has to be seen. Only the
+*size* of the answer is taken, so the transactionless front end never faults a committed object in.
+It needs `SessionAccess`; a front end whose user lacks it sees every session as holding nothing, which
+is the same fail-open as the default.
+
 ## Identifying and clearing a lock holder
 
 The holder **is** identifiable, today, with no code in this project — which is what makes this
@@ -252,22 +303,10 @@ System systemLocksDetailedReport.
 System stopSession: 6.                   "ends it; the locks go with it"
 ```
 
-`System systemLocks` and `System sessionLocks: <id>` give the same information unformatted.
-
-**And the router already does this on its own.** Locks are released when the holding gem logs out, and
-the session reaper logs idle workers out on the schedule in `docs/session-lifetime.md`. Measured: a
-session holding all 2,291 locks was reaped for having no event stream open, and
-`systemLocksDetailedReport` went from 2,299 write locks to `no locks` with no operator action. So the
-exposure is bounded by session lifetime rather than being indefinite — which is exactly why the idle
-and lifetime settings are worth configuring deliberately on a deployment that hands `execute_code` to
-anyone less than trusted.
-
-What does **not** exist yet is an on-demand path: nothing lets an operator say "whoever holds this
-lock, reap that MCP session". The pieces are there — `McpSession` caches its worker's stone session id
-(`cacheWorkerIds`, used by `stopWorkerGem`), so a router could map a stone session id from
-`systemLocksDetailedReport` back to an MCP session and end it. Until then, `System stopSession:` on
-the stone session id does the same job one level down, and the worker gem's death is noticed by the
-front end the way any other dead worker is.
+`System systemLocks` and `System sessionLocks: <id>` give the same information unformatted. The front
+end notices a stopped worker the way it notices any other dead one, so this is safe to do to a live
+MCP session. This is also the escape hatch when `MCP_REAP_LOCK_HOLDERS` is off, or when the holder is
+not an MCP session at all.
 
 ## Provisioning
 

@@ -55,6 +55,8 @@
 #    object authorization: give a read-only analyst a read-only UserProfile. See
 #    docs/read-only-user.md, and ./setup-read-only-user.sh for a user to model one on. MCP_WRITE_SCOPE
 #    and MCP_READONLY existed here until the release after 0.8.0; they are now ignored if set.)
+#   MCP_REAP_LOCK_HOLDERS - 1 to end any session found holding a GemStone WRITE LOCK (default 0).
+#                         Same setting and same reasoning as run-server.sh; see docs/read-only-user.md.
 #   MCP_TOOLSETS        - space-separated McpToolset names to expose instead of the default surface
 #                         (the core seven, McpServer class>>defaultToolsetNames). Same variable and
 #                         same meaning as run-server.sh. Needed to serve an OPTIONAL toolset at all,
@@ -198,6 +200,8 @@ for s in $MCP_EXTRA_SCOPES; do EXTRA_ST="$EXTRA_ST '$s'"; done
 # cascade; a guard on it would be unreachable after the check above.
 EXTRA_LINE=""
 [ -n "$MCP_EXTRA_SCOPES" ] && EXTRA_LINE="r extraScopes: #($EXTRA_ST )."
+LOCKS_LINE=""
+[ "${MCP_REAP_LOCK_HOLDERS:-0}" = "1" ] && LOCKS_LINE="r reapWriteLockHolders: true."
 BIND_LINE=""
 [ -n "$MCP_BIND_ADDRESS" ] && BIND_LINE="r bindAddress: '$MCP_BIND_ADDRESS'."
 # Message tracing; both settings travel to the forked gem in the config (McpRouter>>configDict).
@@ -273,6 +277,7 @@ r userIdClaim: '$MCP_USERID_CLAIM';
   authorizationServers: #( '$MCP_ISSUER' );
   useTlsCertificateFile: '$MCP_TLS_CERT' privateKeyFile: '$MCP_TLS_KEY'.
 $EXTRA_LINE
+$LOCKS_LINE
 $VIEW_HYGIENE_LINES
 $BIND_LINE
 $TRACE_LINE

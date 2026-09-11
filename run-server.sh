@@ -36,6 +36,14 @@
 #                     No password is needed here: the front end mints a one-time password for the
 #                     named user, which requires one committed grant that setup-read-only-user.sh
 #                     makes:  (AllUsers userWithId: '$GS_USER') addOnetimePasswordUserId: '<user>'
+#   MCP_REAP_LOCK_HOLDERS - 1 to end any session found holding a GemStone WRITE LOCK (default 0).
+#                     A lock is ungated by privilege and changes nothing itself, but it stops every
+#                     OTHER session on the repository from committing the objects it covers for as
+#                     long as the locking session lives -- the one real thing a confined session can
+#                     still do to everyone else. Idleness is no bound on it: a client that keeps
+#                     calling never goes idle. OFF by default because an application may take a lock
+#                     deliberately; turn it on together with MCP_WORKER_USER, where a lock could only
+#                     be an attack. See docs/read-only-user.md.
 #   MCP_WORKER_CLASS - McpServer subclass the workers should instantiate (default McpServer).
 #                     Subclass to change BEHAVIOR; to add tools write a toolset instead.
 #   MCP_TOOLSETS - space-separated McpToolset names to expose instead of the default surface,
@@ -109,6 +117,7 @@ GS_USER="${GS_USER:-DataCurator}"
 GS_PASS="${GS_PASS:-swordfish}"
 MCP_PORT="${MCP_PORT:-8000}"
 MCP_WORKER_USER="${MCP_WORKER_USER:-}"
+MCP_REAP_LOCK_HOLDERS="${MCP_REAP_LOCK_HOLDERS:-0}"
 MCP_WORKER_CLASS="${MCP_WORKER_CLASS:-}"
 MCP_TOOLSETS="${MCP_TOOLSETS:-}"
 MCP_GRAIL_DIR="${MCP_GRAIL_DIR:-}"
@@ -218,6 +227,10 @@ fi
 if [ -n "$MCP_TITLE" ]; then
   CONFIG="$CONFIG
 r serverTitle: '$(printf '%s' "$MCP_TITLE" | sed "s/'/''/g")'."
+fi
+if [ "$MCP_REAP_LOCK_HOLDERS" = "1" ]; then
+  CONFIG="$CONFIG
+r reapWriteLockHolders: true."
 fi
 if [ -n "$MCP_WORKER_USER" ]; then
   # Doubled quotes rather than rejected characters: a userId is an identifier, but this is the same

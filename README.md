@@ -770,9 +770,16 @@ all raise. Reads and compiling still work, which is what makes the browsing surf
 
 **[docs/read-only-user.md](docs/read-only-user.md) is the reference**: every privilege, what it does,
 the risk of granting it, the cost of withholding it — and, just as important, what is **still open**
-afterwards (reads are broad; a session can take a write lock that blocks *other* sessions' commits;
-resource consumption is bounded only by session lifetime). Read it before pointing an untrusted
-client at this.
+afterwards (reads are broad; resource consumption is bounded only by session lifetime). Read it
+before pointing an untrusted client at this.
+
+One residue has its own switch. A session that can change nothing can still take a GemStone **write
+lock**, which blocks *other* sessions from committing the objects it covers — and idleness is no bound
+on that, since a client that keeps calling never goes idle.
+`MCP_REAP_LOCK_HOLDERS=1` ends any session found holding one, with no grace period: an idle holder is
+reaped, and a busy one has its call ended first so the client is told why (error kind `lockRelease`).
+Off by default, because an application may take a lock deliberately; turn it on alongside
+`MCP_WORKER_USER`, where a lock could only be an attack.
 
 `McpAuthRouter` **refuses** `workerUserId:` — there each worker logs in as the user its bearer token
 names, so restricting an analyst means giving *that* GemStone user a restricted profile. (It had a
