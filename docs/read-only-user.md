@@ -157,25 +157,12 @@ This bounds what a session can **change**. It does not make a sandbox, and three
    (measured: 19 of them). If some of the data in the repository is more sensitive than the rest,
    the answer is object security policies, not this document.
 
-2. **Locks — the sharpest residue, and measured end to end.** From a worker gem running as the
-   provisioned `McpReadOnly` (commit-locked, five privileges, *unable to write the object at all*),
-   `System writeLock:` on a shared object in `Mcp` **succeeded**. While that lock was held, a
-   `DataCurator` MCP session changed the same object and its commit **failed**:
-
-   ```
-   Commit failed on conflict: Write-WriteLock(1). Nothing was written.
-   ```
-
-   So a browsing-only session cannot change the repository but *can stop other sessions changing it*,
-   for as long as the worker gem lives. Stopping the server released it.
-
-   This is worth stating plainly because the obvious reassurances do not apply. It is not answered by
-   every session being the same user, and it is not answered by those sessions being unable to
-   commit — the victim is a **different, privileged** session elsewhere on the stone, and what it
-   loses is its own ability to commit. Nothing in the privilege system gates locking. What bounds it
-   is session lifetime, which the router already controls (the reaper,
-   `McpSession>>stopWorkerGem`, `docs/session-lifetime.md`), and the fact that only `execute_code`
-   can reach it — no tool in the surface takes a lock.
+2. **Locks — the sharpest residue, and the one worth understanding in detail.** See
+   [the section below](#what-a-lock-can-and-cannot-reach); briefly, a browsing-only session can take
+   a write lock on any *committed* object and thereby block **other, privileged** sessions from
+   committing changes to it. It cannot change anything; it can stop others changing things. Bounded
+   by the worker gem's lifetime, which the router already controls, and reachable only from
+   `execute_code`.
 
 3. **Resources.** A loop, a full-repository scan, temp object space, cache churn, and a pinned view.
    Bounded by the router's call and session lifetimes (`docs/session-lifetime.md`), not by privileges.
@@ -207,6 +194,80 @@ One committed grant, made by `setup-read-only-user.sh`, requiring `OtherPassword
 user. This is what lets `McpRouter>>configDict` carry only the worker user's **name** — it is an
 identifier, and the fork string stays free of key material. Without the grant the mint raises and the
 failure surfaces at session open, not mid-conversation.
+
+## What a lock can and cannot reach
+
+`System writeLock:` is not gated by any privilege, so the browsing-only user has it. This section is
+what that actually buys an attacker, measured against the provisioned `McpReadOnly`.
+
+**A write lock blocks other sessions from COMMITTING the locked object.** Controlled test, with the
+restricted gem forked directly so the router's reaper could not interfere: the read-only gem locked
+*only* `McpServer`'s instance-side method dictionary, and a `DataCurator` session then compiled a
+method into `McpServer` and committed —
+
+```
+DataCurator compile+commit: false
+   conflict #'Write-WriteLock' n=1
+```
+
+So this is not limited to application data: **locking a class's method dictionary stops a privileged
+developer committing code to that class.** `install.sh` would fail the same way.
+
+**What is lockable: any committed object the session can name.** Every one of these was granted:
+
+| target | lockable |
+|---|---|
+| `McpRouter`, `McpServer` (the class objects) | yes |
+| a class's `persistentMethodDictForEnv: 0`, an individual `GsNMethod` | yes |
+| `Globals`, `AllUsers`, another user's `UserProfile` and `UserGlobals` | yes |
+| `Object` and the other kernel classes | yes |
+
+And it scales: one `execute_code` call walking `Globals` locked **2,291 objects** — every class and
+method dictionary in it, 1,528 method dictionaries among them — in a single statement.
+
+**What is NOT reachable, which is the more reassuring half.** A lock only means anything for an object
+that exists in the repository. The two objects most worth worrying about are not:
+
+* **the front end's `McpRouter` instance** — it lives in the detached router gem's memory and is never
+  committed, so no other session can reach it at all; and
+* **a worker's `McpServer` instance** — likewise transient, held in that gem's `SessionTemps`.
+
+Locking a transient object "succeeds" and means nothing: no other session can see the object, so
+there is nothing for the lock to exclude. (This is the same property that lets two differently
+configured routers run at once with no shared state.)
+
+## Identifying and clearing a lock holder
+
+The holder **is** identifiable, today, with no code in this project — which is what makes this
+survivable. From any session with `SessionAccess` (`DataCurator` has it):
+
+```smalltalk
+System systemLocksDetailedReport.
+  "session 6(
+     (1 writeLocks: 80439809(a GsMethodDictionary)))"
+
+(System descriptionOfSession: 6) at: 1.  "the UserProfile -- 'McpReadOnly'"
+(System descriptionOfSession: 6) at: 2.  "the host pid"
+
+System stopSession: 6.                   "ends it; the locks go with it"
+```
+
+`System systemLocks` and `System sessionLocks: <id>` give the same information unformatted.
+
+**And the router already does this on its own.** Locks are released when the holding gem logs out, and
+the session reaper logs idle workers out on the schedule in `docs/session-lifetime.md`. Measured: a
+session holding all 2,291 locks was reaped for having no event stream open, and
+`systemLocksDetailedReport` went from 2,299 write locks to `no locks` with no operator action. So the
+exposure is bounded by session lifetime rather than being indefinite — which is exactly why the idle
+and lifetime settings are worth configuring deliberately on a deployment that hands `execute_code` to
+anyone less than trusted.
+
+What does **not** exist yet is an on-demand path: nothing lets an operator say "whoever holds this
+lock, reap that MCP session". The pieces are there — `McpSession` caches its worker's stone session id
+(`cacheWorkerIds`, used by `stopWorkerGem`), so a router could map a stone session id from
+`systemLocksDetailedReport` back to an MCP session and end it. Until then, `System stopSession:` on
+the stone session id does the same job one level down, and the worker gem's death is noticed by the
+front end the way any other dead worker is.
 
 ## Provisioning
 
