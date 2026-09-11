@@ -23,28 +23,35 @@ time counted separately so it is visible what the demos actually cost:
 | 2–3 | Starting a server; fork, detach, transactionless | 4 | 1.5 (B) | 5.5 |
 | 4 | **Trace 1 — `initialize`** | 6 | 2 (C) | 8 |
 | 5 | **Trace 2 — `tools/call`**, and `McpJson` | 5 | 1.5 (D) | 6.5 |
-| 6 | Progress notifications | 2 | | 2 |
-| 7 | **The transaction model and the guardrail** | 6.5 | 3 (E) | 9.5 |
-| 8 | The maintenance cycle | 5 | 1.5 (F) | 6.5 |
+| 6 | Progress notifications | 1.5 | | 1.5 |
+| 7 | **The transaction model and the guardrail** | 8.2 | 3 (E) | 11.2 |
+| 8 | **The maintenance cycle** | 5.7 | 1.5 (F) | 7.2 |
 | 9 | `McpAuthRouter` | 2.5 | 2 (G) | 4.5 |
-| 10–11 | Extending it; read-only mode | 2 | | 2 |
+| 10–11 | Extending it; read-only mode | 1.5 | | 1.5 |
 | 12–13 | Versions; future work and the asks | 2.5 | | 2.5 |
-| | | **39.5** | **12.5** | **52** |
+| | | **40.9** | **12.5** | **53.4** |
 
-**52 minutes leaves 8 for questions in a 60-minute slot, which is tight** — and this audience will
-have questions, so treat 52 as the ceiling rather than the plan. Two honest observations about those
+**53.4 minutes leaves under 7 for questions in a 60-minute slot, which is tight** — and this audience
+will have questions, so treat 53.4 as the ceiling rather than the plan. **It is also 0.7 over the
+52.7 this table carried before §8 was cut**, and that is a decision rather than a rounding: §8 came
+out at 5.7 talk minutes against the 5 allowed, *after* moving request deadlines and cancellation
+into speaker notes entirely. The cheapest place to pay for it is the second half of **§12**, which
+is already first in the shed list below; the alternative is to accept ~6.6 minutes of questions. Two honest observations about those
 numbers. The demos are **a quarter of the running time** and are the first thing that will overrun,
-so each one wants a hard stop rehearsed into it. And §§4, 5, 7 and 8 are **22.5 of the 39.5 talk
-minutes — with their demos, 31 of the 52** — which is the right shape: they are the four sections
-whose content does not survive being read in the README afterwards.
+so each one wants a hard stop rehearsed into it. And §§4, 5, 7 and 8 are **24.9 of the 40.9 talk
+minutes — with their demos, 32.9 of the 53.4** — which is the right shape: they are the four
+sections whose content does not survive being read in the README afterwards.
 
 If the slot turns out to be 45 minutes, shed in this order: **§6**, then **§10–11**, then the second
 half of **§12** (keep 12.1, the `continueTransaction` measurement; #51438 and the compatibility
 leftovers can go). **Do not shed a demo to save a section** — the demos are what make the gem model
 concrete, and a section summarised in two sentences beside a live worker gem lands better than the
 same section in full with nothing on screen. If it turns out to be 90 minutes, the material to
-*add* is already listed: the `sessionGone` demo in the demo inventory, and the two tables §7 points
-at rather than reproduces.
+*add* is already listed: the `sessionGone` demo in the demo inventory, and the three measurements
+§7 now carries as speaker notes rather than slides — the seven-line clobber trace, the four-way
+refresh table, and the commit-probe discovery story — and **§8's request deadlines and cancellation**,
+which are a slide's worth of material sitting in slide 8's notes and are the single largest thing
+either cut section gave up.
 
 **Standing rule for the healthy-path half:** no commit-record pressure, no timeouts, no pending
 ledger, no progress notifications, no auth. Every one of those is a later section that comes back to
@@ -119,8 +126,10 @@ topaz file-outs.
 
 * **`./run-unit-tests.sh`** — the in-image `GsTestCase` suites, each in **its own topaz session**, so
   a suite that blows up is reported `ABORTED` under `COULD NOT RUN` rather than silencing the whole
-  report; failures are reported **by name**, and the output is coloured for CI. **466 tests** on a base install, **522** with the auth group, **561 with the 39 in
-  `McpGrailToolsetTest`** on a Grail image. Exit 0 means every test passed.
+  report; failures are reported **by name**, and the output is coloured for CI. **466 tests** on a base install, **522** with the auth group, **566 with the 44 in
+  `McpGrailToolsetTest`** on a Grail image. Exit 0 means every test passed. **Seven** of the suites
+  are not purely in-image and need a **netldi** — `McpGrailToolsetTest` joined them in the merge of
+  2026-09-10, because `run_python_tests` now forks the gem it runs Grail's classes in.
 * **`./test.sh`** — the only check that drives the tools **over the wire** with curl: `initialize`,
   the captured session id on every later request, every core tool, a compile/commit round trip, the
   error paths, the SSE GET stream, DELETE. Nothing in the unit suites covers the transport, so a
@@ -739,184 +748,98 @@ object.
 
 ---
 
-## 7. The transaction model and the blind-write guardrail (5–6 slides; the second centrepiece)
+## 7. The transaction model and the blind-write guardrail (14 slides; the second centrepiece)
 
-**Start with what the client is told**, because everything after it is enforcement of the same
-story. `McpServer class>>defaultServerInstructions` — sent in the `initialize` result, prepended to
-the model's context for the whole conversation, and deliberately about the transaction and nothing
-else. Its five headings *are* the slide:
+**This section is cut, and `docs/slides/deck.md` is the authority for it** — the running order
+below is a summary of that file rather than a plan for it, and where the two disagree the deck is
+right. It was rebudgeted to **11:10 (490s of slides + a 180s demo)** against the 9:30 this outline
+first guessed; §6 and §10–11 gave up a minute between them.
 
-* `YOUR VIEW IS A SNAPSHOT.` It moves when *you* move it — `commit`, `abort`, `refresh` — and in one
-  other case (view hygiene), which happens only **between** calls, **keeps** uncommitted changes,
-  and **tells** you on your next result.
-* `THE DATABASE PROTECTS YOU FROM ACTING ON A STALE SNAPSHOT.` …and therefore a `refresh` in the
-  middle of a plan is **not free**: it adopts the other session's version as your starting point, so
-  a change made on the strength of an earlier read will then commit cleanly and erase their work.
-* `WHAT SURVIVES A CALL.` Compile a method, run its tests against what you just compiled, *then*
-  decide. Nobody else sees any of it until you commit.
-* `NOTHING COMMITS FOR YOU.` Only the `commit` tool commits.
-* `THE [session] LINE.` One line, appended by `McpDispatcher>>transactionNote`, unintelligible
-  without the paragraph above — which is exactly why the instructions exist.
+Three things moved out of the slides and into the speaker notes while it was being cut, and all
+three are better there — they are evidence for a claim rather than the claim:
 
-**The `[session]` line**, one slide: `transactionStateNote` ordered **most-blocking first** —
-failed commit (which subsumes everything: no further commit can succeed and the view cannot move
-until abort), nested transaction, uncommitted changes — plus a **second** line for stale reads,
-appended rather than ranked because it is a different subject (*what to re-read*, not *what to
-commit or abort*).
+* **the measured seven-line trace** of the silent clobber → notes on slide 5, where the picture
+  makes the claim and the trace backs it;
+* **the four-way refresh measurement** → notes on slide 6, for the same reason;
+* **"why this never needed to exist before"** stopped being a slide at all: its blockquote is now
+  the closing line of slide 5, and its argument is that slide's notes.
 
-**Then the guardrail. Build it as a story, in this order:**
+### The running order
 
-1. **The failure, measured.** Two sessions, two methods:
-
-   ```
-   0 baseline: method1 ^#baseline1 | method2 ^#baseline2
-   3 client1 first commit = false (#'retryFailure')     <- refused, nothing written
-   4 after abort client1 sees: method1 ^#client2 | method2 ^#client2
-   5 commit of method1 = true
-   6 commit of method2 = true (#'success')              <- accepted
-   7 FINAL: method1 ^#client1_adjusted | method2 ^#client1_v1
-   ```
-
-   The second client's `method2:` is gone, with **no error and no conflict**. Step 6 is not a defect
-   in the repository: the abort at step 4 moved the view *past* the other session's commit, so by
-   then there is genuinely nothing left to conflict with. What is wrong is that the client wrote
-   `method2:` from source it had read **before** the abort.
-2. **Why the repository cannot catch it, in the audience's own terms.**
-   `writeWriteConflicts = writeSet * writeSetUnion`. OOP-bitmap intersection: **no timestamps and no
-   per-object versions anywhere in the mechanism.** Only your *view* is dated; the objects are not.
-   So the check answers one question — *did anyone change something I am writing, since I last
-   looked?* — and answers it well. It has **no opinion about what you read.** Two consequences:
-   * **the grain is the class, not the method** — compiling a method writes the class's
-     `GsMethodDictionary` and a per-class `SymbolSet`, so two sessions editing *different* selectors
-     on one class conflict, while different classes never do;
-   * **a view move launders a stale read, but never a stale write** — once an object is in your
-     write set the conflict follows it through any number of refreshes.
-3. **The design that was there instead, and how it was found — put this on a slide of its own.**
-   Before 2026-08-28 the dispatcher refreshed the view **before every tool call**: first with
-   `abortTransaction`, then briefly with `continueTransaction` on the reasoning that the freshness
-   was wanted and only the destruction was not. **The freshness was not wanted.** Measured four
-   ways, one shared object, two RPC sessions, S1 reading before S2 commits over it:
-
-| S1's behaviour between the read and the write | S1's commit | final value |
+| | slide | s |
 |---|---|---|
-| no refresh at all | **`false`**, `retryFailure` | **S2's** — the stone refused the stale write |
-| `System continueTransaction` first | `true` | **S1's — S2's work silently gone** |
-| `System abortTransaction` first | `true` | **S1's — identical** |
-| S1 writes first, refresh happens after | **`false`**, `retryFailure` | **S2's** |
+| 1 | section opener — *A browser invariant, restored by rule* | 10 |
+| 2 | **the instructions, verbatim** — all 551 words of `defaultServerInstructions` | 50 |
+| 3 | **what the `[session]` line actually looks like** — four real examples | 35 |
+| 4 | **a human at a browser** — the stone's guard works (diagram) | 40 |
+| 5 | **an agent** — the same guard, walked past (diagram) + the browser invariant | 90 |
+| 6 | **"so make every tool self-contained: abort, write, commit — in one pass"** | 45 |
+| 7 | why the repository does not catch it — and is right not to | 30 |
+| 8 | two consequences: the class grain, and laundering a read but not a write | 25 |
+| 9 | the rule, the ledgers, the stamp | 40 |
+| 10 | what licenses what | 35 |
+| 11 | re-validation, and what the client is told when the view moves | 40 |
+| 12 | full disclosure: `execute_code`, and three limits | 30 |
+| 13 | keeping the measurements honest | 20 |
+| 14 | `[DEMO E]` two clients, six calls | 180 |
 
-   Three things follow, and they are the whole argument for the section: the hole was **as old as
-   the blanket refresh** (row 3 is the older design, and an abort refreshes a view just as
-   thoroughly); **the vulnerable shape is precisely read → refresh → write**, because row 4 shows a
-   write already made is *not* laundered — it is the **read** that goes unprotected, which is the
-   dangerous half because the read is what the plan was built on; and the grain is the class, which
-   here is **coarse in the safe direction**.
+### What each one is for
 
-   And the lesson, which is the one to say out loud to a room of database implementors: both earlier
-   designs were reasoned about entirely in terms of what the refresh did to **this** session — does
-   it destroy work, does it raise, does it pin pages — and never in terms of **what it told the
-   stone about this session**. Both were checked carefully against the wrong question. *A
-   two-session test that nobody had written would have answered the right one in a minute.*
+**2 — the instructions, verbatim.** All 551 words on one slide, in two columns, with the five
+ALL-CAPS headings in the accent colour. The body is a **prop**: the back row reads the headings and
+nothing else, which is the intent — the headings are the argument and the point is that the whole
+thing *fits on one slide*. Walk them in order; the one to dwell on is `THE DATABASE PROTECTS YOU`,
+because its closing instruction to the model — *"If you read something, thought about it, and are
+only now acting, re-read it first"* — exists because of the failure two slides later. Extract the
+text programmatically rather than transcribing it (`McpServer class>>defaultServerInstructions`);
+a read-only session is sent none of it.
 
-4. **Why this never needed to exist before, and this is the line to say slowly to *this* audience:**
-   a human editing a method opens it in a browser first. The browser renders it from the current
-   view, and only then can anything be typed. **`readLedger ⊇ writeLedger` was an invariant enforced
-   by the user interface, for free, in every Smalltalk browser ever written** — so the repository
-   never had to check it. **An agent is the first client that can write a method it has never
-   displayed.** The guardrail restores by rule what the browser guaranteed by construction.
-5. **The rule.** *A mutating tool may not touch a method, class or dictionary that has not been read
-   in the current view window.* A window opens whenever the view moves.
-6. **The ledgers.** Two instance variables on `McpServer` (hence §4's insistence on one instance per
-   gem): `readLedger` (key → stamp) and `writeLedger` (a Set of keys). **Nothing touches `GsBitmap`,
-   hidden sets, or any repository state — the stone's own guardrail is left exactly as it ships.**
-   Four key grains: `Foo>>bar:` / `Foo class>>bar:`, `Foo:shape`, `Foo:comment`, `#UserGlobals`.
-7. **The stamp.** SHA-256 of the subject's canonical text as the current view has it
-   (`asSha256String`, in the kernel well below the supported floor), or a fixed marker for a subject that does
-   not exist. `stampFor:` dispatches per grain: method source as `sourceCodeAt:` answers it, the
-   `definition` message, the class comment, and for a dictionary the **entry names and their kinds
-   only** — the values are deliberately *not* hashed, because `list_dictionary_entries` shows none
-   of them and `remove_dictionary` destroys the bindings rather than the objects.
-8. **What registers a read, and what a mutation requires** — the two tables from
-   [blind-write-guardrail.md](blind-write-guardrail.md), on facing halves of one slide. The split is
-   **per tool, not per toolset**: *does this call name one subject and show its current contents?*
-   `list_classes` names a dictionary but shows only the classes in it — a partial view, not enough
-   to license destroying it. The search tools register nothing, deliberately.
-9. **Three rules that are easy to get wrong and are stated as invariants:**
-   * **Creation is never blind** — nothing to read means nothing to discard; a concurrent creation
-     collides write-write in the ordinary way.
-   * **A write implies a read** (`noteWrite:` records into both), because having just written
-     something is knowing its content — better than having read it.
-   * **`writeLedger ⊆ readLedger` at every instant**, which is the property the whole thing rests
-     on, and the reason `writeLedger` is written **on the branch that actually performed the write**
-     rather than on entry to the tool.
-10. **Enforcement is one place: the top of each mutating tool.** `requireRead:subject:tool:hint:`
-   raises `kind = blindWrite` **naming the exact call that licenses it** — the message is the point,
-   because the client can always satisfy it in one cheap call. **There is no commit-time check**,
-   because the refresh rules make the invariant true by construction, so one could never fire.
-11. **What a view move does — the table.** Successful commit: reads re-validated, writes cleared.
-    **Failed commit: the view does *not* move** (measured), so both ledgers are kept untouched.
-    Abort: re-validated, writes cleared. `refresh` answering true: re-validated, writes **kept**.
-    `refresh` answering **false**: the view **advances anyway** (measured — the one genuinely bad
-    state in the system), writes cleared, reads re-validated.
-12. **Re-validation, and the `[session]` line it produces.** At every move,
-    `revalidateReadLedger` recomputes each key's stamp in the new view. Equal → the read keeps its
-    licence. Different → dropped and remembered in `staleReadKeys`. Then, once:
+**3 — the `[session]` line.** Four of the five shapes, verbatim: uncommitted work; the client's own
+commit refused; the server's refresh having doomed the pending work; and reads gone stale. Read the
+middle two back to back — same jam, two causes, and *the client must not be told the wrong one*.
+Keep the one structural note: **computed from the state left after the tool ran**, which is what
+lets `abort` answer with no contradicting warning stapled to it.
 
-    ```
-    [session] The view moved: 2 of 7 earlier reads are stale and must be re-read before writing
-    to them: Foo>>bar:, Baz:shape.
-    ```
+**4 and 5 — the matched pair, and the heart of the section.** Same lane geometry, same x-positions
+for S2's commit and S1's final commit, one difference: **where the view move falls relative to S2's
+commit.**
 
-    **The count is the point**: it tells the client the other five reads still stand, so it re-reads
-    two subjects instead of all seven — or, worse, discovers each stale one as a refusal. Names are
-    **summarised by class** so the line stays one line whatever was browsed: up to three methods of
-    a class in full, more counted (`5 methods from Foo`), and past four classes the whole list gives
-    way to `changes to 7 classes; re-check what you depend on before writing`.
-    * Three consequences worth a bullet each: a **byte-identical recompile by another session leaves
-      the read good** (the stamp is of the text, not the method object); an **aborted write needs a
-      fresh read** even when nobody else touched the subject (the client's last knowledge is a
-      version that no longer exists); and a **false refresh leaves this session's own uncommitted
-      writes in place**, so such a read survives the refresh and is dropped by the abort that is the
-      only way out.
-    * **Cost**, since somebody will ask: one `sourceCodeAt:` and one SHA-256 per entry per view move
-      — tens of microseconds each, so a few hundred reads cost milliseconds against a commit that
-      costs more. The fallback if it ever shows is a **lazy check** in `requireRead:` against a
-      recorded view generation, at the price of the one-time note (which can only come from checking
-      everything).
-13. **Why `writeLedger` is *also* useful:** when a commit does fail, `System transactionConflicts`
-    answers the **objects**, and matching them by identity against `persistentMethodDictForEnv:` for
-    the classes in `writeLedger` turns a `GsMethodDictionary` back into **a class name the client
-    can act on** (`conflictingSubjects`). Named rather than counted.
-14. **Full disclosure: `execute_code` bypasses all of it**, and its own description says so. Not an
-    oversight that can be closed: it evaluates arbitrary Smalltalk, so any check on what it compiles
-    is walked around with `perform:`, and it can send `System commitTransaction` itself. **And there
-    is no way to observe what it wrote** — `System needsCommit` only flips on the first write of a
-    transaction (so it reports the case that does not matter and misses the one that does),
-    `PomWriteSet` is empty until the commit flush, and `_enableTraceNewPomObjs` traces objects only
-    after they are committed. The commit result reports **how many `execute_code` calls happened in
-    the window**, which is the most that can be said without inventing precision. A deployment
-    needing a hard guarantee **composes the toolset out** — the same mechanism read-only mode uses.
-    * Say plainly that the view-hygiene refresh (§8) is likewise invisible to a client that only
-      ever used `execute_code`: the notification rides the `[session]` line on tool results, and the
-      ledger it names tracks only what was read *through a tool*.
-15. **The tool that was secretly the same thing**, worth 30 seconds because it is a good story:
-    `compile_class_definition` used to take a source string and `source evaluate`, checking only
-    *afterwards* that the result was a `Behavior` — by which point any side effect had happened. It
-    was `execute_code` with a return-type assertion. It now takes **structured arguments** and
-    builds the definition itself, so it cannot evaluate anything.
-16. **Known limits**, stated rather than buried: cross-class staleness is not caught (read `Foo>>a`,
-    write `Bar>>b`, and nothing stops the commit — the `StrongReadSet` *would* close it, but arming
-    the conflict check with every class a session browses makes a long-browsing session
-    progressively unable to commit, so the trade was declined); `execute_code`; and the **grain
-    mismatch** — the guardrail is per method, the repository's conflicts are per class, so a commit
-    can still be refused over a method the client never touched.
-17. **How the measurements are kept honest**, one slide, because this audience will trust it and may
-    reuse it: two suites, deliberately different in kind. `McpBlindWriteTest` (41) drives the ledger
-    protocol directly and pins the **rules**; `McpConcurrentEditTest` (18) stages genuine conflicts
-    from a **real second gem** and pins that the rules still match the **database**. And
-    `testTheStoneAloneWouldAllowThatClobber` is **written to fail on good news**: it asserts that
-    with the guardrail bypassed, GemStone still accepts the commit that discards the other session's
-    work. *If it ever starts failing, the stone has grown protection of its own and this design's
-    scope should be revisited.*
+* On **4**, S1 aborts *first*, S2 then commits, S1 edits X, S1's commit is **refused**. Drawn in
+  green, because the guard working is a good outcome and not a warning. `edit X` is one mark like
+  every other event on the line — for a human at a browser, editing a method *is* one event, and
+  **the split is the next slide's reveal, so do not decompose it here.**
+* On **5**, S1 reads X, S2 commits, *then* S1 aborts — so S2's commit is behind the view move, and
+  S1's write commits cleanly over it. The stone is right: as far as it can tell, S1 saw the change
+  and chose to overwrite it. It closes on the blockquote that used to be its own slide, and gets 90
+  seconds because it is the one idea in the talk that is about this audience's history rather than
+  about this code.
+
+**6 — "one pass", and the laugh.** Frame it as the sensible thing to build: if every tool takes a
+fresh view in and commits on the way out, no tool can ever fail on a stale view. Tools that always
+work. *Then* say it was the first design here — `handleToolsCall:` ran `System abortTransaction`
+before **every** tool, and each mutation tool committed inside its own call — and land on
+**"including the `commit` tool."** Pause before the punchline: `commitTransaction` answers **true**
+because committing nothing succeeds, so the tool reported *"Transaction committed."* while the
+probe it was supposed to save was already gone. A commit that can never fail, achieved by never
+committing anything. `refresh` had it in miniature, being the same two lines as `abort`.
+The serious half is in the notes: **a blanket pre-call refresh makes every write a blind write by
+construction**, which is what the four-way measurement shows.
+
+**7 and 8 — the mechanism the stone actually has.** `writeWriteConflicts = writeSet *
+writeSetUnion`; no timestamps, no per-object versions, only the view is dated; so it has no opinion
+about what you read. Then the two consequences that shape the rest: **class grain** (so a client can
+be refused over a method it never touched) and **a view move launders a stale read, never a stale
+write**. Be explicit that the `StrongReadSet` would close the read side and was declined, and why.
+
+**9 to 12 — the solution, and its limits.** The rule and the four key grains; the SHA-256 stamp per
+grain; the read/write licence table; re-validation at every view move and the one-time `[session]`
+line whose **count** is the point; then `execute_code` outside the guardrail, why that cannot be
+closed, the three observability failures behind "how many `execute_code` calls happened in the
+window", and the three known limits.
+
+**13 — how it is kept honest.** Two suites, deliberately different in kind, and the test written to
+**fail on good news** — which, as of 2026-09-10, is doing exactly its job on an unsupported image
+(§12).
 
 `[DEMO E — 3 min, the one to rehearse]` Two clients, staged live:
 1. Client A: `get_method_source` on a fixture method, then `compile_method` a change — uncommitted.
@@ -926,324 +849,157 @@ commit or abort*).
 5. Client A: `compile_method` again without re-reading → **refused, `kind: blindWrite`**, with the
    call that licenses it named.
 6. Re-read, recompile, commit → accepted.
-That sequence is the whole section in six calls, and step 5 is the moment the audience sees why the
-browser invariant had to be restored by rule.
 
----
+Steps 1–3 are slide 4's refusal reached the agent's way; steps 4–6 are slide 5, except that step 5
+is where this server stops and the bare stone would not. Six calls, and step 5 is the moment the
+audience sees why the browser invariant had to be restored by rule.
 
-## 8. The router maintenance cycle (6–7 slides; flowcharts earn their place here)
+## 8. The router maintenance cycle (11 slides, two of them diagrams)
 
-**One `GsProcess`, forked at startup, one pass every `reaperIntervalSeconds` (60).**
-`maintainSessions` is four steps, and the comment says the **order is the point**:
+**This section is cut, and `docs/slides/deck.md` is the authority for it** — the running order below
+is a summary of that file rather than a plan for it, and where the two disagree the deck is right.
+It was rebudgeted to **7:10 (340s of slides + a 90s demo)** against the 6:30 this outline's table
+first allowed; see the preamble for where the extra 0.7 talk minutes have to come from, because it
+is a decision and not a rounding.
 
-```
-maintainSessions
-  1. refreshFrontEndView      "this gem stops holding a commit record — and picks up recompiles"
-  2. maintainViewHygiene      "what is each worker's view costing the repository?"
-  3. probeIdleSessions        "so silence can be told from absence"
-  4. reapIdleSessions         "what should go, goes — in the same pass that found it"
-```
+**The thesis, and every slide serves it:** the front end is the only part of this server with a
+heartbeat, so every judgement about *time* is made there — and it is made by **counting evidence
+this front end observed** rather than by measuring elapsed time. Two mechanisms were *deleted* by
+adopting that rule. That is the strongest thing the section has to say and the reason slide 3 is the
+one to protect.
 
-Step 1 first so everything after it reasons about the repository **as it is now** rather than as it
-was when this gem logged in. Reaping last so a session found gone while probing is freed in the
-**same** pass rather than the next.
+Six things moved out of the slides and into the speaker notes while it was being cut, on the
+principle §7 settled — a **measurement is evidence for a claim, not the claim**:
 
-**Flowchart 1 — the pass.** The four steps, with `maintainIdleSession:`'s per-session logic inset:
-`notePassWithStream:` **first and unconditionally** (the pass *is* the observation, and that is the
-whole clock — it ticks when this front end runs and not otherwise), then `isBusy` → skip, then no
-stream → skip the ping but keep counting passes, then `probeDue:` → `probeSession:`.
+* **the 96%-over-one-night suspend-detector result** → notes on slide 3, where the rule makes the
+  claim and the result backs it;
+* **the four-way commits-behind measurement** (9 → 18 under a live call, then 161 → 202 after one
+  `install.sh` and one test run, and the front-end gem 489 behind) → notes on slide 7;
+* **`StnCrBacklogThreshold` comes back already resolved** — 80 against a `StnMaxSessions` of 10,
+  where resolving `-1` ourselves would have computed 20 → notes on slide 6;
+* **the zero-filled `descriptionOfSession:` of a dead gem** → notes on slide 6, which is where a
+  Q&A magnet belongs rather than on a slide nobody asked the question about yet;
+* **the `endedCall*` / `isEndedCallKind:` defect story** → notes on slide 8;
+* **request deadlines and cancellation, in full** → notes on slide 8. The outline put them in this
+  section because they share the escalation; at this budget they are the first thing that cannot be
+  slides. **If §8 is ever given another minute, this is what to spend it on.**
 
-**Almost nothing here is measured in elapsed time**, and this is the slide that makes the rest
-coherent:
+### The running order
 
-* **Idleness is a count of liveness pings the client answered with no work in between** —
-  `sessionIdleTimeoutSeconds ÷ realizedProbeIntervalSeconds` of them, fifteen at the defaults.
-* **Unreachability is a count of maintenance passes with no stream.**
-* Both advance only while the front end runs, so **a suspended host simply stops the count where it
-  was**: there is no suspend to detect, nothing to forgive, no threshold to get wrong.
-* **Every division rounds up, and one adds a pass**, so the guarantee is legible: *a session is
-  released no sooner than its configured timeout, and no later than one maintenance pass after it.*
-  The idle count is taken against the **realized** ping cadence, since a 90-second probe interval on
-  a 60-second pass really fires every 120.
-* The prehistory is worth 20 seconds because it is a result, not an anecdote: an earlier design
-  *did* measure elapsed time and tried to **detect** suspends, forgiving a pass that came back late.
-  It worked to about **96%** over a real night, and the missing few percent still released sessions
-  whose clients had never left — because the error term was set by someone else's power management.
-  Counting evidence instead of subtracting time removed the failure **and the mechanism** together.
-  `sleep-test.sh` brackets a real sleep and asserts the outcome that now matters: the session is
-  still there, the gem still works, and the front end logged nothing about the sleep at all.
-
-**Flowchart 2 — `reapReasonFor:`, the whole reaping policy as one ladder.** In order, and each rung
-labelled with *what kind of evidence it is*:
-
-| rung | ground | evidence |
+| | slide | s |
 |---|---|---|
-| 0 | a call is in flight | **never reaped, on any ground, however long it has run** |
-| 1 | `isExpired` | **wall clock** — a credential is, and no amount of sleeping makes an expired token valid |
-| 2 | stream closed by client **and** no stream open now | one **observed fact**, needing no repetition |
-| 3 | `unansweredProbes >=` limit | **evidence**, not absent traffic: it went down a stream the client itself opened |
-| 4 | `quietProbes >=` confirmations | **counted confirmations** — only where a deadline is configured |
-| 5 | stuck view, four conjuncts (below) | the only ground about the **repository** rather than the client |
-| 6 | `streamlessPasses >=` limit | the give-up rule: liveness cannot speak for a client it cannot reach |
+| 1 | section opener — *One gem with a heartbeat, counting what it saw* | 10 |
+| 2 | **the pass** — four steps, and the order is the point (diagram) | 35 |
+| 3 | **almost nothing here is measured in elapsed time** | 45 |
+| 4 | `reapReasonFor:` — the whole policy, ordered by **kind of evidence** (table) | 40 |
+| 5 | an answered ping proves the client is there — **and still counts against it** | 35 |
+| 6 | how the front end can see any of this — `descriptionOfSession:` 7 / 8 / 16 | 30 |
+| 7 | **view hygiene: one ground**, and the `kept` / `doomed` / `stuck` verdict | 45 |
+| 8 | the two disruptive arms take pressure as a **conjunct**, never an alternative | 35 |
+| 9 | the ending *not* in the ladder: a worker gem that has **died** (diagram) | 35 |
+| 10 | `maxSessions` — the one bound here that **refuses** rather than releases | 30 |
+| 11 | `[DEMO F]` view hygiene, live | 90 |
 
-* **Idle sessions and the ping.** Past 25 minutes idle a session holding a stream is sent a `ping`
-  (bidirectional; the receiver MUST answer). Answered → **proven live**, gem kept, and **the answer
-  counts toward the idleness total** — deliberately *not* resetting the activity clock, because
-  otherwise any well-behaved client (they all answer `ping`) would hold a gem and a transaction view
-  for as long as it stayed open. Unanswered → **proven gone**, released early rather than waited
-  out. Reaped → unmapped silently; the client meets a **404** on its next call and the reason goes
-  to the gem log.
-* **An unanswered ping is evidence of death only if it went down the stream the client is still
-  on.** Both shipping clients reconnect a dropped standalone GET on their own, and a handover is
-  likeliest on exactly the quiet sessions the reaper probes; the write into a superseded stream
-  *succeeds*, into a socket buffer nobody will read. So every probe records the **stream
-  generation** it was written to, and a verdict is drawn only if that generation is still current;
-  otherwise the probe is discarded and re-sent on the next pass. **Measured against real clients on
-  2026-08-23: 6 of 14 pings.**
-* **Timeouts from closed streams.** The drain loop is already watching the read side, so a client
-  that hangs up is detected within ~100ms — **not inferred from silence, observed**. Then
-  `streamLossGraceSeconds` (10) for another stream, else released on the spot rather than at the
-  next pass. **Measured end to end over four VS Code tab closes: 9.7–10.2 seconds** from close to
-  the worker gem being logged out, where it used to be **half an hour**. Three things retract the
-  verdict, and a client needs only one: a new stream, a call in flight, or **any request at all**.
-  And the honest footnote: measured on those same closes, Claude Code does **not** resume its
-  session across a tab close — it returns as a fresh `initialize` on a new id, so the grace runs out
-  untouched. It is kept because the protocol allows the case and a proxy or blip can force it, and
-  because being wrong the other way costs a live client its uncommitted work.
-* **A client that never opens a GET stream** is never probed (pinging it would only mark it
-  unanswered and cost it its gem early) and falls back to `streamlessIdleTimeoutSeconds` — **1
-  minute**, short on purpose because the commonest streamless client is a one-shot POST whose gem is
-  pure overhead the moment it returns, and safe because the count pays for the pass it starts on.
-* **The client is not warned before either deadline, and is not told when one arrives** — it was
-  until 2026-08-27, in a `notifications/message`, which the draft revision deprecates and (for
-  anything unsolicited) prohibits, and which measurement said no client surfaced to its model
-  anyway. What a client gets instead is the **404** the transport already defines. The ping stays,
-  because what it buys is the **evidence**, not the message.
+### What each one is for
 
-**The ending that is *not* in the ladder: a worker gem that has died.** A slide of its own, because
-it is the newest arm, it is about neither the client nor the repository, and the reason it could not
-be a rung is instructive.
+**2 — the pass, and the only diagram that had to be a diagram.** Four boxes in order, the loop back
+labelled `reaperIntervalSeconds (60)`, and two brackets carrying the two claims the ordering makes:
+**step 1 first**, so everything after it reasons about the repository as it is *now* rather than as
+it was when this gem logged in (and, the same act from the other side, so a committed recompile of
+front-end code takes effect here); **step 4 last**, so a session found gone while probing is freed in
+the *same* pass rather than a minute later. Underneath, the per-session line that is the whole
+clock: `notePassWithStream:` **first and unconditionally**, before the busy test and before the
+no-stream test — the pass *is* the observation. Then busy → skip, no stream → skip the ping but keep
+counting, probe due → ping.
 
-* **The old behaviour was a wedge.** A dead worker gem left its session registered, and every later
-  call on it answered a generic JSON-RPC **`-32603` "Internal error" with no `data.kind`, inside a
-  healthy HTTP 200** — which means "something went wrong at our end", not "your session is
-  finished". So a **well-behaved** client retried, got the same answer forever, and never
-  re-initialized, while the session held its `maxSessions` slot for as long as the front end ran.
-* **The reaper is not the mechanism for this and could not be.** Its probe asks whether the
-  **client** is still there, on a stream that client keeps answering — so **a dead gem behind a live
-  client answers every ping and trips no ground in `reapReasonFor:`.** Only the front end knows the
-  state of its own workers, which is why both halves of the fix are in `McpRouter`.
-* **How it is recognized: the GCI *fatal* band**, `originalNumber` 4000–4999
-  (`McpRouter>>isSessionGoneError:`) — **the kernel's own verdict, not a guess about which failures
-  are serious.** `GsTsExternalSession>>_signalError:` *closes the external session's connection* when
-  it sees one, which is why the **second** such request fails with 4100 "invalid session" however the
-  first one failed. Matching the **band** rather than either number also keeps it from being a list
-  to maintain: every way a gem can die arrives as some number in it.
-* **Both halves of the answer, for two different clients.** The request that found it is answered
-  **`-32001` with `data.kind` `sessionGone`** bearing its own id (as a *frame* where the call was
-  already being streamed) — that lets a client recover on **this** request. And the session is
-  **unmapped as part of answering**, so its slot goes back at once and the **next** request gets the
-  **404** the transport already defines — which lets a client that branches on nothing recover
-  anyway.
-* **What the client is told, and what it is not.** The GCI **number**, not the `GciError`'s text:
-  measured on 3.7.5, the kernel appends the gem's whole NRS to a fatal error — **host, stone,
-  GemStone user, extent and log paths** — which is not a thing to hand an MCP client, least of all
-  on the network-facing front end. The failure in full goes to the gem log beside the session id,
-  which is the same split a reap already makes.
-* **Verified end to end** on 3.7.5 with the reported reproduction — an `execute_code` that exhausts
-  the worker's temporary object memory: the gem dies in about **three seconds**, the call is answered
-  `sessionGone` with **GCI 4067**, the next request 404s, and a fresh `initialize` succeeds on a
-  router **capped at one session**, so the slot really came back. 4 new tests in `McpTransportTest`
-  and 9 wire checks in `test.sh` — *which is the only place the first failure's number can be
-  pinned: a mock can raise 4100 but it cannot die.*
+**3 — the thesis, and the slide to spend time on.** Idleness is a count of **pings answered with no
+work in between** (fifteen at the defaults); unreachability is a count of **passes with no stream**;
+and a ping is **never declared late by a clock** — it is superseded by the next one and judged at
+that moment. Every count advances only while the front end runs, so a suspended host **stops the
+count where it was**: no suspend to detect, nothing to forgive, no threshold to get wrong. Land the
+closing blockquote as the point: two mechanisms were **removed** by this rule rather than fixed —
+the suspend detector, and the pass that timed out server-initiated requests. Not *"we fixed the
+suspend detector"* but *"there is no suspend left to forgive."* The 96% night is in the notes, and
+the reason it could never have been tuned out is the part worth giving: the error term was set by
+somebody else's power management.
 
-**Why `maxSessions` exists at all, and why it is the one bound here that refuses rather than
-releases** — a slide, because it is the failure most likely to bite a developer in this room:
+**4 — the ladder.** Seven rungs, and what to point at is the **third column** — what kind of claim
+each rung makes — not the individual numbers. Rung 0 first, because somebody is already composing
+the objection: a call in flight is **never reaped on any ground, however long it has run.** Then the
+two deliberate exceptions to the counting rule, for opposite reasons: an **expiry** is wall-clock
+because a credential is, and a **closed stream** is one observed fact that needs no repetition. The
+detail worth having for this audience is rung 5's **strictly-greater** comparison where the others
+use `>=`, and that it has two independent reasons — it makes a configured grace a *floor*, and it
+makes a grace of **zero** mean what it says with no separate evidence test.
 
-* A session **is** a GemStone login; a repository has a finite number (ten on Community Edition);
-  and **the login that exhausts them fails for every gem on the stone, not just for the client that
-  asked.** Measured on 3.7.5: nine one-shot clients took nine worker gems, the tenth login of any
-  kind failed with error **4039**, and the **owner of the database was locked out of their own
-  extent — including from plain topaz** — until the router was killed. (Killing it released all nine
-  in about four seconds, each worker being an RPC gem whose client process is the router; but that is
-  a recovery for somebody who already knows.)
-* And it does not take a careless client: **reconnecting counts as a new client.** Reloading an
-  editor window, restarting an agent, a client that crashes and retries — eight of those inside one
-  idle period is nobody being reckless. The idle rules make that self-correcting; the cap makes it
-  impossible.
-* **Three is deliberately low**: one agent, one editor, one left over for a reconnect not yet
-  reaped. The number to be safe against is not what a busy server wants but what the smallest
-  plausible stone allows. `SessionsCurrent` against `StnMaxSessions` is how to raise it — remembering
-  that the unit suite, `test.sh` and every other server on the stone spend from the same budget.
+**5 — the ping that proves life and still counts against you.** Three bullets that are one decision,
+and the audience may push on it, so lead with the reason rather than the mechanism: **the ping is how
+idleness is measured, so an answer cannot also reset what it is measuring.** Otherwise the idle
+deadline is unreachable for every conformant client — and they all answer `ping`. The bottom half is
+the subtlest thing in the section: an unanswered ping is evidence of death **only if it went down
+the stream the client is still on**, a write into the superseded stream *succeeds* into a buffer
+nobody will read, and a handover is likeliest on exactly the quiet sessions the reaper probes — so
+the population being judged is enriched for the thing that breaks the judgement. **6 of 14 pings**,
+measured, is the answer to "is this theoretical".
 
-**Before the flowchart: how the front end can see any of this**, which is a slide this audience will
-want and nobody else would:
+**6 — the instrument, which no other audience would want.** `System descriptionOfSession:`,
+primitive 334: a **stone query** made from the front-end gem about *another* session. The structural
+point is the first bullet, because it is what makes the busy case tractable at all — the
+**measurement** is a stone query and cares nothing for what the worker is doing, while the **action**
+would have to travel the worker's GCI channel, which allows one call at a time. So a session with a
+call in flight is measured every pass and acted on never. That asymmetry is not a workaround; it is
+the reason the arm can exist.
 
-* **`System descriptionOfSession:`** — a **stone query made from the front-end gem** (primitive 334)
-  about another session. It never touches the worker's GCI channel and does not care what the worker
-  is doing, so **a busy worker can be measured perfectly well** even though it cannot be *acted*
-  on. Confirmed explicitly, because it was the obvious thing to worry about. Three fields carry the
-  whole policy:
+**7 — one ground, and the route that was wrong twice over.** Two things to land, and the second is
+the one they will argue with. First **`doomed`**, which is what makes the whole arm defensible and
+connects straight back to §7: the kernel carries the write set forward across `continueTransaction`
+and answers whether it *now* conflicts, so refreshing a worker's view **cannot launder a write that
+was going to be refused**. Without that, this arm would be the blind write §7 was about, performed by
+the server on the client's behalf. Then the deleted second route, both halves measured: a high
+backlog is **not evidence that anybody is behind** (the stone defers disposing records nobody
+references — which is the deferral `StnCrBacklogThreshold` exists to override), and right after a
+restart **every** session reports holding the oldest record. Together they made that route fire
+hardest in exactly the state where refreshing achieves nothing.
 
-| field | meaning |
-|---|---|
-| 7 | `-1` / `0` / `1` for transactionless / out of transaction / in transaction |
-| 8 | whether this session references the **oldest** commit record |
-| 16 | "number of commits which have occurred since the session obtained its view" |
+**8 — the two disruptive arms.** Open with the last line, not the mechanism, because it is the
+objection the slide exists to answer: **on a quiet repository a long call is never ended, however
+long it runs.** Then the conjunctions — four for reaping a stuck view, five for ending a pinned call —
+and the point that pressure is always a **conjunct**, never an alternative. The two mechanism details
+are load-bearing and easy to get wrong: the reaper only ever **sets a flag** (the ending is done by
+the process that owns the worker mutex, on its next wait), and it uses **`tryLock` not `critical:`**
+and **no `touch`** — `touch` would be an immortality potion. The live firings, the `viewRelease`
+defect story, and the whole of request deadlines and cancellation are in the notes.
 
-* **And one counter-intuitive fact worth having ready, because it is a Q&A magnet:**
-  `descriptionOfSession:` **does not refuse a session id nobody holds** — it answers a **zero-filled
-  description** (measured on 3.7.5: 29 fields, the first `nil` and the rest `0`). So for a session
-  whose gem has died, `commitsBehindFor:` answers **0** rather than `nil`, which means the arm never
-  reaches the privilege complaint (no false "view hygiene is disabled" line, no burnt one-shot
-  latch), and — being under any configured limit — **never sends the dead gem a refresh and writes
-  nothing at all.** That is also the *truthful* answer: **a gem that has exited pins no commit
-  record, because its view went with the process.**
-  * The one exception, and it is honest to state it: **id recycling.** The worker's stone session id
-    was cached at its login and nothing re-reads it, so if the stone hands that number to another
-    gem, the figure this arm reads belongs to a **stranger**. If the stranger is far enough behind,
-    the front end sends *its own dead worker* a refresh, takes the fatal 4100, and logs
-    `maintainViewHygiene error:` once per pass. **Nothing is corrupted and nothing reaches the
-    stranger** — the refresh only ever travels the dead worker's own closed GCI channel — but the log
-    line names the right session, quotes a different gem's number, and reports an error about a gem
-    that is gone, *and none of the three is wrong on its own terms*. What bounds it is the dead
-    session's own release, and the one configuration with no bound is `MCP_IDLE_TIMEOUT=none` behind
-    a ping-answering client that never calls again — the same corner as that client's session slot,
-    with the same answer.
-* **Reading *another* session's description needs the `SessionAccess` privilege.** Confirmed present
-  for DataCurator on the development stone; `sessionAccessWarned` is the once-only latch so a router
-  without it says so once rather than every pass. A worker reading its **own** field 16 needs no
-  privilege at all, which is what makes the every-result note self-measured.
-* **`StnCrBacklogThreshold` comes back already resolved, and that mattered.** `system.conf`
-  documents `-1` as twice `STN_MAX_SESSIONS`; on the development stone, which sets neither, the
-  runtime read answers **80** against a `StnMaxSessions` of 10. **Resolving `-1` ourselves would
-  have computed 20 and been wrong about the number the stone actually uses.** Trust the stone's
-  number; map only `0` (disabled) and negative (unknown). `StnSignalAbortCrBacklog` (default 20) is
-  the other one, and `commitsBehindLimit` is `maxCommitsBehind min:` it.
-* **The numbers the default was set against**, and they are the slide's punchline: one client on the
-  development stone went **9 → 18** commits behind while a 50-second call was in flight (correctly
-  untouchable), then **161 → 202 behind after one `./install.sh` and one `./run-unit-tests.sh`**. An
-  ordinary edit–install–test loop puts every connected client **hundreds** of commits behind within
-  minutes. So `maxCommitsBehind` = 20 **is not a conservative default on a development stone; it is
-  the normal state of one.** And the front-end gem that started all this was **489 commits behind
-  with the stone's backlog at 490, and was the sole entry in `sessionsReferencingOldestCr`.**
+**9 — the ending that is not in the ladder, and the second diagram.** The drawing exists to make one
+thing visible that prose has to assemble: a **live client answering every ping** in front of a **dead
+worker gem**, so every ground in `reapReasonFor:` says *keep* — and **the ladder is not wrong, it is
+answering a different question correctly.** Only the front end knows the state of its own workers,
+which is why both halves of the fix are in `McpRouter`. Say what the old behaviour cost: a generic
+`-32603` inside a healthy HTTP 200 meant *"something went wrong at our end"*, so a **well-behaved**
+client retried forever and never re-initialized — being well behaved was the thing that trapped it.
+Recognition is the GCI **fatal band**, 4000–4999: the kernel's own verdict, and matching the band
+rather than either number is what keeps it from being a list to maintain.
 
-**Flowchart 3 — view hygiene, the three arms.** This is the section the audience is most likely to
-have opinions about, so state the ground first and defend it:
+**10 — `maxSessions`, and end the section here.** It is the failure most likely to bite somebody in
+this room and the one slide whose answer is *"we refuse"* rather than *"we measure"*. The lockout is
+the part to land, and it is not that the tenth MCP client fails — it is that the tenth login **of any
+kind** fails, so the person who owns the extent cannot get in with topaz to find out why. Then: it
+takes no carelessness, because **reconnecting counts as a new client**; three is deliberately low;
+and the two halves work together — the idle rules mean a stranded gem goes away on its own, and the
+cap means the stranding cannot pile up faster than they go.
 
-* **The front end refreshes its own view every pass** (§3). One arm, no conditions.
-* **A worker at least `maxCommitsBehind` behind is refreshed**: the front end sends it one
-  `McpServer refreshViewForFrontEnd` → `System continueTransaction` — a current view with the
-  client's uncommitted changes **kept**. Three things keep that from being the design this project
-  twice rejected: it happens **between** calls, never with one in flight; a pending write is
-  **validated rather than laundered**, because the kernel carries the write set forward and answers
-  whether it now conflicts, so a refusal that was owed is still owed; and the client is **told**, on
-  its next result, with the stale reads named.
-* **THE GROUND IS ONE THING: this session's own distance from the current state.** Nothing about the
-  state of the stone can trigger a refresh, and the reason is measured — an earlier version had a
-  second route (stone over `STN_CR_BACKLOG_THRESHOLD` **and** this session holding the oldest
-  record) and it was **wrong twice over**:
-  1. the inequality runs only one way. The backlog is at least the largest commits-behind figure
-     among the sessions, never the reverse, because **the stone defers disposing records nobody
-     references** — which is the deferral `StnCrBacklogThreshold` exists to override. So a high
-     backlog is **not evidence that anybody is behind**.
-  2. measured right after a restart, **every** session reports holding the oldest record — they are
-     all on the same current one — so that flag is no discriminator at all until somebody has fallen
-     behind.
-  Together those make the second route fire hardest in exactly the state where refreshing achieves
-  nothing: a burst of commits has ended, every view is current, and the backlog number has not
-  caught up. It would have refreshed every worker in the server at once, for a backlog none of their
-  views was pinning.
-* **Where the pressure signals *do* belong** is the two decisions that are not "would refreshing
-  help" but "is this bad enough to justify something disruptive" — and both take pressure as a
-  **conjunct**, never an alternative:
-  * **Arm 3(a) — a stuck view is reaped.** `continueTransaction` is illegal in exactly two states —
-    after a commit that failed on conflict, and inside a nested transaction — and in both **the view
-    stays exactly where it was**. Nothing this server can send will free that record, and the work
-    the session holds is *already* un-committable, which is what makes ending it defensible. It
-    needs **all four** of: reaping on this ground configured at all; found stuck on **more** passes
-    than the grace allows; far enough behind to be part of the problem; and the stone over its own
-    threshold. A stuck session on a quiet stone is left alone. And it is **reaped rather than
-    aborted** deliberately: an abort behind the client's back would destroy the same work silently
-    and leave a live session working from a view it never chose; a reap is **loud** — logged, plus
-    the 404 the transport already defines.
-  * **Arm 3(b) — a *running* call that pins the oldest record is ended.** While a call is in flight
-    nothing can refresh that view (GCI allows one call per session, and moving a view out from under
-    a running tool is the corruption the whole model prevents). So the last arm ends the **call**.
-    Same conjunction **plus one more**: far enough behind, stone over its threshold, **and this
-    session holding the oldest record** — sustained for the whole of `pinnedViewGraceSeconds`, reset
-    the moment any of the three lapses. **On a quiet repository a long call is never ended, however
-    long it runs**: a router with no request deadline is a supported deployment, and this is not that
-    deadline in disguise.
-* **Both disruptive arms were verified live, and the numbers are worth showing** because they are
-  what a reviewer will ask for. The pinned-call arm fired after **three consecutive pinning
-  passes** — backlog **195/80**, the session **194 commits behind** — the client got `-32001` with
-  `data.kind: viewRelease` bearing its own request id, and **the next pass refreshed the now-idle
-  session to `'kept'`**, which is the arm's whole purpose. It also correctly **declined** to fire
-  while every other condition held but the session did not hold the oldest record. The stuck-view
-  arm was found stuck at :54 and :14 and reaped at :34 — exactly the 40 seconds configured.
-* **One defect the live run caught and no unit test would have**, and it is the best small story in
-  the section. Both catch sites on the response path **enumerated the endings they knew** —
-  `#cancelled` and `#timeout` — and passed everything else along. So the first call ever ended for
-  `#viewRelease` reached its client as a bare **`-32603` Internal error with `id` null**, with the
-  reason the server had just written to its own log **nowhere in it**. The list had already grown
-  three times and would have gone on swallowing the fourth. Fixed by **asking `McpSession` what an
-  ended call *is*** (`isEndedCallKind:`) instead of naming reasons at each catch — which is why the
-  writers are called `endedCall*` and answer for four endings now. *Two more endings have been added
-  since, and neither needed either catch site touched.*
-* **Two mechanism details that are load-bearing and easy to get wrong** — the user's own note, and
-  they deserve their own slide:
-  * **The reaper only ever sets a flag** (`requestViewRelease`, and `requestCancel:` likewise),
-    never a break. The worker mutex is held by the process running the call, and sending a break
-    from the reaper's process would be **two processes driving one session** — exactly what that
-    mutex exists to prevent. The ending is done by the process that owns it, on its next wait, by
-    the same escalation a timeout or a cancellation uses.
-  * **`runMaintenanceExpression:` differs from `runWorker:` in exactly two ways, both deliberate.**
-    It **does not `touch`** — `touch` resets everything the reaping policy counts, so a maintenance
-    send that touched would be an **immortality potion**: a session whose client had gone for good
-    would be refreshed every pass and never released. And it uses **`tryLock`, not `critical:`**,
-    so it never queues — `critical:` would park the *reaper's* process behind a client's tool call
-    for the length of that call, stalling probes and reaps for **every other session in the server**.
-    Testing `isBusy` alone would not do: a call can start between the test and the send, which is
-    what the mutex is for.
-* **What the log says, and what it deliberately does not.** A view that **moved** gets a line
-  always. A view that has just **become** stuck gets one line — the transition is news, the standing
-  state is not. Any pass on which the number changed gets one. Everything else is silence, and both
-  silences were measured rather than guessed: before the arm acted at all, an idle session over the
-  line wrote three identical lines in a row (**1440 a day** at a one-minute pass), and a stuck
-  session writes one per pass for the whole of its grace (nine redundant lines on a ten-pass grace).
+`[DEMO F — 90s, hard stop]` `MCP_MAX_COMMITS_BEHIND=2 MCP_REAPER_INTERVAL=10s ./run-server.sh`
+1. One client **reads a method** — nothing committed, view taken.
+2. A second gem **commits three times**.
+3. Wait one pass — the gem log writes `view hygiene: session ... is 3 commits behind`.
+4. Any tool call: the **`[session]`** line says the server refreshed the view, and **names what went
+   stale**.
 
-**Request deadlines and cancellation** — put them here, since they share the escalation:
-
-* **`requestTimeoutSeconds` is `nil` by default, and that is a change with a story.** It was 45
-  seconds, chosen against the *client's* patience rather than the server's. But what that number
-  really was is a **guess at the moment nobody is waiting any more**, made by a server with no way
-  to find out. Two things now tell it instead: a call carrying a `progressToken` is answered as a
-  stream and **pushes its own deadline out as it reports**, and a client that stops waiting **says
-  so** (`notifications/cancelled`, or by closing the response stream). *A deadline approximates
-  that; a cancel signal knows it.*
-* The cost also fell in the wrong place: a 45-second limit cut off legitimate slow work — a full
-  suite run, a large fileIn, a broad search — far more often than a runaway, which is exactly the
-  work progress notifications exist to make watchable. And it was not even conservative in the
-  direction intended: **measured 2026-08-31, Claude Code ran a 150-second tool call to completion,
-  with no progress notifications on it, and took delivery of the answer.**
-* **What ending a call costs.** A **soft break** reaches both shapes a runaway takes — a Smalltalk
-  loop and a call blocked in a wait — and leaves the worker gem immediately usable, so the session,
-  its view and its uncommitted work all survive and the client can call again at once. What it does
-  **not** promise is that the call did nothing: it was cut partway, and whatever it had already done
-  is still in that gem's view, uncommitted. A gem that takes **neither** break — code that handles
-  `ControlInterrupt` and resumes — cannot be ended from the front end at all, so its gem is stopped
-  from the stone side and the session finishes; **that is the one case where a timeout costs the
-  client its session, and the error says so.**
-* Four endings, one escalation, and the client is told which happened and why — **except** a
-  cancellation, which it is deliberately told nothing about, because it asked for that one.
-
-`[DEMO F — 90s, optional]` `MCP_MAX_COMMITS_BEHIND=2 MCP_REAPER_INTERVAL=10s ./run-server.sh`, one
-client reading a method, a second gem committing a few times, then any tool call showing the
-`[session]` line that says *the server refreshed your view* and names what went stale. Fall back to
-a gem-log screenshot if the timing is awkward on stage.
-
----
+The point is step 4, not the log line: the client is **told**, on its next result, in the same
+`[session]` channel §7 introduced, and the stale reads are named. Everything before it is staging.
+Rehearse the fallback — this depends on a second gem committing on cue *and* on a pass landing where
+you want it, which is two timing dependencies on stage, and a gem-log screenshot plus the `[session]`
+line is all the evidence anyone needs.
 
 ## 9. `McpAuthRouter`: a reachable port (3 slides)
 
@@ -1791,10 +1547,24 @@ audience will have the README open.
    one, qualify the path in the comment. If they stay out, the alternative is to reword each citation
    to point at the class comment that carries the conclusion.
 3. **Test counts to re-take on the morning.** The README now says **466** base / **522** with auth /
-   **561** with Grail (39 in `McpGrailToolsetTest`), and the newest commit messages say 48 in
-   `McpTransportTest` and 560 across 22 suites — one apart, because they were written either side of
-   a Grail test landing. Run `./run-unit-tests.sh` on the demo stone and quote **only** what it
-   prints.
+   **566** with Grail (44 in `McpGrailToolsetTest`) — the Grail figure moved by five in the
+   2026-09-10 merge, which is exactly why this is on the list. Run `./run-unit-tests.sh` on the demo
+   stone and quote **only** what it prints.
+4. **Three comments in `McpRouter` contradict the code, all found while cutting §8, and all three
+   are cheap.** None of them changes a slide, but this audience reads source:
+   * **`maintainSessions`** — the numbered list in its comment has **three** steps and the method
+     sends **four**. `maintainViewHygiene` is missing from the list, which is awkward given that the
+     comment's whole point is that *the order is the point*.
+   * **`reaperIntervalSeconds`** — its comment still says it is *"the unit the suspend detector
+     measures its own lateness in (#maintainSessions)"*. `maintainSessions` says, correctly, that
+     **there is no suspend detector**. It is a footprint left by the mechanism §8's slide 3 is about
+     having removed.
+   * **`commitsBehindFor:`** — its comment says *"two failures both answer nil: the session has
+     logged out, and this server's user lacks the `SessionAccess` privilege."* The first is wrong,
+     and `docs/session-lifetime.md` has the measurement: `descriptionOfSession:` does **not** refuse
+     an id nobody holds, it answers a zero-filled description, so field 16 reads **`0`** and a dead
+     gem measures as perfectly current. That is load-bearing — it is why the arm sends a dead worker
+     nothing — so the comment contradicts the behaviour the design depends on.
 
 ---
 
