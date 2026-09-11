@@ -191,7 +191,13 @@ defaultServerVersion
 category: 'toolsets'
 classmethod: McpServer
 defaultToolsetNames
-  "The core tool surface: the seven toolsets a plain McpServer registers, in registration order.
+  "The core tool surface: the seven toolsets a plain McpServer registers, in registration order, and
+   the whole of what an unconfigured deployment gets (McpRouter>>effectiveToolsetNames).
+   Nothing is added to this by being LOADED. An optional toolset in this image -- McpGrailToolset is
+   the one this project ships -- is exposed only by a router that names it, because a toolset can
+   carry a dependency the image knows nothing about: Grail's tools read the .py checkout that
+   grailDirectory points at, so a server that offered them merely because src/grail was filed in
+   would answer for a directory nobody chose.
    A deployment that wants a different surface names its own (see McpToolset)."
   ^#( 'McpBrowsingToolset' 'McpExecutionToolset' 'McpListingToolset' 'McpMutationToolset'
       'McpSearchToolset' 'McpSessionToolset' 'McpTestingToolset' )
@@ -211,7 +217,8 @@ handleJsonString: aRawJsonString
    class the sender named. It no longer looks for the Grail subclass: which server class and which
    toolsets a worker uses is the front end's decision, pushed down per session, and Grail is a toolset
    now rather than a rung in the hierarchy. A direct `McpServer handleJsonString:` therefore gets the
-   base tool surface; ask for a different one by name, or via McpServer installedDefaultToolsetNames.
+   core tool surface (McpServer class>>defaultToolsetNames), which is also what an unconfigured
+   deployment gets; ask for anything else by name, with newWithToolsetNames:.
 
    Answers as if nothing bounds this session's lifetime -- see the lifetimeBounds: variant, which
    the front end uses. Routing through it rather than duplicating the lookup is what CLEARS bounds
@@ -227,19 +234,6 @@ handleJsonString: aRawJsonString lifetimeBounds: anArrayOrNil
    refreshed. It is passed per request for the same reason, and used only when there is uncommitted
    work to warn about (McpDispatcher>>transactionNote)."
   ^self currentServer handleJsonString: aRawJsonString lifetimeBounds: anArrayOrNil
-%
-category: 'toolsets'
-classmethod: McpServer
-installedDefaultToolsetNames
-  "The default surface for a deployment that names none: the core toolsets, plus the optional Grail
-   (Python) toolset when its file has been loaded into this image. Resolved in THIS gem's symbol
-   list, and by the FRONT END once per session -- a worker never chooses its own tool surface (see
-   McpRouter>>effectiveToolsetNames)."
-  | names |
-  names := self defaultToolsetNames.
-  ^(System myUserProfile objectNamed: #McpGrailToolset) isNil
-    ifTrue: [names]
-    ifFalse: [names , (Array with: 'McpGrailToolset')]
 %
 category: 'guardrail keys'
 classmethod: McpServer

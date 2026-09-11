@@ -7,7 +7,8 @@
 # session goes idle; a dedicated gem's own activity does not.) The front end is always McpRouter; it
 # resolves the worker class and the tool surface ONCE PER SESSION and pushes them into each per-client
 # worker gem, which never chooses for itself. Unconfigured, that is McpServer with the core toolsets
-# plus the Grail (python) toolset when its optional file has been loaded.
+# and nothing else: an optional toolset that happens to be loaded in the image does NOT join the
+# surface, it has to be named in MCP_TOOLSETS.
 #
 # This script does NOT block -- it returns once the server is forked. To stop the server, run
 # ./stop-server.sh (by port), or use the `System stopSession: <id>` / `kill <pid>` line it prints.
@@ -30,18 +31,32 @@
 #   MCP_WORKER_CLASS - McpServer subclass the workers should instantiate (default McpServer).
 #                     Subclass to change BEHAVIOR; to add tools write a toolset instead.
 #   MCP_TOOLSETS - space-separated McpToolset names to expose instead of the default surface,
-#                     e.g. "McpBrowsingToolset McpSearchToolset". Empty means the default.
-#   MCP_GRAIL_DIR - path to the Grail CHECKOUT, on an image that has the Grail (python) toolset.
-#                     Grail's Python lives in the image, but its .py stdlib and its test fixtures
+#                     e.g. "McpBrowsingToolset McpSearchToolset". Empty means the default: the core
+#                     seven (McpServer class>>defaultToolsetNames), and only those. This is also how
+#                     an OPTIONAL toolset is turned on -- name the core seven plus it. The Python
+#                     toolset is the worked example, and the one this project ships:
+#
+#                       MCP_TOOLSETS="McpBrowsingToolset McpExecutionToolset McpListingToolset \
+#                         McpMutationToolset McpSearchToolset McpSessionToolset McpTestingToolset \
+#                         McpGrailToolset" \
+#                       MCP_GRAIL_DIR=/path/to/Grail ./run-server.sh
+#
+#                     Your own toolset goes on the same line. Naming it is the whole of the wiring:
+#                     the front end resolves the class, the worker registers its tools, and
+#                     MCP_TOOLSET_OPTIONS below configures it.
+#   MCP_GRAIL_DIR - path to the Grail CHECKOUT, for a server whose MCP_TOOLSETS include
+#                     McpGrailToolset. It CONFIGURES that toolset; it does not add it. Grail's
+#                     Python lives in the image, but its .py stdlib and its test fixtures
 #                     live on DISK under the checkout, and a worker gem cannot work out where: its
 #                     own working directory is the STONE's, which holds no src/python/stdlib. Without
 #                     it run_python_tests refuses, and get_python_source and the python traceback
 #                     have nothing to read. Use the same checkout this image was installed from --
 #                     a DIFFERENT one will resolve names against source the image did not compile.
 #                     Checked here for src/python/stdlib, so a typo fails at launch rather than at
-#                     the first tool call. On an image with no Grail toolset loaded, setting this
-#                     fails with "Toolset not found: McpGrailToolset" -- which is correct: the
-#                     setting could never have reached anything.
+#                     the first tool call. With the toolset NOT in the surface it could reach nothing,
+#                     so this script says so and leaves it off -- a router holding options for a
+#                     toolset it does not serve refuses to start, and this variable is a machine fact
+#                     (run-unit-tests.sh wants it too) rather than a request for a Grail server.
 #   MCP_TOOLSET_OPTIONS - options for any OTHER toolset that declares some, as a JSON object of
 #                     toolset name -> that toolset's options, e.g.
 #                     '{"AcmeDbToolset":{"dataDirectory":"/srv/acme"}}'. The general form of the
@@ -149,10 +164,24 @@ if [ -n "$MCP_GRAIL_DIR" ]; then
     echo "       installed from (the one whose install.sh you last ran)." >&2
     exit 1
   fi
-  CONFIG="$CONFIG
+  # Only worth SETTING when McpGrailToolset is in the surface, which since the toolset stopped
+  # joining it automatically means: named in MCP_TOOLSETS. McpRouter>>validateWorkerConfig refuses to
+  # start a router holding options for a toolset it does not serve -- correct for the Smalltalk API,
+  # where writing them is deliberate, but wrong here: MCP_GRAIL_DIR is a machine fact, exported once
+  # (run-unit-tests.sh wants the same variable), and its mere presence is not a request for a Grail
+  # SERVER. So say what is happening and leave it off, rather than refusing every ordinary launch on
+  # a machine that has it set.
+  case " $MCP_TOOLSETS " in
+    *" McpGrailToolset "*)
+      CONFIG="$CONFIG
 r toolsetOptions: (Dictionary new at: 'McpGrailToolset' put:
   (Dictionary new at: 'grailDirectory' put: '$(printf '%s' "$MCP_GRAIL_DIR" | sed "s/'/''/g")'; yourself);
-  yourself)."
+  yourself)." ;;
+    *)
+      echo "note: MCP_GRAIL_DIR is set, but McpGrailToolset is not in this server's tool surface," >&2
+      echo "      so it is ignored and no python tool is served. Name it, with the core toolsets," >&2
+      echo "      in MCP_TOOLSETS -- see this script's header for the line." >&2 ;;
+  esac
 fi
 if [ -n "$MCP_TOOLSET_OPTIONS" ]; then
   # parseBody: answers nil for anything that is not a JSON OBJECT, and toolsetOptions: nil means

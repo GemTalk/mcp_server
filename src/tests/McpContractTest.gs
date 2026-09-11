@@ -114,6 +114,21 @@ testCoreReadOnlyAllowListIsPinned
   pinned := McpServer coreReadOnlySafeToolNames asSortedCollection asArray.
   self assert: union equals: pinned
 %
+category: 'tests - toolsets'
+method: McpContractTest
+testDefaultToolsetSurfaceIsTheCoreSevenOnly
+  "The front end resolves the default surface with McpServer class>>defaultToolsetNames
+   (McpRouter>>effectiveToolsetNames), and NOTHING is added to it by being loaded. Asserted
+   image-agnostically, and deliberately in the CORE suite rather than the Grail one: the property
+   that matters is that an unconfigured router's surface does not depend on which optional groups
+   this image happens to carry, so it has to be checked on an image that carries them."
+  | surface |
+  surface := McpRouter new effectiveToolsetNames.
+  self assert: surface equals: McpServer defaultToolsetNames.
+  self assert: surface size equals: 7.
+  self deny: (surface includes: 'McpGrailToolset').
+  surface do: [:n | self assert: (n beginsWith: 'Mcp')]
+%
 category: 'tests - registry'
 method: McpContractTest
 testEveryDescriptorIsWellFormed
@@ -135,18 +150,6 @@ testEverySchemaIsClosed
     schema := d at: 'inputSchema'.
     self assert: (schema at: 'type') equals: 'object'.
     self assert: (schema at: 'additionalProperties' ifAbsent: [true]) == false]
-%
-category: 'tests - toolsets'
-method: McpContractTest
-testInstalledDefaultToolsetNamesIsCorePlusGrailWhenPresent
-  "The front end resolves the default surface with this (McpRouter>>effectiveToolsetNames). It is the
-   core seven, plus McpGrailToolset only when that optional file is loaded -- so assert
-   image-agnostically: the core names are always there, and any extra is the Grail toolset."
-  | installed |
-  installed := McpServer installedDefaultToolsetNames.
-  McpServer defaultToolsetNames do: [:n | self assert: (installed includes: n)].
-  (installed reject: [:n | McpServer defaultToolsetNames includes: n]) do: [:extra |
-    self assert: extra equals: 'McpGrailToolset']
 %
 category: 'tests - guard'
 method: McpContractTest
