@@ -596,13 +596,26 @@ an image without Grail. Once loaded the toolset joins the default tool surface a
 > line. Uncaptured, stderr went to a `PyConsoleStream` — and a worker gem is forked by the netldi
 > and detached, so nothing reads that sink: the bytes were accepted, counted and gone.
 >
-> **What the redirect cannot reach.** It swaps `sys.stdout` and `sys.stderr` on *this session's*
-> `sys`. A `.py` module **deployed** into the image holds the `sys` it was bound to at deploy time,
-> which is a different object, so its writes go past the redirect — `traceback.print_exc()` with no
-> `file=` argument is the one that bites, and `traceback.print_exc(file=sys.stderr)` is captured
-> normally. Grail's `warnings` is native (Smalltalk), so it writes through this session's `sys` and
-> *is* captured. Assigning into a deployed module's `sys` would mean writing committed state shared
-> with every other session, which is not a thing a read of a tool result should do.
+> **What the redirect does not always reach.** It swaps the streams on the `sys` *this session*
+> imports. A `.py` module gets its own module-global `sys` when it is executed, and one executed at
+> **deploy** time keeps the `sys` of the session that deployed it — so whether a stdlib module's
+> writes are captured depends on the image's deployment state rather than on your code. Measured on
+> 3.7.5, same stone and same tool, two sessions:
+>
+> | `traceback` is | `traceback.sys is sys` | `print_exc()` with no `file=` |
+> |---|---|---|
+> | committed (deployed), shared with every session | `False` | **lost** — writes past the redirect |
+> | session-built (canonical, not committed) | `True` | captured and labelled |
+>
+> In the deployed case `traceback.sys.modules is sys.modules` is nevertheless `True`: the two module
+> objects share their session-resolved state but not their `stdout`/`stderr` attributes. Native
+> modules are never affected — Grail's `warnings` among them — and passing the stream explicitly,
+> `traceback.print_exc(file=sys.stderr)`, is captured either way.
+>
+> This is not worked around here: reaching a deployed module's `sys` means assigning into globals
+> that are committed state shared with every other session, and evaluating an expression must not
+> write that. It belongs in Grail — a deployed module should see the importing session's `sys`, as
+> it already sees its `modules` and `path`.
 >
 > **`get_python_source` exists because the image loses this.** A compiled `def`'s `__doc__` reads
 > `None` and `inspect.getsource` answers an *empty string* — not an error, the wrong answer quietly.

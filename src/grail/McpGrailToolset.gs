@@ -2094,6 +2094,25 @@ tool_eval_python: args
    contextlib.redirect_stdout within a single call was never affected: it restores before the call
    ends.
 
+   WHAT THE REDIRECT DOES NOT ALWAYS REACH. It swaps the streams on the `sys` THIS session imports.
+   A .py module gets its own module-global `sys` when it is executed, and one executed at DEPLOY
+   time keeps the `sys` of the session that deployed it. Measured on 3.7.5, same stone, same tool,
+   two sessions -- and it is the image's deployment state that decides, not the code:
+     - traceback COMMITTED (deployed): `traceback.sys is sys` false, while
+       `traceback.sys.modules is sys.modules` is TRUE -- the two module objects share their
+       session-resolved state but not their stdout/stderr attributes -- and print_exc() with no
+       file= argument wrote past the redirect and was lost.
+     - traceback session-built (canonical, not committed): `traceback.sys is sys` true, and
+       print_exc() came back labelled like anything else.
+   Native modules are never affected, Grail's `warnings` among them, since they resolve the stream
+   through the live session. Passing the stream explicitly -- print_exc(file=sys.stderr) -- is
+   captured either way.
+
+   Not worked around here. Reaching a deployed module's `sys` means assigning into globals that are
+   committed state shared with every other session, and evaluating an expression must not write
+   that. It belongs in Grail: a deployed module should see the importing session's `sys`, the way
+   it already sees its `modules` and `path`.
+
    Python errors become #pythonError (withPythonErrorsAsMcpError:) carrying the traceback where one
    could be built and the one-line message otherwise -- so this degrades to the old behavior rather
    than failing if Grail's internals move."

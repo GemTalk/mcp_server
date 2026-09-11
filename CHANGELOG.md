@@ -25,10 +25,12 @@ reasoning has nowhere better to live, not that the entry should grow.
   channels are reported ahead of the traceback on the failing path, where a script that printed its
   way to the point of failure used to have that output captured and dropped unread; and a client's
   own `sys.stdout` redirect is left installed across calls rather than silently reverted. A call
-  that writes to neither channel still answers the bare `repr` on one line. Writes from a `.py`
-  module **deployed** into the image — `traceback.print_exc()` with no `file=` — are still not
-  captured: it holds a `sys` bound at deploy time, and redirecting that would mean writing state
-  shared with every session.
+  that writes to neither channel still answers the bare `repr` on one line. One limit, and it is
+  the image's rather than the tool's: a `.py` module executed at **deploy** time keeps the `sys` of
+  the session that deployed it, so on an image with the frameworks deployed a call like
+  `traceback.print_exc()` with no `file=` still writes past the redirect. Reaching it would mean
+  assigning into state shared with every session; `print_exc(file=sys.stderr)` is captured either
+  way, as is anything native.
 
 * **`list_python_methods` no longer drops `*args`, `**kwargs`, `/` and `*` from a signature.** The
   renderer read each parameter's name and default out of the class's signature table and ignored its
