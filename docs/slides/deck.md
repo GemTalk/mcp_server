@@ -29,11 +29,12 @@ style: |
 ---
 
 <!--
-FIVE VERTICAL SLICES so far. In RUNNING order: sections 0 and 1 (nine slides), then sections 2
-and 3 (nine), then section 4 (ten), then section 7 (fourteen), then section 8 (ten). In the order
-they were CUT that is slice 3, slice 4, slice 5, slice 1, slice 2 -- the two centrepieces were cut
-first on purpose, because they are what the budget has to fit around. Sections 5, 6 and 9-13 are
-not cut yet. Each slice's own header comment sits beside its first slide.
+SIX VERTICAL SLICES so far. In RUNNING order: sections 0 and 1 (nine slides), then sections 2 and
+3 (nine), then section 4 (ten), then section 5 (seven), then section 7 (fourteen), then section 8
+(ten). In the order they were CUT that is slice 3, slice 4, slice 5, slice 6, slice 1, slice 2 --
+the two centrepieces were cut first on purpose, because they are what the budget has to fit
+around. Section 6 and sections 9-13 are not cut yet. Each slice's own header comment sits beside
+its first slide.
 
 Source of truth for the argument and the notes is docs/Presentation.md; each slice is derived from
 the matching section of it. Where the two disagree THIS FILE IS RIGHT and the outline should be
@@ -1482,6 +1483,331 @@ is also running on 8001 from demo B, this is the moment to show 40 beside it.
 If the room asks to see the session end: DELETE /mcp with the same id, then the
 statistics line again, and the row is gone. It is fifteen extra seconds and it
 closes the loop -- but only if we are on time.
+-->
+
+---
+
+<!--
+================================================================================
+VERTICAL SLICE 6 -- section 5, trace 2: a follow-up request, and the JSON codec.
+Seven slides, no demo. Cut 2026-09-12: fourth in running order, sixth to be cut.
+
+Running order and plans, in seconds -- what is different 40, the request id 40,
+handleToolsCall: 50, the view 45 (175s, trace 2); why the writer is owned 50,
+inbound 45, the five defects 60 (155s, the codec). About 5 1/2 minutes.
+
+NO LEAD SLIDE, and this is the only non-centrepiece slice without one. Section 5
+is not a new subject, it is the same walk with one thing changed, and announcing
+it as a section would undo the thing that makes it cheap. It opens on the header
+that ends section 4 -- MCP-Session-Id -- and reads as the next sentence. Section
+6 will need its own lead; this one would have cost 10s to say "still trace".
+
+THE SECTION HAS TWO HALVES and they are not the same kind of material. Slides
+1-4 are trace, and they get faster as they go because the room has walked this
+path. Slides 5-7 are the codec, and they are the part THIS ROOM can act on:
+these are their defects, in their kernel, measured. Slide 7 is the concrete ask
+of the talk and section 13 collects it.
+
+Slide 4 is the pivot. "THE VIEW. NO TOOL REFRESHES IT." is the dispatcher's own
+capitals and it is section 7's whole premise arriving one section early -- so
+state it, do not argue it, and let section 7 do the work. If a hand goes up
+there, the answer is "that is the next section but one" and nothing more.
+
+DEPARTURES from docs/Presentation.md:
+  * THE SUMMARY DIAGRAM FOR SECTIONS 4-5 IS NOT HERE, deliberately, and this is
+    the departure to revisit if anyone wants it back. The outline asks for "the
+    whole chain on one page, front end above the line and worker below, with the
+    GCI hop drawn as the only thing crossing it", to be reused in sections 6 and
+    8 with an arm added each time. Three reasons it is gone: slice 5's sequence
+    diagram already IS that picture, drawn before the walk rather than after it,
+    and a second view of one chain eighteen slides later recaps rather than
+    teaches; section 8 is already cut and does not reuse it, so the "one arm
+    each time" economy was never going to be collected; and section 6's own
+    picture is a different shape anyway (a tick's path out of a worker, which
+    crosses the line in the other direction). If it comes back, it belongs HERE,
+    as slide 5, and the two codec slides move after it.
+  * the outline's step 7 (McpJson write: -> the string -> GCI -> writeJson:, and
+    a notification's empty answer becoming 202) is one line of slide 2's notes.
+    It is a call chain with no decision in it, and 202 was already established
+    on section 4's servePost: slide.
+  * the outline gives the codec "1-2 slides". It gets three, because the defect
+    table cannot share a slide with the argument for owning the writer and stay
+    readable at the back of a room.
+
+THE DEFECT TABLE SAYS FIVE; McpJson's class comment says three. Both are right
+and NEITHER SHOULD BE "FIXED" INTO THE OTHER. The class comment enumerates the
+three defects that bear on ONE design decision -- which half of the codec to own
+-- and says so in its own words. The table is the filed 3.7.6 report, which is a
+superset: it adds the unchecked hex digits after \u and the leniency/error-quality
+family. If the class comment is ever edited, it is still answering its own
+question and still needs exactly its three.
+
+THE DOCUMENT THE SLIDE OFFERS IS NOT IN THE TREE. docs/kernel-json-unicode.md is
+cited from README.md, McpJson's class comment, McpJsonTest and docs/utf8-wire.md,
+and it lives outside the repository along with three later variants including the
+filed 3.7.6 report this table quotes. The outline already knows (its "What to fix
+before the talk", item 2) and recommends committing it. THAT HAS TO HAPPEN BEFORE
+THE TALK or slide 7's last line is an offer of something nobody can take: this
+room will ask for the file by name, and the README they have open cites a path
+that 404s.
+================================================================================
+-->
+
+## Same client, second call. What is *different*
+
+```
+POST /mcp   MCP-Session-Id: 978EC559…
+{"jsonrpc":"2.0","id":2,"method":"tools/call",
+ "params":{"name":"get_method_source","arguments":{"className":"McpServer",…}}}
+```
+
+Everything transport-side is the same **up to `servePost:`**. Not a response, not a cancellation, not `initialize` → **`serveRouted:id:progressToken:sessionId:on:`**.
+
+* **The session gates live in `serveRouted:`** — missing id → **400**, unknown or expired → **404** — and they *have* to live there, above both answer shapes: **a stream cannot be opened before it is known there is a session to serve**, or the refusal would have to be written into a response already committed to being a stream
+* `progressTokenFor:accepting:` then decides the **framing**, not the content: `nil` → one JSON object (`serveCall:`) · non-nil → an SSE stream (`serveStreamedCall:`, §6)
+
+<span class="fine">A 404 is the one a client is expected to recover from: a compliant client re-`initialize`s and gets a new session. Three conditions for a token, all in one method: it is a `tools/call`, it carries `params._meta.progressToken`, **and** its `Accept` offers a stream.</span>
+
+<!--
+Open by saying what this section is: the same walk, with the differences called
+out, and it gets faster as it goes. Nobody needs the front door again.
+
+The gate placement is the one piece of design on this slide and it is worth the
+sentence. It is an ordering constraint of the same family as section 3's
+"capture the ids before launching the loop": once the headers of a stream have
+gone out there is no second HTTP response to be had, so anything that might
+refuse has to refuse BEFORE the shape is chosen. That is why the gates are in
+the method above the fork rather than duplicated in the two below it.
+
+If someone asks why an expired session is 404 rather than 401 or 410: 404 is
+what the spec names, and the client behaviour it produces is the one wanted --
+re-initialize, get a new gem, carry on. Section 8 is where sessions end.
+
+Claude Code puts a progressToken on every single tools/call it has ever sent, so
+in practice the live server takes the stream branch almost always. Trace 2 takes
+the nil branch because it is the simpler one and because section 6 is the other.
+-->
+
+---
+
+## The request id lives exactly as long as the call
+
+`serveCall:` → `sess forward: body lifetimeBounds: … requestId: anIdOrNil`
+
+* The id is remembered **only while the call runs**, so a `notifications/cancelled` naming it can be matched to it — and cleared in an `ensure:` **at both ends**. A flag outliving its call would end **the next one**; and a cancel can arrive in the instant between a call finishing and the clearing
+* `runWorker:` as in trace 1 — **non-blocking**, which is where "clients really do run concurrently" stops being a claim
+
+> **Two guarantees the blocking call used to provide by accident, now explicit.** The per-session **mutex** — GCI allows one call in flight per session. And the reaper **skipping any session with a call in flight** (`McpSession>>isBusy`), instead of logging a worker out mid-request.
+
+<span class="fine">Neither could have been needed before: while forwarding froze the whole front-end gem, no second request could collide and the reaper could not run either. Making the gem keep working is what made both necessary. `isBusy` reads the external session's own state and makes **no GCI call** — and deliberately excludes an *abandoned* worker, whose call is in flight and always will be.</span>
+
+<!--
+The blockquote is the slide, and it is a general lesson worth naming as one:
+when you remove an accidental serialization, you inherit every invariant it was
+quietly providing. Two here, and both were found by reasoning rather than by a
+failure -- which is the good outcome and worth saying, because it is the case
+FOR spending the time.
+
+The ensure:-at-both-ends detail is small and real. Cleared on the way OUT for
+the obvious reason. Cleared on the way IN because another GsProcess sets this
+flag, and it can set it in the instant between a call finishing and the ensure:
+running -- at which point the flag is sitting there waiting to end a call that
+has not started yet.
+
+The same method clears the view-release flag and its pass count, for the same
+reason and set by the reaper rather than a client. Section 8.
+
+If asked what happens after: McpJson write: turns the response Dictionary into
+the JSON string, it crosses GCI as the value of the expression, and the front
+end writes it with conn writeJson:. A notification's answer is empty, which
+becomes a 202 with no body -- the same 202 as section 4's slide.
+-->
+
+---
+
+## `handleToolsCall:` — and **two** different failure envelopes
+
+* `params.name` missing → **`-32602`** `invalidParams` · unknown tool → **`-32602`** `notFound`
+* A **read-only gated** tool → **`-32601`**, `data.kind = "readOnly"` — deliberately *not* `notFound`, so a client can tell **“exists but forbidden here”** from “no such tool” (§11)
+* **Schema enforcement is structural, and says so.** `validationErrorFor:` rejects unknown top-level keys under `additionalProperties: false` *naming the allowed ones*, and requires every `required` key. **No deep type checks.** Schemas are JSON Schema 2020-12; no `$schema` needed
+
+> **Per MCP 2025-11-25, the two are split by what the model can act on.** A malformed **request** — missing name, unknown tool — is a **protocol** error `-32602`: the model is unlikely to recover. Arguments that violate the **tool's own `inputSchema`** come back as a **tool execution error**, `isError: true` *in the result*, because they carry actionable feedback a model can use to self-correct and retry.
+
+<span class="fine">Before 2025-11-25 both were `-32602`. **Only the envelope changed** — the check still runs *before* the tool is invoked, so a rejected call still has **no side effect**.</span>
+
+<!--
+This is the slide for anyone in the room who will write a toolset, and the two
+envelopes are the part that is not obvious. The split is not about severity, it
+is about who can do something with the answer: a model cannot invent a tool that
+does not exist, but it can absolutely fix an argument if you tell it which one
+and what was allowed. That is why the schema failure goes in the RESULT.
+
+Be honest about the validator, because someone will read McpTool and find out
+anyway. It is structural: unknown keys and missing required keys, nothing
+deeper. In practice that has been enough, because the failure mode it catches is
+a model guessing an argument name, and the errors name the allowed ones -- which
+is the actionable feedback the spec is asking for.
+
+The read-only kind is a small thing that matters more than it looks, and section
+11 has the rest: a model told a tool does not exist will go and find another way
+to do the same thing, which on a read-only server is exactly what you do not
+want it doing.
+-->
+
+---
+
+## `THE VIEW. NO TOOL REFRESHES IT.`
+
+The dispatcher's own capitals — and the premise of §7, arriving one section early.
+
+**A session sees one consistent snapshot of the repository until the client itself asks for another:** by committing, by aborting, or by calling `refresh`.
+
+> This is **not an omission. It is the guardrail.** GemStone's conflict check is write-write **against the view**, and does not track what a client *read* — so the view is the only record the stone has of what this client saw.
+
+* Two earlier designs *did* refresh under the tool: first `abortTransaction` before every call, then briefly `continueTransaction`. **Both were wrong for the same reason** — they tell the stone the client has seen changes it has not, and a commit that should have been refused as stale is accepted instead, **silently discarding another session's work**
+* Then `tool callWith: args` → the handler → `contentText:isError:` → **`annotateContent:`**, which appends the `[session]` line (§7) — to **both** envelopes, because a tool that raised is exactly when dirty state most needs reporting, and computed from the state left **after** the tool ran
+
+<!--
+State this, do not argue it. Section 7 is eleven minutes of arguing it, with two
+diagrams and a live demo, and every second spent here is a second stolen from
+there. If a hand goes up: "that is the section after next".
+
+What to say, and stop: the stone cannot help us here, because it does not track
+reads. The view is the only record of what the client saw. So refreshing the
+view under a client that has not asked is not a courtesy, it is destroying
+evidence -- and the damage does not show up as an error, it shows up as somebody
+else's work missing.
+
+Measured both ways before it was believed, and the measurement is in
+docs/server-to-client-messaging.md 15 -- which is one of the documents not in
+the tree (see the slice header).
+
+annotateContent: applying to the ERROR envelope too is the detail worth keeping
+if the clock is bad: a tool that raised is precisely when a client most needs to
+be told what state it is now in. Section 7 slide 9 is the whole of it.
+-->
+
+---
+
+## Why this server owns its JSON **writer** — and only the writer
+
+`McpJson class>>write:` replaces `Object>>asJson` on every production path, and answers **a byte `String` of UTF-8**.
+
+> **The one defect an application cannot route around.** `printJsonOn:` keeps only **bits 12–15** of a codepoint above U+FFFF instead of emitting a surrogate pair: U+1F600 goes out as `"\uF600"`, and some codepoints as a **lone surrogate**, which is not well-formed JSON. **By the time `asJson` has answered, the codepoint is gone** — no post-pass can recover it.
+
+* Writing UTF-8 **does not fix that arithmetic so much as never reach it**: a surrogate pair is an artefact of `\u` escapes and UTF-16, and UTF-8 spells an astral codepoint directly in four bytes. Only RFC 8259 §7's mandatory escapes are emitted
+* **Bytes rather than characters is load-bearing**, and three unrelated things downstream depend on it: `Content-Length` is written as `body size` · the worker→front-end hop is measured in bytes by the kernel's result fetch, **whose buffer is sized in bytes** · `MCP_TRACE` writes bodies through `GsFile`, where a 16-bit string comes out garbled
+
+<span class="fine">A byte `String`'s `#size` **is** its byte count whatever the bytes are, so all three hold **by construction**.</span>
+
+<!--
+The shape of the argument, said once: exactly one of the kernel's JSON defects is
+on the WRITE path, and it is the only one that cannot be repaired from outside.
+That asymmetry is the whole design. Own the writer, keep the parser, and fix the
+inbound defect in forty lines at the edge -- which is the next slide.
+
+"By the time asJson has answered, the codepoint is gone" is the sentence to land.
+It is why this could not be a post-pass, a wrapper, or a sanitizer. The
+information has already been destroyed.
+
+The three downstream dependencies are worth reading out slowly, because they are
+three unrelated mechanisms that all happen to need the same property, and they
+all held under the OLD ASCII-only policy for an incidental reason -- nothing was
+ever above 0x7E. Under this one they hold structurally. That is the difference
+between a thing that works and a thing that is true.
+
+The alternative to owning a writer, if anyone asks why not just patch it: a
+kernel method patched in an image is lost on an extent reload, and it changes
+behaviour for every other consumer in that image. Neither is acceptable for
+something a customer installs.
+
+The encoder has an oracle, if anyone asks how the UTF-8 arithmetic is trusted:
+writeUtf8CodePoint:on: must agree with the kernel primitive encodeAsUTF8 for
+every codepoint, checked across the whole range including both sides of all
+three sequence-length boundaries. 1,148 codepoints, zero disagreements. The
+escaping writer it replaced could only ever be checked against expectations
+written by the same hand that wrote it.
+-->
+
+---
+
+## Inbound: two `asString`s and one repair
+
+```smalltalk
+JsonParser parse: (self combineSurrogateEscapesIn: aString asString decodeFromUTF8 asString)
+```
+
+* **The leading `asString`.** The body does not reach the worker as the bytes the socket read — the front end forwards it **embedded in an expression**, and the worker **compiles that literal**, so its class comes from the worker's `#StringConfiguration`. A `Unicode16` — what an accented body compiles to on **any Grail image** — does not understand `decodeFromUTF8` **at all**
+* **The trailing one** narrows `Unicode7`/`16`/`32` back into the byte-string family: a `Unicode7` compared to a `String` **raises** on a stock image rather than answering false
+* **`combineSurrogateEscapesIn:`** — the one repair made *before* the parser sees the text. Kernel `JsonParser` sends `Character codePoint:` to each `\uXXXX` separately and 3.7.x refuses to build a surrogate, so an emoji written as the **pair RFC 8259 prescribes** failed the whole request with `-32700`. **Python's `json.dumps` escapes by default** — that is a real client, not a hypothetical
+
+<span class="fine">**Forty lines at the edge, where the outbound defect needed a whole writer** — because inbound the information is still there in the escapes. An unpaired half becomes U+FFFD; a malformed *byte* sequence refuses the whole body with a `-32700` naming the offset, because a bad encoder means nothing it sent can be trusted.</span>
+
+<!--
+The leading asString is the best bug in this section for this audience, because
+nothing about it is a JSON problem. The body is wire bytes by origin and
+something else entirely by class, and the thing that changed its class is that
+the front end sent it to the worker as a compiled literal. So the receiver's
+StringConfiguration decides what parseBody: is handed -- and on every Grail
+image, which is what the live server runs on, that is Unicode16.
+
+And decodeFromUTF8 is implemented on String, ByteArray and Unicode7 ONLY.
+Unicode16 answers MessageNotUnderstood EVEN WHEN every codepoint in it is below
+256 and it therefore holds exactly the bytes the method is for. That is the API
+note in the report that is not itself a JSON defect, and it is the one this room
+is most likely to agree should just be fixed.
+
+How it was found and confirmed, if asked: read out of the worker's gem log with
+parseBody: instrumented, then confirmed causally -- revert the single asString
+in the image, restart the front end, and a non-ASCII initialize is a -32700
+while an ASCII one succeeds. Restore it and both succeed.
+
+Performance footnote for anyone who worries about a scan per request: the repair
+gates its scan behind one primitive findString: and answers the receiver itself
+when there is no escape to find. 0.05ms against 3.6ms for a character loop over
+a 63KB body.
+-->
+
+---
+
+## Five defects, measured — and this is **the ask**
+
+| # | defect | effect |
+|---|---|---|
+| 1 | `JsonParser>>string` — no surrogate-pair **decoding** | an escaped astral character raises `OutOfRange` (2723): **nothing above U+FFFF can be sent escaped** |
+| 2 | `printJsonOn:` — no surrogate-pair **encoding** | U+1F600 → `\uF600`; U+10000 → NUL; U+1D800 → a **lone surrogate**, ill-formed JSON. **No error** |
+| 3 | `JsonParser>>string` — an unrecognized escape is **dropped** | `{"a":"\x"}` parses to `'a' -> ''`; RFC 8259 §7 admits exactly eight escapes |
+| 4 | `JsonParser>>string` — the four characters after `\u` are **not hex-checked** | `\uZZZZ` becomes U+0000, because `'16rZZZZ' asNumber` is 0 |
+| 5 | `parse:` — leniencies, and error quality | trailing content ignored · raw control characters accepted · empty input is a `MessageNotUnderstood`, not a JSON error |
+
+**Two of the five are silent data corruption on a public API** (2, 4). One raises three layers from its cause (1). Two accept what is invalid (3, 5).
+
+<span class="fine">Measured against **3.7.6**, stock `extent0.dbf`, every result a live measurement, with a copy-pasteable reproduction and a suggested fix per defect. **I would like to hand this to someone.**</span>
+
+<!--
+THE CONCRETE ASK OF THE TALK, and the slide section 13 collects. Everything
+before it in this section exists to earn the right to put it up.
+
+Say the ask plainly and then STOP TALKING. The room fixes these. Do not soften
+it, do not apologise for it, and do not fill the silence -- a pause here is the
+whole point, and somebody in that room will say a name.
+
+Rank them out loud, because five defects read as a list and two of them are not
+in the same league: 2 and 4 are SILENT. No exception, no log line, a wrong
+character written into the image and stored. 1 is at least loud, and it has a
+named client behind it -- Python's json.dumps escapes by default, so an emoji
+from any such client failed the whole request until forty lines of repair
+existed. 3 and 5 are leniency, which is a smaller thing.
+
+Have the reproduction for defect 2 in scrollback and ready to paste. It is one
+line -- (String with: (Character codePoint: 16r1F600)) asJson -- and it answers
+"\uF600" in front of them. If the room wants ONE thing to look at, that is it,
+and it is more persuasive than the table.
+
+BEFORE THE TALK: docs/kernel-json-unicode.md has to be in the tree. It is cited
+from README.md, from McpJson's class comment, from McpJsonTest and from
+docs/utf8-wire.md, and it is not committed -- see the slice header. This room
+will ask for it by name and will have the README open.
 -->
 
 ---
