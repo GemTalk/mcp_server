@@ -29,13 +29,13 @@ style: |
 ---
 
 <!--
-EIGHT VERTICAL SLICES so far, and sections 0-9 are now cut end to end -- this file is in RUNNING
+NINE VERTICAL SLICES so far, and sections 0-10 are now cut end to end -- this file is in RUNNING
 order throughout. Sections 0 and 1 (nine slides), then sections 2 and 3 (nine), then section 4
 (ten), then section 5 (seven), then section 6 (six), then section 7 (fourteen), then section 8
-(ten), then section 9 (six). In the order they were CUT that is slice 3, slice 4, slice 5, slice 6,
-slice 7, slice 1, slice 2, slice 8 -- the two centrepieces were cut first on purpose, because they
-are what the budget has to fit around. Sections 10-13 are not cut yet. Each slice's own header
-comment sits beside its first slide.
+(ten), then section 9 (six), then section 10 (five). In the order they were CUT that is slice 3,
+slice 4, slice 5, slice 6, slice 7, slice 1, slice 2, slice 8, slice 9 -- the two centrepieces were
+cut first on purpose, because they are what the budget has to fit around. Sections 11-13 are not
+cut yet. Each slice's own header comment sits beside its first slide.
 
 Source of truth for the argument and the notes is docs/Presentation.md; each slice is derived from
 the matching section of it. Where the two disagree THIS FILE IS RIGHT and the outline should be
@@ -3642,4 +3642,237 @@ on the side that holds the token, so the mechanism exists; what nobody has
 decided is the policy, and whether GemStone's own privileges should carry any of
 it. That is a question for this room specifically, and it is worth leaving in the
 air rather than answering.
+-->
+
+---
+
+<!--
+================================================================================
+VERTICAL SLICE 9 -- section 10, extending it: a server for YOUR software. Five
+slides, no demo. Cut 2026-09-12: ninth in running order, ninth to be cut.
+
+Running order and plans, in seconds -- write a toolset 45, pick a surface 45,
+the worked example 40, the collision 55, the upstream ask 40. About 3 3/4
+minutes.
+
+THE OUTLINE SAYS 2 SLIDES. It is the third section where that number predates
+the bullet list under it, and this one is the most lopsided: the list runs to
+nine bullets and two of them are measurements with a story attached. Five.
+
+THIS IS THE SECTION THE ROOM CAN ACT ON SECOND-MOST, after section 5's defect
+table. Everything before it has been "here is what this server does"; this is
+"here is the seam, and here is what happens when you use it". Pitch it that way.
+
+WHAT THE 2026-09-11 MERGE DID FOR THIS SECTION, and why slide 3 exists at all.
+Until McpServer class>>installedDefaultToolsetNames was removed, the only
+optional toolset in the tree was wired by a mechanism nobody else could use --
+so this section could only describe how you WOULD add one. Now McpGrailToolset
+is configured exactly as a third party's is, and the section can say "copy this"
+and mean it literally. Slide 3 is the payoff of section 2's slide 13; say so.
+
+SLIDE 4 IS THE ONE THAT LANDS, and it is not really about Grail. It is the
+general shape: your domain has a model, this server has a session model, and
+where they disagree the disagreement is yours to resolve -- with a number
+attached that nobody can argue with (132 defects against 386/386 clean). Every
+vendor in that room who writes a toolset will meet some version of it.
+
+WHAT TO CUT: slide 5 (40s), which is a lovely result and an upstream ask but is
+Grail-specific and section 13 can carry the asks alone. Then slide 3, whose
+argument survives as one sentence on slide 2. Do NOT cut slide 4.
+
+NO DEMO, matching the outline and the demo inventory. Demo C already showed a
+tool surface being chosen; a sixth demo to show a different one would be the
+same screen with different words in it.
+
+DEPARTURES from docs/Presentation.md:
+  * the outline's Grail bullet names grailDirectory as the options example.
+    There are TWO declared options -- grailDirectory and testGemConfig -- and
+    slide 3 says two, because "a toolset declares its options" is the point and
+    one option makes it look like a special case;
+  * McpGrailToolset's OTHER collision with the model is speaker notes on slide 4,
+    not a bullet: Grail models Python exceptions outside the Smalltalk Error
+    hierarchy, so McpDispatcher's `on: Error do:` cannot see them and an uncaught
+    one would take the whole worker gem down rather than answer the client. It is
+    excellent material and there is no room for it; it is the first thing to say
+    if a hand goes up on slide 4.
+================================================================================
+-->
+
+## To add tools, write a **toolset**
+
+Subclass `McpToolset` and implement three things:
+
+* **`registerOn:`** — one `name:description:inputSchema:do:` per tool, with schemas from the inherited builders (`objectSchema:required:`, `propString:`, `boolProperty:`)
+* **`toolNames`** — what this toolset offers
+* **`readOnlySafeToolNames`** — whichever of your tools **cannot persist a change**
+
+> **The default is that *no* tool is read-only safe.** Fail closed: a tool a toolset does not list is gated in a read-only session — **including a future one whose author forgot to classify it** (§11).
+
+Handlers are instance methods taking the parsed arguments and answering a `String`; `resolveClass:`, `dictNamed:`, `linesFrom:` and `capResult:` cover the usual lookups and output capping.
+
+**A handler that mutates passes through `self assertMutableClass: cls` first** — which forwards to the **server**, because what counts as protected is **one policy per deployment** rather than each toolset's to invent, and a subclass can tighten it for every toolset at once. **A toolset built with no server refuses to mutate at all.**
+
+<!--
+Open the section by saying what kind of section it is: everything so far has been
+"here is what this server does". This is "here is the seam". Two extension
+points, and the first is the one you almost always want.
+
+Nobody hand-writes JSON Schema -- the builders are there so a tool's schema is
+Smalltalk, and so that the closed-by-default additionalProperties rule of section
+5's slide 33 is applied for you rather than remembered.
+
+The fail-closed default is the design decision worth defending, because its cost
+is real -- you must remember to classify a new tool or it silently will not run
+in a read-only session. That is the right way round. The other way, a tool is
+safe until somebody notices it is not, and the noticing happens in production.
+
+assertMutableClass: forwarding to the SERVER is the bit that is easy to get
+wrong and it generalises: policy belongs to the deployment, not to the component.
+Two toolsets must not disagree about what a protected class is, and a vendor
+should not have to know. The fail-closed-with-no-server case is not theoretical
+-- it is exactly what a toolset built standalone in a test gets.
+
+If asked how a handler reports failure: raise. The dispatcher classifies Errors
+into the isError envelope with a kind (section 5's slide 33). A handler does not
+build error envelopes itself.
+-->
+
+---
+
+## How a deployment picks a surface — three shapes, all live today
+
+* **`MCP_TOOLSETS="AcmeDbToolset"`** → a server with **only your tools** and none of the Smalltalk-development surface. **An empty list is legal**, and means a server offering no tools at all
+* **`serverName:` / `serverVersion:` say which *software* this is** — the product's to set. **`serverTitle:` labels *this instance*** — the operator's — and is **omitted entirely rather than sent as null**, so a title being present means a human deliberately labelled that box
+* **`MCP_WORKER_CLASS=AcmeDbServer`** → subclass `McpServer` to change **behaviour**: the kernel guards (`isProtectedClass:`, `protectedDictionaryNames`), the identity hooks, the server instructions. **Usually toolsets are the right answer** — nothing auto-detects a subclass, and the router names it per session (§4)
+
+> **Brain Freeze Insurance is the example to say out loud:** a database whose useful tool surface is **its own domain operations**, not developer coding tools. Same transport, same session model, same guardrail — and **none of `McpBrowsingToolset`**.
+
+<!--
+Three shapes and they are genuinely different decisions, which is why they are
+three bullets rather than a paragraph. What tools; what this thing calls itself;
+and how it behaves.
+
+The empty-list case is worth half a sentence because it sounds like a mistake and
+is not: a router that offers no tools is a legal, running MCP server. It answers
+initialize, it answers tools/list with nothing, and it is what you get while you
+are building your first toolset.
+
+The name/title split is a small thing that operators feel immediately. Two
+instances of one product need to be told apart by a human, and that is the
+operator's word, not the vendor's. Omitting rather than nulling is the same rule
+section 4 met on serverInfo: an absent key means "none given", and null means the
+word null rendered somewhere.
+
+Brain Freeze Insurance is the one to name because it makes the whole section
+concrete in one breath. Nobody there wants list_classes. They want their domain
+operations, over the same transport, with the same guardrail underneath. That is
+the shape of every deployment this section is for.
+-->
+
+---
+
+## `McpGrailToolset` is the worked example — and it is not a privileged one
+
+**Nine tools** — eval, transpile, source, class and method browsing, module state, tests, and two search tools — in **its own source group**, and it **needs nothing from the server**.
+
+> **That is what makes it a genuine third-party example rather than an insider.** Since 2026-09-11 it is turned on exactly as yours would be: **named in `MCP_TOOLSETS`**, and nothing joins a surface by being loaded (§2).
+
+* It is also the example of **toolset options**. `McpGrailToolset class>>declaredOptionNames` declares **two** — `grailDirectory` and `testGemConfig` — and they travel as **JSON in the fork string**, then again as one `printString`-quoted JSON string in the worker bootstrap, parsed there (§4)
+* **JSON rather than a Smalltalk literal**, because the options are a nested map **whose shape the core does not know**. Encoding them as JSON keeps that shape out of the core entirely, and gives them the same one-quoted-literal safety every other bootstrap argument has
+* Options are **narrowed to the toolsets actually in the surface**, so a worker is never handed configuration for a toolset it does not have — and a router holding options for a toolset it does not serve **refuses to start**
+
+<!--
+This slide is the payoff of section 2's slide 13 and it is worth pointing back
+explicitly. Before that merge, the only optional toolset in the tree was wired by
+a mechanism nobody else could use, so this section could only describe how you
+WOULD add one. Now it can say copy this.
+
+"It needs nothing from the server" is the claim to make deliberately. Grail's
+toolset gets no hook, no special case, no entry in core -- it resolves by name
+like any other, takes its options like any other, and is gated read-only like any
+other. If it needed a privilege, it would not be an example of anything.
+
+Two options rather than one matters for the same reason: one option looks like a
+special case, two looks like a mechanism.
+
+The narrowing rule at the end is the one a vendor will hit: configure options for
+a toolset, then change the surface and forget, and the router tells you at
+startup instead of silently dropping them. Section 2's validateWorkerConfig.
+-->
+
+---
+
+## When a domain toolset collides with the session model
+
+**`run_python_tests` forks a fresh gem. That is the design, not a precaution.**
+
+> **Measured 2026-09-01:** the same three test classes gave **132 defects** run in a long-lived worker session, and **386 run / 386 passed / 0 failed / 0 errors** run fresh. **Every one of those defects was an artifact of the session.**
+
+* A real disagreement between two models. Grail's rule: **a module is a compiled artifact in the database, bound — never rebuilt — by every import afterwards.** Its SUnit isolates tests by **evicting framework modules from `sys.modules`** — and where those modules are *committed*, re-importing **raises**. **A long-lived MCP worker is exactly the session that accumulates that state**
+* Forking settles three more things at once: the caller's transaction is **untouched**, where an in-session run dirties it *silently* — **a cold Grail import is a database write**, measured at **31 modified objects for a 7-test class**; the child's writes are **never committed**; and that is what makes the tool **read-only safe**
+* **The cost is honest and stated in the tool.** Every run is fully cold — `FlaskScaffoldingTestCase` alone is **262 seconds**. Hence the `classNames` argument, and why this is the flagship consumer of progress (§6): **an unbounded wait with no word is worse than a slow one that says so**
+
+<!--
+The slide that lands, and it is not really about Grail. The general shape is:
+your domain has a model, this server has a session model, and where they disagree
+the disagreement is yours to resolve. Every vendor in that room who writes a
+toolset will meet some version of it.
+
+Lead with the number. 132 against 386/386 is not a tuning difference, it is the
+session inventing every single defect -- and it is the kind of result that would
+have been reported as a Grail bug by anybody who did not know where to look.
+
+Then the mechanism, slowly, because it is a genuine standoff rather than a bug in
+either party. Grail is right that a committed module is canonical. Its SUnit is
+right to isolate by eviction. Put them in a session with history and they
+contradict each other, and the MCP worker is the session with the most history
+anybody has.
+
+THE OTHER COLLISION, which is the first thing to say if a hand goes up, and which
+there was no room for on the slide: Grail models Python exceptions OUTSIDE the
+Smalltalk Error hierarchy -- NameError inheritsFrom: Error is FALSE -- so
+McpDispatcher's on: Error do: cannot see one. Uncaught, a python-tool error would
+escape the dispatcher and take the whole worker gem down instead of answering the
+client. The toolset catches them itself and converts them to an McpError kinded
+#pythonError. That is the same lesson in a different register: a domain's error
+model is part of the collision surface too.
+
+If asked about the forked gem's memory: it is driven ONE CLASS PER SEND and
+forked with Grail's own budget, because a netldi's default 50MB is not enough for
+a single Grail test class -- and the run bounds memory as well as raising it,
+stopping near the ceiling, because a Grail run that ends full does not crash, it
+reports AlmostOutOfMemory against an innocent test.
+-->
+
+---
+
+## A GemStone result, and three asks already filed
+
+**The stock sender search answers *nothing* for Python, confidently.** It scans **environment 0**; Grail compiles into **environment 1**.
+
+> Measured on 3.7.5 with `_grail_session` imported: `ClassOrganizer new sendersOf: #'_dict'` answers **an empty pair of arrays** where **12** senders exist. Not under-reporting — **reporting nothing, with no indication that it could not look.**
+
+* `find_python_senders` searches **all three shapes** a Python reference compiles into: resolvable calls in compiled methods, first-class references and unresolved attribute calls, and the `.py` text on disk
+* **Every answer ends with a `searched:` and a `not searched:` block** — because *“no senders”* is only worth reading if it can be told from *“I could not look there”*
+* Three interfaces that would let it stop reading Grail's internals are **filed upstream**: **Grail #883, #884, #885**
+
+<!--
+Thirty seconds, and it is here for this audience specifically: it is a GemStone
+result, it is measured, and the asks are already filed rather than being made
+from a stage.
+
+The phrasing to get right is "confidently". A search that says it could not look
+is useful. A search that answers an empty array is indistinguishable from a
+search that looked everywhere and found nothing, and a model reading that answer
+will conclude the name is unused and delete something.
+
+The searched:/not searched: block is the design response and it generalises past
+Python: any tool whose coverage is partial owes the caller its own boundaries.
+That is worth ten seconds on its own, because every vendor writing a search tool
+over their own domain has the same obligation.
+
+The three issue numbers are on the slide so that nobody has to write them down
+from speech. Section 13 collects the asks; this one is already lodged, which is
+the point -- it is not a request made from a stage, it is a request made in the
+tracker with a talk mentioning it.
 -->
