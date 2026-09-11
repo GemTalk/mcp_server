@@ -423,7 +423,7 @@ an image without Grail. Once loaded the toolset joins the default tool surface a
 | Tool | Arguments | Result |
 |------|-----------|--------|
 | `compile_python` | `code` | transpile Python source to Smalltalk via Grail (`ModuleAst`), return the generated source |
-| `eval_python` | `code` | evaluate Python in this session's persistent namespace; returns anything printed, then the value's `repr`, or the Python traceback on failure |
+| `eval_python` | `code` | evaluate Python in this session's persistent namespace; returns anything printed to stdout, anything written to stderr (each line marked `[stderr] `), then the value's `repr` — and on failure those same two channels ahead of the Python traceback |
 | `get_python_source` | `name`, `limit?`, `offset?` | source of a module, class or function named dotted (`gemdb.transaction`), read from the `.py` it was loaded from; pages over **lines**, and the `# path:line` header names where the page starts |
 | `run_python_tests` | `classNames` *(optional)* | run Grail's `PythonTestCase` classes **in a fresh gem** and report the result structurally |
 | `describe_python_class` | `name` | a Python class: backing Smalltalk class, storage base, `__bases__`/`__mro__`, `__slots__`, class attributes, method names |
@@ -573,12 +573,58 @@ an image without Grail. Once loaded the toolset joins the default tool surface a
 > slate *while imports persisted* (`sys.modules` is session-local), so the surface looked stateful
 > and was not.
 >
-> It reports three things rather than one, because they answer different questions: what the code
-> **printed** (discarding it meant `print(x)` answered `None` and the output was simply gone), the
-> **value** as Python's `repr` (not a Smalltalk `printString`, which shows an `OrderedCollection`
-> where the caller asked for a list), and on failure the **traceback** — Grail computes a full
-> multi-frame one with real line numbers, and reporting only `KeyError: 'missing'` threw away the
-> part that says where.
+> It reports four things rather than one, because they answer different questions: what the code
+> printed to **stdout** (discarding it meant `print(x)` answered `None` and the output was simply
+> gone), what it wrote to **stderr**, the **value** as Python's `repr` (not a Smalltalk
+> `printString`, which shows an `OrderedCollection` where the caller asked for a list), and on
+> failure the **traceback** — Grail computes a full multi-frame one with real line numbers, and
+> reporting only `KeyError: 'missing'` threw away the part that says where. The two output channels
+> are reported on the failing path too, ahead of the traceback: a script that printed its way to
+> the point of failure is where that output is worth most.
+>
+> **stderr is labelled, not merged.** Every stderr line is marked `[stderr] `, because a
+> `warnings.warn` and a `print` mean different things and a reader who cannot tell them apart has
+> lost the distinction:
+>
+> ```
+> to stdout
+> [stderr] <grail>:3: UserWarning: careful
+> => 'done'
+> ```
+>
+> An empty channel prints nothing, so a call that writes to neither is still the bare `repr` on one
+> line. Uncaptured, stderr went to a `PyConsoleStream` — and a worker gem is forked by the netldi
+> and detached, so nothing reads that sink: the bytes were accepted, counted and gone.
+>
+> **What the redirect does not always reach** ([GemTalk/Grail#924](https://github.com/GemTalk/Grail/issues/924))**.** It swaps the streams on the `sys` *this session*
+> imports. A `.py` module keeps the module-global `sys` it was executed with, so a module
+> **warm-bound** from a committed canonical instance hands out the `sys` of whichever session
+> committed it — a different object, and not the one the redirect touched.
+>
+> Reproduced deliberately in plain Grail (`86d29a7`), with none of this server involved. Starting
+> from an empty canonical registry:
+>
+> | fresh session evaluates | `traceback.sys is sys` | captured `print_exc()` |
+> |---|---|---|
+> | `import traceback` (cold) | `True` | the traceback |
+> | …after one session committed that import | `False` | `''` — **lost** |
+>
+> `traceback.sys.modules is sys.modules` stays `True` in both: the two module objects share their
+> session-resolved state but not their `stdout`/`stderr` attributes, which is the asymmetry behind
+> it. Native modules are never affected — Grail's `warnings` among them — and passing the stream
+> explicitly, `traceback.print_exc(file=sys.stderr)`, is captured either way.
+>
+> **Diagnosing it:** `python_module_state` reading `canonical: yes, COMMITTED (deployed)` does not
+> on its own predict the loss. When Grail has been installed since the last deploy, the generation
+> guard drops the whole registry on first touch, so the import is really cold and the redirect works
+> while the registry still reads deployed. Compare `GrailRuntimeGeneration` with
+> `GrailCanonicalDeployGeneration`, not the label.
+>
+> This is not worked around here: reaching a warm-bound module's `sys` means assigning into globals
+> that are committed state shared with every other session, and evaluating an expression must not
+> write that. It belongs in Grail, and is filed there as
+> [GemTalk/Grail#924](https://github.com/GemTalk/Grail/issues/924) — a warm-bound module should see
+> the importing session's `sys`, as it already sees its `modules` and `path`.
 >
 > **`get_python_source` exists because the image loses this.** A compiled `def`'s `__doc__` reads
 > `None` and `inspect.getsource` answers an *empty string* — not an error, the wrong answer quietly.
@@ -1537,7 +1583,10 @@ flag, so a missing suite is a skip and not an error:
   runtime, syntax) surfacing as `isError` with `kind = "pythonError"`, a 33-tool `tools/list` check on
   core-plus-Grail, auto-detection into the default surface, and the toolset being dropped whole in a
   read-only session. The last two failure paths were switched-off tripwires while Grail crashed the
-  gem on them; both run for real as of 2026-08-18.
+  gem on them; both run for real as of 2026-08-18. Also `eval_python`'s output channels: stderr
+  captured and labelled per line, a `warnings.warn` reported, both channels delivered ahead of the
+  traceback when the code raises, and a client's own `sys.stdout` redirect left installed across
+  calls — checked between calls, which is the only moment it is the installed one.
 
 Run a single suite while a server is up via the `run_test_class` tool (e.g. `run_test_class
 McpToolTest`). `./run-unit-tests.sh` runs them all and exits 0 when every test passes: the
@@ -1549,7 +1598,7 @@ plus `McpConcurrentEditTest` (18), `McpExternalSessionTest` (5), `McpTransaction
 `McpWorkerDeadlineTest` (4) — **466 tests**,
 which is the whole suite on a base install. Where the optional groups are installed the runner picks
 their suites up automatically: plus `McpAuthTest` (31) and `McpAuthConformanceTest` (25) — **522
-tests** — and **566 with the 44 in `McpGrailToolsetTest`** on a Grail image.
+tests** — and **573 with the 51 in `McpGrailToolsetTest`** on a Grail image.
 
 Seven suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
 `McpAuthConformanceTest` commit a throwaway JWT user and spawn real worker gems; they are in the

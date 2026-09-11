@@ -294,6 +294,83 @@ print("two")')].
 %
 category: 'tests'
 method: McpGrailToolsetTest
+testEvalPythonCapturesWhatWentToStderr
+  "stderr used to be DESTROYED rather than merged: the redirect swapped sys.stdout alone, so
+   everything Python wrote to sys.stderr reached a PyConsoleStream -- and in a netldi-forked,
+   detached worker gem nobody reads that sink. The bytes were accepted, counted and gone, and a
+   model saw a clean result and concluded the code was clean.
+
+   Both channels now come back from one call and are told apart: stdout unlabelled, stderr marked
+   per line, the value after '=> ', in the order they happened."
+  | out |
+  out := self withFreshScopeDo: [
+    self mcp tool_eval_python: (self oneArg: 'code' value: 'import sys
+print("to stdout")
+print("to stderr", file=sys.stderr)
+"done"')].
+  self assert: (self includesCS: 'to stdout' in: out).
+  self assert: (self includesCS: '[stderr] to stderr' in: out).
+  self assert: (self includesCS: '=> ''done''' in: out).
+  "stdout, then stderr, then the value"
+  self assert: (out findString: 'to stdout' startingAt: 1) < (out findString: '[stderr]' startingAt: 1).
+  self assert: (out findString: '[stderr]' startingAt: 1) < (out findString: '=> ' startingAt: 1).
+  "the label is what separates them, so stdout must NOT carry one"
+  self deny: (self includesCS: '[stderr] to stdout' in: out)
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testEvalPythonLabelsEveryStderrLineAndKeepsTheBlankOnes
+  "Labelled per LINE rather than once per block. stderr is routinely multi-line --
+   traceback.print_exc() alone is four -- and a block marked only at its head leaves every line
+   after the first unattributed, which is the ambiguity the label exists to remove.
+
+   A blank line inside the block is kept and labelled too: a line dropped from a traceback
+   misleads about its shape. A last line with no trailing newline still gets one, so the '=> '
+   marker always starts a line of its own."
+  | out lf |
+  lf := String with: Character lf.
+  out := self withFreshScopeDo: [
+    self mcp tool_eval_python: (self oneArg: 'code' value: 'import sys
+sys.stderr.write("first\n\nthird\nfourth, with no trailing newline")
+"multi"')].
+  self assert: (self includesCS: '[stderr] first' , lf , '[stderr] ' , lf , '[stderr] third' in: out).
+  self assert: (self includesCS: '[stderr] fourth, with no trailing newline' , lf , '=> ' in: out).
+  self assert: (self includesCS: '=> ''multi''' in: out)
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testEvalPythonLeavesAClientsOwnRedirectInstalled
+  "sys.modules is session-local, so a client can redirect sys.stdout in one call and expect it in
+   the next -- which a REPL invites. The restore used to assign sys.stdout = _mcp_prev_stdout
+   unconditionally, so the following call destroyed it. A stream is now put back only if it is
+   STILL the StringIO this toolset installed.
+
+   Asked through #evaluatePython: rather than the tool, deliberately: BETWEEN calls is the only
+   moment a client's stream is the installed one. INSIDE a tool_eval_python: call the toolset's own
+   capture buffer is installed -- it always was, and that is what makes the capture work at all --
+   so `sys.stdout is mine` asked from inside would read false under either behaviour and would test
+   nothing.
+
+   sys.stdout is SESSION state, not scope state, so withFreshScopeDo: does not put it back; the
+   ensure: does, or every test after this one in this session would print into a leaked buffer."
+  | ts |
+  self withFreshScopeDo: [
+    ts := self mcp.
+    ts evaluatePython: 'import sys, io
+_saved_console = sys.stdout'.
+    [self assert: (ts tool_eval_python: (self oneArg: 'code' value: 'mine = io.StringIO()
+sys.stdout = mine
+"redirect set"')) equals: '''redirect set'''.
+     self assert: (ts evaluatePython: 'sys.stdout is mine').
+     "a later call does not destroy it either"
+     ts tool_eval_python: (self oneArg: 'code' value: 'print("into the toolset''s own buffer")').
+     self assert: (ts evaluatePython: 'sys.stdout is mine').
+     "and that call's output went to the TOOLSET's buffer, not the client's"
+     self assert: (ts evaluatePython: 'mine.getvalue()') equals: '']
+      ensure: [ts evaluatePython: 'sys.stdout = _saved_console']]
+%
+category: 'tests'
+method: McpGrailToolsetTest
 testEvalPythonNamespacePersistsBetweenCalls
   "The REPL property, and the reason this toolset holds a scope at all. Before it, every call was a
    blank slate WHILE imports persisted (sys.modules is session-local), so the surface looked stateful
@@ -316,6 +393,28 @@ testEvalPythonRendersValuesAsPythonNotSmalltalk
     self mcp tool_eval_python: (self oneArg: 'code' value: '[1, "two", None]')].
   self assert: out equals: '[1, ''two'', None]'.
   self deny: (self includesCS: 'OrderedCollection' in: out)
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testEvalPythonReportsAWarning
+  "The case a client cannot see coming: its own code, or the stdlib under it, raises a
+   DeprecationWarning or a ResourceWarning and the answer used to look clean. Grail's `warnings` is
+   NATIVE -- implemented in Smalltalk, so it writes through this session's own sys.stderr -- which
+   is why the redirect reaches it. A .py module deployed into the image holds the `sys` it was
+   bound to at deploy time and writes past the redirect; see #tool_eval_python:.
+
+   simplefilter('always') rather than trusting the default: the default action reports a given
+   warning once per location, and a test must not depend on whether something warned earlier."
+  | out |
+  out := self withFreshScopeDo: [
+    self mcp tool_eval_python: (self oneArg: 'code' value: 'import warnings
+warnings.simplefilter("always")
+warnings.warn("this deprecation is not invisible")
+"after the warning"')].
+  self assert: (self includesCS: '[stderr]' in: out).
+  self assert: (self includesCS: 'UserWarning' in: out).
+  self assert: (self includesCS: 'this deprecation is not invisible' in: out).
+  self assert: (self includesCS: '=> ''after the warning''' in: out)
 %
 category: 'tests'
 method: McpGrailToolsetTest
@@ -359,6 +458,35 @@ outer()').
   self assert: (self includesCS: 'line 8' in: text).   "the outer() call"
   self assert: (self includesCS: 'line 2' in: text).   "return inner()"
   self assert: (self includesCS: 'line 6' in: text)    "the failing subscript"
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testEvalPythonReportsWhatWasPrintedBeforeAFailure
+  "What the code printed used to be captured into a temporary and then never read: the failing
+   branch returned before the renderer ran. So the case where progress output matters MOST -- a
+   script that printed its way to the point of failure -- was the one case that discarded it.
+
+   Both output channels now go ahead of the traceback, in the order they happened. Only the
+   exception's NAME is asserted, not the frames: formatting a full traceback needs Grail's own
+   `traceback` module off the checkout, so an unconfigured session gets the one-line message
+   instead -- testEvalPythonReportsTheTraceback is where that split is checked."
+  | text |
+  text := self withFreshScopeDo: [
+    [self mcp tool_eval_python: (self oneArg: 'code' value: 'import sys
+print("progress before the failure")
+print("a note on the way", file=sys.stderr)
+1/0').
+      nil]
+      on: McpError do: [:ex | ex messageText]].
+  self assert: text notNil.
+  self assert: (self includesCS: 'progress before the failure' in: text).
+  self assert: (self includesCS: '[stderr] a note on the way' in: text).
+  self assert: (self includesCS: 'ZeroDivisionError' in: text).
+  "the output first, the failure after it"
+  self assert: (text findString: 'progress before the failure' startingAt: 1)
+    < (text findString: 'ZeroDivisionError' startingAt: 1).
+  self assert: (text findString: '[stderr] a note on the way' startingAt: 1)
+    < (text findString: 'ZeroDivisionError' startingAt: 1)
 %
 category: 'tests'
 method: McpGrailToolsetTest
