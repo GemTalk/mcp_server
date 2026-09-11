@@ -17,6 +17,19 @@ reasoning has nowhere better to live, not that the entry should grow.
 
 ## Unreleased
 
+* **`eval_python` now reports stderr, and no longer throws away output when the code fails.** The
+  redirect swapped `sys.stdout` alone, so `warnings.warn`, `print(..., file=sys.stderr)` and the
+  interpreter's own diagnostics went to a console sink that a detached worker gem nobody reads —
+  the bytes were accepted, counted and gone, and a model saw a clean result. stderr is now a fourth
+  channel, each line marked `[stderr] ` so a warning is not mistakable for a `print`; both output
+  channels are reported ahead of the traceback on the failing path, where a script that printed its
+  way to the point of failure used to have that output captured and dropped unread; and a client's
+  own `sys.stdout` redirect is left installed across calls rather than silently reverted. A call
+  that writes to neither channel still answers the bare `repr` on one line. Writes from a `.py`
+  module **deployed** into the image — `traceback.print_exc()` with no `file=` — are still not
+  captured: it holds a `sys` bound at deploy time, and redirecting that would mean writing state
+  shared with every session.
+
 * **`list_python_methods` no longer drops `*args`, `**kwargs`, `/` and `*` from a signature.** The
   renderer read each parameter's name and default out of the class's signature table and ignored its
   *kind*, so `call(a, /, b, *args, key=None, **kwargs)` was answered as

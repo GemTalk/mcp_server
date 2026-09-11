@@ -248,6 +248,41 @@ canonicalKeyFor: aName
 %
 category: 'private'
 method: McpGrailToolset
+channelsPrefixPrinted: aStringOrNil stderr: anErrStringOrNil
+  "The two captured output channels, rendered ahead of whatever the call answered -- the value on
+   the ordinary path, the traceback on the failing one. Answers the empty string when neither wrote
+   anything, so the common answer is still one line and nothing has to be parsed off.
+
+   stdout goes out unlabelled, stderr labelled. The argument that keeps printed text away from the
+   value keeps the two channels apart as well: a `warnings.warn` and a `print` mean different
+   things, and a reader who cannot tell which one produced a line has lost the distinction that
+   capturing stderr was for.
+
+   Labelled PER LINE rather than once per block, because stderr is routinely multi-line --
+   traceback.print_exc() alone is four -- and a block marked only at its head leaves every line
+   after the first unattributed. Blank lines inside the block are kept and labelled too, since a
+   line dropped from a traceback misleads about its shape."
+  | out lf |
+  lf := Character lf.
+  out := WriteStream on: String new.
+  (aStringOrNil isNil or: [aStringOrNil isEmpty]) ifFalse: [
+    out nextPutAll: aStringOrNil asString.
+    aStringOrNil last = lf ifFalse: [out nextPut: lf]].
+  (anErrStringOrNil isNil or: [anErrStringOrNil isEmpty]) ifFalse: [ | src size start |
+    src := anErrStringOrNil asString.
+    size := src size.
+    (src at: size) = lf ifTrue: [size := size - 1].
+    start := 1.
+    [ | idx |
+      idx := src indexOf: lf startingAt: start.
+      (idx = 0 or: [idx > size]) ifTrue: [idx := size + 1].
+      out nextPutAll: '[stderr] '; nextPutAll: (src copyFrom: start to: idx - 1); nextPut: lf.
+      start := idx + 1.
+      start <= size] whileTrue].
+  ^out contents
+%
+category: 'private'
+method: McpGrailToolset
 childResultFrom: aSession expression: anExpressionString progress: aLabel since: aStartSecond
   "Run one expression in the test gem and answer its result as a String, telling the client how long
    it has been waiting.
@@ -1203,7 +1238,7 @@ registerOn: aToolRegistry
     description: 'Transpile Python source to Smalltalk via Grail (ModuleAst) and return the generated Smalltalk source. Requires GemStone-Python in the image.'
     inputSchema: codeArg do: [:args | self tool_compile_python: args].
   aToolRegistry name: 'eval_python'
-    description: 'Evaluate Python source via Grail. Names bound here persist for the rest of this session, as in a REPL. Returns anything printed, then the repr of the value; on failure, the Python traceback.'
+    description: 'Evaluate Python source via Grail. Names bound here persist for the rest of this session, as in a REPL. Returns anything printed to stdout, then anything written to stderr with each line marked "[stderr] ", then the repr of the value; on failure, those same two output channels and then the Python traceback.'
     inputSchema: codeArg do: [:args | self tool_eval_python: args].
   aToolRegistry name: 'describe_python_class'
     description: 'Describe a Python class in the image: its backing Smalltalk class and storage base, __bases__/__mro__, __slots__, class attributes, and its method names. Named dotted, e.g. "json.JSONDecoder".'
@@ -1295,17 +1330,19 @@ relativePathOf: aPath under: aRoot
 %
 category: 'private'
 method: McpGrailToolset
-renderValue: aValue printed: aStringOrNil
-  "What eval_python answers: anything the code printed, then its value.
+renderValue: aValue printed: aStringOrNil stderr: anErrStringOrNil
+  "What eval_python answers: anything the code wrote to stdout, anything it wrote to stderr, then
+   its value.
    With no output this is just the repr on one line, so the ordinary case reads exactly as it always
-   did and nothing has to be stripped. With output, the `=> ` marker separates the two channels --
-   which matters because printed text is arbitrary and could otherwise be mistaken for the value."
-  | repr |
+   did and nothing has to be stripped. With output, the `=> ` marker separates the channels from the
+   value -- which matters because that text is arbitrary and could otherwise be mistaken for the
+   value. #channelsPrefixPrinted:stderr: renders the channels; the failing path shows the same block
+   ahead of the traceback."
+  | repr prefix |
   repr := self reprOf: aValue.
-  (aStringOrNil isNil or: [aStringOrNil isEmpty]) ifTrue: [^repr].
-  ^aStringOrNil asString
-    , ((aStringOrNil last = Character lf) ifTrue: [''] ifFalse: [String with: Character lf])
-    , '=> ' , repr
+  prefix := self channelsPrefixPrinted: aStringOrNil stderr: anErrStringOrNil.
+  prefix isEmpty ifTrue: [^repr].
+  ^prefix , '=> ' , repr
 %
 category: 'private'
 method: McpGrailToolset
@@ -2027,40 +2064,70 @@ method: McpGrailToolset
 tool_eval_python: args
   "Evaluate Python source in this session's persistent namespace and report what happened.
 
-   Three channels rather than one value, because they answer different questions and merging them
-   loses two of the three:
-     - anything the code PRINTED. Discarding it meant `print(x)` answered `None` and the thing the
-       caller asked to see was gone -- and most real Python prints.
+   Four channels rather than one value, because they answer different questions and merging them
+   loses three of the four:
+     - anything the code printed to STDOUT. Discarding it meant `print(x)` answered `None` and the
+       thing the caller asked to see was gone -- and most real Python prints.
+     - anything it wrote to STDERR. Not an exotic channel in Python but where the language puts its
+       diagnostics: `warnings.warn`, `traceback.print_exc()` for a HANDLED exception (the one case
+       the traceback channel below cannot cover, since that fires only when the exception reaches
+       here unhandled), `print(..., file=sys.stderr)`, and the interpreter's own unraisable-exception
+       reports. Uncaptured it went to sys.stderr's PyConsoleStream, which in a netldi-forked
+       detached worker gem nobody reads -- the bytes were accepted, counted and gone, so a model saw
+       a clean result and concluded the code was clean.
      - the VALUE, as Python's repr.
      - on failure, the TRACEBACK, which says where.
-   Printed output is shown first and the value after a `=>` marker, so the common case (no output)
-   is still just the value on one line and nothing has to be parsed off.
+   stdout is shown first, then stderr labelled per line, then the value after a `=>` marker, so the
+   common case (no output) is still just the value on one line and nothing has to be parsed off.
+   The FAILING path reports the two output channels as well, ahead of the traceback: a script that
+   printed its way to the point of failure is exactly the case where that output is worth most, and
+   it used to be captured into a temporary and then dropped unread.
 
-   stdout is captured by redirecting sys.stdout around the evaluation, restored in an ensure: so a
-   raise cannot leave this session's stdout pointing at a dead buffer.
+   Both streams are captured by redirecting sys.stdout and sys.stderr around the evaluation, in the
+   two evaluations that already ran once per call, and restored in an ensure: so a raise cannot
+   leave this session pointing at a dead buffer. PyConsoleStream carries no state -- one sink for
+   both streams -- so the two StringIOs need distinct names and nothing else changes.
+
+   The restore puts a stream back only if it is STILL the StringIO installed here. sys.modules is
+   session-local, so a client that redirects sys.stdout in one call and expects it in the next --
+   which a REPL invites -- had it silently reverted by the next call's unconditional restore.
+   contextlib.redirect_stdout within a single call was never affected: it restores before the call
+   ends.
 
    Python errors become #pythonError (withPythonErrorsAsMcpError:) carrying the traceback where one
    could be built and the one-line message otherwise -- so this degrades to the old behavior rather
    than failing if Grail's internals move."
-  | src value printed failure redirected |
+  | src value printed errText failure redirected |
   self ensureGrailConfigured.
   src := args at: 'code'.
   failure := nil.
   printed := nil.
+  errText := nil.
   redirected := [self evaluatePython: 'import sys as _mcp_sys, io as _mcp_io
 _mcp_prev_stdout = _mcp_sys.stdout
-_mcp_sys.stdout = _mcp_io.StringIO()
+_mcp_prev_stderr = _mcp_sys.stderr
+_mcp_out = _mcp_io.StringIO()
+_mcp_err = _mcp_io.StringIO()
+_mcp_sys.stdout = _mcp_out
+_mcp_sys.stderr = _mcp_err
 True'] on: Error, BaseException do: [:ex | nil].
   [value := [self evaluatePython: src] on: BaseException do: [:ex | failure := ex. nil]]
     ensure: [
       redirected == true ifTrue: [
-        printed := [self evaluatePython: '_mcp_captured = _mcp_sys.stdout.getvalue()
-_mcp_sys.stdout = _mcp_prev_stdout
-_mcp_captured'] on: Error, BaseException do: [:ex | nil]]].
+        printed := [self evaluatePython: '_mcp_captured = _mcp_out.getvalue()
+_mcp_captured_err = _mcp_err.getvalue()
+if _mcp_sys.stdout is _mcp_out:
+    _mcp_sys.stdout = _mcp_prev_stdout
+if _mcp_sys.stderr is _mcp_err:
+    _mcp_sys.stderr = _mcp_prev_stderr
+_mcp_captured'] on: Error, BaseException do: [:ex | nil].
+        errText := [self evaluatePython: '_mcp_captured_err']
+          on: Error, BaseException do: [:ex | nil]]].
   failure ifNotNil: [:ex | | detail |
     detail := (self pythonTracebackFor: ex) ifNil: [self pythonMessageFor: ex].
-    ^McpError signalKind: #pythonError message: (self capResult: detail)].
-  ^self capResult: (self renderValue: value printed: printed)
+    ^McpError signalKind: #pythonError message:
+      (self capResult: (self channelsPrefixPrinted: printed stderr: errText) , detail)].
+  ^self capResult: (self renderValue: value printed: printed stderr: errText)
 %
 category: 'tools - python'
 method: McpGrailToolset
