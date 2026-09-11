@@ -507,8 +507,8 @@ session's symbol list, so an unbound class disappears from `allSubclassesOf:` an
   wall is *creating a separate gem at all*, not fork/detach specifically. It is environmental, below
   our code: do not add a `respondsTo:` shim, since `GciTsLibrary` fails before the API choice matters.
 
-**3.7.2** is missing three `GsTsExternalSession` selectors. The expansions are byte-identical on
-3.7.5 (proven — the NRS strings compare equal), so use them unconditionally, with no feature test:
+**3.7.2** is missing three `GsTsExternalSession` selectors, each with an expansion that is
+byte-identical on 3.7.5 (proven — the NRS strings compare equal):
 
 * `newDefaultForGemHost: h` →
   `GsTsExternalSession newDefault gemNRS: (GsNetworkResourceString defaultGemNRSFromCurrent node: h; yourself); yourself`
