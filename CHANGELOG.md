@@ -26,8 +26,8 @@ reasoning has nowhere better to live, not that the entry should grow.
   way to the point of failure used to have that output captured and dropped unread; and a client's
   own `sys.stdout` redirect is left installed across calls rather than silently reverted. A call
   that writes to neither channel still answers the bare `repr` on one line. One limit, and it is
-  the image's rather than the tool's: a `.py` module executed at **deploy** time keeps the `sys` of
-  the session that deployed it, so on an image with the frameworks deployed a call like
+  the image's rather than the tool's: a `.py` module **warm-bound** from a committed canonical
+  instance keeps the `sys` of whichever session committed it, so on such an image a call like
   `traceback.print_exc()` with no `file=` still writes past the redirect. Reaching it would mean
   assigning into state shared with every session; `print_exc(file=sys.stderr)` is captured either
   way, as is anything native.
