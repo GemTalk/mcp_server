@@ -596,7 +596,7 @@ an image without Grail. Once loaded the toolset joins the default tool surface a
 > line. Uncaptured, stderr went to a `PyConsoleStream` — and a worker gem is forked by the netldi
 > and detached, so nothing reads that sink: the bytes were accepted, counted and gone.
 >
-> **What the redirect does not always reach.** It swaps the streams on the `sys` *this session*
+> **What the redirect does not always reach** ([GemTalk/Grail#924](https://github.com/GemTalk/Grail/issues/924))**.** It swaps the streams on the `sys` *this session*
 > imports. A `.py` module keeps the module-global `sys` it was executed with, so a module
 > **warm-bound** from a committed canonical instance hands out the `sys` of whichever session
 > committed it — a different object, and not the one the redirect touched.
@@ -622,8 +622,9 @@ an image without Grail. Once loaded the toolset joins the default tool surface a
 >
 > This is not worked around here: reaching a warm-bound module's `sys` means assigning into globals
 > that are committed state shared with every other session, and evaluating an expression must not
-> write that. It belongs in Grail — a warm-bound module should see the importing session's `sys`, as
-> it already sees its `modules` and `path`.
+> write that. It belongs in Grail, and is filed there as
+> [GemTalk/Grail#924](https://github.com/GemTalk/Grail/issues/924) — a warm-bound module should see
+> the importing session's `sys`, as it already sees its `modules` and `path`.
 >
 > **`get_python_source` exists because the image loses this.** A compiled `def`'s `__doc__` reads
 > `None` and `inspect.getsource` answers an *empty string* — not an error, the wrong answer quietly.

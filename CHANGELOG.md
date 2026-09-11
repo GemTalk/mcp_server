@@ -30,7 +30,8 @@ reasoning has nowhere better to live, not that the entry should grow.
   instance keeps the `sys` of whichever session committed it, so on such an image a call like
   `traceback.print_exc()` with no `file=` still writes past the redirect. Reaching it would mean
   assigning into state shared with every session; `print_exc(file=sys.stderr)` is captured either
-  way, as is anything native.
+  way, as is anything native. Filed upstream as
+  [GemTalk/Grail#924](https://github.com/GemTalk/Grail/issues/924).
 
 * **`list_python_methods` no longer drops `*args`, `**kwargs`, `/` and `*` from a signature.** The
   renderer read each parameter's name and default out of the class's signature table and ignored its

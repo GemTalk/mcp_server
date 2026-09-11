@@ -2094,10 +2094,10 @@ tool_eval_python: args
    contextlib.redirect_stdout within a single call was never affected: it restores before the call
    ends.
 
-   WHAT THE REDIRECT DOES NOT ALWAYS REACH. It swaps the streams on the `sys` THIS session imports.
-   A .py module keeps the module-global `sys` it was executed with, so a module WARM-BOUND from a
-   committed canonical instance hands out the `sys` of whichever session committed it -- a
-   different object from this session's, and the one the redirect did not touch.
+   WHAT THE REDIRECT DOES NOT ALWAYS REACH -- GemTalk/Grail issue 924. It swaps the streams on the
+   `sys` THIS session imports. A .py module keeps the module-global `sys` it was executed with, so
+   a module WARM-BOUND from a committed canonical instance hands out the `sys` of whichever session
+   committed it -- a different object from this session's, and the one the redirect did not touch.
 
    Reproduced deliberately in plain Grail (86d29a7), with no part of this toolset involved. With
    the canonical registry empty, a fresh session that evaluates `import traceback`, redirects
@@ -2119,8 +2119,8 @@ tool_eval_python: args
 
    Not worked around here. Reaching a warm-bound module's `sys` means assigning into globals that
    are committed state shared with every other session, and evaluating an expression must not write
-   that. It belongs in Grail: a warm-bound module should see the importing session's `sys`, the way
-   it already sees its `modules` and `path`.
+   that. It belongs in Grail, and is filed there: a warm-bound module should see the importing
+   session's `sys`, the way it already sees its `modules` and `path`.
 
    Python errors become #pythonError (withPythonErrorsAsMcpError:) carrying the traceback where one
    could be built and the one-line message otherwise -- so this degrades to the old behavior rather
