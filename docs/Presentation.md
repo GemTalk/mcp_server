@@ -1622,6 +1622,36 @@ audience will have the README open.
    they are machinery this server needs rather than a capability to advertise. Two clauses of
    qualification, in the sentence that currently reads as a feature list.
 
+6. **`McpJson`'s class comment and the §5 defect table number the same defects differently**, which
+   is not a stale comment but reads exactly like one — and one cross-reference is already wrong
+   because of it. Found while cutting §5.
+   * **The counts differ legitimately.** The class comment says *"Three Unicode defects were
+     measured in the kernel's JSON"*; the slide's table has **five**. Both are right: the comment
+     enumerates only the three that bear on the question it is answering (*WHY ONLY THE WRITER* —
+     which half of the codec to own), while the table is the filed 3.7.6 report, which is a superset
+     adding the unchecked hex digits after `\u` and the leniency/error-quality family. Nothing to
+     fix in the count itself; the comment is answering its own question and still needs exactly its
+     three.
+   * **The ORDER differs too, and that is the actual defect.** The class comment's list is
+     1 = `printJsonOn:` cannot *encode* a pair, 2 = `JsonParser` cannot *decode* one, 3 = an
+     unrecognized escape is dropped. The report and the slide run 1 = no decoding, 2 = no encoding,
+     3 = escape dropped, 4 = `\u` not hex-checked, 5 = leniencies. So the two schemes **transpose 1
+     and 2** — the encoding defect is *defect 1* in the class comment and *defect 2* in the report.
+   * **`McpJsonTest`'s class comment cites the report's numbering while sitting next to `McpJson`'s
+     own.** It says the writer defect is *"docs/kernel-json-unicode.md, defect 2 and section 7"*,
+     which is correct **for the report** and lands on the *decoding* defect for anyone who followed
+     `McpJson`'s list to get there. The README cites the report without a number and is fine.
+   **Recommendation:** leave the enumeration alone and add one clause to `McpJson`'s comment saying
+   its three are the write-path-relevant subset **and are numbered locally**, with the report's own
+   numbering authoritative — or, cheaper and better, stop numbering in the class comment and name
+   each defect instead (`printJsonOn:`, `JsonParser>>string` decode, `JsonParser>>string` escape),
+   so no citation anywhere can drift against a list. This matters more once item 2 is done: the
+   moment `docs/kernel-json-unicode.md` is in the tree, a reader can follow *defect 2* from
+   `McpJsonTest` to a document that means something else by it.
+   One thing that is **not** a discrepancy, so that nobody "fixes" it: the comment's *"identically
+   on 3.6.2, 3.7.2, 3.7.5 and 3.7.6"* and the slide's *"measured against 3.7.6"* agree — the report
+   is the 3.7.6 filing of defects that reproduce on all four.
+
 ---
 
 ## Open items

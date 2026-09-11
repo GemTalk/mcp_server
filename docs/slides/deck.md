@@ -1534,13 +1534,18 @@ DEPARTURES from docs/Presentation.md:
     table cannot share a slide with the argument for owning the writer and stay
     readable at the back of a room.
 
-THE DEFECT TABLE SAYS FIVE; McpJson's class comment says three. Both are right
-and NEITHER SHOULD BE "FIXED" INTO THE OTHER. The class comment enumerates the
-three defects that bear on ONE design decision -- which half of the codec to own
--- and says so in its own words. The table is the filed 3.7.6 report, which is a
-superset: it adds the unchecked hex digits after \u and the leniency/error-quality
-family. If the class comment is ever edited, it is still answering its own
-question and still needs exactly its three.
+THE DEFECT TABLE SAYS FIVE; McpJson's class comment says three, and the COUNT is
+not the problem -- neither should be "fixed" into the other. The class comment
+enumerates the three defects that bear on ONE design decision (which half of the
+codec to own) and says so in its own words; the table is the filed 3.7.6 report,
+a superset adding the unchecked hex digits after \u and the leniency family.
+WHAT IS wrong is that the two number the same defects in a different ORDER --
+encoding is defect 1 in the class comment and defect 2 in the report -- and
+McpJsonTest already cites "defect 2" meaning the report's. So a reader who
+follows the class comment's list lands on the decoding defect instead. That is
+item 6 of "What to fix in the repository before the talk" in
+docs/Presentation.md, with the recommendation; it changes nothing on this slide,
+and it wants doing before docs/kernel-json-unicode.md reaches the tree.
 
 THE DOCUMENT THE SLIDE OFFERS IS NOT IN THE TREE. docs/kernel-json-unicode.md is
 cited from README.md, McpJson's class comment, McpJsonTest and docs/utf8-wire.md,
