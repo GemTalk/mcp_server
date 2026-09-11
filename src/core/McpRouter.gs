@@ -913,13 +913,8 @@ forkOnPort: aPort
    port that never opens, with the reason buried in a detached gem's log."
   self validateWorkerConfig.
   self validateTimerConfig.
-  "The next two statements are for compatibility with 3.7.2. In 3.7.5 they could be replaced with
-   es := GsTsExternalSession newDefaultForGemHost: 'localhost'.
-   es useOnetimePassword."
-  es := GsTsExternalSession newDefault
-          gemNRS: (GsNetworkResourceString defaultGemNRSFromCurrent node: 'localhost'; yourself);
-          yourself.
-  es onetimePassword: (GsCurrentSession currentSession createOnetimePasswordValidForSeconds: 300).
+  es := GsTsExternalSession newDefaultForGemHost: 'localhost'.
+  es useOnetimePassword.
   es login.
   "Capture the child's id/pid BEFORE launching the loop -- once the non-blocking call is running the
    external session rejects further queries (GciError 'operation in progress')."

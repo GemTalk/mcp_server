@@ -15,7 +15,7 @@ has to act on. The measurements, the alternatives weighed and the kernel behavio
 belong in its commit message and in `docs/` — an entry that has to carry all of that is a sign the
 reasoning has nowhere better to live, not that the entry should grow.
 
-## Unreleased
+## 0.8.0 — 2026-09-11
 
 * **Breaking: the Grail (Python) toolset is no longer served by default.** `McpServer
   class>>installedDefaultToolsetNames` — which probed the symbol list and appended `McpGrailToolset`

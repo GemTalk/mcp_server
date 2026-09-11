@@ -668,10 +668,8 @@ category: 'private'
 method: McpGrailToolset
 newGrailTestSession
   "A fresh, logged-in gem to run Grail's tests in, with the memory budget Grail's own runner gives
-   one. Built exactly as McpSession builds a worker -- newDefault plus an explicit localhost NRS
-   rather than newDefaultForGemHost:, which does not exist on 3.7.2 -- and logged in as the current
-   user with a one-time password, so it needs no credentials and inherits this session's permissions
-   and nothing else.
+   one. Logged in as the current user with a one-time password, so it needs no credentials and
+   inherits this session's permissions and nothing else.
    The caller logs it out in an ensure:. Nothing is ever committed in it, so a run leaves the
    repository as it found it whether it ends well or badly.
 
@@ -697,7 +695,7 @@ newGrailTestSession
       body: 'gemnetobject -C ' , self testGemConfig;
       yourself);
     yourself.
-  sess onetimePassword: (GsCurrentSession currentSession createOnetimePasswordValidForSeconds: 300).
+  sess useOnetimePassword.
   sess login.
   ^sess
 %
