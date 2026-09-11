@@ -26,8 +26,16 @@
 #   GS_USER    - GemStone user   (default: DataCurator)
 #   GS_PASS    - GemStone password (default: swordfish)
 #   MCP_PORT- listen port      (default: 8000)
-#   MCP_READONLY - 1 to open a read-only server (mutating tools hidden + refused; a localhost
-#                     convenience so a single user cannot accidentally mutate the image). Default 0.
+#   MCP_WORKER_USER - GemStone user every worker gem logs in as (default: none, i.e. this script's
+#                     own GS_USER). THIS IS THE SERVER'S ACCESS BOUNDARY: a worker gem IS this user,
+#                     so what a session can read, write, commit, compile or run on the host is that
+#                     user's privileges and object authorization -- decided in the stone, not by the
+#                     tool list. ./setup-read-only-user.sh provisions a user that cannot commit and
+#                     cannot reach the host; docs/read-only-user.md explains each privilege, what it
+#                     costs to withhold, and what is still open afterwards.
+#                     No password is needed here: the front end mints a one-time password for the
+#                     named user, which requires one committed grant that setup-read-only-user.sh
+#                     makes:  (AllUsers userWithId: '$GS_USER') addOnetimePasswordUserId: '<user>'
 #   MCP_WORKER_CLASS - McpServer subclass the workers should instantiate (default McpServer).
 #                     Subclass to change BEHAVIOR; to add tools write a toolset instead.
 #   MCP_TOOLSETS - space-separated McpToolset names to expose instead of the default surface,
@@ -100,7 +108,7 @@ GS_STONE="${GS_STONE:-gs64stone}"
 GS_USER="${GS_USER:-DataCurator}"
 GS_PASS="${GS_PASS:-swordfish}"
 MCP_PORT="${MCP_PORT:-8000}"
-MCP_READONLY="${MCP_READONLY:-0}"
+MCP_WORKER_USER="${MCP_WORKER_USER:-}"
 MCP_WORKER_CLASS="${MCP_WORKER_CLASS:-}"
 MCP_TOOLSETS="${MCP_TOOLSETS:-}"
 MCP_GRAIL_DIR="${MCP_GRAIL_DIR:-}"
@@ -133,8 +141,6 @@ fi
 # of its variables are set, leaving McpRouter>>initialize's defaults in place. That file documents
 # every one of them, and validates them, so neither launcher repeats either job.
 . ./session-lifetime.sh
-
-[ "$MCP_READONLY" = "1" ] && RO="true" || RO="false"
 
 # Optional worker-class / toolset configuration, as extra Smalltalk setter sends on the router.
 CONFIG=""
@@ -213,7 +219,15 @@ if [ -n "$MCP_TITLE" ]; then
   CONFIG="$CONFIG
 r serverTitle: '$(printf '%s' "$MCP_TITLE" | sed "s/'/''/g")'."
 fi
-echo "Forking McpRouter (readOnly=$RO) onto 127.0.0.1:$MCP_PORT (detached; this script returns)..."
+if [ -n "$MCP_WORKER_USER" ]; then
+  # Doubled quotes rather than rejected characters: a userId is an identifier, but this is the same
+  # literal-safety rule every other operator-supplied string here follows.
+  CONFIG="$CONFIG
+r workerUserId: '$(printf '%s' "$MCP_WORKER_USER" | sed "s/'/''/g")'."
+  echo "Forking McpRouter (workers as $MCP_WORKER_USER) onto 127.0.0.1:$MCP_PORT (detached; this script returns)..."
+else
+  echo "Forking McpRouter onto 127.0.0.1:$MCP_PORT (detached; this script returns)..."
+fi
 "$TOPAZ" -l <<TPZ
 set gemstone $GS_STONE
 set username $GS_USER
@@ -223,7 +237,6 @@ iferr 1 stk
 run
 | r |
 r := McpRouter new.
-r readOnly: $RO.
 $VIEW_HYGIENE_LINES$CONFIG$LIFETIME_LINES
 r forkOnPort: $MCP_PORT
 %

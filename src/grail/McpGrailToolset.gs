@@ -45,10 +45,11 @@ Like every toolset it owns its handlers (see McpToolset), and needing no server-
 touches `server` at all -- so it also serves as the worked example for a third-party toolset, now
 including how a toolset takes DEPLOYMENT CONFIGURATION (class>>declaredOptionNames -- grailDirectory
 and testGemConfig).
-Read-only-safe: python_module_state (which only reads) and run_python_tests (which writes, but in a
-fresh gem that is thrown away and never committed in). Every other tool is dropped in a read-only
-session: running arbitrary Python can persist anything, and the browsing tools RESOLVE their subject,
-which imports the module it lives in -- and in Grail a cold import is a database write.
+MOST TOOLS HERE WRITE, including ones that look like reads: the browsing tools RESOLVE their
+subject, which imports the module it lives in, and in Grail a cold import is a database write. Only
+python_module_state is a pure read. That is a fact about Grail worth knowing before pointing a
+browsing-only deployment at this toolset -- what decides whether those writes can be KEPT is the
+worker gem''s GemStone user (docs/read-only-user.md), not the tool list.
 
 BROWSING A PYTHON CLASS IS NOT BROWSING A SMALLTALK ONE. Grail creates every user Python class
 anonymously (inDictionary: nil), so no symbol dictionary names it and list_classes cannot see it at
@@ -1198,32 +1199,6 @@ quotedStringAt: anIndex in: aSourceString
       ifFalse: [out nextPut: c. i := i + 1]].
   ^out contents
 %
-category: 'read-only'
-method: McpGrailToolset
-readOnlySafeToolNames
-  "Four, for three different reasons.
-
-   python_module_state only READS -- registries, a session dictionary, and the .py on disk to hash.
-   It deliberately does not import the module it describes, which is what lets it answer questions
-   about a module you have not yet decided to import.
-
-   run_python_tests writes plenty, but not HERE: it runs in a fresh gem that is thrown away and never
-   committed in, so a read-only session running it can persist nothing, and the tests it runs are
-   already-committed code -- the same argument McpTestingToolset makes for the Smalltalk SUnit tools.
-
-   find_python_senders and search_python_source read compiled methods, two registries and the .py
-   files on disk, and that is all -- which is the direct consequence of matching a name
-   SYNTACTICALLY rather than resolving it. Resolving would buy exact arities and would make a search
-   a database write, since a cold import in Grail compiles and commits nothing but writes plenty;
-   it would also put both tools in this comment's second paragraph instead of this one. Read-only
-   safety was a design input here, not a discovery about the finished tools.
-
-   Everything else stays gated, deliberately. eval_python runs arbitrary Python. compile_python looks
-   pure but shares that path. get_python_source, describe_python_class and list_python_methods all
-   RESOLVE their subject, which imports the module it lives in, and in Grail a cold import is a
-   database write."
-  ^#( 'find_python_senders' 'python_module_state' 'run_python_tests' 'search_python_source' )
-%
 category: 'registration'
 method: McpGrailToolset
 registerOn: aToolRegistry
@@ -2182,8 +2157,8 @@ tool_find_python_senders: args
 
    MATCHING IS SYNTACTIC AND NEVER IMPORTS. The last segment of the name is what is matched; leading
    segments narrow and label. Resolving the name instead would give exact arities, and would make a
-   SEARCH a database write -- a cold import in Grail compiles and writes -- which is both surprising
-   and the reason it could not be read-only safe. Over-matching is reported instead: a bare name
+   SEARCH a database write -- a cold import in Grail compiles and writes -- which is surprising
+   enough to be worth avoiding on its own. Over-matching is reported instead: a bare name
    answers hits in every module, each labelled with the module it is in, and `scope` narrows.
 
    Nothing here imports, resolves or compiles."
@@ -2425,7 +2400,7 @@ tool_run_python_tests: args
    Running it elsewhere settles three other things at once. The caller's transaction is untouched,
    where running in-session dirties it silently (a cold Grail import IS a database write: measured 31
    modified objects for a 7-test class). The child's writes are never committed, so a run leaves the
-   repository exactly as it found it. And that is what makes this tool read-only-safe.
+   repository exactly as it found it.
 
    The cost is that every run is fully cold, so the framework-heavy classes recompile each time
    (FlaskScaffoldingTestCase alone: 262s). Hence the classNames argument, and hence progress

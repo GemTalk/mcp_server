@@ -4,14 +4,14 @@ expectvalue /Class
 doit
 Object subclass: 'McpSession'
   instVarNames: #( id worker workerMutex
-                    lastActivitySeconds userId readOnly workerClassName
-                    toolsetNames toolsetOptions serverName serverTitle
-                    serverVersion workerPid workerStoneSession outbox
-                    startedAtSeconds expiresAtSeconds quietProbes unansweredProbes
-                    streamlessPasses passesSinceProbe streamClosedByClient requestTimeoutSeconds
-                    workerAbandoned inFlightRequestId cancelRequested waitAction
-                    commitsBehind maintenanceCallTimeoutSeconds stuckViewPasses stuckViewReason
-                    pinnedViewPasses viewReleaseRequested)
+                    lastActivitySeconds userId workerClassName toolsetNames
+                    toolsetOptions serverName serverTitle serverVersion
+                    workerPid workerStoneSession outbox startedAtSeconds
+                    expiresAtSeconds quietProbes unansweredProbes streamlessPasses
+                    passesSinceProbe streamClosedByClient requestTimeoutSeconds workerAbandoned
+                    inFlightRequestId cancelRequested waitAction commitsBehind
+                    maintenanceCallTimeoutSeconds stuckViewPasses stuckViewReason pinnedViewPasses
+                    viewReleaseRequested)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -96,16 +96,9 @@ new
 category: 'instance creation'
 classmethod: McpSession
 startWithId: anId
-  "Spawn a worker gem (current user, one-time password) and answer a started session with the
-   given client id."
+  "Spawn a worker gem as the FRONT END'S OWN user and answer a started session with the given
+   client id. See startWithId:workerUser: for the variant that names a different one."
   ^self new startWithId: anId
-%
-category: 'instance creation'
-classmethod: McpSession
-startWithId: anId readOnly: aBoolean
-  "As startWithId:, but marks the local worker read-only when aBoolean (a read-only McpRouter -- a
-   localhost convenience so a single user cannot accidentally mutate)."
-  ^self new startWithId: anId readOnly: aBoolean
 %
 category: 'instance creation'
 classmethod: McpSession
@@ -116,10 +109,10 @@ startWithId: anId user: aUserId jwt: aJwtString
 %
 category: 'instance creation'
 classmethod: McpSession
-startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
-  "As startWithId:user:jwt:, but marks the worker read-only when aBoolean is true (the token lacked
-   the configured write scope -- see McpAuthRouter writeScope)."
-  ^self new startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
+startWithId: anId workerUser: aUserIdOrNil
+  "Spawn a worker gem logged in as aUserIdOrNil (nil means the front end's own user) and answer a
+   started session with the given client id. See the instance-side method."
+  ^self new startWithId: anId workerUser: aUserIdOrNil
 %
 ! ------------------- Instance methods for McpSession
 category: 'private'
@@ -318,7 +311,7 @@ method: McpSession
 expiresAtSeconds
   "The absolute wall-clock second at which this session must end regardless of activity, or nil when
    nothing bounds it. Set by an authenticated front end from the access token's exp (see
-   McpAuthRouter>>openSessionForUser:jwt:readOnly:): the worker gem is logged in as that token's
+   McpAuthRouter>>openSessionForUser:jwt:): the worker gem is logged in as that token's
    user, so letting the session outlive the token would leave the authorization it was granted in
    force after the grant expired."
   ^expiresAtSeconds
@@ -654,13 +647,13 @@ pinnedViewPasses
 category: 'initialization'
 method: McpSession
 prepareWorker
-  "Prepare this client's worker gem in ONE call, before any request reaches it: set read-only, resolve
-   the named toolsets, apply the advertised identity, and pre-build the server instance. The front end
-   calls this after configuring the session (McpRouter>>openSessionCreating:) and BEFORE the session is
+  "Prepare this client's worker gem in ONE call, before any request reaches it: resolve the named
+   toolsets, apply the advertised identity, and pre-build the server instance. The front end calls
+   this after configuring the session (McpRouter>>openSessionCreating:) and BEFORE the session is
    registered, so there is no window in which a request could run unprepared.
-   One round trip replaces the conditional 'sessionReadOnly:' send this used to make, and it moves tool
-   registration off the client's first request. A worker class or toolset the worker cannot resolve
-   fails HERE, where the message can say what to fix -- see McpServer class>>toolsetClassNamed:."
+   One round trip, which moves tool registration off the client's first request. A worker class or
+   toolset the worker cannot resolve fails HERE, where the message can say what to fix -- see
+   McpServer class>>toolsetClassNamed:."
   ^[self runWorker: self workerBootstrapExpression]
     on: Error
     do: [:ex | self error: 'Could not prepare the MCP worker gem for session ' , id printString
@@ -688,13 +681,6 @@ quotedNameArrayFor: aCollectionOfNames
     s nextPutAll: n asString printString; nextPut: Character space].
   s nextPut: $).
   ^s contents
-%
-category: 'accessing'
-method: McpSession
-readOnly
-  "Whether this client's worker is read-only. Recorded when the session starts and applied to the
-   worker gem by prepareWorker."
-  ^readOnly == true
 %
 category: 'view hygiene'
 method: McpSession
@@ -910,40 +896,19 @@ startedAtSeconds
 category: 'initialization'
 method: McpSession
 startWithId: anId
-  "Local worker login with full read-write access (see the readOnly: variant)."
-  ^self startWithId: anId readOnly: false
-%
-category: 'initialization'
-method: McpSession
-startWithId: anId readOnly: aBoolean
-  "Log in a fresh worker gem as the current (server) user via a one-time password (the local,
-   unauthenticated front end, McpRouter). When aBoolean, mark the worker read-only for its whole
-   life -- set inside the worker gem itself, so it needs no commit and is private to that gem."
-  id := anId.
-  userId := System myUserProfile userId.
-  worker := self newWorkerSession.
-  worker useOnetimePassword.
-  worker login.
-  self cacheWorkerIds.
-  readOnly := aBoolean.
-  self touch.
-  ^self
+  "Local worker login as the front end's own user (see startWithId:workerUser:)."
+  ^self startWithId: anId workerUser: nil
 %
 category: 'initialization'
 method: McpSession
 startWithId: anId user: aUserId jwt: aJwtString
-  "JWT worker login with full read-write access (see the readOnly: variant)."
-  ^self startWithId: anId user: aUserId jwt: aJwtString readOnly: false
-%
-category: 'initialization'
-method: McpSession
-startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
   "Log in a fresh worker gem authenticated by a JWT (an OAuth/OIDC access token), for the
    network-facing authenticated front end (McpAuthRouter). The caller has already validated the
    token and derived aUserId from its claims; GemStone re-validates the JWT's signature (against its
-   trusted keys) and claims when the worker logs in -- a bad/expired token fails the login. When
-   aBoolean is true the worker is marked read-only for its whole life (its token lacked the write
-   scope) -- set inside the worker gem itself, so it needs no commit and cannot affect other sessions."
+   trusted keys) and claims when the worker logs in -- a bad/expired token fails the login.
+   The worker IS that token's GemStone user, so what the session may do is that user's privileges
+   and authorization -- which is why McpAuthRouter has no workerUserId of its own: McpRouter's is
+   for the unauthenticated front end, which has no other way to say who a worker should be."
   id := anId.
   userId := aUserId.
   worker := self newWorkerSession.
@@ -951,7 +916,38 @@ startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
   worker jwtPassword: aJwtString.
   worker login.
   self cacheWorkerIds.
-  readOnly := aBoolean.
+  self touch.
+  ^self
+%
+category: 'initialization'
+method: McpSession
+startWithId: anId workerUser: aUserIdOrNil
+  "Log in a fresh worker gem via a one-time password, for the local, unauthenticated front end
+   (McpRouter). nil means this gem's own user, which is the default and the historical behavior.
+   A NAMED user is how a deployment bounds what its sessions can do: the worker is that user, so
+   everything a tool can reach -- execute_code included -- is bounded by that user's GemStone
+   privileges and authorization rather than by anything in this image. See McpRouter>>workerUserId
+   and docs/read-only-user.md.
+   NO CREDENTIAL IS INVOLVED, which is why the router can carry the user's NAME in ordinary config
+   (McpRouter>>configDict is a fixed allow-list that must never carry key material). The one-time
+   password is minted here, by this gem, for the named user; minting for ANOTHER user requires that
+   user to be on this gem's user's allowlist, one committed grant an operator makes once:
+     (AllUsers userWithId: '<front end user>') addOnetimePasswordUserId: '<worker user>'
+   setup-read-only-user.sh does that. Without the grant the mint raises, and the failure surfaces
+   at session open (McpRouter>>openSession) rather than mid-conversation.
+   300 seconds matches what GsTsExternalSession>>useOnetimePassword allows itself; the password is
+   single-use and is spent by the login on the next line."
+  id := anId.
+  userId := aUserIdOrNil ifNil: [System myUserProfile userId].
+  worker := self newWorkerSession.
+  aUserIdOrNil
+    ifNil: [worker useOnetimePassword]
+    ifNotNil: [:u |
+      worker username: u.
+      worker onetimePassword: (GsCurrentSession currentSession
+        createOnetimePasswordForUserId: u validForSeconds: 300)].
+  worker login.
+  self cacheWorkerIds.
   self touch.
   ^self
 %
@@ -1075,7 +1071,6 @@ workerBootstrapExpression
     , ' options: ' , ((toolsetOptions isNil or: [toolsetOptions isEmpty])
         ifTrue: ['nil']
         ifFalse: [(McpJson write: toolsetOptions) printString])
-    , ' readOnly: ' , self readOnly printString
     , ' serverName: ' , (serverName isNil ifTrue: ['nil'] ifFalse: [serverName printString])
     , ' title: ' , (serverTitle isNil ifTrue: ['nil'] ifFalse: [serverTitle printString])
     , ' version: ' , (serverVersion isNil ifTrue: ['nil'] ifFalse: [serverVersion printString])

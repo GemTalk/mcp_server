@@ -5,7 +5,7 @@ doit
 McpRouter subclass: 'McpAuthRouter'
   instVarNames: #( userIdClaim authorizationServers resourceMetadataUrl
                     requiredScopes extraScopes expectedAudience expectedIssuer
-                    writeScope bindAddress)
+                    bindAddress)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -44,12 +44,20 @@ committed class state; forkOnPort: serializes it into the child gem''s fork stri
 (REQUIRED -- the canonical resource identifier, also published as `resource` and used to derive the
 metadata URL), authorizationServers (REQUIRED, https), userIdClaim (default ''sub''), requiredScopes
 (default empty -> no scope check), expectedIssuer (default nil -> skip that check), resourceMetadataUrl
-(derived unless overridden), writeScope, extraScopes, bindAddress, and the inherited readOnly. The
-advertised scope set (`scopes_supported`) is NOT configured: supportedScopes DERIVES it as the union
-of requiredScopes, writeScope and extraScopes. Configure a router and fork it, e.g. via
-run-auth-server.sh.
+(derived unless overridden), extraScopes and bindAddress. The advertised scope set
+(`scopes_supported`) is NOT configured: supportedScopes DERIVES it as the union of requiredScopes
+and extraScopes. Configure a router and fork it, e.g. via run-auth-server.sh.
 
-THREE INVARIANTS distinguish this class from its superclass, and all are enforced in code rather
+WHAT A SESSION MAY DO IS ITS GEMSTONE USER''S BUSINESS, not this router''s. A worker gem here logs in
+as the token''s own user, so that user''s privileges and object authorization decide what it can read,
+write, commit or run -- an operator grants a read-only analyst a read-only UserProfile
+(docs/read-only-user.md). This router had a `writeScope` that downgraded a scope-less token to a
+reduced tool list instead; it was removed because a tool list was never a boundary (execute_code, and
+any test body, reach whatever the user reaches) and because two answers to one question is worse than
+one. McpRouter>>workerUserId is the same idea for the unauthenticated front end, which has no token
+to read a user from; it is deliberately NOT honored here, where the token names the user.
+
+FOUR INVARIANTS distinguish this class from its superclass, and all are enforced in code rather
 than by a launch script, because runOnPort:/forkOnPort: can be called directly:
  * bindAddress IS configurable here (McpRouter answers loopback with no setter), because every
    request must present a valid bearer token. Seeded to loopback all the same -- reachability is
@@ -64,6 +72,10 @@ than by a launch script, because runOnPort:/forkOnPort: can be called directly:
    authorization server MUSTs, so they cannot be optional settings that happen to default to off --
    an unconfigured router would accept a token minted for any resource and publish a metadata
    document naming nowhere to get one.
+ * workerUserId IS REFUSED (the setter signals). Inherited from McpRouter, where it names the one
+   user every worker logs in as; here the TOKEN names the user, per session. Silently ignoring it
+   would be the dangerous reading -- an operator who set it would believe their sessions were
+   confined to a restricted user while each one ran as its own token''s user instead.
 
     (McpAuthRouter new
         useTlsCertificateFile: ''/path/server.crt'' privateKeyFile: ''/path/server.key'';
@@ -97,7 +109,6 @@ applyConfig: aConfigDict
   extraScopes := aConfigDict at: 'extraScopes' ifAbsent: [extraScopes].
   expectedAudience := aConfigDict at: 'expectedAudience' ifAbsent: [expectedAudience].
   expectedIssuer := aConfigDict at: 'expectedIssuer' ifAbsent: [expectedIssuer].
-  writeScope := aConfigDict at: 'writeScope' ifAbsent: [writeScope].
   bindAddress := aConfigDict at: 'bindAddress' ifAbsent: [bindAddress].
   ^self
 %
@@ -157,7 +168,6 @@ configDict
   d at: 'extraScopes' put: extraScopes.
   d at: 'expectedAudience' put: expectedAudience.
   d at: 'expectedIssuer' put: expectedIssuer.
-  d at: 'writeScope' put: writeScope.
   d at: 'bindAddress' put: bindAddress.
   ^d
 %
@@ -201,13 +211,13 @@ category: 'validation'
 method: McpAuthRouter
 extraScopes
   "Scopes to advertise that this router does not itself gate on -- see supportedScopes, which unions
-   them with requiredScopes and the writeScope. Empty by default."
+   them with requiredScopes. Empty by default."
   ^extraScopes
 %
 category: 'validation'
 method: McpAuthRouter
 extraScopes: anArrayOfScopeStrings
-  "Advertise scopes beyond the ones this router derives on its own. requiredScopes and the writeScope
+  "Advertise scopes beyond the ones this router derives on its own. requiredScopes
    are advertised automatically, so they do NOT belong here: this is for scopes the client must
    request from the authorization server that mean nothing to this resource -- an OIDC scope such as
    'profile' that the userIdClaim rides on, say. Listing a scope redundantly is harmless (the union
@@ -240,7 +250,6 @@ initialize
   extraScopes := #().
   expectedAudience := nil.
   expectedIssuer := nil.
-  writeScope := nil.
   bindAddress := self class loopbackAddress.  "reachable only if the caller asks for it"
   ^self
 %
@@ -287,23 +296,17 @@ metadataPaths
 category: 'sessions'
 method: McpAuthRouter
 openSessionForUser: aUserId jwt: aJwtString
-  "Open + register a worker session logged in as aUserId, authenticated by the JWT."
-  ^self openSessionForUser: aUserId jwt: aJwtString readOnly: false
-%
-category: 'sessions'
-method: McpAuthRouter
-openSessionForUser: aUserId jwt: aJwtString readOnly: aBoolean
-  "Open + register a worker session for aUserId. When aBoolean, the worker is read-only for its
-   whole life (its token lacked the write scope).
+  "Open + register a worker session for aUserId, logged in by the JWT. The worker IS that GemStone
+   user, so what the session may do is that user's privileges and object authorization.
    The session is also bound to the TOKEN'S OWN expiry. That matters more here than any idle policy:
-   the worker gem is logged in as the token's GemStone user, so a session allowed to outlive its
-   access token would leave the authorization it was opened with in force after the grant expired --
-   indefinitely, on a router configured with no idle deadline. exp is required of every token this
-   router accepts (#rejectionForPayload:), so there is always one to bind to; McpSession only ever
-   moves an expiry earlier, so this composes with #maxSessionLifetimeSeconds rather than fighting it."
+   a session allowed to outlive its access token would leave the authorization it was opened with in
+   force after the grant expired -- indefinitely, on a router configured with no idle deadline. exp
+   is required of every token this router accepts (#rejectionForPayload:), so there is always one to
+   bind to; McpSession only ever moves an expiry earlier, so this composes with
+   #maxSessionLifetimeSeconds rather than fighting it."
   | sess |
   sess := self openSessionCreating: [:newId |
-    McpSession startWithId: newId user: aUserId jwt: aJwtString readOnly: aBoolean].
+    McpSession startWithId: newId user: aUserId jwt: aJwtString].
   sess expiresAtSeconds: (self tokenExpirySecondsOf: aJwtString).
   ^sess
 %
@@ -370,17 +373,9 @@ renewSessionExpiry: sess from: aJwtString
    #tokenRejectionFor:, and the subject matches sess userId. A fresh token for the same user IS a
    renewed grant, and honouring its exp is reading the credential in front of you rather than
    relaxing a rule.
-   The scope check is the part that is easy to miss. A session's read/write mode is fixed at open
-   from the opening token's write scope (#openSessionForUser:jwt:readOnly:), so extending a
-   read-WRITE session on a token that no longer carries the write scope would keep the broader
-   authorization alive on the strength of a narrower grant -- a privilege the client has just
-   demonstrably lost. Such a token is allowed to keep working (it is valid, and the session is still
-   its user's) but it buys no more time: the session runs out at its existing deadline, and the
-   client's next session is opened read-only, which is what its current grant actually says.
    A session already past its deadline but not yet reaped is renewable on purpose. The reaper runs on
    an interval, so that window is an artefact of scheduling, and the client presenting a valid token
    inside it is exactly the client that should keep its gem."
-  (sess readOnly not and: [(self tokenGrantsWrite: aJwtString) not]) ifTrue: [^false].
   ^sess renewExpiryTo: (self tokenExpirySecondsOf: aJwtString)
 %
 category: 'routing'
@@ -573,8 +568,7 @@ serveInitialize: req on: conn
     description: 'Token has no ' , self userIdClaim , ' claim' on: conn].
   ^self refusingOverSessionLimit: req on: conn do: [
     | sess |
-    sess := [self openSessionForUser: userId jwt: token
-      readOnly: (self readOnly or: [(self tokenGrantsWrite: token) not])]
+    sess := [self openSessionForUser: userId jwt: token]
       on: Error
       do: [:e |
         "A refused session is a capacity answer and not a failed login, so it must not be reported
@@ -644,20 +638,17 @@ method: McpAuthRouter
 supportedScopes
   "The scopes this router ADVERTISES: published as `scopes_supported` in the Protected Resource
    Metadata and offered in the WWW-Authenticate `scope=` challenge -- what a client is told to
-   request. DERIVED, not configured: the union of requiredScopes, the writeScope, and extraScopes.
+   request. DERIVED, not configured: the union of requiredScopes and extraScopes.
    Advertising is deliberately WIDER than requiring. requiredScopes is what a token MUST carry;
-   the writeScope is role-gated, so it must be requestable by everyone even though only some users
-   are granted it (a writeScope nobody can request leaves every session read-only forever); and
    extraScopes carries scopes this router does not itself gate on but the client still needs.
-   Deriving rather than configuring means the two ways to get this wrong -- a required scope no
-   client is told to request, or an unrequestable writeScope -- are unrepresentable, so there is no
-   subset rule for a caller to maintain and none for requireResourceServerConfig to check.
-   Order is requiredScopes, then writeScope, then extraScopes, each first occurrence kept; OAuth
+   Deriving rather than configuring means the way to get this wrong -- a required scope no client is
+   told to request -- is unrepresentable, so there is no subset rule for a caller to maintain and
+   none for requireResourceServerConfig to check.
+   Order is requiredScopes, then extraScopes, each first occurrence kept; OAuth
    treats scope as a set, so the order is for stable output only."
   | all |
   all := OrderedCollection new.
   requiredScopes do: [:s | (all includes: s) ifFalse: [all add: s]].
-  writeScope ifNotNil: [:w | (all includes: w) ifFalse: [all add: w]].
   extraScopes do: [:s | (all includes: s) ifFalse: [all add: s]].
   ^all asArray
 %
@@ -666,7 +657,7 @@ method: McpAuthRouter
 tokenExpirySecondsOf: aJwtString
   "The token's exp claim as a wall-clock second, or nil if it cannot be read. An UNVERIFIED parse,
    like #userIdFromToken:. It has two callers, and they rest on different ground:
-    * #openSessionForUser:jwt:readOnly: uses it to SHORTEN a session's life, which is safe whatever
+    * #openSessionForUser:jwt: uses it to SHORTEN a session's life, which is safe whatever
       the parse says -- a wrong answer can only cost the session time it was not owed.
     * #renewSessionExpiry:from: uses it to EXTEND one, where a wrong answer would hand a session
       life it never earned. That caller is safe only because #tokenRejectionFor: has already
@@ -679,21 +670,6 @@ tokenExpirySecondsOf: aJwtString
      exp := (JsonWebToken fromJwtString: aJwtString) payload at: 'exp' ifAbsent: [nil].
      (exp isKindOf: Number) ifTrue: [exp truncated] ifFalse: [nil] ]
    on: Error do: [:e | nil]
-%
-category: 'validation'
-method: McpAuthRouter
-tokenGrantsWrite: aJwtString
-  "Whether aJwtString carries the configured writeScope, granting its session read-WRITE access.
-   True (write allowed) when no writeScope is configured -- per-session write-gating is off. A token
-   that can't be parsed grants no write (fail-safe -> read-only). GemStone still re-validates the
-   token's signature at login regardless."
-  | scope |
-  scope := self writeScope.
-  scope isNil ifTrue: [^true].
-  ^[ | payload |
-     payload := (JsonWebToken fromJwtString: aJwtString) payload.
-     (self scopesOf: payload) includes: scope ]
-   on: Error do: [:e | false]
 %
 category: 'routing'
 method: McpAuthRouter
@@ -794,6 +770,22 @@ userIdFromToken: aJwtString
      payload at: self userIdClaim asSymbol ifAbsent: [nil] ]
    on: Error do: [:e | nil]
 %
+category: 'worker user'
+method: McpAuthRouter
+workerUserId: aUserIdOrNil
+  "REFUSED here -- see the class comment's invariants. McpRouter uses this to log every worker in as
+   one named GemStone user, because an unauthenticated front end has no other way to say who a worker
+   should be. This router does: each worker is the user its bearer token names
+   (McpSession>>startWithId:user:jwt:), so a single configured user would have to either override
+   that -- discarding the authenticated identity -- or be ignored. Signalling says so at
+   configuration time, where an operator can still act on it.
+   nil is allowed, since that is the inherited default and asks for nothing."
+  aUserIdOrNil isNil ifTrue: [^super workerUserId: nil].
+  ^self error: 'McpAuthRouter does not accept workerUserId: every worker gem logs in as the ' ,
+    'GemStone user its bearer token names, so one configured user cannot apply. To bound what a ' ,
+    'user may do, restrict that GemStone UserProfile (see docs/read-only-user.md); to run every ' ,
+    'session as one user, use McpRouter.'
+%
 category: 'auth'
 method: McpAuthRouter
 writeAuthError: httpCode oauthError: errorCodeOrNil description: aMessage on: conn
@@ -811,8 +803,8 @@ writeAuthError: httpCode oauthError: errorCodeOrNil description: aMessage on: co
     "error_description is only meaningful alongside an error code (RFC 6750 3.1); a plain
      missing-token challenge carries neither and just invites the client to authenticate."
     aMessage ifNotNil: [:m | params add: 'error_description="' , m , '"']].
-  "scope advertises what the client should request -- supportedScopes, the derived union, so it also
-   offers the role-gated writeScope. The Scope Selection Strategy makes this a client's first choice
+  "scope advertises what the client should request -- supportedScopes, the derived union. The Scope
+   Selection Strategy makes this a client's first choice
    for what to request, ahead of the metadata document's scopes_supported, and its example is a 401.
    Without it on the initial 401 a client requests no scope at all, is issued a token lacking them,
    and only discovers what it needed from the 403 that follows -- a wasted authorization round trip
@@ -829,15 +821,4 @@ writeAuthError: httpCode oauthError: errorCodeOrNil description: aMessage on: co
   err at: 'jsonrpc' put: '2.0'; at: 'id' put: nil.
   err at: 'error' put: (Dictionary new at: 'code' put: -32600; at: 'message' put: aMessage; yourself).
   conn writeStatus: httpCode reason: reason headers: challenge , crlf body: (McpJson write: err)
-%
-category: 'validation'
-method: McpAuthRouter
-writeScope
-  "The scope a token must carry for its session to get read-WRITE access, or nil for no gating."
-  ^writeScope
-%
-category: 'validation'
-method: McpAuthRouter
-writeScope: aStringOrNil
-  writeScope := aStringOrNil
 %

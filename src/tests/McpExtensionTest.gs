@@ -18,9 +18,8 @@ McpExtensionTest comment:
 named worker subclass (McpFixtureServer).
 
 What this pins that the other suites do not: a vendor server exposing ONLY its own tools; two
-independent toolsets composed on one server (which single inheritance could never do); a toolset''s own
-read-only declaration being honored; and a worker instantiating the class the FRONT END named, with the
-identity precedence that follows -- a subclass override beats router config, config beats the default.'
+independent toolsets composed on one server (which single inheritance could never do); and a worker
+instantiating the class the FRONT END named, with the identity precedence that follows -- a subclass override beats router config, config beats the default.'
 %
 expectvalue /Class
 doit
@@ -34,8 +33,8 @@ removeallclassmethods McpExtensionTest
 category: 'helpers'
 method: McpExtensionTest
 dispatchOn: aServer request: requestDict
-  "Route requestDict through a dispatcher wired to aServer, so read-only gating and identity are
-   exercised through the real path."
+  "Route requestDict through a dispatcher wired to aServer, so identity is exercised through the
+   real path."
   ^(McpDispatcher withToolRegistry: aServer toolRegistry server: aServer) handle: requestDict
 %
 category: 'helpers'
@@ -71,7 +70,7 @@ testBootstrapBuildsTheNamedSubclassWithItsNamedToolsets
   self withFreshWorkerCacheDo: [ | note out |
     note := McpFixtureServer
       prepareWorkerWithToolsets: #('McpFixtureToolset') options: nil
-      readOnly: false serverName: nil title: nil version: nil frontEnd: nil cacheName: nil.
+      serverName: nil title: nil version: nil frontEnd: nil cacheName: nil.
     self assert: (self includesCS: 'McpFixtureServer ready' in: note).
     out := McpFixtureServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'.
     self assert: (self includesCS: 'fixture_echo' in: out).
@@ -83,7 +82,7 @@ testBootstrapBuildsTheNamedSubclassWithItsNamedToolsets
   "...and a deployment that DOES name the server in config relabels it, through the same bootstrap"
   self withFreshWorkerCacheDo: [ | out |
     McpFixtureServer prepareWorkerWithToolsets: #('McpFixtureToolset') options: nil
-      readOnly: false serverName: 'billing-mcp' title: 'Billing - staging' version: '1.1.1'
+      serverName: 'billing-mcp' title: 'Billing - staging' version: '1.1.1'
       frontEnd: nil cacheName: nil.
     out := McpFixtureServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'.
     self assert: (self includesCS: 'billing-mcp' in: out).
@@ -275,20 +274,6 @@ testSubclassGuardPolicyReachesEveryToolset
     self assert: ([ts assertRemovableDictionaryNamed: 'Globals'. #noRaise]
       on: McpError do: [:e | e kind]) equals: #refused]
 %
-category: 'tests - read-only'
-method: McpExtensionTest
-testToolsetDecidesItsOwnReadOnlySafety
-  "A toolset's own readOnlySafeToolNames is honored: the fixture tool survives a read-only build
-   because its toolset vouches for it, while the core mutating tools are dropped. Nothing central had
-   to be edited to allow a third-party tool through."
-  self withReadOnlyDo: [ | names |
-    names := self toolNamesOf: (McpServer newWithToolsetNames:
-      (McpServer defaultToolsetNames , (Array with: 'McpFixtureToolset'))).
-    self assert: (names includes: 'fixture_echo').
-    self assert: (names includes: 'describe_class').
-    self deny: (names includes: 'execute_code').
-    self deny: (names includes: 'compile_method')]
-%
 category: 'tests - toolset options'
 method: McpExtensionTest
 testUnconfiguredToolsetIsUnchanged
@@ -351,12 +336,4 @@ withoutSessionNote: aString
   idx := aString findString: marker startingAt: 1.
   idx = 0 ifTrue: [^aString].
   ^aString copyFrom: 1 to: idx - 1
-%
-category: 'helpers'
-method: McpExtensionTest
-withReadOnlyDo: aBlock
-  "Run aBlock in a read-only session, clearing the flag before and after (see McpContractTest)."
-  SessionTemps current removeKey: #McpReadOnly ifAbsent: [nil].
-  ^[McpServer sessionReadOnly: true. aBlock value]
-    ensure: [SessionTemps current removeKey: #McpReadOnly ifAbsent: [nil]]
 %

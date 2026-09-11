@@ -20,6 +20,9 @@ Nothing here is machine-specific. Facts about *your* stones, netldis, IdP and ho
 * [docs/blind-write-guardrail.md](../docs/blind-write-guardrail.md),
   [docs/session-lifetime.md](../docs/session-lifetime.md),
   [docs/utf8-wire.md](../docs/utf8-wire.md) — deep dives on three subsystems.
+* [docs/read-only-user.md](../docs/read-only-user.md) — what bounds a session, now that nothing in
+  this image does: the worker gem's GemStone user, privilege by privilege, and what is still open.
+  Read it before adding anything that claims to restrict what a client can do.
 * [CHANGELOG.md](../CHANGELOG.md) — what changed per release.
 
 GemStone's own manuals are online and fetchable, and the product tree ships the kernel source; both
@@ -32,7 +35,7 @@ Three kinds of gem, and which one runs your code decides how it gets refreshed:
 | | class | gem | picks up a recompile |
 |---|---|---|---|
 | front end | `McpRouter` / `McpAuthRouter`, `McpHttpConnection` | one detached gem owning the listen socket | within **two** maintenance passes (`reaperIntervalSeconds`, default 60s) |
-| worker | `McpServer`, `McpDispatcher`, the `Mcp*Toolset`s | one per client session | next request (the dispatcher aborts before each tool call) |
+| worker | `McpServer`, `McpDispatcher`, the `Mcp*Toolset`s | one per client session | next request (a worker is built per session, so a new session gets the new code) |
 | driver | the suites | whatever topaz or MCP session you are in | immediately |
 
 `./stop-server.sh && ./run-server.sh` is the only way to be *certain* which code a running server

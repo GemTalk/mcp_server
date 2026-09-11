@@ -18,9 +18,11 @@ McpSessionToolset comment:
 with McpSession, the front end''s handle on a client''s worker gem -- these tools act on the GemStone
 transaction the worker is in.)
 
-The one MIXED toolset: abort, refresh and status only read (aborting discards uncommitted work
-rather than persisting any), while commit persists and so is NOT read-only-safe. That is why
-read-only screens individual tools and not just whole toolsets -- see McpToolset.
+Three of the four only read: abort discards uncommitted work rather than persisting any, and
+refresh and status move or report the view. `commit` is the one that persists -- and whether it is
+ALLOWED to is not this toolset''s question. A worker gem whose GemStone user cannot commit gets a
+TransactionError from the stone, which is the honest refusal and the only one that cannot be
+talked around: see McpRouter>>workerUserId and docs/read-only-user.md.
 
 THE TRANSACTION MODEL THESE TOOLS EXPOSE (changed 2026-08-28; docs/server-to-client-messaging.md
 10.11 and 15). A worker gem sits in one long-lived GemStone transaction and sees one consistent
@@ -49,16 +51,6 @@ removeallmethods McpSessionToolset
 removeallclassmethods McpSessionToolset
 ! ------------------- Class methods for McpSessionToolset
 ! ------------------- Instance methods for McpSessionToolset
-category: 'read-only'
-method: McpSessionToolset
-readOnlySafeToolNames
-  "Everything except commit. abort discards uncommitted work, refresh updates the view without
-   either persisting or discarding, and status only reports -- none of the three can write to the
-   repository. commit is the one tool here that can persist a change, and since 2026-08-28 it is
-   the only tool in the whole server that can (see McpMutationToolset), which makes this list the
-   place read-only mode is actually enforced for writes."
-  ^#( 'abort' 'refresh' 'status' )
-%
 category: 'registration'
 method: McpSessionToolset
 registerOn: aToolRegistry

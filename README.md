@@ -6,7 +6,7 @@ Node.js process, no GCI/FFI bridge. The goal is to replace the GCI-based Jasper 
 server with one that any MCP client can reach over plain HTTP.
 
 **Status:** the Streamable HTTP transport, per-client worker gems, 31 base tools (+9 optional
-Python), OAuth 2.1 / JWT + TLS, per-router read-only mode and server-initiated messages are built
+Python), OAuth 2.1 / JWT + TLS, per-router worker identity and server-initiated messages are built
 and verified end-to-end — by curl, by a TLS run, and by the in-image suites. What is *not* built is
 listed under [Future work](#future-work).
 
@@ -55,7 +55,7 @@ export GEMSTONE=/path/to/GemStone64Bit3.7.x   # product dir
 ./install.sh --no-auth              # ...or leave the auth group out of an image that could take it
 ./install.sh --grail                # ...plus the optional Grail/Python toolset (Grail image only)
 MCP_PORT=8000 ./run-server.sh       # fork a detached, independent localhost server gem and return
-MCP_READONLY=1 ./run-server.sh      # ...read-only (browse/search only; no accidental mutation)
+MCP_WORKER_USER=McpReadOnly ./run-server.sh   # ...every worker gem as a restricted GemStone user
 MCP_TOOLSETS="McpBrowsingToolset McpSearchToolset" ./run-server.sh   # ...only these tools
 MCP_WORKER_CLASS=MyMcpServer ./run-server.sh                         # ...a subclass as the worker
 
@@ -200,8 +200,8 @@ For network-facing use,
 the optional `McpAuthRouter` subclass (see [Install & run](#install--run)) adds OAuth 2.1 / JWT
 bearer-token authentication (per-user worker gems),
 a `WWW-Authenticate` challenge + RFC 9728 Protected Resource Metadata, TLS (`GsSecureSocket`), and
-scope-based [read-only sessions](#read-only-mode); the base `McpRouter` is the localhost,
-unauthenticated front end.
+per-user worker identity; the base `McpRouter` is the localhost, unauthenticated front end, and the
+one that can run every worker as [a restricted GemStone user](#browsing-only-deployments-the-worker-gems-gemstone-user).
 
 ```
 # initialize -- the response carries an MCP-Session-Id header
@@ -461,7 +461,7 @@ worked example for configuring your own.
 > a `not searched:` block, each gap naming the argument that closes it — because "no senders" is
 > only worth reading if it can be told apart from "I could not look there".
 >
-> **It never imports, and that is why it is read-only safe.** Matching is syntactic: the last
+> **It never imports.** Matching is syntactic: the last
 > segment of the name is what is matched, and leading segments narrow and label. Resolving the name
 > instead would buy exact arities and would make a *search* a database write, since a cold import in
 > Grail compiles. Over-matching is reported rather than avoided — a bare name answers hits in every
@@ -512,7 +512,7 @@ worked example for configuring your own.
 > rather than rebuilding. The tool reports each fact and then the line that matters: what
 > `import <name>` would actually do from here. It only reads — it deliberately does not import the
 > module it describes, which is what makes it safe to ask about one you have not decided to import,
-> and read-only-safe.
+> — not because anything in this server stops it, but because the tool is written not to.
 
 > **`run_python_tests` runs somewhere else on purpose.** Pointing the generic `run_test_class` at
 > Grail's SUnit classes reported roughly **3,410 errors**, and not one of them was a defect in Grail.
@@ -525,7 +525,7 @@ worked example for configuring your own.
 > So this tool logs in a new gem, runs there, and throws it away. That also settles three other
 > things: the caller's transaction is untouched (running in-session dirtied it with 31 modified
 > objects for a *seven-test* class, because a cold Grail import **is** a database write), nothing is
-> ever committed, and it is therefore the one tool here that is **read-only-safe**. The price is that
+> ever committed, and a run therefore leaves the repository exactly as it found it. The price is that
 > every run is fully cold — `FlaskScaffoldingTestCase` alone takes ~262s — which is why `classNames`
 > exists and why the tool reports progress.
 >
@@ -732,37 +732,63 @@ worked example for configuring your own.
   under any key — in a Grail image `Python` binds kernel `Object` under an alias, ahead of `Globals`,
   which made `Object` read as unprotected and let the mutation tools through.
   Your own classes (in `UserGlobals`, or an application dictionary) stay freely mutable.
-  `execute_code` is the deliberate escape hatch (and is itself gated in read-only mode).
+  `execute_code` is the deliberate escape hatch, and is deliberately **not** guarded — what bounds it
+  is the worker gem's GemStone user, not this server.
 - **Structured error kinds** — when a tool raises, the `isError` result keeps the human-readable
   message in `content` **and** carries `structuredContent.error.kind`, a short machine-readable
-  classifier (`compileError`, `refused`, `readOnly`, `notFound`, `invalidParams`, `other`), so a
+  classifier (`compileError`, `refused`, `notFound`, `invalidParams`, `other`), so a
   client can branch on the kind instead of parsing prose.
 
-## Read-only mode
+## Browsing-only deployments: the worker gem's GemStone user
 
-A router can refuse every state-changing tool, so a client can browse and search but not modify the
-image — primarily a **localhost convenience** so a single user cannot *accidentally* mutate or commit
-(it is a tool-gate, **not** an access-control boundary). Read-only is **per-router**: the router marks
-each worker read-only at session open, so two routers (one read-only, one not) can run at once with
-no shared state. A worker is read-only if **either** applies:
+**There is no read-only mode.** There was one until the release after 0.8.0 — a per-router flag plus a
+`readOnlySafeToolNames` allow-list — and it was removed rather than extended, because a list of
+"safe" tools could never be a boundary: `execute_code` evaluates arbitrary Smalltalk, `run_test_class`
+runs arbitrary test bodies, and a tool that compiles can be followed by one that runs. Worse, it
+*looked* like a boundary in exactly the place that mattered — an administrator starting
+`MCP_READONLY=1 ./run-server.sh` on a privileged user, believing the image was holding the line.
 
-- **The router is read-only** — `(McpRouter new readOnly: true) forkOnPort: 8000`, or the shortcut
-  `MCP_READONLY=1 ./run-server.sh`. Every session that router opens is read-only.
-- **By OAuth scope (`McpAuthRouter`)** — give the router a `writeScope` (e.g. `./run-auth-server.sh`
-  with `MCP_WRITE_SCOPE=mcp:write`): a token carrying that scope gets a read-write worker; a token
-  lacking it gets a read-only worker for that session. For a client to actually *request* that scope,
-  the router must also **advertise** it — and it does so automatically, so there is nothing to keep
-  in sync. Advertising without requiring is the point: an entitled user is granted the scope and gets
-  read-write, while an unentitled user (the authorization server withholds it) still connects
-  read-only.
+What holds the line is the **GemStone user the worker gem logs in as**, enforced in the stone on
+every operation:
+
+```bash
+./setup-read-only-user.sh                      # provision McpReadOnly (once)
+MCP_WORKER_USER=McpReadOnly ./run-server.sh    # every worker gem of this router is that user
+```
+
+`McpRouter>>workerUserId` names the user and defaults to nil, meaning the front end's own user. No
+credential is configured: the front end mints a one-time password per session, which needs a single
+committed grant that `setup-read-only-user.sh` makes — so the router carries only an **identifier**,
+and the fork string stays free of key material.
+
+The provisioned user has `UserProfile>>disableCommits` (so **every** session of it is commit-locked
+from login, forked gems included) and the privileges `CodeModification`, `NoPerformOnServer`,
+`NoUserAction`, `NoGsFileOnServer`, `NoGsFileOnClient`. Measured against it: `commit` raises
+`TransactionError` 2249, writing a shared object is refused `SecurityError` 2116 *at the write*, and
+`performOnServer:`, `GsFile`, one-time-password minting, `stopSession:` and logging in a second gem
+all raise. Reads and compiling still work, which is what makes the browsing surface worth having.
+
+**[docs/read-only-user.md](docs/read-only-user.md) is the reference**: every privilege, what it does,
+the risk of granting it, the cost of withholding it — and, just as important, what is **still open**
+afterwards (reads are broad; a session can take a write lock that blocks *other* sessions' commits;
+resource consumption is bounded only by session lifetime). Read it before pointing an untrusted
+client at this.
+
+`McpAuthRouter` **refuses** `workerUserId:` — there each worker logs in as the user its bearer token
+names, so restricting an analyst means giving *that* GemStone user a restricted profile. (It had a
+`writeScope` that downgraded a scope-less token to a reduced tool list; that went with the rest of
+the gate.)
+
+Choosing a shorter `toolsetNames` list is still worth doing — it narrows what a model is *offered*,
+and a smaller surface is a clearer one. It is not a security control.
 
 `supportedScopes` is the set published as `scopes_supported` (RFC 9728 metadata) and offered in the
 `WWW-Authenticate` challenge — what clients are told to request, as distinct from `requiredScopes`,
-what every token *must* carry. It is **derived, not configured**: the union of `requiredScopes`, the
-`writeScope`, and `extraScopes`. Because it is a union, a required scope is always advertised and the
-write scope is always requestable — neither can be left out by a configuration slip, and there is no
-subset rule to observe. Set `extraScopes` only for scopes the router itself does not gate on but the
-client still needs to ask for, such as an authorization server's own `profile`.
+what every token *must* carry. It is **derived, not configured**: the union of `requiredScopes` and
+`extraScopes`. Because it is a union, a required scope is always advertised — it cannot be left out by
+a configuration slip, and there is no subset rule to observe. Set `extraScopes` only for scopes the
+router itself does not gate on but the client still needs to ask for, such as an authorization
+server's own `profile`.
 
 **Configuring the authorization server (Keycloak).** Keycloak's own
 [MCP authorization server guide](https://www.keycloak.org/securing-apps/mcp-authz-server) recommends
@@ -785,47 +811,31 @@ tokens are not a resource requirement — but on Keycloak, advertising is the on
 dynamically-registered client can come to hold that scope, so it is the supported configuration here
 rather than a workaround.
 
-**What's gated:** everything that can persist a change or run arbitrary code — `execute_code`,
-`commit`, and all the mutation tools. Everything else (browsing, listing, search,
-`status`/`refresh`/`abort`, and the test-runner tools) stays available.
-
-**Each toolset declares its own safe tools** (`McpToolset>>readOnlySafeToolNames`), and the server
-answers their union, so a third-party toolset decides for its own tools without editing anything
-central. It is **fail-closed**: the default declaration is *empty*, so a newly added tool is gated
-until its toolset explicitly vouches for it. `McpServer class>>coreReadOnlySafeToolNames` remains as
-the **audit list** — the one place to read the whole core answer — and `McpContractTest` pins the
-union of the seven core toolsets against it, so a tool cannot quietly become "safe".
-
-Screening happens at both levels, which matters because one family is mixed: `McpSessionToolset`
-holds `abort`/`refresh`/`status` (safe) *and* `commit` (not). A toolset that declares nothing safe —
-mutation, execution — is dropped whole; a mixed one keeps only its safe tools.
-
-Two moments, too. When the router opens a read-only worker the gated tools are **never registered**
-(the flag is set before the server is built), which is a stronger gate than refusing them on call;
-the dispatcher's check still runs for a server whose flag was set afterwards. Either way a gated tool
-is **hidden from `tools/list`** and, if called by name, returns `-32601` with
-`error.data.kind = "readOnly"` — deliberately *not* `notFound`, so a client can tell "exists but
-forbidden here" from "no such tool". A tool absent because its toolset was never loaded genuinely
-*is* `notFound`.
+**What a deployment chooses is its TOOLSET LIST.** `tools/list` is unfiltered — the registry is the
+surface — so leaving `McpMutationToolset` and `McpExecutionToolset` out of `toolsetNames` narrows
+what a model is *offered*, which is worth doing for clarity. It is not a security control: a tool
+absent that way is `notFound`, and `run_test_class` still runs arbitrary test bodies. What a session
+may actually **do** is its GemStone user's business — see
+[the section above](#browsing-only-deployments-the-worker-gems-gemstone-user).
 
 ## Architecture
 
 | Class | Role |
 |-------|------|
 | `McpBase` | abstract superclass of the router + worker; holds only what both share — `parseBody:`, `log:`, the JSON-RPC envelope builders for server-initiated messages, and the RFC 5424 log-level table |
-| `McpRouter` | front end: accept loop, HTTP, routing, the `MCP-Session-Id → McpSession` map, the SSE drain loop, the pending-request table, and the session reaper. Owns the socket; never runs a tool |
-| `McpAuthRouter` | network-facing `McpRouter` subclass: requires an OAuth/JWT bearer token, logs each worker in as its own GemStone user, serves the `WWW-Authenticate` challenge + RFC 9728 metadata, validates token claims/scopes, adds TLS, and (via `writeScope`) can open a session read-only |
-| `McpServer` | per-client worker: the single-client MCP server that runs inside each worker gem — registry, dispatcher, the kernel guards, read-only gating, identity. The tools themselves belong to its toolsets, and which of those it registers is not fixed by the class. No socket |
-| `McpToolset` | abstract tool pack: `registerOn:` (its tools + schemas), its `tool_*` handlers, `toolNames`, `readOnlySafeToolNames` (empty by default — fail closed), plus the shared schema builders, image-lookup helpers, and the kernel guards (which forward to the server's policy). **Subclass this to add tools**; a deployment picks the list |
+| `McpRouter` | front end: accept loop, HTTP, routing, the `MCP-Session-Id → McpSession` map, the SSE drain loop, the pending-request table, and the session reaper. Also `workerUserId`, the GemStone user its worker gems log in as. Owns the socket; never runs a tool |
+| `McpAuthRouter` | network-facing `McpRouter` subclass: requires an OAuth/JWT bearer token, logs each worker in as its own GemStone user, serves the `WWW-Authenticate` challenge + RFC 9728 metadata, validates token claims/scopes, and adds TLS. Refuses `workerUserId:` — the token names the user |
+| `McpServer` | per-client worker: the single-client MCP server that runs inside each worker gem — registry, dispatcher, the kernel guards, identity. The tools themselves belong to its toolsets, and which of those it registers is not fixed by the class. No socket |
+| `McpToolset` | abstract tool pack: `registerOn:` (its tools + schemas), its `tool_*` handlers, `toolNames`, plus the shared schema builders, image-lookup helpers, and the kernel guards (which forward to the server's policy). **Subclass this to add tools**; a deployment picks the list |
 | `McpBrowsingToolset`, `McpExecutionToolset`, `McpListingToolset`, `McpMutationToolset`, `McpSearchToolset`, `McpSessionToolset`, `McpTestingToolset` | the seven core toolsets, one per tool family. A deployment can expose any subset — or none of them, alongside its own |
 | `McpGrailToolset` | optional Python toolset (7 tools: eval, transpile, source, class + method browsing, module state, tests), filed in only on a Grail image. Needs nothing from the server, so it doubles as the worked example for a third-party toolset |
 | `McpSession` | one client's isolated worker handle: a `GsTsExternalSession` gem + session id + last-activity + the worker class/toolsets/identity the front end resolved, plus the front-end-side outbox, log level and liveness state. `prepareWorker` sets the gem up in one call; `forward:` runs a request in it (`<workerClass> handleJsonString: …`) without blocking the front end (`runWorker:`); `close` stops it |
 | `McpOutbox` | one session's queue of server-initiated messages waiting for its SSE stream. Front-end-only and never committed; owns the bound/overflow policy, the closing handshake, and the latest-GET-wins rule |
 | `McpHttpConnection` | reads one HTTP/1.1 request, writes one JSON response (incl. `MCP-Session-Id`), and writes the SSE stream — every frame gated on the socket being writable, plus a non-blocking read-side disconnect check |
-| `McpDispatcher` | JSON-RPC 2.0 / MCP routing (`initialize`, `tools/list`, `tools/call`, `ping`); read-only tool gating; structured error kinds |
+| `McpDispatcher` | JSON-RPC 2.0 / MCP routing (`initialize`, `tools/list`, `tools/call`, `ping`); the post-call `[session]` line; structured error kinds |
 | `McpToolRegistry` | name → `McpTool` map; produces `tools/list` descriptors |
 | `McpTool` | one tool: name, description, JSON Schema, handler block; validates arguments against the schema |
-| `McpError` | an error carrying a machine-readable `kind` (e.g. `refused`, `readOnly`) that the dispatcher surfaces in the tool-call error envelope |
+| `McpError` | an error carrying a machine-readable `kind` (e.g. `refused`, `notFound`) that the dispatcher surfaces in the tool-call error envelope |
 | `McpJson` | the JSON writer: renders a response as a byte `String` of UTF-8, replacing `Object>>asJson`, whose escaping corrupts every codepoint above U+FFFF |
 
 Built on existing image facilities: `GsSocket` (TCP), `JsonParser parse:` (JSON in) and
@@ -931,9 +941,10 @@ transaction views. The port-owning gem runs `McpRouter`, a **front end / router*
 tools itself (those run in the per-client `McpServer` workers):
 
 - **`initialize`** → the front end opens a `McpSession` (a `GsTsExternalSession` worker gem,
-  logged in as the current user via a one-time password), **prepares** it with a single
-  `prepareWorkerWithToolsets:options:readOnly:serverName:title:version:frontEnd:cacheName:` call —
-  which names the worker's gem in the shared cache, sets read-only, resolves the
+  logged in via a one-time password as `workerUserId` — the front end's own user unless a
+  restricted one is configured), **prepares** it with a single
+  `prepareWorkerWithToolsets:options:serverName:title:version:frontEnd:cacheName:` call —
+  which names the worker's gem in the shared cache, resolves the
   named toolsets, applies the advertised identity, and pre-builds the server so the client's first
   request has no registration to do — assigns a server-side id, and returns it in the
   **`MCP-Session-Id`** response header. A worker class or toolset the worker gem cannot resolve fails
@@ -1231,9 +1242,8 @@ first is the one you usually want.
 
 **To add tools, write a toolset.** Subclass `McpToolset`, implement `registerOn:` (one
 `name:description:inputSchema:do:` send per tool, building schemas with the inherited
-`objectSchema:required:` / `propString:` / `boolProperty:` helpers), implement `toolNames`, and
-declare `readOnlySafeToolNames` for whichever of your tools cannot persist a change — the default is
-*none*, so an undeclared tool is gated in a read-only session. Write the handlers as instance methods
+`objectSchema:required:` / `propString:` / `boolProperty:` helpers) and implement `toolNames`.
+Write the handlers as instance methods
 on the same class, taking the parsed argument dictionary and returning a `String`; the inherited
 `resolveClass:`, `dictNamed:`, `linesFrom:` and `capResult:` helpers cover the usual image lookups
 and output capping. `McpFixtureToolset` (in `src/tests/`) and `McpGrailToolset` are small worked
@@ -1288,7 +1298,7 @@ it):
 Sooner or later your toolset needs something the core cannot know — where your data directory is,
 which host a subsystem talks to, which tenant this deployment serves. Adding an ivar to `McpRouter`
 per vendor does not scale and puts your domain knowledge in the core, so a toolset **declares what it
-can be configured with**, alongside what it provides and what is safe read-only:
+can be configured with**, alongside what it provides:
 
 ```smalltalk
 AcmeDbToolset class >> declaredOptionNames
@@ -1346,7 +1356,7 @@ there is no `title` a client displays the `name`. So the two shapes are:
 ```smalltalk
 "same software, three stones -- name stays truthful, humans can tell them apart"
 (McpRouter new serverTitle: 'GemStone - geode teststone 3.7.6') forkOnPort: 8000
-(McpRouter new readOnly: true; serverTitle: 'GemStone (read-only)') forkOnPort: 8001
+(McpRouter new workerUserId: 'McpReadOnly'; serverTitle: 'GemStone (browse-only)') forkOnPort: 8001
 "a different product assembled from toolsets, with no McpServer subclass"
 (McpRouter new toolsetNames: #('AcmeDbToolset');
    serverName: 'acme-db-mcp'; serverVersion: '2.5.0';
@@ -1592,29 +1602,29 @@ flag, so a missing suite is a skip and not an error:
 - `McpContractTest` — contract / property tests over the tool surface, all driven through the real
   `McpDispatcher>>handle:` envelope: every tool schema is closed (`additionalProperties:false`),
   unknown/missing arguments → an `isError` tool execution error while a missing tool name / unknown
-  tool stay `-32602`, `ping` → an empty result, a raised error carries a structured `kind`, kernel-class
-  mutation is refused, and read-only hides + refuses the gated tools. Also the toolset invariants: the
-  union of the core toolsets' read-only declarations equals the audit list, no toolset vouches for a
-  tool it does not provide, `toolNames` matches what `registerOn:` registers, a server built from one
-  toolset exposes only its tools, a read-only build drops an all-unsafe toolset whole, and the kernel
+  tool stay `-32602`, `ping` → an empty result, a raised error carries a structured `kind`, and
+  kernel-class mutation is refused. Also the toolset invariants: `tools/list` offers the whole
+  registry (all 31 of the default surface, mutating tools included), `toolNames` matches what
+  `registerOn:` registers, a server built from one toolset exposes only its tools, and the kernel
   guard survives a dictionary that shadows a kernel name. Socket-less and worker-less, so it runs in
   `run-unit-tests.sh` with the others above.
 - `McpExtensionTest` — the extension story through two fixtures: `McpFixtureToolset` (a third-party
-  toolset that owns its handler and vouches for its own read-only safety) and `McpFixtureServer` (a
-  named worker subclass that names itself). Covers a vendor server exposing **only** its own tools,
-  two independent toolsets composed on one server, a third-party tool surviving a read-only build,
+  toolset that owns its handler) and `McpFixtureServer` (a named worker subclass that names itself).
+  Covers a vendor server exposing **only** its own tools,
+  two independent toolsets composed on one server,
   the worker entry answering as the named subclass, and the identity precedence — router config
   relabels a subclass's own default. `McpStubSession` lets it drive
   `McpRouter>>openSessionCreating:` (configure **and** prepare) with no login.
 - `McpAuthTest` *(3.7.5+ images, where the auth group installs)* — the authenticated front end
   (`McpAuthRouter`): missing / non-bearer / garbage / valid tokens, RS-layer `exp` / issuer /
-  audience / scope validation, and the write-scope read-only sessions. Unlike every suite above it
+  audience / scope validation, that a worker runs as its own token's GemStone user, and that
+  `workerUserId:` is refused here. Unlike every suite above it
   commits a throwaway JWT user and spawns real worker gems, so it needs a netldi running.
 - `McpGrailToolsetTest` *(Grail images only)* — the optional Python toolset: `eval_python`→`42`,
   `compile_python`→`___binOpMul___:`, `print`→`None`, all three Python failure paths (undefined name,
   runtime, syntax) surfacing as `isError` with `kind = "pythonError"`, a 33-tool `tools/list` check on
-  core-plus-Grail, the toolset being served only when a router NAMES it (loaded is not exposed), and
-  the toolset being dropped whole in a read-only session. The last two failure paths were switched-off tripwires while Grail crashed the
+  core-plus-Grail, and the toolset being served only when a router NAMES it (loaded is not exposed).
+  The last two failure paths were switched-off tripwires while Grail crashed the
   gem on them; both run for real as of 2026-08-18. Also `eval_python`'s output channels: stderr
   captured and labelled per line, a `warnings.warn` reported, both channels delivered ahead of the
   traceback when the code raises, and a client's own `sys.stdout` redirect left installed across

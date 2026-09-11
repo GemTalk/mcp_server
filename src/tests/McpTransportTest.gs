@@ -552,7 +552,7 @@ testConfigJsonRoundTrips
    initialize-seeded default. (McpAuthRouter's RS-layer keys are covered in McpAuthTest.)"
   | src dst |
   src := McpRouter new.
-  src readOnly: true;
+  src workerUserId: 'McpReadOnly';
     requestTimeoutSeconds: 5;
     allowedOriginHosts: #('example.com');
     workerClassName: 'McpServer';
@@ -563,7 +563,9 @@ testConfigJsonRoundTrips
     messageTrace: true;
     messageTraceLimit: 512.
   dst := McpRouter new applyConfigJson: src configJson.
-  self assert: dst readOnly.
+  "the worker's GemStone user is a plain IDENTIFIER, which is why it is allowed on the fixed key
+   allow-list at all -- no credential travels with it (McpSession>>startWithId:workerUser:)"
+  self assert: dst workerUserId equals: 'McpReadOnly'.
   self assert: dst allowedOriginHosts equals: #('example.com').
   self assert: dst workerClassName equals: 'McpServer'.
   self assert: dst toolsetNames equals: #('McpBrowsingToolset').
@@ -576,9 +578,9 @@ testConfigJsonRoundTrips
   "the message trace has to survive this or it is unreachable: forkOnPort: is how the server starts"
   self assert: dst messageTrace.
   self assert: dst messageTraceLimit equals: 512.
-  "an unconfigured router round-trips to its safe defaults -- read-write on, loopback origins,
-   trace off"
-  self deny: (McpRouter new applyConfigJson: McpRouter new configJson) readOnly.
+  "an unconfigured router round-trips to its safe defaults -- workers as the front end's own user,
+   loopback origins, trace off"
+  self assert: (McpRouter new applyConfigJson: McpRouter new configJson) workerUserId isNil.
   self deny: (McpRouter new applyConfigJson: McpRouter new configJson) messageTrace
 %
 category: 'tests'

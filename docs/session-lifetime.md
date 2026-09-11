@@ -227,9 +227,12 @@ user extends the session to the new token's `exp` (`renewSessionExpiry:from:`). 
 working steadily had its worker gem torn down and rebuilt one access-token lifetime after opening,
 however recently it had called, because activity feeds the idle clock and the idle clock is not what
 ends an authenticated session. Refreshing sooner would not have helped, since
-the renewed token was never consulted about lifetime. A read-write session is *not* extended by a
-token that has lost the write scope: that token keeps working, but buys no time, and the next session
-opens read-only.
+the renewed token was never consulted about lifetime.
+
+Renewal now turns on the token's expiry alone. It once also refused to extend a read-WRITE session on
+a token that had lost the router's `writeScope` — both that scope and the tool-gate it drove are
+gone, because what a session may do is now decided by its GemStone user rather than by which tools it
+was shown (`docs/read-only-user.md`).
 
 **The log says what was in force.** The startup banner records the whole lifetime configuration and
 the concurrency cap beside it (`concurrent sessions: at most 3`); a refused `initialize` is logged

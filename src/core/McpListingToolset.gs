@@ -15,7 +15,7 @@ expectvalue /Class
 doit
 McpListingToolset comment: 
 'The dictionary/class listing tools: what classes exist, in which symbol dictionaries, and what else
-those dictionaries hold. All read-only-safe.
+those dictionaries hold. Nothing here persists a change.
 
 Every tool here but list_dictionaries takes limit/offset and answers sorted, so a client that finds
 an answer too long has a way to walk it -- see McpToolset>>page:args:defaultLimit:. None of them
@@ -30,12 +30,6 @@ removeallmethods McpListingToolset
 removeallclassmethods McpListingToolset
 ! ------------------- Class methods for McpListingToolset
 ! ------------------- Instance methods for McpListingToolset
-category: 'read-only'
-method: McpListingToolset
-readOnlySafeToolNames
-  "Every listing tool only reads."
-  ^self toolNames
-%
 category: 'registration'
 method: McpListingToolset
 registerOn: aToolRegistry

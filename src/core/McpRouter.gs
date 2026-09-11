@@ -5,7 +5,7 @@ doit
 McpBase subclass: 'McpRouter'
   instVarNames: #( isRunning mutex routesTable
                     serverSocket sessions allowedOriginHosts tlsCertificateFile
-                    tlsPrivateKeyFile readOnly workerClassName toolsetNames
+                    tlsPrivateKeyFile workerUserId workerClassName toolsetNames
                     toolsetOptions serverName serverTitle serverVersion
                     pendingRequests pendingMutex serverRequestCounter sessionIdleTimeoutSeconds
                     streamlessIdleTimeoutSeconds livenessProbeIntervalSeconds reaperIntervalSeconds maxSessionLifetimeSeconds
@@ -83,12 +83,13 @@ Foreground (blocks this session):
     McpRouter new runOnPort: 8000
 Detached, independent (survives logout); stop it by port with ./stop-server.sh:
     McpRouter new forkOnPort: 8000
-Read-only (a localhost convenience so a single user cannot accidentally mutate the image):
-    (McpRouter new readOnly: true) forkOnPort: 8000
+Run every worker as a DIFFERENT GemStone user -- how a deployment bounds what its sessions can do,
+since the worker gem IS that user (see workerUserId, docs/read-only-user.md, setup-read-only-user.sh):
+    (McpRouter new workerUserId: ''McpReadOnly'') forkOnPort: 8000
 Label THIS INSTANCE for humans -- what an operator running two instances of one product needs. The
 name and version stay truthful (every box reports the same software); only the display title differs:
     (McpRouter new serverTitle: ''GemStone - geode teststone 3.7.6'') forkOnPort: 8000
-    (McpRouter new readOnly: true; serverTitle: ''GemStone (read-only)'') forkOnPort: 8001
+    (McpRouter new workerUserId: ''McpReadOnly''; serverTitle: ''GemStone (browse-only)'') forkOnPort: 8001
 Choose the tool surface -- e.g. a vendor''s own tools with none of the Smalltalk-development ones.
 An empty list is legal and means a server offering no tools at all. serverName says which SOFTWARE
 this is, so it is set here (a different product), not to distinguish deployments:
@@ -459,7 +460,11 @@ applyConfig: aConfigDict
   allowedOriginHosts := aConfigDict at: 'allowedOriginHosts' ifAbsent: [allowedOriginHosts].
   tlsCertificateFile := aConfigDict at: 'tlsCertificateFile' ifAbsent: [tlsCertificateFile].
   tlsPrivateKeyFile := aConfigDict at: 'tlsPrivateKeyFile' ifAbsent: [tlsPrivateKeyFile].
-  readOnly := aConfigDict at: 'readOnly' ifAbsent: [readOnly].
+  "Through the SETTER for the same reason frontEndTransactionMode is: a subclass may refuse this
+   value (McpAuthRouter does), and a config that it refuses must fail in the child gem rather than
+   be written straight past the refusal into the ivar."
+  (aConfigDict includesKey: 'workerUserId')
+    ifTrue: [self workerUserId: (aConfigDict at: 'workerUserId')].
   "Through the SETTER, not the ivar: it is the one thing here whose value has a fixed vocabulary, and
    a name that is not in it must fail in the child gem rather than be handed to #asSymbol."
   (aConfigDict includesKey: 'frontEndTransactionMode')
@@ -671,7 +676,7 @@ configDict
   d at: 'allowedOriginHosts' put: allowedOriginHosts.
   d at: 'tlsCertificateFile' put: tlsCertificateFile.
   d at: 'tlsPrivateKeyFile' put: tlsPrivateKeyFile.
-  d at: 'readOnly' put: readOnly.
+  d at: 'workerUserId' put: workerUserId.
   d at: 'frontEndTransactionMode' put: frontEndTransactionMode.
   d at: 'workerClassName' put: workerClassName.
   d at: 'toolsetNames' put: toolsetNames.
@@ -925,7 +930,7 @@ forkOnPort: aPort
   [es logout] on: Error do: [:e | nil].  "release our handle; the detached front end keeps running"
   s := WriteStream on: String new.
   s nextPutAll: self class name asString.
-  readOnly ifTrue: [s nextPutAll: ' (read-only)'].
+  workerUserId ifNotNil: [:u | s nextPutAll: ' (workers as '; nextPutAll: u; nextPut: $)].
   s nextPutAll: ' forked into gem session '; nextPutAll: sid printString.
   pid ifNotNil: [:p | s nextPutAll: ' (host pid '; nextPutAll: p printString; nextPutAll: ')'].
   s nextPutAll: ', listening on port '; nextPutAll: aPort printString; nextPutAll: ' (independent; survives logout).'.
@@ -1082,7 +1087,7 @@ initialize
   allowedOriginHosts := self class defaultAllowedOriginHosts.  "loopback -- a security default"
   tlsCertificateFile := nil.
   tlsPrivateKeyFile := nil.
-  readOnly := false.
+  workerUserId := nil.    "nil = the front end gem's own user"
   workerClassName := nil.  "nil = McpServer"
   toolsetNames := nil.     "nil = the core default surface (McpServer defaultToolsetNames), resolved per session"
   toolsetOptions := nil.   "nil = no toolset needs configuring, which is the ordinary case"
@@ -1647,9 +1652,9 @@ noteSessionAccessDenied: anError
 category: 'sessions'
 method: McpRouter
 openSession
-  "Create + register a new client session (a worker gem for the current/server user). The worker is
-   opened read-only when THIS router is read-only."
-  ^self openSessionCreating: [:newId | McpSession startWithId: newId readOnly: self readOnly]
+  "Create + register a new client session. The worker gem logs in as #workerUserId -- nil, the
+   default, meaning this front end's own user."
+  ^self openSessionCreating: [:newId | McpSession startWithId: newId workerUser: self workerUserId]
 %
 category: 'sessions'
 method: McpRouter
@@ -1907,20 +1912,6 @@ randomSessionToken
   f isNil ifTrue: [^self error: 'cannot open /dev/urandom for session-id entropy'].
   bytes := [f next: 16] ensure: [f close].
   ^bytes asHexString
-%
-category: 'read-only'
-method: McpRouter
-readOnly
-  "Whether this router opens its worker sessions read-only (mutating tools hidden + refused). A
-   localhost convenience so a single user cannot accidentally mutate the image -- NOT an access
-   boundary. Default false."
-  ^readOnly
-%
-category: 'read-only'
-method: McpRouter
-readOnly: aBoolean
-  "Open this router's workers read-only (see #readOnly)."
-  readOnly := aBoolean
 %
 category: 'session lifetime'
 method: McpRouter
@@ -3427,6 +3418,28 @@ workerClassName: aNameOrNil
    validatedClassName:. The class must be visible in the WORKER gem's symbol list, which under
    McpAuthRouter belongs to the authenticated user, so Mcp rather than UserGlobals."
   workerClassName := aNameOrNil isNil ifTrue: [nil] ifFalse: [self validatedClassName: aNameOrNil]
+%
+category: 'worker user'
+method: McpRouter
+workerUserId
+  "The GemStone user every worker gem of this router logs in as, or nil (the default) for this front
+   end's own user.
+   THIS IS THE DEPLOYMENT'S ACCESS BOUNDARY, and the only one the server has. A worker gem IS this
+   user, so what a session can read, write, commit, compile, run on the host or do to the stone is
+   decided by that user's privileges and object authorization -- in the stone, not in this image.
+   Narrowing the TOOL LIST (toolsetNames) narrows what is offered and nothing more: execute_code and
+   any test body reach whatever the user reaches. docs/read-only-user.md is the privilege-by-privilege
+   account, and setup-read-only-user.sh provisions the user this was built for.
+   Naming a user needs no secret here -- see McpSession>>startWithId:workerUser: for the one-time
+   password mint and the single committed grant it depends on."
+  ^workerUserId
+%
+category: 'worker user'
+method: McpRouter
+workerUserId: aUserIdOrNil
+  "Log every worker gem of this router in as aUserIdOrNil (see #workerUserId). nil restores the
+   default, this front end's own user."
+  workerUserId := aUserIdOrNil
 %
 category: 'routing'
 method: McpRouter

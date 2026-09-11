@@ -197,16 +197,13 @@ testWorkerAppliesTheNameTheFrontEndSent
    suites passes cacheName: nil, and would rename the session running it if nil did anything."
   self savingGemCacheNameDo: [
     SessionTemps current removeKey: #McpServer ifAbsent: [nil].
-    SessionTemps current removeKey: #McpReadOnly ifAbsent: [nil].
-    [McpServer prepareWorkerWithToolsets: #() options: nil readOnly: false
+    [McpServer prepareWorkerWithToolsets: #() options: nil
        serverName: nil title: nil version: nil frontEnd: nil cacheName: 'McpServer:9:feedface'.
      self assert: McpBase gemCacheName equals: 'McpServer:9:feedface'.
-     McpServer prepareWorkerWithToolsets: #() options: nil readOnly: false
+     McpServer prepareWorkerWithToolsets: #() options: nil
        serverName: nil title: nil version: nil frontEnd: nil cacheName: nil.
      self assert: McpBase gemCacheName equals: 'McpServer:9:feedface']
-      ensure: [
-        SessionTemps current removeKey: #McpServer ifAbsent: [nil].
-        SessionTemps current removeKey: #McpReadOnly ifAbsent: [nil]]]
+      ensure: [SessionTemps current removeKey: #McpServer ifAbsent: [nil]]]
 %
 category: 'tests - the worker'
 method: McpGemNameTest

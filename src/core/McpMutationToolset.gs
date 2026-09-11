@@ -29,8 +29,10 @@ is undone by `abort`: a method, a class binding, a shape-changing redefinition w
 methods (the class history shrinks back too) and, contrary to the obvious guess, a symbol
 dictionary added to or removed from the user''s symbol list.
 
-NONE are read-only-safe (readOnlySafeToolNames is inherited, i.e. empty), so a read-only session
-drops this toolset whole. Every handler additionally passes through the inherited kernel guard
+A deployment that does not want these tools offered leaves this toolset out of its
+McpRouter>>toolsetNames -- which hides them, and nothing more: execute_code, and any test body, can
+still do everything they do. Only the gem''s GemStone user decides what a session can actually
+change (docs/read-only-user.md). Every handler passes through the inherited kernel guard
 (self assertMutableClass: / self assertRemovableDictionaryNamed:, see McpToolset) before it changes
 anything, so even a read-write session cannot modify a protected class. That guard FORWARDS to the
 server, which is where the policy lives and where a subclass overrides it: what counts as protected

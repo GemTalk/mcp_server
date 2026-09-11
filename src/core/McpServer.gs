@@ -21,7 +21,7 @@ McpServer comment:
 JSON-RPC dispatcher; parses a JSON-RPC request and answers the JSON response string via
 handleJsonString:. The tools themselves -- schemas AND handlers -- belong to the toolsets it
 registers (McpToolset), not to this class; what stays here is what a server decides for every tool:
-read-only gating, the kernel guards, and the advertised identity.
+the kernel guards and the advertised identity.
 
 One instance runs in each per-client worker gem -- built lazily and cached in SessionTemps by the
 class-side handleJsonString:, and driven by the front end McpRouter over a GsTsExternalSession.
@@ -32,7 +32,7 @@ Which tools a server offers is NOT fixed by its class: each server registers a l
 instances (see McpToolset), so a deployment -- or a vendor shipping only their own tools -- chooses the
 surface. The front end resolves both the worker class and the toolset list per session and pushes them
 into the worker gem in one call
-(prepareWorkerWithToolsets:options:readOnly:serverName:title:version:frontEnd:cacheName:), so a
+(prepareWorkerWithToolsets:options:serverName:title:version:frontEnd:cacheName:), so a
 worker never decides what it is. Subclass this to change BEHAVIOR (the kernel guards, the worker
 entry, dispatcher wiring, the advertised identity); write a toolset to add tools. A subclass is used
 only when it is NAMED in the router''s workerClassName config.
@@ -63,26 +63,6 @@ commentKeyFor: aClassName
    because the two are read by different tools: get_class_definition answers the subclass: message
    and shows no comment, so it must not license set_class_comment."
   ^aClassName asString , ':comment'
-%
-category: 'read-only'
-classmethod: McpServer
-coreReadOnlySafeToolNames
-  "The AUDIT list: every CORE tool that cannot persist a change, and so may run in a read-only
-   session. This is no longer what the gate consults -- each toolset declares its own safe names and
-   the server answers their union (see the instance-side readOnlySafeToolNames) -- because a
-   third-party toolset must be able to declare its own. It is kept as the one place a reviewer can
-   read the whole core answer at once, and McpContractTest pins the union of the seven core toolsets
-   against it, so a tool cannot silently become 'safe'.
-   FAIL-CLOSED throughout: a toolset lists nothing by default. Note run_test_* / list_failing_tests
-   ARE safe: read-only forbids execute_code and the mutation tools, so no NEW code can be introduced
-   this session, and a test can only run already-committed (trusted) code."
-  ^#( 'describe_class' 'export_class_source' 'get_class_definition' 'get_class_hierarchy'
-      'get_method_source' 'list_methods'
-      'list_all_classes' 'list_classes' 'list_dictionaries' 'list_dictionary_entries'
-      'find_implementors' 'find_references_to' 'find_senders' 'search_method_source'
-      'status' 'refresh' 'abort'
-      'list_test_classes' 'list_failing_tests' 'describe_test_failure'
-      'run_test_class' 'run_test_method' )
 %
 category: 'worker'
 classmethod: McpServer
@@ -268,15 +248,14 @@ newWithToolsetNames: anArrayOfNames toolsetOptions: aDictOrNil
 %
 category: 'worker'
 classmethod: McpServer
-prepareWorkerWithToolsets: anArrayOfNames options: anOptionsJsonOrNil readOnly: aBoolean serverName: aNameOrNil title: aTitleOrNil version: aVersionOrNil frontEnd: aFrontEndSessionOrNil cacheName: aCacheNameOrNil
+prepareWorkerWithToolsets: anArrayOfNames options: anOptionsJsonOrNil serverName: aNameOrNil title: aTitleOrNil version: aVersionOrNil frontEnd: aFrontEndSessionOrNil cacheName: aCacheNameOrNil
   "Prepare THIS worker gem for one client, in the single call the front end makes at session open
    (McpSession>>prepareWorker). Sent to the class the front end NAMED, so `self` is the server class to
    build -- a worker never chooses.
-   Order matters: the read-only flag is set BEFORE THE BUILD, so the build can leave gated tools out
-   of the registry entirely (McpServer>>registerToolsets). Then the instance is built with the given toolsets
-   and identity and cached where handleJsonString: looks for it, which moves tool registration off the
-   client's first request and makes an unresolvable toolset fail here, at session open, rather than
-   mid-conversation. Answers a short line for the log.
+   The instance is built with the given toolsets and identity and cached where handleJsonString:
+   looks for it, which moves tool registration off the client's first request and makes an
+   unresolvable toolset fail here, at session open, rather than mid-conversation. Answers a short
+   line for the log.
    aFrontEndSessionOrNil is the value System session answers IN THE ROUTER'S GEM -- where to ring the
    doorbell when a tool reports progress. It is constant for this worker's whole life, so it is pushed
    once here rather than repeated on every request; only the per-call id travels with the request
@@ -298,14 +277,12 @@ prepareWorkerWithToolsets: anArrayOfNames options: anOptionsJsonOrNil readOnly: 
    McpBase class>>nameThisGem:."
   | srv |
   self nameThisGem: aCacheNameOrNil.
-  self sessionReadOnly: aBoolean.
   SessionTemps current at: #McpFrontEndSession put: aFrontEndSessionOrNil.
   srv := self newWithToolsetNames: anArrayOfNames
     toolsetOptions: (anOptionsJsonOrNil isNil ifTrue: [nil] ifFalse: [self parseBody: anOptionsJsonOrNil]).
   srv serverName: aNameOrNil; serverTitle: aTitleOrNil; serverVersion: aVersionOrNil.
   SessionTemps current at: #McpServer put: srv.
   ^self name asString , ' ready: ' , srv toolRegistry descriptors size printString , ' tool(s)'
-    , (aBoolean ifTrue: [' (read-only)'] ifFalse: [''])
 %
 category: 'progress'
 classmethod: McpServer
@@ -351,17 +328,6 @@ scopeOfMethodKey: aKey
   | idx |
   idx := aKey indexOfSubCollection: '>>'.
   ^idx = 0 ifTrue: [nil] ifFalse: [aKey copyFrom: 1 to: idx - 1]
-%
-category: 'read-only'
-classmethod: McpServer
-sessionReadOnly: aBoolean
-  "Mark (or clear) read-only for the CURRENT worker session. The opening router sets this in the
-   worker gem when the session should be read-only -- a router configured read-only (a localhost
-   convenience so a single user cannot accidentally mutate), or an McpAuthRouter session whose bearer
-   token lacked the write scope. Stored in SessionTemps, so it lives and dies with the worker gem,
-   needs no commit, and is private to that gem -- which is why two routers (one read-only, one not)
-   can run at once with no shared state."
-  SessionTemps current at: #McpReadOnly put: aBoolean
 %
 category: 'guardrail keys'
 classmethod: McpServer
@@ -453,13 +419,13 @@ toolsetClassNamed: aName
   ^cls
 %
 ! ------------------- Instance methods for McpServer
-category: 'read-only'
+category: 'tools'
 method: McpServer
 allToolNames
-  "Every tool my toolsets provide, whether or not it is currently REGISTERED -- a read-only build
-   prunes the unsafe ones from the registry (registerToolsets). Lets the dispatcher tell a gated tool
-   ('exists, but this session is read-only') from a nonexistent one, which the client needs: they are
-   different errors and only one of them is worth reporting to a user as a permission problem."
+  "Every tool my toolsets DECLARE (McpToolset>>toolNames), as distinct from what is actually in the
+   registry. The two agree on a stock server, and a toolset whose toolNames drift from what its
+   registerOn: installs is exactly the bug this is here to make visible -- McpContractTest pins the
+   two against each other."
   | names |
   names := OrderedCollection new.
   toolsets do: [:ts | names addAll: ts toolNames].
@@ -470,8 +436,9 @@ method: McpServer
 assertMutableClass: aClass
   "Refuse (signal McpError kind:#refused, naming the class, reason, and remedy) if aClass is a
    protected/kernel class. Called by every mutation tool before it changes anything. NB: this
-   guards the structured mutation tools only -- execute_code is the deliberate escape hatch (and is
-   itself gated in read-only mode)."
+   guards the structured mutation tools only -- execute_code is the deliberate escape hatch, and is
+   deliberately not guarded here. What bounds execute_code is the WORKER GEM'S GEMSTONE USER, not
+   this server: see McpRouter>>workerUserId."
   | where |
   (self isProtectedClass: aClass) ifFalse: [^aClass].
   where := self protectedDictionaryNames
@@ -657,21 +624,6 @@ isProtectedClass: aClass
       (d at: name ifAbsent: [nil]) == aClass ifTrue: [^true]]].
   ^(System myUserProfile dictionaryAndSymbolOf: aClass) isNil
 %
-category: 'read-only'
-method: McpServer
-isReadOnly
-  "Whether THIS worker session is read-only: the per-session #McpReadOnly flag its opening router set
-   (see sessionReadOnly:). Read-only is entirely per-worker now -- there is no global switch."
-  ^(SessionTemps current at: #McpReadOnly otherwise: false) == true
-%
-category: 'read-only'
-method: McpServer
-isToolAllowed: aToolName
-  "Whether aToolName may run right now: always when not read-only; only the read-only-safe tools
-   when read-only. Asks THIS server's toolsets (readOnlySafeToolNames), so a third-party toolset's
-   own declaration is honored."
-  ^self isReadOnly not or: [self readOnlySafeToolNames includes: aToolName]
-%
 category: 'session lifetime'
 method: McpServer
 lifetimeNote
@@ -835,17 +787,6 @@ readLedger
   readLedger isNil ifTrue: [readLedger := Dictionary new].
   ^readLedger
 %
-category: 'read-only'
-method: McpServer
-readOnlySafeToolNames
-  "The tools THIS server may run in a read-only session: the union of what its toolsets declare
-   (McpToolset>>readOnlySafeToolNames, empty by default -- fail closed). For the default surface this
-   equals the audit list, McpServer class>>coreReadOnlySafeToolNames, which McpContractTest pins."
-  | names |
-  names := OrderedCollection new.
-  toolsets do: [:ts | names addAll: ts readOnlySafeToolNames].
-  ^names asArray
-%
 category: 'view hygiene'
 method: McpServer
 refreshViewForFrontEnd
@@ -883,23 +824,14 @@ refreshViewForFrontEnd
 category: 'initialization'
 method: McpServer
 registerToolsets
-  "Register my toolsets' tools, honoring read-only at BUILD time: a toolset that declares nothing
-   read-only-safe is skipped whole, and a mixed one (McpSessionToolset) keeps only its safe tools --
-   so in a read-only worker a gated tool is never in the registry at all, which is a stronger gate
-   than refusing it on call. Applies whenever read-only is known BEFORE the server is built, which is
-   both the production path (the front end sets the flag as it opens the session) and what the
-   read-only tests do.
-   The client is still told the truth about a pruned tool: McpDispatcher answers a gated name with
-   kind 'readOnly' rather than 'notFound' (see readOnlyGated:), so 'forbidden here' never masquerades
-   as 'no such tool'. Its isToolAllowed: check also still runs, covering a server whose flag was set
-   after it was built and a toolset whose toolNames drift from what it registers."
-  self isReadOnly ifFalse: [^toolsets do: [:ts | ts registerOn: toolRegistry]].
-  toolsets do: [:ts | | safe |
-    safe := ts readOnlySafeToolNames.
-    safe isEmpty ifFalse: [
-      ts registerOn: toolRegistry.
-      (ts toolNames reject: [:n | safe includes: n])
-        do: [:n | toolRegistry removeToolNamed: n]]].
+  "Register every tool of every toolset I was built with. There is no filter here and no per-tool
+   policy: a deployment chooses its surface by choosing its TOOLSET LIST (McpRouter>>toolsetNames),
+   and what a session may actually change is decided by the worker gem's GemStone user, outside this
+   image entirely (McpRouter>>workerUserId, docs/read-only-user.md).
+   This replaced a read-only allow-list that pruned 'unsafe' tools at build time. That gate was
+   removed because it could only ever be advisory -- execute_code can reach anything the gem's user
+   can reach, so a list of 'safe' tool names was a statement about intent, not a boundary."
+  toolsets do: [:ts | ts registerOn: toolRegistry].
   ^self
 %
 category: 'blind-write guardrail'
@@ -971,13 +903,8 @@ serverInstructions
   "The instructions to send in the initialize result, or nil to send none. Answers the class
    default (defaultServerInstructions), which is where a product overrides them -- there is no
    router-config path for these the way there is for serverName/serverTitle, because they describe
-   how the SOFTWARE behaves rather than which instance this is.
-
-   Answers nil for a READ-ONLY session, whose whole point is that it cannot write: telling it to
-   commit its changes, or how to recover a commit that failed, would be a page of instructions
-   about tools it does not have. Such a session never has uncommitted changes and so never sees a
-   [session] line either, which is the thing they exist to explain."
-  ^self isReadOnly ifTrue: [nil] ifFalse: [self class defaultServerInstructions]
+   how the SOFTWARE behaves rather than which instance this is."
+  ^self class defaultServerInstructions
 %
 category: 'identity'
 method: McpServer
@@ -1004,7 +931,7 @@ category: 'identity'
 method: McpServer
 serverTitle
   "The human-readable label for THIS INSTANCE, reported as serverInfo.title -- 'GemStone - geode
-   teststone 3.7.6', 'GemStone (read-only)'. nil (the stock answer) means the instance carries no
+   teststone 3.7.6', 'GemStone (browse-only)'. nil (the stock answer) means the instance carries no
    label and the title key is omitted from serverInfo; see defaultServerTitle.
    Same precedence as serverName: a deployment's router config beats the class default, which a
    product overrides."
