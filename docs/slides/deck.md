@@ -29,19 +29,19 @@ style: |
 ---
 
 <!--
-SIX VERTICAL SLICES so far. In RUNNING order: sections 0 and 1 (nine slides), then sections 2 and
-3 (nine), then section 4 (ten), then section 5 (seven), then section 7 (fourteen), then section 8
-(ten). In the order they were CUT that is slice 3, slice 4, slice 5, slice 6, slice 1, slice 2 --
-the two centrepieces were cut first on purpose, because they are what the budget has to fit
-around. Section 6 and sections 9-13 are not cut yet. Each slice's own header comment sits beside
-its first slide.
+SEVEN VERTICAL SLICES so far, and sections 0-8 are now cut end to end. In RUNNING order: sections
+0 and 1 (nine slides), then sections 2 and 3 (nine), then section 4 (ten), then section 5 (seven),
+then section 6 (six), then section 7 (fourteen), then section 8 (ten). In the order they were CUT
+that is slice 3, slice 4, slice 5, slice 6, slice 7, slice 1, slice 2 -- the two centrepieces were
+cut first on purpose, because they are what the budget has to fit around. Sections 9-13 are not
+cut yet. Each slice's own header comment sits beside its first slide.
 
 Source of truth for the argument and the notes is docs/Presentation.md; each slice is derived from
 the matching section of it. Where the two disagree THIS FILE IS RIGHT and the outline should be
 brought into line with it, which is how both slices were reconciled.
 
 Rendering, either way from this one file. --html IS REQUIRED, not optional: Marp Core defaults
-html:false and STRIPS raw HTML, which would silently drop all six inline <svg> diagrams and every
+html:false and STRIPS raw HTML, which would silently drop all seven inline <svg> diagrams and every
 <span class="fine"> / .verbatim / .ex block. Front matter cannot turn it on (it is a CLI/config-level
 setting); use the flag, or html:true in a .marprc.yml beside the file.
   marp --html --pdf --allow-local-files docs/slides/deck.md
@@ -1813,6 +1813,317 @@ BEFORE THE TALK: docs/kernel-json-unicode.md has to be in the tree. It is cited
 from README.md, from McpJson's class comment, from McpJsonTest and from
 docs/utf8-wire.md, and it is not committed -- see the slice header. This room
 will ask for it by name and will have the README open.
+-->
+
+---
+
+<!--
+================================================================================
+VERTICAL SLICE 7 -- section 6, progress notifications. Five slides and demo D.
+Cut 2026-09-12: fifth in running order, seventh to be cut.
+
+Running order and plans, in seconds -- a worker cannot write to its own client 50,
+the client opts in 50, the reporter's three judgements 40, two end-to-end bugs 50,
+the other stream 40 (230s of slides); demo D 90. About 5 1/2 minutes.
+
+THE OUTLINE SAYS 2-3 SLIDES AND THIS IS FIVE. The outline's own bullet list under
+section 6 runs to a page and a half and includes a picture, a demo, and the whole
+of the standalone GET stream, which section 8 then rides. Two or three slides was
+a budget guess made before that list existed, not a judgement about the material.
+Five is what it takes; the two to cut under pressure are named below.
+
+NO LEAD SLIDE, again, and for a better reason than section 5's. Section 6 IS a new
+subject -- it is the first time anything travels from a worker BACK to a client --
+but the premise and the picture are the same slide, and a lead in front of them
+would announce what slide 1 then proves. Slide 1 is the lead.
+
+WHAT TO CUT IF THE HOUR IS GOING, in order:
+  1. "the other stream" (40s) -- section 8 needs the outbox, but it can introduce
+     it in one sentence where it uses it. This slide is a convenience, not a
+     dependency;
+  2. demo D (90s) -- it is the most timing-dependent demo in the deck and the
+     least load-bearing, and slide 4 already tells its story.
+Do NOT cut slide 4. It is the best material in the section: two bugs that cannot
+exist in a unit test, both found end to end, and this audience knows exactly how
+expensive that class of bug is.
+
+THE PICTURE IS NEW rather than the one the outline asked for. The outline says
+"draw it as the section 5 diagram plus one arrow each way" -- but there is no
+section 5 diagram (see slice 6's header for why the summary diagram is gone), and
+a tick's path is a different shape from a request's anyway: it leaves a gem that
+is not answering anything, goes through a queue owned by the STONE, and arrives
+at a process that has to work out which call it belongs to. Drawn on its own it
+is four boxes; grafted onto a request diagram it would have been an annotation.
+Seventh inline svg.
+
+THE HONEST BIT, and it must stay honest: the Claude Code transport is configured
+timeoutMs 60000, and SOME MCP clients reset that timer on each progress
+notification. If this one does, progress is not a nicety, it is the fix for long
+GemStone jobs being cut off client-side. NOT TESTED. Slide 2 says "not measured"
+in those words, and the notes say to say it out loud. Do not let this one drift
+into a claim between now and the talk -- measure it or keep saying so.
+
+DEPARTURES from docs/Presentation.md:
+  * the outline's step-by-step path (its six numbered steps) is the diagram plus
+    slide 3, not a slide of its own. Numbered call chains do not survive being
+    read off a screen, and every step in that list is either on the picture or is
+    a consequence the later slides spend properly;
+  * McpProgressChannel existing BESIDE McpOutbox rather than reusing it -- the
+    outline gives it a bullet under "where progress may travel" -- is the closing
+    line of slide 5, where both queues are on screen together and the shared
+    protocol can be pointed at.
+================================================================================
+-->
+
+## A worker cannot write to its own client
+
+<div style="text-align:center">
+<svg viewBox="0 0 960 234" role="img" aria-label="A progress tick's path: the worker gem's reporter sends an inter-session signal to the Stone's 50-message queue, the front end's signal poller drains it every 100ms and routes it by call id to that call's progress channel, and the front end writes it to the client as a notifications/progress SSE frame.">
+  <defs>
+    <marker id="m6" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <!-- arrow labels, above the row -->
+  <text x="243" y="58" font-size="12" text-anchor="middle" fill="currentColor" opacity=".8">System sendSignal:</text>
+  <text x="243" y="76" font-size="12" text-anchor="middle" fill="currentColor" opacity=".8">to:withMessage:</text>
+  <text x="511" y="58" font-size="12" text-anchor="middle" fill="currentColor" opacity=".8">InterSessionSignal poll</text>
+  <text x="511" y="76" font-size="12" text-anchor="middle" fill="currentColor" opacity=".8">every 100ms</text>
+  <text x="779" y="58" font-size="12" text-anchor="middle" fill="currentColor" opacity=".8">notifications/</text>
+  <text x="779" y="76" font-size="12" text-anchor="middle" fill="currentColor" opacity=".8">progress</text>
+  <!-- boxes -->
+  <rect x="14" y="92" width="190" height="70" rx="4" fill="none" stroke="currentColor" stroke-width="1.6"/>
+  <text x="109" y="118" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">worker gem</text>
+  <text x="109" y="140" font-size="12" text-anchor="middle" fill="currentColor" opacity=".7">McpProgressReporter</text>
+  <rect x="282" y="92" width="190" height="70" rx="4" fill="none" stroke="currentColor" stroke-width="1.6"/>
+  <text x="377" y="118" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">the Stone&#8217;s queue</text>
+  <text x="377" y="140" font-size="12" text-anchor="middle" fill="currentColor" opacity=".7">50 messages, per session</text>
+  <rect x="550" y="92" width="190" height="70" rx="4" fill="none" stroke="currentColor" stroke-width="1.9"/>
+  <text x="645" y="118" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">front-end gem</text>
+  <text x="645" y="140" font-size="12" text-anchor="middle" fill="currentColor" opacity=".7">poller &#183; channelAt: callId</text>
+  <rect x="818" y="92" width="128" height="70" rx="4" fill="none" stroke="currentColor" stroke-width="1.6"/>
+  <text x="882" y="118" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">client</text>
+  <text x="882" y="140" font-size="12" text-anchor="middle" fill="currentColor" opacity=".7">SSE frame</text>
+  <!-- arrows -->
+  <line x1="206" y1="127" x2="278" y2="127" stroke="currentColor" stroke-width="1.5" marker-end="url(#m6)"/>
+  <line x1="474" y1="127" x2="546" y2="127" stroke="currentColor" stroke-width="1.5" marker-end="url(#m6)"/>
+  <line x1="742" y1="127" x2="814" y2="127" stroke="currentColor" stroke-width="1.5" marker-end="url(#m6)"/>
+  <!-- notes -->
+  <text x="377" y="186" font-size="13" text-anchor="middle" fill="#b4451f" font-weight="600">SignalBufferFull in the SENDER on the 51st</text>
+  <text x="480" y="216" font-size="14" text-anchor="middle" fill="currentColor">The socket belongs to the front end&#8217;s process. That is the whole reason this path exists.</text>
+</svg>
+</div>
+
+A worker gem is a **separate OS process**, and the client's socket was accepted by the front end's. **A file descriptor means nothing outside the process that owns it, and GemStone exposes no way to pass one.** So a tool rings a doorbell instead.
+
+<!--
+The premise first, and it is one sentence: a tool cannot write to its own client,
+and no amount of design gets around that. Everything in this section follows.
+
+Walk the picture once. The part worth pausing on is the middle box -- the queue
+belongs to the STONE, not to either gem, and it is shared by every worker
+signalling this front end. That is where the rate limit on slide 3 comes from,
+and the red line is the reason it cannot be politeness.
+
+The payload is deliberately tiny: JSON with one-letter keys, because the signal
+message caps at 1023 bytes. c for callId, p for progress, t for total, m for a
+message truncated at 700 characters. The FRONT END turns that into the JSON-RPC
+notification, which is what keeps the client's progressToken out of the worker
+gem entirely -- the worker knows an opaque call id and nothing about the client.
+
+If asked why polling rather than an interrupt: InterSessionSignal CAN be made to
+raise in the receiving gem (enableSignalling), which would interrupt whatever the
+router happened to be doing at the time. Polling costs a wakeup ten times a second
+and can interrupt nothing. 100ms is the latency floor for every notification this
+server sends.
+-->
+
+---
+
+## The client opts in — and for a while this server threw it away
+
+A `progressToken` in `params._meta` on a `tools/call`. **No capability, no `initialize` field, no per-tool annotation** in either revision — so a client *cannot* lose it by failing to notice a declaration.
+
+> **Claude Code has sent a token on every single `tools/call` since it first connected** (measured 2026-08-27). For a while this server read none of it: **it was handed an explicit opt-in on every call and threw it away.**
+
+* That is the exact mirror of the retired idle warning (§8), where the server **sent** what no client would read. **One feature failed by not listening, the other by not being listened to** — and both were settled by measurement rather than by reading the spec harder
+* **An open measurement, not a claim.** The Claude Code transport is configured `timeoutMs: 60000`, and *some* clients reset that timer on each progress notification. If this one does, progress is **the fix for long GemStone jobs being cut off client-side**. **Not yet tested; I am saying so**
+* In the draft, **closing a request's response stream MUST be treated as cancellation** — a normative, per-request stop signal, better than any deadline this server could invent (§8)
+
+<!--
+The blockquote is the slide and it is a confession, so deliver it as one. The
+server was being handed an explicit, unambiguous opt-in on every single call and
+was discarding it. Nobody had to guess; nobody had to negotiate; the information
+was just there.
+
+Then the mirror, because together they are a lesson rather than two anecdotes.
+The idle warning (section 8) was the server SENDING something no client would
+ever render. Progress was the server IGNORING something every client was already
+sending. Same root: the spec was read instead of the wire being watched. Both
+were settled in an afternoon once somebody turned on MCP_TRACE and looked.
+
+SAY "NOT MEASURED" OUT LOUD on the timeout payoff. It is the most attractive
+claim in this section and it is the one I cannot yet support: some clients reset
+their request timer on a progress notification, and if Claude Code does, this
+stops being a nicety. The honest version is worth more to this room than the
+attractive one, and somebody may well know the answer.
+
+The stream-close-as-cancellation point is a forward reference worth planting,
+because section 8 spends a slide on the fact that this server has no request
+deadline by default. The draft gives a NORMATIVE per-request stop signal, which
+is strictly better than a timeout invented here.
+
+Two things trimmed off this slide for room, both worth saying if the clock is
+kind. What a full Grail suite run does to a 60-second client timeout: blows
+straight through it. And the era point -- this is THE ONE SCENARIO where the
+draft revision and 2025-11-25 agree, so unlike everything else on this subject,
+building it was not a bet: notifications/progress is a BASIC utility, carries no
+deprecation notice, and is request-scoped in both.
+-->
+
+---
+
+## Three pieces of judgement the reporter carries, so tools need not
+
+* **Rate limit — `minIntervalMilliseconds`, 250ms.** The Stone-side queue holds **50** messages per session and raises `SignalBufferFull` **in the sender** on the 51st, shared across every worker signalling one router. A per-test tick from a **5372-test suite** would blow through that in the first second. **The limit is not politeness**, it is what keeps the channel working
+* **Strictly increasing** — required by the spec, and refused **twice**: at the reporter, and again at the channel. The reporter runs **arbitrary tool code** and can be wrong; the channel is the end that owes the client a conforming stream
+* **Unfailable.** Every send is wrapped, and `SignalBufferFull` is an **expected outcome, not a defect**: a full buffer means the front end has not drained yet, and the right response is to drop the tick. **A progress notification that failed a five-minute test run would make this server strictly worse than one that said nothing**
+
+<span class="fine">A tool reaches all of this through `McpToolset>>progress:of:message:`, which **does nothing at all when there is no reporter** — so a tool called from topaz, or by a client that asked for no progress, behaves exactly as it always did. `nowMilliseconds` is `System millisecondsSinceLogin`, **not** `millisecondClockValue`: that one is a Squeak/Pharo selector GemStone does not implement, and because every send here is wrapped, the `doesNotUnderstand` became **a tick that silently never went**.</span>
+
+<!--
+Three rules, one sentence each, and the third is the one with a principle in it.
+
+The rate limit's number is the argument: 50 messages, shared, and SignalBufferFull
+raises IN THE SENDER -- which means an over-chatty tool does not degrade its own
+reporting, it breaks. 250ms was chosen to sit well inside that while still looking
+live to a human.
+
+Refusing non-monotonic ticks twice is worth defending if anyone calls it belt and
+braces, because it is not: the two ends are answerable for different things. The
+reporter is defending a tool from itself and can be wrong, since it runs code it
+did not write. The channel is defending the CLIENT, and owes it a stream that
+conforms whatever the tool did.
+
+The fine line's second half is the best small story here and it is a GemStone
+story, so this room will enjoy it: an unfailable component swallows its own
+bugs. Every send is wrapped, so a doesNotUnderstand on a Pharo selector became a
+tick that never went, silently, with nothing in any log. The fix is one selector;
+the lesson is that "cannot raise" and "cannot be wrong" are different properties
+and the first one hides the second.
+-->
+
+---
+
+## Two bugs that only exist end to end
+
+**The last tick.** The worker sends its final tick and returns **in the same breath** — so that tick is still sitting in the Stone's queue when the call's `ensure:` forgets the channel, and the poller, up to 100ms later, finds **nowhere to put it**.
+
+> **Every reported call lost its last step that way** — the one saying the work is *finished*. Hence the explicit `drainWorkerSignals` before the unregister, and a second `drain:` after it.
+
+**Nesting.** `handleJsonString:` nests: a tool that runs a test suite can run tests that themselves send `handleJsonString:`, and this project's own suites do exactly that.
+
+* The first version **cleared the reporter on the way out**, so the first nested call wiped the reporter its **caller** was still reporting through
+* Fixing that revealed the other half: the nested call then reported **its** progress on the **outer call's** stream — observed as a client told `1/1 test classes` by a call working through **six**
+* So a **depth counter**. At depth 1 the reporter is the front end's and is left alone; deeper, it is taken away for the duration and given back in an `ensure:`. **A nested tool call reports nothing, which is right — nobody asked to be told about it**
+
+<!--
+The best slide in the section, and the one to protect. Both bugs are invisible to
+a unit test of one call, both were found by watching a real client, and this room
+knows what that costs.
+
+The last tick is the more elegant of the two. Nothing is wrong with any component:
+the worker is right to send and return together, the ensure: is right to forget
+the channel, the poller is right to run on its own schedule. The bug lives in the
+gap between three correct things, and it eats exactly the tick that matters most
+-- 100% of reported calls lost the one saying "done".
+
+The nesting story is worth telling as two acts, because the first fix is what
+revealed the second bug, and that is the part people recognise. Act one: a nested
+call cleared its caller's reporter and every later tick vanished. Act two: with
+save-and-restore in place, the nested call was now reporting ITS numbers on the
+OUTER call's stream -- so a client watching six test classes was told 1/1, and
+the outer call's own ticks were then refused for not increasing. Two bugs, one
+symptom, and the second only visible once the first was gone.
+
+What the depth counter does NOT catch, since somebody will ask: code that calls a
+toolset method DIRECTLY rather than sending a request. No request, no depth to
+count, so such a call reports on its caller's stream with its own numbers.
+mcp_server's own McpToolTest does this, which is how it was found; a deployment's
+tools would have to go out of their way to.
+-->
+
+---
+
+## The other stream, in one slide — because §8 rides it
+
+`GET /mcp` opens the **standalone** server→client SSE stream for a session. `McpOutbox` is its per-session FIFO.
+
+* **Bounded at 256**, dropping the **oldest** and recording the gap **in the gem log** — the operator, not the client: an overflow is a server-side fault and there was never anything a client could do about it
+* **Keepalive comment every 15s**, comfortably under the usual 30–60s proxy and NAT idle timeouts — the only thing that interval has to beat
+* **Both directions are guarded.** Every frame waits on `writeWillNotBlockWithin:` first, because `GsSocket>>write:` suspends with **no timeout at all**; and each 100ms tick polls the read side without blocking, so a client that vanished is noticed in **~100ms**
+* **Exactly one drainer.** A newer `GET` **supersedes** the previous stream — `attachStream` hands out a *generation*, and a loop runs only while it is still the current one. Two `GsProcess`es draining onto one socket would interleave SSE frames and corrupt the stream
+
+<span class="fine">`McpProgressChannel` exists **beside** this rather than reusing it, because progress is **request-scoped** in every revision and the draft bars it from the long-lived stream outright. The two present the **same** queueing protocol on purpose, so `drain:to:` writes either onto a socket without knowing which it has.</span>
+
+<!--
+A facts slide, run briskly, and the first thing to cut if the hour is going --
+section 8 can introduce the outbox in one sentence where it uses it.
+
+The one line worth slowing for is GsSocket>>write: suspending with no timeout.
+That is a kernel fact with teeth: a client that stops reading but does not close
+will otherwise park a GsProcess forever, and on the front end that is a process
+that was serving somebody. Every write in the SSE path is gated on writability
+for that reason, with a five-second patience -- a full TCP window for five
+seconds on a connection carrying a keepalive means the peer has stopped reading,
+not that it is slow.
+
+Generations are the answer to a real client behaviour rather than a hypothetical:
+a client that reconnects its GET stream without closing the old one leaves two
+sockets both entitled to the same queue. The newest wins, the older ends on its
+next tick, and nothing interleaves.
+
+No event ids and no Last-Event-ID replay, deliberately, if asked: ids are only
+useful with a replay buffer behind them, and offering them without one invites a
+client to ask for a resume this server cannot honour.
+-->
+
+---
+
+<!-- _class: demo -->
+
+# DEMO D — watching a long call report
+
+```bash
+curl -N -X POST localhost:8000/mcp -H 'MCP-Session-Id: …' \
+  -d '{… "method":"tools/call","params":{"name":"run_test_class",
+       "arguments":{"className":"McpRouterTest"},"_meta":{"progressToken":"p1"}}}'
+```
+
+1. `notifications/progress` frames **arriving while the call runs** — `p`, `t`, and the message
+2. The result as the **final frame** on the same stream
+3. The same call **without** the token: **one JSON object**, and nothing until it is done
+
+<span class="fine">Pick the test class by **wall clock**, not by size — 20–30 seconds of ticks, not 262. Rehearse the contrast last; it is what makes the point.</span>
+
+<span class="fine">**90 seconds.**</span>
+
+<!--
+The most timing-dependent demo in the deck and the second to cut, because slide 4
+already tells its story. If it runs, the contrast at the end is the whole point:
+same call, one token's difference, and the difference between a client that can
+see a job moving and one staring at a closed fist for half a minute.
+
+Choose the suite by WALL CLOCK. A 262-test class that finishes in four seconds
+shows nothing; a 30-second class with steady ticks shows everything. Have the
+class name written down -- this is the demo most likely to be improvised badly.
+
+-N is not optional on that curl: without it, curl buffers and the frames all
+arrive at once, which shows the opposite of what the demo is for.
+
+Fallback: a screenshot of the frame sequence, and say so plainly. The frames are
+identical every run, so a screenshot loses only the liveness -- and slide 4's two
+bugs are the material anyway.
 -->
 
 ---
