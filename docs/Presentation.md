@@ -126,7 +126,7 @@ topaz file-outs.
 
 * **`./run-unit-tests.sh`** — the in-image `GsTestCase` suites, each in **its own topaz session**, so
   a suite that blows up is reported `ABORTED` under `COULD NOT RUN` rather than silencing the whole
-  report; failures are reported **by name**, and the output is coloured for CI. **466 tests** on a base install, **522** with the auth group, **566 with the 44 in
+  report; failures are reported **by name**, and the output is coloured for CI. **466 tests** on a base install, **522** with the auth group, **573 with the 51 in
   `McpGrailToolsetTest`** on a Grail image. Exit 0 means every test passed. **Seven** of the suites
   are not purely in-image and need a **netldi** — `McpGrailToolsetTest` joined them in the merge of
   2026-09-10, because `run_python_tests` now forks the gem it runs Grail's classes in.
@@ -1547,9 +1547,11 @@ audience will have the README open.
    one, qualify the path in the comment. If they stay out, the alternative is to reword each citation
    to point at the class comment that carries the conclusion.
 3. **Test counts to re-take on the morning.** The README now says **466** base / **522** with auth /
-   **566** with Grail (44 in `McpGrailToolsetTest`) — the Grail figure moved by five in the
-   2026-09-10 merge, which is exactly why this is on the list. Run `./run-unit-tests.sh` on the demo
-   stone and quote **only** what it prints.
+   **573** with Grail (51 in `McpGrailToolsetTest`). The Grail figure moved **twice on 2026-09-10
+   alone** — 39 → 44 → 51 across two merges from `main` — while the base and auth numbers did not
+   budge. So quote the Grail number from a run and nothing else: run `./run-unit-tests.sh` on the
+   demo stone that morning and read **only** what it prints. Better still, say "about 570" on the
+   slide and let the live run be the precise answer if anyone asks.
 4. **Three comments in `McpRouter` contradict the code, all found while cutting §8, and all three
    are cheap.** None of them changes a slide, but this audience reads source:
    * **`maintainSessions`** — the numbered list in its comment has **three** steps and the method
