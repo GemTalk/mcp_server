@@ -22,9 +22,11 @@
 #   --grail   ALSO file in the optional GemStone-Python toolset (src/grail). Only valid on an image
 #             that has Grail/ModuleAst -- those methods reference ModuleAst and BaseException and
 #             cannot compile without it. Equivalently, set MCP_WITH_GRAIL=1. Opt-in rather than
-#             detected, because loading it is NOT inert: the toolset joins the default tool surface
-#             automatically (see McpServer class>>installedDefaultToolsetNames), so whether to have
-#             it is a decision about the server you are running, not about the image.
+#             detected because it cannot be detected safely: unlike the JWT classes the auth group
+#             needs, ModuleAst present does not mean the Grail this toolset was written against.
+#             Filing it in is inert -- McpGrailToolset is NOT in the default tool surface (see
+#             McpServer class>>defaultToolsetNames), and no server gets these tools until its router
+#             names the toolset. Having it in the image and running it are separate decisions.
 #
 #   --auth    require the OAuth/OIDC front end (src/auth); fail if this image cannot compile it.
 #   --no-auth skip it.

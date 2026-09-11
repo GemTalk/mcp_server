@@ -58,6 +58,12 @@ MCP_PORT=8000 ./run-server.sh       # fork a detached, independent localhost ser
 MCP_READONLY=1 ./run-server.sh      # ...read-only (browse/search only; no accidental mutation)
 MCP_TOOLSETS="McpBrowsingToolset McpSearchToolset" ./run-server.sh   # ...only these tools
 MCP_WORKER_CLASS=MyMcpServer ./run-server.sh                         # ...a subclass as the worker
+
+# ...the core tools PLUS the optional Python toolset. Naming it is what turns it on: installing
+# src/grail puts McpGrailToolset in the image, and nothing more. Same shape for your own toolset.
+MCP_TOOLSETS="McpBrowsingToolset McpExecutionToolset McpListingToolset McpMutationToolset \
+  McpSearchToolset McpSessionToolset McpTestingToolset McpGrailToolset" \
+  MCP_GRAIL_DIR=/path/to/Grail ./run-server.sh
 MCP_TRACE=1 ./run-server.sh         # ...logging every message a client sends (see Message trace)
 ./run-auth-server.sh                # ...the OAuth/OIDC network-facing server (McpAuthRouter)
 ```
@@ -68,19 +74,25 @@ enough, because on many machines they are not. `install.sh` files the code in wi
 group at a time: `src/core` and `src/tests` always, `src/auth` when the image can compile it, and
 `src/grail` on `--grail` (or `MCP_WITH_GRAIL=1`).
 
-The two optional groups are selected differently on purpose. Loading `McpAuthRouter` is **inert** —
+The two optional groups are selected differently on purpose. Loading `McpAuthRouter` is inert —
 nothing instantiates it until you fork one with `run-auth-server.sh` — so it can be detected rather
 than asked about, and `install.sh` probes the image for `JsonWebToken` to decide. Loading
-`McpGrailToolset` is **not** inert: it joins the default tool surface automatically (see
-`McpServer class>>installedDefaultToolsetNames`), so whether to have it is a decision about the
-server you are running, and it stays opt-in. Use `--auth` to turn a skip into an error, `--no-auth`
-to force one; `--check` reports the decision without installing anything.
+`McpGrailToolset` is inert too, deliberately: it is **not** in the default tool surface
+(`McpServer class>>defaultToolsetNames`), so filing it in adds a class to the image and changes no
+server. It nonetheless stays **opt-in at install**, because the probe that works for auth does not
+work here — `ModuleAst` being present does not mean the Grail these tools were written against, and
+a group that cannot compile takes the file-in down with it. Use `--auth` to turn a skip into an
+error, `--no-auth` to force one; `--check` reports the decision without installing anything.
 
 `run-server.sh` builds a base `McpRouter` instance and calls
 its `forkOnPort:` (`run-auth-server.sh` builds an OIDC-configured `McpAuthRouter` — resource-server
 config as code, no commit), which launches a detached, independent front-end gem and returns; stop it
 with `./stop-server.sh` (by port), or the `System stopSession: <id>` / `kill <pid>` line it prints.
-A loaded Grail toolset is picked up automatically, per session, by the front end.
+The front end resolves the tool surface per session: `MCP_TOOLSETS` if it is set, otherwise the core
+seven and nothing else. **No toolset joins that surface by being loaded** — an optional one, this
+project's `McpGrailToolset` included, is served only by a router that names it. That keeps having a
+toolset in the image and running it as two decisions, which matters when the toolset carries a
+dependency of its own: Grail's tools read the checkout on disk that `MCP_GRAIL_DIR` names.
 
 ### Environment
 
@@ -416,9 +428,10 @@ symbol list.
 
 These live in the optional `McpGrailToolset`, in its own source group (`src/grail/`) which only
 `install.sh --grail` loads — they reference `ModuleAst` and `BaseException`, so they cannot compile in
-an image without Grail. Once loaded the toolset joins the default tool surface automatically
-(`McpServer class>>installedDefaultToolsetNames`), or can be named explicitly in a router's
-`toolsetNames`.
+an image without Grail. Loading it does not serve it: the toolset is **not** in the default surface,
+and a server has these tools only when its router names `McpGrailToolset` in `toolsetNames`
+(`MCP_TOOLSETS` from either launcher). Starting a Grail server is a toolset configuration, and the
+worked example for configuring your own.
 
 | Tool | Arguments | Result |
 |------|-----------|--------|
@@ -639,27 +652,36 @@ an image without Grail. Once loaded the toolset joins the default tool surface a
 > Python lives in the image, but
 > its `.py` stdlib and its test fixtures live on **disk** under the checkout. A worker gem cannot
 > work out where: its own working directory is the *stone's*, which holds no `src/python/stdlib`, so
-> every `.py`-backed import fails. Name the checkout with the toolset option:
+> every `.py`-backed import fails. So a Grail server takes two things: the toolset **named** into the
+> surface, and the checkout named as its option.
 >
 > ```bash
-> MCP_GRAIL_DIR=/opt/Grail ./run-server.sh
+> MCP_TOOLSETS="McpBrowsingToolset McpExecutionToolset McpListingToolset McpMutationToolset \
+>   McpSearchToolset McpSessionToolset McpTestingToolset McpGrailToolset" \
+>   MCP_GRAIL_DIR=/opt/Grail ./run-server.sh
 > ```
 >
 > which is shorthand for
 >
 > ```smalltalk
 > (McpRouter new
+>    toolsetNames: McpServer defaultToolsetNames , #('McpGrailToolset');
 >    toolsetOptions: (Dictionary new
 >      at: 'McpGrailToolset' put: (Dictionary new at: 'grailDirectory' put: '/opt/Grail'; yourself);
 >      yourself))
 >   forkOnPort: 8000
 > ```
 >
+> `MCP_GRAIL_DIR` **configures** the toolset; it does not add it. Set without `McpGrailToolset` in
+> `MCP_TOOLSETS` it could reach nothing, so both launchers say so and leave it off — a router holding
+> options for a toolset it does not serve refuses to start, and the variable is commonly exported
+> once for `run-unit-tests.sh` rather than meant as a request for a Grail server.
+>
 > Use the **same checkout the image was installed from** — a different one resolves names against
 > source the image did not compile. `run-server.sh` checks the path holds `src/python/stdlib` before
 > forking anything, so a typo is one line at launch rather than a wave of import errors later, which
 > is exactly how a misconfigured session comes to read as a broken Python subsystem.
-> `run-auth-server.sh` takes the same variable. See **Toolset options** for the general mechanism and
+> `run-auth-server.sh` takes both variables. See **Toolset options** for the general mechanism and
 > `MCP_TOOLSET_OPTIONS` for other toolsets.
 >
 > `testGemConfig` is the gem configuration `run_python_tests` forks its test gem with, as one
@@ -673,7 +695,9 @@ an image without Grail. Once loaded the toolset joins the default tool surface a
 > `MCP_GRAIL_DIR` rather than adding to it:
 >
 > ```bash
-> MCP_TOOLSET_OPTIONS='{"McpGrailToolset":
+> MCP_TOOLSETS="McpBrowsingToolset McpExecutionToolset McpListingToolset McpMutationToolset \
+>   McpSearchToolset McpSessionToolset McpTestingToolset McpGrailToolset" \
+>   MCP_TOOLSET_OPTIONS='{"McpGrailToolset":
 >   {"grailDirectory":"/opt/Grail","testGemConfig":"GEM_TEMPOBJ_CACHE_SIZE=300000;"}}' \
 >   ./run-server.sh
 > ```
@@ -1240,8 +1264,16 @@ Relabel the server when you configure one: `serverName` / `serverVersion` say wh
 below.
 
 Toolsets **compose** — `#('AcmeDbToolset' 'McpBrowsingToolset')` gives your tools plus class
-browsing, and two unrelated vendors' toolsets can be combined. This is the reason tools live in
-toolsets rather than in `McpServer` subclasses: single inheritance could never express it.
+browsing, and two unrelated vendors' toolsets can be combined. To keep the development surface and
+add yours, compose on the default: `McpServer defaultToolsetNames , #('AcmeDbToolset')`. This is the
+reason tools live in toolsets rather than in `McpServer` subclasses: single inheritance could never
+express it.
+
+**Nothing is served that a router did not name.** Being loaded in the image is not being exposed —
+which is why the surface has to be stated even for a toolset this project ships. `McpGrailToolset` is
+that case end to end, and the example to copy: its own source group, its own `declaredOptionNames`,
+a launcher line naming it in `MCP_TOOLSETS`, and `MCP_GRAIL_DIR` supplying the one option it cannot
+work out for itself. Nothing about it is privileged — a deployment turns yours on the same way.
 
 **To change behavior, subclass `McpServer`** — the kernel guards, the worker entry, dispatcher
 wiring, or the advertised identity. Name your subclass in `workerClassName` (nothing auto-detects
@@ -1581,8 +1613,8 @@ flag, so a missing suite is a skip and not an error:
 - `McpGrailToolsetTest` *(Grail images only)* — the optional Python toolset: `eval_python`→`42`,
   `compile_python`→`___binOpMul___:`, `print`→`None`, all three Python failure paths (undefined name,
   runtime, syntax) surfacing as `isError` with `kind = "pythonError"`, a 33-tool `tools/list` check on
-  core-plus-Grail, auto-detection into the default surface, and the toolset being dropped whole in a
-  read-only session. The last two failure paths were switched-off tripwires while Grail crashed the
+  core-plus-Grail, the toolset being served only when a router NAMES it (loaded is not exposed), and
+  the toolset being dropped whole in a read-only session. The last two failure paths were switched-off tripwires while Grail crashed the
   gem on them; both run for real as of 2026-08-18. Also `eval_python`'s output channels: stderr
   captured and labelled per line, a `warnings.warn` reported, both channels delivered ahead of the
   traceback when the code raises, and a client's own `sys.stdout` redirect left installed across

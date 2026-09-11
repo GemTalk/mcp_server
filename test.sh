@@ -316,7 +316,7 @@ n=$(printf '%s' "$r" | grep -o '"name":"' | wc -l | tr -d ' ')
 # many tools its toolsets declare, and checking tools/list agrees, is a real assertion (everything
 # declared is registered, and nothing else is) and it cannot go stale.
 declared=$(post <<'JSON' | sed -n 's/.*"text":"\([0-9][0-9]*\)".*/\1/p'
-{"jsonrpc":"2.0","id":19,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"(McpServer newWithToolsetNames: McpServer installedDefaultToolsetNames) allToolNames size"}}}
+{"jsonrpc":"2.0","id":19,"method":"tools/call","params":{"name":"execute_code","arguments":{"code":"(McpServer newWithToolsetNames: McpServer defaultToolsetNames) allToolNames size"}}}
 JSON
 )
 check "tools/list matches the toolsets' declared count (got $n, declared $declared)" \

@@ -239,7 +239,7 @@ testAuthRouterResolvesWorkerConfigForItsSessions
   | r sess |
   r := McpAuthRouter new.
   self assert: r effectiveWorkerClassName equals: 'McpServer'.
-  self assert: r effectiveToolsetNames equals: McpServer installedDefaultToolsetNames.
+  self assert: r effectiveToolsetNames equals: McpServer defaultToolsetNames.
   r workerClassName: 'McpFixtureServer'; toolsetNames: #('McpFixtureToolset'); serverName: 'acme-db-mcp'.
   sess := r openSessionCreating: [:id | McpStubSession new].
   self assert: sess workerClassName equals: 'McpFixtureServer'.

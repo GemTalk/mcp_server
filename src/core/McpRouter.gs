@@ -38,7 +38,7 @@ stone''s: a repository has a finite number of sessions, and exhausting it locks 
 gem -- topaz included -- not just the next MCP client.
 
 It also decides WHAT each worker is: per session it resolves the worker class (workerClassName) and
-the tool surface (toolsetNames, defaulting to the installed toolsets) and pushes them into the worker
+the tool surface (toolsetNames, defaulting to the core toolsets) and pushes them into the worker
 gem in one call, so a worker never chooses for itself. Resolving here rather than at boot is also what
 will let an authenticated router narrow the surface per token, since the token is only visible on this
 side.
@@ -806,13 +806,17 @@ drainWorkerSignals
 category: 'toolsets'
 method: McpRouter
 effectiveToolsetNames
-  "The toolsets this router's NEXT worker will register: the configured list, or the installed default
-   surface. Resolved HERE, in the front end, and pushed into the worker at session open -- a worker
-   never chooses its own tool surface. Probed per session rather than cached, so a Grail install that
-   lands after this router started is picked up by the next client.
+  "The toolsets this router's NEXT worker will register: the configured list, or the default surface
+   (McpServer class>>defaultToolsetNames). Resolved HERE, in the front end, and pushed into the worker
+   at session open -- a worker never chooses its own tool surface.
+   That default is the CORE toolsets and nothing else. An optional toolset that merely happens to be
+   loaded in this image -- McpGrailToolset is the one this project ships -- does NOT join it: a
+   toolset carrying a dependency of its own (Grail's is the checkout on disk that grailDirectory
+   names) has to be asked for, so that installing it and running it stay separate decisions. Name it
+   in toolsetNames to have it.
    This is where scope-driven selection will hook in: an authenticated router can narrow the list per
    principal, which is only possible on this side, because this is where the token is."
-  ^toolsetNames ifNil: [McpServer installedDefaultToolsetNames]
+  ^toolsetNames ifNil: [McpServer defaultToolsetNames]
 %
 category: 'toolsets'
 method: McpRouter
@@ -1085,7 +1089,7 @@ initialize
   tlsPrivateKeyFile := nil.
   readOnly := false.
   workerClassName := nil.  "nil = McpServer"
-  toolsetNames := nil.     "nil = the installed default surface, resolved per session"
+  toolsetNames := nil.     "nil = the core default surface (McpServer defaultToolsetNames), resolved per session"
   toolsetOptions := nil.   "nil = no toolset needs configuring, which is the ordinary case"
   serverName := nil.       "nil = the worker's own default (McpServer class>>defaultServerName)"
   serverTitle := nil.
@@ -3074,7 +3078,7 @@ tlsPrivateKeyFile: aPathOrNil
 category: 'toolsets'
 method: McpRouter
 toolsetNames
-  "The toolsets this router asks its workers to register, or nil for the installed default surface
+  "The toolsets this router asks its workers to register, or nil for the core default surface
    (see effectiveToolsetNames). Names, not classes: they cross a gem boundary."
   ^toolsetNames
 %
@@ -3084,7 +3088,16 @@ toolsetNames: aCollectionOfNamesOrNil
   "Choose this router's tool surface by naming toolsets -- e.g. only a vendor's own, with none of the
    Smalltalk-development tools. Each name is validated as an identifier (validatedClassName:) because
    it is interpolated into an executeString: in the worker gem. An EMPTY collection is legal and means
-   a server with no tools at all."
+   a server with no tools at all, and nil means the core default surface.
+   To ADD to that default rather than replace it, compose the list -- this is how a deployment turns
+   on an optional toolset, and how the Python one is turned on here:
+
+     (McpRouter new
+        toolsetNames: McpServer defaultToolsetNames , #('McpGrailToolset');
+        toolsetOptions: (Dictionary new
+          at: 'McpGrailToolset' put: (Dictionary new at: 'grailDirectory' put: '/opt/Grail'; yourself);
+          yourself))
+       forkOnPort: 8000"
   toolsetNames := aCollectionOfNamesOrNil isNil
     ifTrue: [nil]
     ifFalse: [(aCollectionOfNamesOrNil collect: [:n | self validatedClassName: n]) asArray]
