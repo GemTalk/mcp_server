@@ -13,6 +13,7 @@ style: |
   section.demo code { background: rgba(255,255,255,.09); }
   section.demo pre { background: rgba(255,255,255,.06); color: #eef3f1; }
   section.demo pre code { background: none; color: inherit; }
+  section.demo .fine { color: #a9b6bd; }
   h1 { font-size: 34px; line-height: 1.15; }
   table { font-size: 19px; }
   pre, code { font-size: 19px; }
@@ -28,22 +29,15 @@ style: |
 ---
 
 <!--
-TWO VERTICAL SLICES so far, in running order: section 7 (fourteen slides) then section 8 (ten).
-Sections 0-6 and 9-13 are not cut yet. Slice 2's own header comment is beside its first slide.
+THREE VERTICAL SLICES so far. In RUNNING order: sections 0 and 1 (nine slides), then section 7
+(fourteen), then section 8 (ten). In the order they were CUT that is slice 3, slice 1, slice 2 --
+the two centrepieces were cut first on purpose, because they are what the budget has to fit
+around. Sections 2-6 and 9-13 are not cut yet. Each slice's own header comment sits beside its
+first slide.
 
 Source of truth for the argument and the notes is docs/Presentation.md; each slice is derived from
 the matching section of it. Where the two disagree THIS FILE IS RIGHT and the outline should be
 brought into line with it, which is how both slices were reconciled.
-
-SLICE 1 — section 7. Re-cut 2026-09-10 to the running order below; it diverged from the outline on
-purpose:
-
-  * the measured seven-line trace is now speaker notes on the agent diagram, not a slide;
-  * "why this never needed to exist before" is dissolved into the agent diagram, whose closing
-    blockquote it now is;
-  * the four-way refresh measurement is now speaker notes on "one pass", not a slide;
-  * two new slides: the human-in-a-browser diagram (the guard working), and "one pass" — the
-    design that makes every tool succeed by making commit meaningless.
 
 Rendering, either way from this one file. --html IS REQUIRED, not optional: Marp Core defaults
 html:false and STRIPS raw HTML, which would silently drop all four inline <svg> diagrams and every
@@ -69,9 +63,379 @@ with no Marp-specific syntax inside, so a comment -> \note{} conversion is mecha
 
 The `style:` block is deliberately minimal and is the thing to replace when the visuals get
 dressed up. Nothing in the content depends on it.
+-->
 
-Budget: 11:10 at the plans in docs/Presentation.md's demo inventory — 490s of slides plus a
-180s demo. Slide 5 carries 90 of those seconds and is the one to protect.
+<!--
+================================================================================
+VERTICAL SLICE 3 -- sections 0 and 1: framing, and the repository. Nine slides --
+four for section 0, five for section 1, the last of them demo A. Cut 2026-09-11:
+first in running order, third to be cut.
+
+Running order and plans, in seconds -- title 10, MCP in one slide 30, what is
+different 30, status honestly 35 (105s, section 0); nothing to install 35,
+load.gs 35, which gem runs your code 30, how it is verified 40 (140s, section 1);
+demo A 60.
+
+Section 0's thesis is one sentence and slide 3 is the whole of it: it runs inside
+the image, so a session is a login, a session is a transaction view, and a view is
+a commit record the stone cannot dispose of. Everything the rest of the hour finds
+difficult follows from those three, and not one of them is an MCP problem.
+
+Section 1 has no thesis and does not want one. It is the tour that makes the later
+sections cheap: after it, "the front end" and "a worker" are things the room can
+picture, and "why did my fix not take" has an answer on a slide.
+
+TWO DELIBERATE DEPARTURES from docs/Presentation.md:
+
+  * NO DIAGRAM in either section, on purpose -- the only slice with none. The
+    orienting picture of the deployment belongs to section 3, where the fork and
+    the detach are the subject; the request picture belongs to section 4, where it
+    is walked line by line. Drawn here, either would spend 45s saying worse what a
+    later section says properly. This is the one slice where a diagram would be
+    decoration.
+  * the outline's "two expected failures that are signal rather than noise" is not
+    a slide. Both belong to sections that spend them properly -- McpExternalSession
+    Test to 12, testTheStoneAloneWouldAllowThatClobber to 7, where it already has a
+    slide -- so they are one sentence of notes on the verification slide. The
+    outline also attributed that test to McpBlindWriteTest; it lives in
+    McpConcurrentEditTest, and the outline has been corrected.
+
+WHAT WAS ASKED FOR ON 2026-09-11, and where it landed -- both on the status slide,
+which is the slide those two notes turned into:
+  * server-initiated messages are NOT a feature and will not become one, because
+    the 2026-07-28 draft forbids the direction outright. Slide 4 says "machinery,
+    not a feature" and hands the consequence to section 13;
+  * read-only mode is a placeholder and must not be oversold. Slide 4 says "a tool
+    gate, not an access-control boundary" and names what such a session still
+    costs -- a login, and a view.
+  The README's own status line still reads both as features; that is now item 5 in
+  docs/Presentation.md's fix list.
+
+WATCH -- the Grail toolset is about to stop being auto-detected. McpServer class>>
+installedDefaultToolsetNames appends McpGrailToolset whenever that class is loaded
+in the image; it is to be replaced by naming the toolset explicitly in the router
+configuration. Nothing in THIS slice asserts the auto-detection -- the group table
+is about install.sh's file-in, which does not change, and the test counts are
+unaffected because the suite runs either way -- but section 2 does assert it
+(docs/Presentation.md, "Resolved per session, not at boot") and section 10 will.
+Re-read both when that merge lands.
+
+Budget: 5:05 -- 245s of slides plus the 60s demo, against the 5.0 minutes the
+outline's table allows for 0 and 1 together. Section 0 runs 15s over its 1.5 and
+section 1 comes in 10s under its 3.5, so the pair is within rounding and the table
+does not move.
+================================================================================
+-->
+
+<!-- _class: lead -->
+<!-- _header: '' -->
+<!-- _paginate: false -->
+
+# mcp_server
+
+### A Model Context Protocol server that *is* a gem
+
+<br>
+
+**For the GemStone developers** — the present state, end to end
+
+<!--
+Say the shape of the hour before the first slide, because it is the thing that stops people
+waiting for the caveat. Healthy path first, in full: what the repository IS, how a server starts,
+one request end to end, a second request end to end. Only THEN progress, the transaction model,
+the maintenance cycle, auth, extension, and the version story. Every pressure case is a later
+section that comes back to the same trace and adds one arm to it.
+
+You know GemStone. You do not necessarily know MCP, and -- more to the point -- you do not yet
+know why a thing that looks like a web server is built out of gems. That second question is the
+whole talk.
+
+Six demos, each with a hard stop rehearsed into it. If we run long the demos are what I will
+protect, because a section summarised in two sentences beside a live worker gem lands better than
+the same section in full with nothing on screen.
+-->
+
+---
+
+## MCP, in one slide
+
+* **JSON-RPC 2.0 over HTTP**, one endpoint. A client — an editor, an agent — asks a server what tools it has, and calls them
+* **Four methods are the whole of what this server answers**: `initialize`, `ping`, `tools/list`, `tools/call`
+* Resources, prompts, sampling, elicitation — **undeclared**, and answered `-32601`
+
+<p class="exlbl">the entire declared capability surface</p>
+<p class="ex">"capabilities": { "tools": {} }</p>
+
+> A server may send only what it has declared. **This one declares its tools and nothing else** — so everything in the next hour is either a tool call, or the machinery that keeps one alive.
+
+<!--
+Deliberately not a diagram. The orienting picture of the deployment belongs to section 3, where
+the fork and the detach are the subject, and the request picture belongs to section 4, where it is
+walked line by line. Drawing either here would spend 45 seconds to say worse what a later section
+says properly.
+
+The four-method surface is smaller than people expect and that is worth landing early: it is why
+the interesting parts of this project are all GemStone parts. There is very little protocol to get
+wrong.
+
+`notifications/*` is the fifth thing that arrives and the reason it is not in the list: a
+notification has no id, so it gets no response at all -- the dispatcher answers nil and the
+transport sends 202. That is JSON-RPC, not an MCP rule.
+
+On what is NOT declared, if asked: tools/listChanged (no session's tool surface changes after
+initialize), resources, prompts, completions -- none of which exist here. `logging` was declared
+until 2026-08-27 and was removed rather than left as a promise nothing would keep. Progress needs
+no declaration at all: it is a base-protocol utility a client opts into per REQUEST by putting a
+progressToken in _meta, so there has never been anything for a server to advertise.
+-->
+
+---
+
+## What is different here
+
+* It runs **inside the image**. No Node process, no GCI bridge, no FFI
+* The thing that executes `execute_code` is **a gem**. The thing that owns the socket is **a gem**
+
+That single decision is where every interesting consequence in this talk comes from:
+
+> a session is a **login** · a session is a **transaction view** · a view is a **commit record the stone cannot dispose of**
+
+* It exists to replace the **GCI-based Jasper MCP server**, with something **any** MCP client can reach over plain HTTP
+
+<span class="fine">**Standing rule for the first half:** the healthy path only — no commit-record pressure, no timeouts, no pending ledger, no progress notifications, no auth. Every one of those is a later section.</span>
+
+<!--
+The three consequences in the blockquote are the spine of sections 7, 8 and 9. Read them slowly;
+they are the only thing on this slide anyone needs to carry forward.
+
+"A view is a commit record the stone cannot dispose of" is the one that turns a convenience into a
+design constraint, and it is why section 8 exists at all. An idle MCP client is not free here the
+way an idle HTTP connection is free in a web server.
+
+Say the standing rule out loud rather than leaving it on the slide. This audience will otherwise
+spend the healthy-path half waiting for the caveat, and ask about failure modes in section 4 that
+section 7 answers properly.
+-->
+
+---
+
+## Status, honestly
+
+**Built, and verified end to end** — by curl, by a TLS run, and by the in-image suites:
+
+* Streamable HTTP transport · **per-client worker gems** · **31 base tools** (+9 optional Python)
+* OAuth 2.1 / JWT bearer tokens, and TLS
+
+**Two things on that list I am not going to sell you:**
+
+* **Read-only mode** is a **tool gate, not an access-control boundary** — a localhost convenience so one user cannot mutate by accident. A read-only session still costs a login and still holds a view (§11)
+* **Server-initiated messages** are built, and this server needs them — every count in §8 rests on them — but the `2026-07-28` draft removes that direction outright. **Machinery, not a feature** (§13)
+
+<!--
+The honesty on this slide is the point of the slide, and it is worth the seconds. The README's own
+status line currently reads both of these as features and is the thing to correct.
+
+Read-only mode: the honest framing is the one section 11 gives -- gated tools are never registered
+for a read-only worker, so they are hidden from tools/list rather than refused on call, which is
+stronger than it sounds. But underneath it is still an ordinary read-write GemStone login. A
+read-only DATABASE login, or a user whose privileges cannot write, is what would make it a
+boundary, and that is a question for this room.
+
+Server-initiated messages: the draft says it plainly -- "servers do not initiate JSON-RPC requests
+and clients do not send JSON-RPC responses". That deletes server-initiated ping, which is what
+section 8's idleness counting is made of, and deletes the reason the pending-request table exists.
+It is not built wrong; it is built for the era that is ending. Section 13 has the worked answer,
+including which half of section 8 survives (the reaping policy, which is a GemStone question) and
+which half does not (the evidence underneath it, which is a protocol question).
+
+If asked "so why build it": because it is what the clients in the room actually speak today.
+Claude Code sends a session id, opens the GET stream, answers pings, and hands over a progressToken
+on every call.
+
+Point at README's Future work for what is not built, rather than reading a second list here.
+-->
+
+---
+
+## There is nothing to install but topaz file-outs
+
+| group | classes | what | when |
+|---|---|---|---|
+| `src/core/` | 21 | protocol, transport, dispatch, the seven toolsets | always |
+| `src/tests/` | 26 | the SUnit suites and their fixtures | always |
+| `src/auth/` | 3 | `McpAuthRouter` + its two suites | 3.7.5+ |
+| `src/grail/` | 2 | the optional Python toolset + its suite | `--grail` |
+
+* **One `.gs` file per class, canonical `fileOutClass` output.** No Rowan, no Tonel, no package manager
+* It files into any image topaz can log into — and the tree **round-trips byte-exact**, so a regenerated-vs-repo diff is a trustworthy signal
+* **`Mcp` is the home dictionary**, not `Published`. A user provisioned for MCP needs it in their symbol list
+
+<span class="fine">`install.sh` picks the groups by **probing the image rather than asking**: `src/auth` needs `JsonWebToken` and `JwtSecurityData`, neither of which exists before 3.7.5.</span>
+
+<!--
+Spend no time defending the absence of a package manager; state it and move on. The audience this
+matters to is the one that has to file it into an image on a customer machine.
+
+The byte-exact round trip is the part worth one extra sentence, because it is what makes the
+rule enforceable: file the class out canonically, diff against the repo, and a difference means a
+real difference. Hand-editing a method block into a .gs file is how that property gets lost, and
+it is the first thing in the contributor guide.
+
+The counts are classes, not files -- each group also carries its own load.gs, which is the next
+slide.
+-->
+
+---
+
+## Each `load.gs` pre-declares its class names, bound to `nil`
+
+The classes reference each other **in both directions** — `McpDispatcher` asks `McpServer` for its name, `McpServer` builds an `McpDispatcher` — so **no file order puts every class ahead of its first mention**.
+
+```smalltalk
+names := #( #McpError #McpTool #McpToolRegistry ... #McpSession #McpRouter ).
+names do: [:s | (d includesKey: s) ifFalse: [ d at: s put: nil ] ].
+```
+
+**Why a nil binding is enough:** the compiler binds a global by its **association**, and each class definition fills *that same association* in. A method compiled before its referent exists still ends up pointing at the real class.
+
+<span class="fine">Existing keys are left alone, so re-installing over a loaded image changes nothing.</span>
+
+<!--
+A slide of its own for this audience, and only for this audience. It is four lines of loader code,
+but it is the one place where the file-in depends on something about the compiler rather than
+about the project -- and the people in this room are the ones who would otherwise ask why the
+loader does not simply topologically sort the files. It cannot: the graph has cycles.
+
+Without the pre-declaration the compiler reports `undefined symbol` and the file-in STOPS, which is
+at least loud. The quiet version of this failure is the one in the contributor guide: a lost `%`
+after a merge drops a method with errorcount still reading 0.
+
+The dictionary itself is created self-referenced if absent -- a SymbolDictionary's name IS the key
+inside it whose value is itself -- and appended to the symbol list. install.sh does that too; the
+loader repeats it so a run by hand on a fresh image still works.
+-->
+
+---
+
+## Which gem runs your code decides how it gets refreshed
+
+| | class | gem | picks up a recompile |
+|---|---|---|---|
+| **front end** | `McpRouter` / `McpAuthRouter`, `McpHttpConnection` | one **detached** gem owning the listen socket | within **two** maintenance passes (60s each) |
+| **worker** | `McpServer`, `McpDispatcher`, the `Mcp*Toolset` classes | **one per client session** | **next request** |
+| **driver** | the suites | whatever topaz or MCP session you are in | **immediately** |
+
+**This is the table that answers "why did my fix not take".** A transport fix that will not take while tool-layer fixes go live is usually just the front end not having reached its next pass.
+
+`./stop-server.sh && ./run-server.sh` is the only way to be *certain* which code a running server is on.
+
+<!--
+Leave this one on screen a beat longer than it needs. It is the table I would put on the wall of
+anyone working on this, and every row of it is a section: the front end is 3 and 8, the worker is
+4 and 5, the driver is 1.
+
+The worker picks up a recompile on the next request because the dispatcher ABORTS before each tool
+call -- so it is not that anything reloads, it is that the worker's view moves and the new method
+is simply what is there. Section 5.
+
+Two passes rather than one for the front end, because the pass that notices is not necessarily the
+pass that acts -- worth saying only if someone asks why it is not "within 60 seconds".
+
+If a fix seems not to have taken: check the gem's start time before checking the code. That is the
+cheaper test and it is right more often.
+-->
+
+---
+
+## How it is verified
+
+* **`./run-unit-tests.sh`** — the in-image suites, **each in its own topaz session**, so one that blows up is reported by name rather than silencing the run. **466** base · **522** with auth · **about 570** with Grail
+* **`./test.sh`** — the only check that drives the tools **over the wire**. Nothing in the unit suites covers the transport, so a break there is otherwise silent
+* **`./test-tls.sh`** — the same transport over HTTPS, with a throwaway cert set **only in the forked gem's session, never committed**
+* **GitHub Actions** installs **3.7.5 from scratch** on `ubuntu-latest` — fresh extent, stone, netldi, **with and without Grail** — and runs all three
+
+> For a project with no package manager the question is *what proves it still files in.* That is the workflow's job, not mine.
+
+<span class="fine">**Seven suites need a netldi**, because they spawn real worker gems — no new burden, since this server cannot serve one request without one.</span>
+
+<!--
+Give the exact numbers from the morning's run, not these. The Grail figure moved TWICE on
+2026-09-10 alone -- 39 to 44 to 51 tests -- while the base and auth numbers did not budge, so
+"about 570" is the honest thing to have on a slide and the live run is the precise answer if
+anyone asks.
+
+Per-suite topaz sessions are worth the extra sentence if there is time: it is the difference
+between a broken suite being reported by name and a broken suite taking the report down with it.
+Failures are named individually and the output is coloured for CI.
+
+Two suites are written to fail on purpose, and both belong to later sections rather than here:
+McpExternalSessionTest fails on an unsupported image BECAUSE that is how the suite reports the
+image (section 12), and McpConcurrentEditTest>>testTheStoneAloneWouldAllowThatClobber is written
+to fail on GOOD news (section 7). Mention that they exist; do not spend them here.
+
+The netldi seven: McpAuthTest, McpAuthConformanceTest, McpExternalSessionTest, McpTransactionTest,
+McpWorkerDeadlineTest, McpConcurrentEditTest, and -- since the merge of 2026-09-10 -- McpGrail
+ToolsetTest, because run_python_tests now forks the gem it runs Grail's classes in. They also need
+spare LOGIN SLOTS, which is the likeliest cause of a failure that has nothing to do with the code.
+
+The lint job over the workflows themselves (actionlint, zizmor) is not worth a sentence unless
+somebody asks what else CI does.
+-->
+
+---
+
+<!-- _class: demo -->
+
+# DEMO A — install, from nothing
+
+```bash
+./install.sh --check
+./install.sh
+```
+
+1. The **environment report** — `GEMSTONE`, the stone, the netldi, and `GEMSTONE_GLOBAL_DIR`
+2. The **group selection deciding itself**: auth in or out by probing the image for `JsonWebToken`
+3. File-in, group by group, and one commit
+
+<span class="fine">**`GEMSTONE_GLOBAL_DIR` is the variable that decides whether anything works.** Get it wrong and you get `getaddrinfo failed, EAI error 8 ... Number: 4065`, which reads like DNS and is not. `--check` is the first thing to run on a new machine.</span>
+
+<span class="fine">**60 seconds, hard stop.**</span>
+
+<!--
+The demo is here rather than after section 2 because it is the only one that costs nothing to
+stage: no server, no second gem, no timing. If the room is still settling, this is the demo to
+stretch; if we are already behind, it is the one to cut to a single `--check`.
+
+What to point at while it scrolls: the line where it decides about auth. That is the whole version
+story in one line of output, and section 12 will come back to it.
+
+Do NOT get drawn into GEMSTONE_GLOBAL_DIR here beyond the one sentence. The full version is in the
+README and it is a ten-minute conversation: netldi and stone each bind an ephemeral port and record
+it under that directory, /etc/services is a trap rather than a fix, and install.sh logs in linked
+(-l) specifically so it needs no netldi at all.
+-->
+
+---
+
+<!--
+================================================================================
+VERTICAL SLICE 1 -- section 7, the transaction model and the blind-write
+guardrail. Fourteen slides. Re-cut 2026-09-10 to the running order below; it
+diverged from the outline on purpose:
+
+  * the measured seven-line trace is now speaker notes on the agent diagram, not
+    a slide;
+  * "why this never needed to exist before" is dissolved into the agent diagram,
+    whose closing blockquote it now is;
+  * the four-way refresh measurement is now speaker notes on "one pass", not a
+    slide;
+  * two new slides: the human-in-a-browser diagram (the guard working), and "one
+    pass" -- the design that makes every tool succeed by making commit meaningless.
+
+Budget: 11:10 at the plans in docs/Presentation.md's demo inventory -- 490s of
+slides plus a 180s demo. Slide 5 carries 90 of those seconds and is the one to
+protect.
+================================================================================
 -->
 
 <!-- _class: lead -->

@@ -59,7 +59,18 @@ the same trace and adds one arm to it. Say so early, so the audience stops waiti
 
 ---
 
-## 0. Framing (2 slides)
+## 0. Framing (4 slides)
+
+**This section is cut, and `docs/slides/deck.md` is the authority for it** — the running order
+below is a summary of that file rather than a plan for it, and where the two disagree the deck is
+right. Four slides: the title, *MCP in one slide*, *What is different here*, *Status, honestly*.
+**1:45 against the 1.5 minutes this outline's table allows**, and §1 gives the 15 seconds back, so
+the table does not move.
+
+**Deliberately no diagram**, here or in §1. The orienting picture of the deployment belongs to §3,
+where the fork and the detach are the subject; the request picture belongs to §4, where it is walked
+line by line. Either one drawn here would spend 45 seconds saying worse what a later section says
+properly.
 
 * **What MCP is, in one slide.** JSON-RPC 2.0 over HTTP, one endpoint. A client (an editor, an
   agent) asks a server what tools it has (`tools/list`) and calls them (`tools/call`). That is
@@ -73,16 +84,36 @@ the same trace and adds one arm to it. Say so early, so the audience stops waiti
   of.
 * One line on what it replaces: the GCI-based Jasper MCP server, and the goal of being reachable by
   *any* MCP client over plain HTTP.
-* Status line, honestly: transport, per-client worker gems, 31 base tools (+9 optional Python),
-  OAuth 2.1/JWT + TLS, read-only mode, server-initiated messages — built and verified end to end.
-  Point at [Future work](../README.md#future-work) for what is not.
+* **Status, honestly — and the slide is called that because the honesty is the point of it.** Built
+  and verified end to end, by curl, by a TLS run and by the in-image suites: the Streamable HTTP
+  transport, per-client worker gems, 31 base tools (+9 optional Python), OAuth 2.1/JWT + TLS. Then
+  **two things on that list which are not being sold**, both settled on 2026-09-11:
+  * **read-only mode is a tool gate, not an access-control boundary** — a localhost convenience so
+    one user cannot mutate by accident, and a read-only session still costs a login and still holds
+    a view. It is a placeholder, and §11 is where the ideas for making it a boundary live. Do not
+    let the slide imply more than §11 will deliver;
+  * **server-initiated messages are machinery, not a feature.** They are built, and this server
+    needs them — every count in §8 rests on server-initiated `ping` — but the `2026-07-28` draft
+    forbids the direction outright ("servers do not initiate JSON-RPC requests"), so it is not a
+    capability with a future to sell. §13 carries the consequence, including which half of §8
+    survives it.
+  Point at [Future work](../README.md#future-work) for what is not built, rather than reading a
+  second list aloud.
 
 ---
 
-## 1. The repository, and how it is verified (3–4 slides)
+## 1. The repository, and how it is verified (5 slides, one of them demo A)
+
+**This section is cut, and `docs/slides/deck.md` is the authority for it** — the running order below
+is a summary of that file rather than a plan for it, and where the two disagree the deck is right.
+Four slides plus demo A: *nothing to install but topaz file-outs*, *each `load.gs` pre-declares its
+class names*, *which gem runs your code*, *how it is verified*. **3:20 against the 3.5 this
+outline's table allows**, which pays for §0's overrun.
 
 The point of this section is that there is no build system to explain and nothing to install but
-topaz file-outs.
+topaz file-outs. It has no thesis and does not want one: it is the tour that makes the later
+sections cheap, so that "the front end" and "a worker" are things the room can picture and "why did
+my fix not take" has an answer on a slide.
 
 **Layout** (from [Source layout](../README.md#source-layout)):
 
@@ -143,10 +174,12 @@ topaz file-outs.
   job over the workflows themselves (`actionlint`, `zizmor`). Worth one line on the slide because it
   answers the question this audience will ask about a project with no package manager: *what proves
   it still files in?*
-* **Two expected failures that are signal rather than noise**, and both are worth naming because
-  they are a technique: `McpExternalSessionTest` fails on an unsupported image **on purpose** — the
-  failure is the suite reporting the image (§12) — and `McpBlindWriteTest>>testTheStoneAloneWould
-  AllowThatClobber` is **written to fail on good news** (§7).
+* **Two expected failures that are signal rather than noise.** They are **speaker notes rather than
+  a slide**, because both belong to sections that spend them properly: `McpExternalSessionTest`
+  fails on an unsupported image **on purpose** — the failure is the suite reporting the image
+  (§12) — and `McpConcurrentEditTest>>testTheStoneAloneWouldAllowThatClobber` is **written to fail
+  on good news** (§7, which already gives it a slide). *Corrected 2026-09-11: this outline
+  attributed that test to `McpBlindWriteTest`, which does not contain it.*
 
 `[DEMO A — 60s]` `./install.sh --check` on the demo stone, then `./install.sh`. Shows the
 environment report and the group selection deciding itself (auth in or out by probing for
@@ -1568,6 +1601,15 @@ audience will have the README open.
      gem measures as perfectly current. That is load-bearing — it is why the arm sends a dead worker
      nothing — so the comment contradicts the behaviour the design depends on.
 
+5. **The README's status line oversells the same two things §0's status slide now refuses to
+   oversell**, and it is the first paragraph anybody in the room will read. It lists "per-router
+   read-only mode and server-initiated messages" among what is "built and verified end-to-end",
+   which is true of both and misleading about both: read-only mode is a **tool gate rather than an
+   access-control boundary** (the README says so itself 700 lines later, under *Read-only mode*),
+   and server-initiated messages are a direction the **`2026-07-28` draft removes outright**, so
+   they are machinery this server needs rather than a capability to advertise. Two clauses of
+   qualification, in the sentence that currently reads as a feature list.
+
 ---
 
 ## Open items
@@ -1585,7 +1627,23 @@ audience will have the README open.
    is run live. On a Community Edition extent that is most of ten. Check `SessionsCurrent` against
    `StnMaxSessions` before the talk, and be ready to explain the 4039 lockout **as a slide** if it
    happens live — §8 already has the material, and it would be the best unplanned demo of the day.
-5. **Two things in the talk are marked "not measured"** and should either be measured or stay
+5. **The Grail toolset is about to stop being auto-detected** — flagged 2026-09-11, and the change
+   will be merged into this branch when it is ready. Today
+   `McpServer class>>installedDefaultToolsetNames` appends `McpGrailToolset` to the default surface
+   whenever that class is loaded in the image; it is to become something a deployment **names
+   explicitly in the router configuration**. What that touches, in order of how wrong it goes:
+   * **§2** asserts the auto-detection directly — *"the seven core toolsets plus `McpGrailToolset`
+     if that file is loaded in the worker's image … resolved per session, not at boot"* — and the
+     "resolved per session" half survives while the "if loaded" half does not;
+   * **§10** is the extension section, so the *"name your toolsets"* story gets **better** under the
+     change, not worse: Grail stops being a special case and becomes the worked example of the
+     ordinary mechanism. Worth cutting §10 after the merge rather than before;
+   * **§0/§1 are safe as cut** — the group table is about `install.sh`'s file-in, which does not
+     change, the "+9 optional Python" count is unaffected, and the test counts are unaffected
+     because the suite runs either way. Nothing in that slice needs re-cutting.
+   * `MCP_TOOLSETS` already exists and already does this, so the demo story does not change either.
+
+6. **Two things in the talk are marked "not measured"** and should either be measured or stay
    labelled: whether Claude Code resets its `timeoutMs: 60000` on a progress notification (§6), and
    the overnight soak of the view-hygiene arms, which wants a teststone and a night rather than the
    development stone (§8).
