@@ -17,6 +17,22 @@ reasoning has nowhere better to live, not that the entry should grow.
 
 ## Unreleased
 
+* **`eval_python` now reports stderr, and no longer throws away output when the code fails.** The
+  redirect swapped `sys.stdout` alone, so `warnings.warn`, `print(..., file=sys.stderr)` and the
+  interpreter's own diagnostics went to a console sink that a detached worker gem nobody reads —
+  the bytes were accepted, counted and gone, and a model saw a clean result. stderr is now a fourth
+  channel, each line marked `[stderr] ` so a warning is not mistakable for a `print`; both output
+  channels are reported ahead of the traceback on the failing path, where a script that printed its
+  way to the point of failure used to have that output captured and dropped unread; and a client's
+  own `sys.stdout` redirect is left installed across calls rather than silently reverted. A call
+  that writes to neither channel still answers the bare `repr` on one line. One limit, and it is
+  the image's rather than the tool's: a `.py` module **warm-bound** from a committed canonical
+  instance keeps the `sys` of whichever session committed it, so on such an image a call like
+  `traceback.print_exc()` with no `file=` still writes past the redirect. Reaching it would mean
+  assigning into state shared with every session; `print_exc(file=sys.stderr)` is captured either
+  way, as is anything native. Filed upstream as
+  [GemTalk/Grail#924](https://github.com/GemTalk/Grail/issues/924).
+
 * **`list_python_methods` no longer drops `*args`, `**kwargs`, `/` and `*` from a signature.** The
   renderer read each parameter's name and default out of the class's signature table and ignored its
   *kind*, so `call(a, /, b, *args, key=None, **kwargs)` was answered as
