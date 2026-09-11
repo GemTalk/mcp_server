@@ -36,9 +36,10 @@ so one client''s namespace is invisible to every other.
 
 A toolset rather than a server subclass, which is the point: python tools can now be combined with
 anyone else''s tools, whereas the old McpServerWithGrail was a rung in the hierarchy that a developer
-wanting python tools AND their own had to inherit from. It is picked up automatically by
-McpServer class>>installedDefaultToolsetNames once this group is loaded, or named explicitly in a
-router''s toolsetNames.
+wanting python tools AND their own had to inherit from. Loading this group does NOT expose it: it is not in McpServer class>>defaultToolsetNames, and a
+server has it only when a router NAMES it in toolsetNames -- because these tools read the Grail
+checkout on disk that grailDirectory points at, and no image can choose that for an operator. See
+McpRouter>>toolsetNames: for the line that turns it on.
 
 Like every toolset it owns its handlers (see McpToolset), and needing no server-level policy it never
 touches `server` at all -- so it also serves as the worked example for a third-party toolset, now

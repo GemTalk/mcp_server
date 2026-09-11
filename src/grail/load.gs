@@ -2,8 +2,9 @@
 ! Paths are relative to the REPOSITORY ROOT (install.sh cds there before running topaz).
 ! Only valid on a Grail/ModuleAst image: these methods reference ModuleAst and BaseException and
 ! cannot compile without them. Requires src/core/load.gs (McpToolset) and src/tests/load.gs.
-! Once loaded the toolset joins the default tool surface -- see
-! McpServer class>>installedDefaultToolsetNames.
+! Loading this group EXPOSES NOTHING on its own: McpGrailToolset is not in the default tool surface
+! (McpServer class>>defaultToolsetNames), so a server has these tools only when its router names the
+! toolset -- see run-server.sh's MCP_TOOLSETS.
 
 run
 "Pre-declare these class names in the Mcp dictionary BEFORE filing in any of them. The classes

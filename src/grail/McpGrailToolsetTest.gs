@@ -78,8 +78,8 @@ grailCheckoutOrNil
 category: 'helpers'
 method: McpGrailToolsetTest
 grailServer
-  "A server whose surface is the core toolsets plus McpGrailToolset -- i.e. what
-   installedDefaultToolsetNames answers on a Grail-equipped image."
+  "A server whose surface is the core toolsets plus McpGrailToolset -- i.e. what a deployment that
+   wants the Python tools configures, since nothing adds them for it."
   ^McpServer newWithToolsetNames:
     (McpServer defaultToolsetNames , (Array with: 'McpGrailToolset'))
 %
@@ -729,6 +729,24 @@ testGrailEmitsTheParameterKindsTheSignatureNeeds
 %
 category: 'tests'
 method: McpGrailToolsetTest
+testGrailToolsetIsExposedOnlyWhenNamed
+  "LOADED IS NOT EXPOSED. This suite only exists on a Grail-equipped image, so McpGrailToolset
+   certainly resolves here -- and an unconfigured router's surface still does not contain it, and no
+   python tool is registered. It takes naming the toolset, which is also how a third-party toolset is
+   turned on (McpRouter>>toolsetNames:).
+   Asserted from this side because the reason is Grail's: these tools read the checkout on disk that
+   grailDirectory names, so a server that offered them merely because src/grail was filed in would be
+   answering for a directory nobody chose."
+  self assert: (System myUserProfile objectNamed: #McpGrailToolset) notNil.
+  self deny: (McpRouter new effectiveToolsetNames includes: 'McpGrailToolset').
+  self deny: (McpServer defaultToolsetNames includes: 'McpGrailToolset').
+  self deny: (McpServer new allToolNames includes: 'eval_python').
+  self assert: ((McpRouter new toolsetNames: McpServer defaultToolsetNames , #('McpGrailToolset'))
+    effectiveToolsetNames includes: 'McpGrailToolset').
+  self assert: (self grailServer allToolNames includes: 'eval_python')
+%
+category: 'tests'
+method: McpGrailToolsetTest
 testGrailToolsetIsGatedInReadOnlySession
   "A read-only worker keeps FOUR of these tools, for three different reasons. run_python_tests runs
    in a fresh gem that is thrown away and never committed in, so it can persist nothing.
@@ -761,16 +779,6 @@ testGrailToolsetIsGatedInReadOnlySession
     self assert: (err at: 'code') equals: -32601.
     self assert: ((err at: 'data') at: 'kind') equals: 'readOnly']
       ensure: [SessionTemps current removeKey: #McpReadOnly ifAbsent: [nil]]
-%
-category: 'tests'
-method: McpGrailToolsetTest
-testGrailToolsetJoinsTheInstalledDefaultSurface
-  "On a Grail-equipped image the optional toolset is picked up automatically: the front end resolves
-   the default surface with installedDefaultToolsetNames, which must include it once this file is
-   loaded (this suite only exists in such an image). That is what replaces the old
-   'build the most capable installed server class' probe."
-  self assert: (McpServer installedDefaultToolsetNames includes: 'McpGrailToolset').
-  self deny: (McpServer defaultToolsetNames includes: 'McpGrailToolset')
 %
 category: 'tests'
 method: McpGrailToolsetTest

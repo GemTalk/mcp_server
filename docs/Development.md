@@ -174,7 +174,10 @@ can detect or work around. Whether the floor settles at 3.7.5 or 3.7.6 is not ye
 Anything present in **3.7.5** may be referenced directly, with no existence guard; the live concern
 is only what is newer than that. Genuinely optional things (Grail) still use an `objectNamed:`
 guard. `src/auth` is detected rather than asked about, because loading `McpAuthRouter` is inert;
-`src/grail` stays opt-in because loading it joins the default tool surface. See
+`src/grail` is inert too (`McpGrailToolset` is not in the default tool surface — a router has to
+name it), but stays opt-in at install because it cannot be detected the same way: `ModuleAst`
+present does not mean the Grail these tools were written against, and a group that cannot compile
+takes the file-in down with it. See
 [GemStone_Notes.md](GemStone_Notes.md#version-to-version-differences) for the concrete behaviour
 differences this surfaced, and in particular why 3.7.2 was dropped rather than covered.
 

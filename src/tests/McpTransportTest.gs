@@ -984,7 +984,7 @@ testValidateWorkerConfigRefusesUnusableNames
 category: 'tests - worker config'
 method: McpTransportTest
 testWorkerConfigDefaultsAreResolvedByTheFrontEnd
-  "Unconfigured: the worker class is McpServer and the tool surface is the installed default. Both are
+  "Unconfigured: the worker class is McpServer and the tool surface is the core default. Both are
    resolved HERE (front end) and pushed to the worker, which never chooses for itself."
   | r |
   r := McpRouter new.
@@ -993,7 +993,7 @@ testWorkerConfigDefaultsAreResolvedByTheFrontEnd
   self assert: r serverName isNil.
   self assert: r serverTitle isNil.   "no instance label until an operator sets one"
   self assert: r effectiveWorkerClassName equals: 'McpServer'.
-  self assert: r effectiveToolsetNames equals: McpServer installedDefaultToolsetNames.
+  self assert: r effectiveToolsetNames equals: McpServer defaultToolsetNames.
   "configured values win, and an EMPTY toolset list is legal -- a server with no tools"
   r workerClassName: 'McpFixtureServerProbe'; toolsetNames: #().
   self assert: r effectiveWorkerClassName equals: 'McpFixtureServerProbe'.

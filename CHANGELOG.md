@@ -17,6 +17,22 @@ reasoning has nowhere better to live, not that the entry should grow.
 
 ## Unreleased
 
+* **Breaking: the Grail (Python) toolset is no longer served by default.** `McpServer
+  class>>installedDefaultToolsetNames` — which probed the symbol list and appended `McpGrailToolset`
+  to the default surface whenever `src/grail` was loaded — is **gone**. The default surface is now
+  `McpServer class>>defaultToolsetNames`, the core seven and only those, and no toolset joins it by
+  being loaded. A Grail server is a deliberate toolset configuration: name `McpGrailToolset`
+  alongside the core toolsets in `MCP_TOOLSETS` (both launchers) or in a router's `toolsetNames:`.
+  Two reasons. An optional toolset can carry a dependency the image knows nothing about — Grail's
+  tools read the `.py` checkout that `grailDirectory` names — so a server that offered them merely
+  because a group was filed in was answering for a directory nobody chose; and turning one on ought
+  to look the same whoever wrote it, so the Python toolset is now the worked example a developer can
+  copy for their own. `MCP_GRAIL_DIR` still *configures* the toolset and no longer adds it: set
+  without `McpGrailToolset` in the surface, both launchers say so and leave it off, since a router
+  holding options for a toolset it does not serve refuses to start. **If you run a Grail server,
+  its `run-server.sh` line needs `MCP_TOOLSETS` or it will come up with 31 tools instead of 40.**
+  `run-auth-server.sh` gained `MCP_TOOLSETS` so an authenticated deployment can do the same.
+
 * **`eval_python` now reports stderr, and no longer throws away output when the code fails.** The
   redirect swapped `sys.stdout` alone, so `warnings.warn`, `print(..., file=sys.stderr)` and the
   interpreter's own diagnostics went to a console sink that a detached worker gem nobody reads —

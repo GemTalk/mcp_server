@@ -54,6 +54,13 @@
 #                         Advertised automatically so clients can request it -- an unrequestable write
 #                         scope would leave every session read-only.
 #   MCP_READONLY        - 1 to force EVERY session read-only regardless of scope (default: 0)
+#   MCP_TOOLSETS        - space-separated McpToolset names to expose instead of the default surface
+#                         (the core seven, McpServer class>>defaultToolsetNames). Same variable and
+#                         same meaning as run-server.sh. Needed to serve an OPTIONAL toolset at all,
+#                         since none joins the surface by being loaded -- for the python tools, name
+#                         the core seven plus McpGrailToolset, and point MCP_GRAIL_DIR at the
+#                         checkout. Narrowing the surface PER TOKEN is a different thing and belongs
+#                         in a router subclass (McpRouter>>effectiveToolsetNames), not here.
 #   MCP_MAX_SESSIONS    - how many client sessions this server holds AT ONCE (default 3; `none`
 #                         for no cap). Documented with the family below, but named here because the
 #                         default is sized for a localhost server on a small stone and a shared
@@ -109,6 +116,7 @@ MCP_REQUIRED_SCOPES="${MCP_REQUIRED_SCOPES:-mcp:use}"
 MCP_EXTRA_SCOPES="${MCP_EXTRA_SCOPES:-}"
 MCP_WRITE_SCOPE="${MCP_WRITE_SCOPE:-}"
 MCP_READONLY="${MCP_READONLY:-0}"
+MCP_TOOLSETS="${MCP_TOOLSETS:-}"
 MCP_TITLE="${MCP_TITLE:-}"
 MCP_TRACE="${MCP_TRACE:-0}"
 MCP_TRACE_LIMIT="${MCP_TRACE_LIMIT:-}"
@@ -218,11 +226,20 @@ fi
 TITLE_LINE=""
 [ -n "$MCP_TITLE" ] && TITLE_LINE="r serverTitle: '$(printf '%s' "$MCP_TITLE" | sed "s/'/''/g")'."
 
-# MCP_GRAIL_DIR -- the Grail checkout, on an image carrying the Grail (python) toolset. Same
+# MCP_TOOLSETS -- which toolsets this server serves. Empty means the core seven, and ONLY those: an
+# optional toolset in the image does not join the surface, so serving one takes naming it here.
+TOOLSETS_LINE=""
+if [ -n "$MCP_TOOLSETS" ]; then
+  LITERALS=""
+  for t in $MCP_TOOLSETS; do LITERALS="$LITERALS '$t'"; done
+  TOOLSETS_LINE="r toolsetNames: #($LITERALS)."
+fi
+
+# MCP_GRAIL_DIR -- the Grail checkout, for a server whose MCP_TOOLSETS include McpGrailToolset. Same
 # variable, same meaning and same launch-time check as run-server.sh; see its header for why a worker
-# gem cannot work this out for itself. Nothing else about toolsets is configurable from this script,
-# so there is deliberately no general MCP_TOOLSET_OPTIONS here -- an authenticated deployment
-# choosing a bespoke tool surface should build its router rather than drive it from env vars.
+# gem cannot work this out for itself. It is the only per-toolset option this script sets, and there
+# is deliberately no general MCP_TOOLSET_OPTIONS here -- an authenticated deployment configuring a
+# bespoke toolset should build its router rather than drive it from env vars.
 GRAIL_LINE=""
 if [ -n "${MCP_GRAIL_DIR:-}" ]; then
   if [ ! -d "$MCP_GRAIL_DIR/src/python/stdlib" ]; then
@@ -230,9 +247,19 @@ if [ -n "${MCP_GRAIL_DIR:-}" ]; then
     echo "       so it is not a Grail checkout." >&2
     exit 1
   fi
-  GRAIL_LINE="r toolsetOptions: (Dictionary new at: 'McpGrailToolset' put:
+  # Set only when the toolset is actually served: McpRouter>>validateWorkerConfig refuses to start a
+  # router holding options for a toolset outside its surface, and MCP_GRAIL_DIR is a machine fact
+  # exported once rather than a request for a Grail server. Same reasoning as run-server.sh.
+  case " $MCP_TOOLSETS " in
+    *" McpGrailToolset "*)
+      GRAIL_LINE="r toolsetOptions: (Dictionary new at: 'McpGrailToolset' put:
   (Dictionary new at: 'grailDirectory' put: '$(printf '%s' "$MCP_GRAIL_DIR" | sed "s/'/''/g")'; yourself);
-  yourself)."
+  yourself)." ;;
+    *)
+      echo "note: MCP_GRAIL_DIR is set, but McpGrailToolset is not in this server's tool surface," >&2
+      echo "      so it is ignored and no python tool is served. Name it, with the core toolsets," >&2
+      echo "      in MCP_TOOLSETS." >&2 ;;
+  esac
 fi
 
 echo "Forking McpAuthRouter onto ${MCP_BIND_ADDRESS:-127.0.0.1}:$MCP_PORT (issuer=$MCP_ISSUER; detached; this script returns)..."
@@ -258,6 +285,7 @@ $VIEW_HYGIENE_LINES
 $BIND_LINE
 $TRACE_LINE
 $TITLE_LINE
+$TOOLSETS_LINE
 $GRAIL_LINE$LIFETIME_LINES
 r forkOnPort: $MCP_PORT
 %
