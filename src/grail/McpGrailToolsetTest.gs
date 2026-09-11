@@ -130,6 +130,17 @@ request: methodName params: paramsDict
   paramsDict ifNotNil: [d at: 'params' put: paramsDict].
   ^d
 %
+category: 'helpers'
+method: McpGrailToolsetTest
+signatureOf: aName fromEntry: anEntry
+  "signatureFor:from:on: driven on ONE table entry -- how the transcripts in issue #19 were
+   produced. No Grail checkout, no class and no import: the entry is the { name . kind . default }
+   triples Grail's compiler emits, which is the whole of what the renderer reads."
+  ^McpGrailToolset new
+    signatureFor: aName
+    from: (KeyValueDictionary new at: aName put: anEntry; yourself)
+    on: Object
+%
 category: 'tests'
 method: McpGrailToolsetTest
 testCallSitesIgnoreLiteralsCommentsAndLongerNames
@@ -555,6 +566,38 @@ testGrailDirectoryIsADeclaredOption
       optionNamed: 'grailDirectory' ifAbsent: [nil]) equals: '/somewhere/Grail'.
   "unconfigured, the toolset still works -- it just leaves Grail to resolve a directory itself"
   self assert: (McpGrailToolset new optionNamed: 'grailDirectory' ifAbsent: [nil]) isNil
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testGrailEmitsTheParameterKindsTheSignatureNeeds
+  "The other half of testSignatureCarriesEveryParameterKind: that the table really does carry the
+   kinds the renderer reads, and that the two varargs kinds carry NO default.
+
+   The second point is load-bearing. The renderer emits a default whenever the entry has a third
+   slot, so an entry `{ 'args' . 2 . x }` would print `*args=x`, which is not Python -- it does not
+   because Grail emits no third slot for kind 2 or kind 4. That is a fact about somebody else's
+   compiler, so it is asserted here rather than assumed.
+
+   Pins Grail's CURRENT emission, like testCompilePython: a failure here means the signature table
+   changed shape, which is exactly the news the renderer needs."
+  | lf q src |
+  lf := Character lf asString.
+  "The table is emitted INSIDE a ___compileMethod: 'source' literal, so every quote in it arrives
+   doubled: the transpiled text reads { ''args''. 2 }, not { 'args'. 2 }. Composing the pair rather
+   than writing four apostrophes in a row keeps the patterns below readable."
+  q := String with: $' with: $'.
+  src := self mcp tool_compile_python: (self oneArg: 'code' value:
+    'class Shim:' , lf ,
+    '    def call(self, a, /, b, *args, key=None, **kwargs):' , lf ,
+    '        return (a, b, args, key, kwargs)' , lf).
+  self assert: (self includesCS: '___methodSignatureTable___' in: src).
+  "each entry matched WHOLE, closing brace included -- that is what says `no third slot` for the
+   two varargs kinds, where a match up to the kind alone would not"
+  self assert: (self includesCS: '{ ' , q , 'a' , q , '. 0 }' in: src).
+  self assert: (self includesCS: '{ ' , q , 'b' , q , '. 1 }' in: src).
+  self assert: (self includesCS: '{ ' , q , 'args' , q , '. 2 }' in: src).
+  self assert: (self includesCS: '{ ' , q , 'key' , q , '. 3. ' , q , 'None' , q , ' }' in: src).
+  self assert: (self includesCS: '{ ' , q , 'kwargs' , q , '. 4 }' in: src)
 %
 category: 'tests'
 method: McpGrailToolsetTest
@@ -1028,14 +1071,174 @@ testSelectorMatchesAPythonNameByDecodingRatherThanEncoding
 %
 category: 'tests'
 method: McpGrailToolsetTest
+testSignatureCarriesEveryParameterKind
+  "Every parameter kind reaches the rendered signature: `*args`, `**kwargs`, the `/` that closes a
+   positional-only group and the bare `*` that opens a keyword-only one.
+
+   Driven on the TABLE rather than through a class, because that is the only way to reach kinds 0,
+   2, 3 and 4 here: this suite's live fixture (_grail_session.SessionDict) is fourteen methods of
+   kind 1 -- the single kind the old renderer got right -- so `0 failed` said nothing about the
+   other four, and the bug this pins shipped under a green suite.
+
+   What shipped was not a signature with a piece missing. `call(a, b, args, key=None, kwargs)` is a
+   well-formed signature for a DIFFERENT method, indistinguishable from a real one, and every call
+   written from it raises TypeError. The first two entries below are what Grail emits for
+   `def call(self, a, /, b, *args, key=None, **kwargs)` and `def kwonly(self, a, *, b, c=1)`;
+   testGrailEmitsTheParameterKindsTheSignatureNeeds pins that they are still what it emits."
+  self assert: (self signatureOf: 'call' fromEntry:
+      { { 'a'. 0 }. { 'b'. 1 }. { 'args'. 2 }. { 'key'. 3. 'None' }. { 'kwargs'. 4 } })
+    equals: 'call(a, /, b, *args, key=None, **kwargs)'.
+  "keyword-only with no *args: the separator is the bare *, and without it `kwonly(a, b, c=1)`
+   invites Shim2().kwonly(1, 2), which the generated method body itself refuses"
+  self assert: (self signatureOf: 'kwonly' fromEntry: { { 'a'. 1 }. { 'b'. 3 }. { 'c'. 3. '1' } })
+    equals: 'kwonly(a, *, b, c=1)'.
+  "a positional-only group that runs to the end still gets its closing /"
+  self assert: (self signatureOf: 'posonly' fromEntry: { { 'a'. 0 }. { 'b'. 0 } })
+    equals: 'posonly(a, b, /)'.
+  "*args has already opened the keyword-only group, so no bare * is added ahead of it"
+  self assert: (self signatureOf: 'wrapper' fromEntry: { { 'args'. 2 }. { 'k'. 3. '2' }. { 'kw'. 4 } })
+    equals: 'wrapper(*args, k=2, **kw)'.
+  "kind 1 is untouched -- the case that always worked, and the shape of nearly every method"
+  self assert: (self signatureOf: 'pop' fromEntry: { { 'key'. 1 }. { 'default'. 1. 'None' } })
+    equals: 'pop(key, default=None)'.
+  self assert: (self signatureOf: 'keys' fromEntry: { }) equals: 'keys()'.
+  "a missing or unrecognised kind renders as the bare name: every read off an entry is guarded, and
+   a surprise in the table must not cost the parameter it belongs to"
+  self assert: (self signatureOf: 'legacy' fromEntry: { { 'a' }. { 'b'. 99 }. { 'c'. nil } })
+    equals: 'legacy(a, b, c)'
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testTestGemDeathNamesTheGciNumberAndNeverTheNrs
+  "A dead test gem's GciError must never be quoted to the client. Measured 2026-09-09 on 3.7.5,
+   GciError>>_error:in: appends `for session ' , externalSession _describe' to every error in the
+   4000-4999 band, and _describe yields the stone NRS, the GemStone user and the gem NRS -- host,
+   netldi and the whole gemnetobject command line. So the number is what goes out, and the text
+   stays in the gem log: the same split, for the same error out of the same band, that
+   McpRouter>>sessionGoneErrorFor:id: makes.
+
+   Driven by NUMBER rather than by a fabricated GciError because one cannot be fabricated: GciError
+   answers instVarAt:put: with `structural updates disallowed', and the only other route into the
+   band sends #_describe to an external session, which this project may not do. A genuine 4067
+   therefore needs a gem that really died -- staged by hand rather than in the suite, because this
+   file spawns exactly ONE gem on purpose (testRunPythonTestsRunsFreshAndLeavesTheCallerAlone) and
+   a stone here has few session slots."
+  | ts oom |
+  ts := McpGrailToolset new.
+  oom := ts testGemDeathCauseForGciNumber: 4067.
+  self assert: (self includesCS: 'ran out of temporary object memory' in: oom).
+  "the budget that was in force, so 'raise it' is an instruction rather than advice"
+  self assert: (self includesCS: 'GEM_TEMPOBJ_CACHE_SIZE' in: oom).
+  "any other number is reported AS a number, and points at the log rather than guessing"
+  self assert: (self includesCS: 'GCI error 4100'
+    in: (ts testGemDeathCauseForGciNumber: 4100)).
+  self assert: (self includesCS: 'stopped answering'
+    in: (ts testGemDeathCauseForGciNumber: 4100)).
+  "an error that is not a GciError at all carries no number, and none is invented"
+  self deny: (self includesCS: 'GCI error'
+    in: (ts testGemDeathCauseForGciNumber: nil)).
+  "and the error object's own text never survives into the sentence"
+  self deny: (self includesCS: 'something else entirely' in: (ts testGemDeathCauseFor:
+    ([Error signal: 'something else entirely'] on: Error do: [:ex | ex])))
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testTestGemIsForkedWithGrailsMemoryBudget
+  "The test gem is forked with the budget Grail's own runner uses, not the netldi's default. A
+   netldi hands out GEM_TEMPOBJ_CACHE_SIZE=50MB, and a Grail test class does not fit in it -- the
+   gem dies mid-class and the run answers nothing at all, which is the failure this option exists
+   to remove.
+
+   The value travels into an NRS, where whitespace and the NRS metacharacters would end the -C
+   argument early and apply half of it. Half a budget looks exactly like no budget, so it is refused
+   rather than passed on."
+  | dflt |
+  self assert: (McpGrailToolset declaredOptionNames includes: 'testGemConfig').
+  dflt := McpGrailToolset new testGemConfig.
+  self assert: (self includesCS: 'GEM_TEMPOBJ_CACHE_SIZE' in: dflt).
+  self assert: (self includesCS: 'GEM_TEMPOBJ_CODE_SIZE' in: dflt).
+  "a deployment on a smaller host sets its own, and gets exactly what it set"
+  self assert: ((McpGrailToolset on: nil options:
+    (Dictionary new at: 'testGemConfig' put: 'GEM_TEMPOBJ_CACHE_SIZE=200000;'; yourself))
+      testGemConfig) equals: 'GEM_TEMPOBJ_CACHE_SIZE=200000;'.
+  self should: [(McpGrailToolset on: nil options:
+    (Dictionary new at: 'testGemConfig' put: 'A=1; B=2;'; yourself)) testGemConfig]
+      raise: McpError
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testTestGemMemoryIsBoundedAsWellAsRaised
+  "Raising the ceiling is only half the fix, and Grail's own runner says so in the same breath it
+   states the budget: `THIS AND THE EIGHT-PARTITION CHANGE BELOW ARE TWO FIXES FOR ONE DEFECT ...
+   Partitioning lowers what a session HAS to hold; the ceiling raises what it MAY hold'
+   (scripts/run_tests.sh). Grail needs EIGHT sessions at that budget for its 648 classes, so no
+   ceiling makes a classNames-less call fit in one gem -- and the failure past the ceiling is the
+   dangerous kind: the gem does not die, it raises AlmostOutOfMemory against whichever test it
+   happened to be running. So the run has to bound what it asks one gem to hold.
+
+   The threshold is checked against the two figures Grail measured rather than as a round number:
+   96% is where its CI broke and 75% is what it calls comfortable, so the default must sit between
+   them or it is either useless or a nuisance. 0 is the escape hatch for a host that would rather
+   have the gem's own verdict.
+
+   Driven through the option and the formatter rather than by staging a full gem: this file spawns
+   exactly ONE gem on purpose (testRunPythonTestsRunsFreshAndLeavesTheCallerAlone) and a stone here
+   has few session slots."
+  | ceilingFor |
+  self assert: (McpGrailToolset declaredOptionNames includes: 'testGemMemoryCeilingPercent').
+  ceilingFor := [:v | (McpGrailToolset on: nil options:
+    (Dictionary new at: 'testGemMemoryCeilingPercent' put: v; yourself))
+      testGemMemoryCeilingPercent].
+  "the default sits between the figure Grail measured breaking and the one it calls comfortable"
+  self assert: McpGrailToolset new testGemMemoryCeilingPercent < 96.
+  self assert: McpGrailToolset new testGemMemoryCeilingPercent > 75.
+  "a deployment gets exactly what it set, and 0 disables stopping altogether"
+  self assert: (ceilingFor value: 90) equals: 90.
+  self assert: (ceilingFor value: 0) equals: 0.
+  "a percentage that is not one is refused rather than silently treated as 'never stop', which is
+   the reading that would put the misreporting back"
+  self should: [ceilingFor value: 101] raise: McpError.
+  self should: [ceilingFor value: -1] raise: McpError.
+  self should: [ceilingFor value: 'lots'] raise: McpError
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testTestGemMemoryNoteCarriesTheBudgetAndNotJustThePercentage
+  "The reading a run reports is the number Grail says it needed and lacked -- `that took a while to
+   recognise precisely because nothing reported the number' (scripts/run_tests.sh). It carries the
+   budget as well as the percentage, because a percentage alone cannot say whether the gem got the
+   budget it was asked for, which is the first thing to check when a run stops short unexpectedly:
+   the same 85% means something different at 659MB than at 29MB."
+  | note |
+  note := McpGrailToolset new memoryNoteFor: 452984832 of: 691142656 percent: 65.
+  self assert: (self includesCS: '432MB' in: note).
+  self assert: (self includesCS: '659MB' in: note).
+  self assert: (self includesCS: '65%' in: note)
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testTestGemPerClassReplyCarriesItsMemoryReading
+  "The per-class expression reports the gem's memory alongside its counts, which is what lets the
+   caller judge headroom at the only boundary where it is still in control. The three selectors are
+   the ones Grail's own runTestsShard.gs emits as GRAIL_SHARD_MEM, and the percentage is taken from
+   the kernel rather than divided out in the caller because it is the figure the kernel raises
+   AlmostOutOfMemory against."
+  | perClass |
+  perClass := McpGrailToolset new testRunnerExpressionForClassNamed: 'FooTest'.
+  self assert: (self includesCS: '_tempObjSpacePercentUsed' in: perClass).
+  self assert: (self includesCS: '_tempObjSpaceUsed' in: perClass).
+  self assert: (self includesCS: '_tempObjSpaceMax' in: perClass)
+%
+category: 'tests'
+method: McpGrailToolsetTest
 testTestRunnerExpressionQuotesNamesRatherThanCompilingThem
-  "Class names come from the client and are interpolated into an expression run in another gem, so
+  "Class names come from the client and are interpolated into expressions run in another gem, so
    they must travel as STRING LITERALS resolved there by objectNamed: -- never as code. printString
    doubles an embedded quote, so a name containing one closes nothing.
-   Checked on the built expression rather than by running it: what matters is what would be sent."
-  | expr |
+   Checked on the built expressions rather than by running them: what matters is what would be sent."
+  | expr perClass |
   expr := (McpGrailToolset new)
-    testRunnerExpressionFor: (Array with: 'FooTest' with: 'It''s')
+    testRunnerClassListExpressionFor: (Array with: 'FooTest' with: 'It''s')
     directory: '/tmp/grail'.
   self assert: (self includesCS: '''FooTest''' in: expr).
   "the apostrophe is doubled, so the literal still closes where it should"
@@ -1044,7 +1247,11 @@ testTestRunnerExpressionQuotesNamesRatherThanCompilingThem
   "the directory travels the same way"
   self assert: (self includesCS: '''/tmp/grail''' in: expr).
   "and it is $GRAIL_DIR that is set -- see the method comment for why, and the Grail defect behind it"
-  self assert: (self includesCS: 'GRAIL_DIR' in: expr)
+  self assert: (self includesCS: 'GRAIL_DIR' in: expr).
+  "the per-class expression names one class, quoted the same way, and runs its suite"
+  perClass := (McpGrailToolset new) testRunnerExpressionForClassNamed: 'FooTest'.
+  self assert: (self includesCS: '''FooTest'' asSymbol' in: perClass).
+  self assert: (self includesCS: 'c suite run: result' in: perClass)
 %
 category: 'tests'
 method: McpGrailToolsetTest
