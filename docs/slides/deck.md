@@ -29,12 +29,13 @@ style: |
 ---
 
 <!--
-SEVEN VERTICAL SLICES so far, and sections 0-8 are now cut end to end. In RUNNING order: sections
-0 and 1 (nine slides), then sections 2 and 3 (nine), then section 4 (ten), then section 5 (seven),
-then section 6 (six), then section 7 (fourteen), then section 8 (ten). In the order they were CUT
-that is slice 3, slice 4, slice 5, slice 6, slice 7, slice 1, slice 2 -- the two centrepieces were
-cut first on purpose, because they are what the budget has to fit around. Sections 9-13 are not
-cut yet. Each slice's own header comment sits beside its first slide.
+EIGHT VERTICAL SLICES so far, and sections 0-9 are now cut end to end -- this file is in RUNNING
+order throughout. Sections 0 and 1 (nine slides), then sections 2 and 3 (nine), then section 4
+(ten), then section 5 (seven), then section 6 (six), then section 7 (fourteen), then section 8
+(ten), then section 9 (six). In the order they were CUT that is slice 3, slice 4, slice 5, slice 6,
+slice 7, slice 1, slice 2, slice 8 -- the two centrepieces were cut first on purpose, because they
+are what the budget has to fit around. Sections 10-13 are not cut yet. Each slice's own header
+comment sits beside its first slide.
 
 Source of truth for the argument and the notes is docs/Presentation.md; each slice is derived from
 the matching section of it. Where the two disagree THIS FILE IS RIGHT and the outline should be
@@ -3325,4 +3326,320 @@ log line plus the [session] line is all the evidence anyone needs, and it saves 
 
 Do not raise MCP_REAPER_INTERVAL questions here -- 10s is for the stage, 60 is the default, and
 saying so takes ten seconds you will want back.
+-->
+
+---
+
+<!--
+================================================================================
+VERTICAL SLICE 8 -- section 9, McpAuthRouter: a reachable port. Five slides and
+demo G. Cut 2026-09-12: eighth in running order, eighth to be cut.
+
+Running order and plans, in seconds -- three invariants 45, every request carries
+the token 45, the login 45, the token is the real bound 55, the offline_access
+deviation 60 (250s of slides); demo G 120. About 6 minutes.
+
+THE OUTLINE SAYS 3 SLIDES AND THIS IS FIVE, which is the same arithmetic as
+section 6: the budget line was written before the bullet list under it, and that
+list contains three things that are each a slide on their own -- the invariants,
+the renewal bug, and the deviation the outline itself says deserves "a slide of
+its own".
+
+WHAT TO CUT, in order: slide 3 (the login) folds into slide 2 as one sentence if
+it has to, and demo G is already the riskiest demo in the deck. Do NOT cut slide
+4 or slide 5. Slide 4 is a silent-data-loss bug with a fix that reads as obvious
+only afterwards; slide 5 is the one place in the talk where this project
+knowingly departs from a normative SHOULD NOT, and saying so out loud in front of
+the people who will read the conformance suite is the whole point of having it.
+
+THE SECTION'S THESIS is not "we added OAuth". It is that authorization here is
+not a gate in front of the server, it is the thing that decides WHOSE GEM RUNS
+THE CODE. Every slide is a consequence of that: the token is checked on every
+request because the session id is not a credential; the session is bound to the
+token's exp because the gem is logged in as that token's user; and the deviation
+exists because without it a real client cannot log in at all.
+
+NO DIAGRAM, deliberately. The shape here is the base router's shape with one hook
+filled in (requestAuthorized:on:, section 4's slide 22), and drawing it again
+with a padlock on it would say less than the sentence already on slide 2.
+
+THE VERSION DEPENDENCY is one fine line on slide 1 and nothing more, because
+section 12 owns versions and spends 12.1 on the obstacle that moved the floor.
+The outline calls 3.7.6 "the one thing in this talk that is a straight ask of the
+room" -- that framing belongs to section 13, which collects the asks; here it is
+a fact about what runs where.
+
+TWO REPOSITORY PROBLEMS FOUND WHILE CUTTING THIS, both now in "What to fix in the
+repository before the talk" (items 7 and 8) and both affecting THIS section:
+  * docs/MCP_Client_Notes.md says the offline_access SHOULD NOT is "draft-only,
+    and so not a gap in either supported revision". McpAuthConformanceTest says
+    SEP-2207 is "status Final, so it binds independently of which revision we
+    claim". Those are opposite claims about whether slide 5's deviation is a
+    deviation at all. THE SLIDE FOLLOWS THE CONFORMANCE SUITE, because that is
+    the reading the code actually enforces -- but somebody in that room may have
+    MCP_Client_Notes.md open, so resolve it before the talk rather than on stage;
+  * ./run-conformance.sh does not exist. It is cited from McpAuthRouter's class
+    comment ("scored by ./run-conformance.sh") and from McpAuthConformanceTest.
+    No slide mentions it and none should until it is back, but the class comment
+    is the first thing a curious attendee will read about conformance.
+================================================================================
+-->
+
+## A reachable port, and the three invariants that pay for it
+
+`McpAuthRouter` is the class you instantiate to get a port reachable beyond loopback. All three invariants are **enforced in code, not by a launch script** — because `runOnPort:` and `forkOnPort:` can be called directly.
+
+1. **`bindAddress` is configurable here**, where the base class answers loopback and offers no setter — because every request must present a valid bearer token. Still **seeded to loopback**: reachability is something the caller *asks for*
+2. **TLS is mandatory** — both start methods **signal** unless a certificate and an unencrypted key are set. A bearer token is a password travelling in a header on **every** request, so cleartext is never appropriate — **not even on loopback**: a router that is safe today becomes unsafe the moment its bind address is widened
+3. **The resource-server config is mandatory** — an `expectedAudience` and at least one **https** authorization server, or it refuses to start. Both are **MUSTs**: an unconfigured router would accept a token minted for **any** resource and publish a metadata document naming **nowhere** to get one
+
+<span class="fine">`src/auth` needs `JsonWebToken`, `JwtSecurityData`, `jwtPassword:` — **3.7.5**. An **external** OIDC IdP — **3.7.6**. §12.</span>
+
+<!--
+Open the section with its thesis, because none of the five slides makes sense
+without it: authorization here is not a gate in front of the server. It is the
+thing that decides WHOSE GEM RUNS THE CODE. Everything else follows.
+
+Then the three invariants, and the phrase to land is "enforced in code rather
+than by a launch script". A launch script is advice. These signal, from the two
+methods that start a server, so there is no way to get a reachable port without
+TLS and a resource config -- not by calling runOnPort: in topaz, not by writing
+your own script, not by copying the example and deleting a line.
+
+Invariant 2 is the one worth defending, because somebody will say "it is only
+loopback". The answer is on the slide: a router that is safe today becomes unsafe
+the moment its bind address is widened, and the bind address is a one-line change
+in somebody else's script six months from now. The property has to hold for the
+class, not for the deployment.
+
+Invariant 3 is the subtle one. An unconfigured router is not merely useless, it
+is actively wrong in two directions at once: it accepts tokens minted for any
+resource, and it publishes a discovery document that names nowhere to get one.
+Neither failure is loud.
+
+The version line: state it and move on, section 12 owns it. The fuller version,
+if asked -- on an image older than 3.7.5 those three methods CANNOT COMPILE AT
+ALL, which is why install.sh probes the image rather than asking, and leaves the
+group out. The 3.7.6 line is unrelated to compilation: earlier releases have a
+bug connecting to an external OIDC IdP.
+-->
+
+---
+
+## Every request carries the token — the session id is **not** a credential
+
+`requestAuthorized:on:` is the base-class hook from §4, and this is the class that fills it in. Verify the **signature** against the stone's trusted JWT keys, then the resource-server claim checks: **`exp`** (required), and where configured **issuer**, **audience** (RFC 8707) and **required scopes**.
+
+* A request naming an existing session must also present a token belonging to **that session's user**
+* **One exception, by design:** the Protected Resource Metadata endpoint is unauthenticated — it is what a client reads *in order to learn how to authenticate*
+
+> **It once was a credential.** `initialize` alone was authenticated and the `MCP-Session-Id` admitted every later request — so an **expired or revoked token kept working** for as long as the session was kept alive, and the **GET stream and DELETE needed no credential at all**.
+
+<span class="fine">The spec is explicit: authorization *"MUST be included in every HTTP request from client to server, even if they are part of the same logical session"*, and the server MUST validate on each protected-resource request. RFC 9728 metadata is served at **both** the root and the path-scoped form, because a conforming client probes the path-scoped one **first**.</span>
+
+<!--
+The blockquote is a confession and lands better delivered as one. The session id
+was doing a job it was never designed for: it is a routing key, it is 128 bits of
+randomness, and it looked exactly like a credential -- which is how this kind of
+mistake survives review. The failure mode is the one that matters: revocation did
+nothing. Revoke a user's access and their session kept working until the idle
+reaper happened to get to it.
+
+And the two endpoints nobody thought about, which is the usual shape of this bug:
+the GET stream and DELETE were not "initialize", so they took no credential
+whatsoever. Anyone holding a session id could read that session's stream.
+
+The metadata exception is the one thing that MUST stay open, and it is worth one
+sentence because it sounds like a hole and is not: it is a discovery document
+whose entire purpose is to tell an unauthenticated client where to go and get
+authenticated. Refusing it without a token would be a bootstrap that cannot
+start.
+
+If asked what changed in practice: every request now pays a signature
+verification. It is cheap against the stone's trusted keys, and nobody has
+measured it as a problem -- but it is an honest cost to name rather than deny.
+-->
+
+---
+
+## The login: the worker gem is **the user's**, not the server's
+
+On `initialize` the router derives the GemStone userId from a configurable claim — **`userIdClaim`, default `sub`**, typically `preferred_username` on Keycloak — then opens the worker:
+
+```smalltalk
+McpSession startWithId: newId user: aUserId jwt: aJwtString
+  → worker username: … ; jwtPassword: … ; login
+```
+
+* **GemStone re-validates the JWT at login** — signature against its trusted keys, plus that user's `JwtSecurityData` — so a bad or expired token **fails the login**, not merely the gate
+* Missing · malformed · forged · expired · wrong-audience → **401 `invalid_token`**. Missing a required scope → **403 `insufficient_scope`**
+* Both carry `WWW-Authenticate: Bearer` with `error`, `error_description`, `scope` and `resource_metadata` — everything a client needs to fix itself
+
+<span class="fine">**`supportedScopes` is derived, never configured** — the union of `requiredScopes`, `writeScope` and `extraScopes` — so a required scope is *always* advertised and the write scope is *always* requestable. The two ways to get it wrong are made **unrepresentable** rather than checked for.</span>
+
+<!--
+The headline is the payoff of the whole section and it is what demo G shows: the
+gem is Alice's. Her code runs as her GemStone user, her privileges apply, her
+name is in the session list. The server is not impersonating anybody.
+
+Two validations, and it is worth being clear they are not redundant. The router
+checks the token because it is the resource server and that is its job. GemStone
+checks it again at login because it is not going to take this server's word for
+who a user is -- and that second check is against the USER's JwtSecurityData,
+which is a fact about the account rather than about the request.
+
+The derived scope set is a small design point that generalises, and it is the
+same move as section 2's "the tool surface is named": the wrong states are not
+detected, they are made impossible to express. A required scope no client is told
+to request, and an unrequestable writeScope that leaves every session read-only
+forever -- both unrepresentable, so requireResourceServerConfig has no subset
+rule to check and no caller has one to maintain.
+
+If asked about userIdClaim: sub is the default because it is the one claim OIDC
+guarantees, but it is usually a UUID. preferred_username is what a Keycloak
+deployment actually wants, and that is why profile is advertised -- it is the
+scope that emits it. That thread continues on the next slide.
+-->
+
+---
+
+## The token is the real bound — and the cap is on the **grant**
+
+Every session is capped at its access token's own `exp`, **whatever the idle policy says** — the worker gem *is* logged in as that token's user, so a session outliving its token would leave the authorization it was opened with in force after the grant expired. **An expiry is never probed around and never forgiven.**
+
+> **And then the bug.** A client working steadily had its worker gem torn down and **its uncommitted transaction lost** one access-token lifetime after opening — however recently it had called. Activity feeds the *idle* clock, and the idle clock is not what ends an authenticated session. **That is silent data loss**: the client gets a new token, opens a new session, and nothing looks broken.
+
+* The fix is to read the credential in front of you: a request bearing a **refreshed** token for the same user extends the session to the **new** token's `exp` (`renewSessionExpiry:from:`). Refreshing sooner would not have helped — **the renewed token was never consulted about lifetime**
+* **Two boundaries kept**, which is why it is a separate selector and not a relaxed ratchet: a **nil `exp` moves nothing**, and a session with **no** deadline is left alone — renewal extends a deadline, it never introduces one
+* A read-write session is **not** extended by a token that has lost the write scope. That token keeps working, **buys no time**, and the client's next session opens read-only — which is what its grant now actually says
+
+<!--
+Spend the time here. The first paragraph is policy and the rest is a bug worth
+telling properly.
+
+Say the failure as the user experienced it, not as the code did: you are working,
+you are calling every few seconds, and one hour after you started -- an access
+token lifetime -- your gem is gone and your uncommitted work with it. Nothing
+errored. Your client got a fresh token, opened a fresh session, and carried on.
+You would find out when you went looking for the changes you had made.
+
+Then the diagnosis, which is the interesting half: activity was feeding the idle
+clock, and the idle clock was never what was going to end this session. The
+absolute deadline was, and nothing was moving it. The client had been presenting
+a renewed grant on every single request and the server was not reading its exp.
+
+The third bullet is the one that shows this is a rule and not a loophole. A token
+that has lost the write scope is still valid and still that user's, so it keeps
+working -- but extending a read-WRITE session on it would keep a broader
+authorization alive on the strength of a narrower grant, which is a privilege the
+client has just demonstrably lost. It buys no time, and the next session opens
+read-only.
+
+One of only two wall-clock grounds in the whole reaper -- section 8 -- which is
+worth saying if that section has already run.
+
+A nil exp moves nothing because a token whose expiry cannot be read must not be
+able to turn a bounded session unbounded; and a session with no deadline is left
+alone because renewal extends a deadline rather than introducing one.
+
+The renewable-past-deadline case, if anyone spots it: a session past its deadline
+but not yet reaped IS renewable, on purpose. The reaper runs on an interval, so
+that window is scheduling, not policy, and a client presenting a valid token
+inside it is exactly the client that should keep its gem.
+-->
+
+---
+
+## The `offline_access` deviation — said out loud, on purpose
+
+**The rule.** MCP **SEP-2207** (status *Final*, so the conformance suite treats it as binding whichever revision we claim): **SHOULD NOT** advertise `offline_access` in `WWW-Authenticate` or `scopes_supported`.
+
+**What forces it is a pair of conditions, neither of them ours:** a client that **appends `offline_access` to its authorization request on its own**, plus an authorization server that **rejects a request naming a scope that client was never assigned**. Keycloak and Authelia reject **before any login page**.
+
+* **Keycloak compounds it.** An RFC 7591 dynamic registration carrying a `scope` field **replaces** the realm's defaults — so the resource *advertising* the scope is the only way such a client ever holds it. Omitting it **breaks the browser login outright**, not merely shortens sessions
+* **Two exits tried, neither available.** Pinning the scopes **client-side** failed (2026-08-20) — the client kept appending it. Nothing **server-side** substitutes: policies only *validate*, mappers only *emit claims*; neither can **assign** a scope. **CIMD** remains, untested
+
+> **How it is kept honest.** The conformance suite asserts the rule against a **`conformantRouter` fixture** — so a router is spec-clean *unless an operator opts out* — and the test deployment opts out via `MCP_EXTRA_SCOPES`, **knowingly**.
+
+<!--
+This is the slide this section exists to be able to give. A deliberate departure
+from a normative SHOULD NOT, stated in front of the people most likely to check,
+with the reasoning rather than an apology.
+
+Authorization servers that gate scopes per client behave this way; others
+silently narrow the grant and need none of this, which is why the deviation looks
+unnecessary until you meet one that does not.
+
+The structure to hold on to: the rule is right, and this project cannot follow it
+because of two behaviours that belong to a client and an authorization server.
+Neither is ours, neither is a bug we can fix, and between them they mean that a
+spec-clean router cannot complete a browser login against Keycloak at all. That
+is a strictly worse outcome than the deviation.
+
+The reason behind the rule, if it is asked: refresh tokens are not a RESOURCE
+requirement. Whether a client gets one is between it and the authorization
+server, and a resource has no business asking for it on the client's behalf.
+
+Say what the deviation is NOT: it is not the server handing out refresh tokens,
+and it is not the server deciding sessions should be longer. It is one string in a
+metadata document, and the reason it has to be there is that Keycloak replaced
+the client's scopes at registration time.
+
+The fixture point is the part to be proud of and it is a technique worth naming:
+the test constrains the FIXTURE, not every deployment. A router is conformant
+unless an operator deliberately opts out, the opt-out is one environment variable,
+and the deviation is recorded in the suite's own class comment rather than in
+somebody's memory.
+
+The known gap in the same breath, if asked what else is untested: the draft's
+scope-hierarchies MUST. The router compares scopes by exact string, which
+satisfies it only while all configured scopes are flat and unrelated -- true of
+mcp:use and mcp:write today. No test, because there is no hierarchy API to test
+yet, and introducing one needs a design decision first.
+
+ONE THING TO SETTLE BEFORE THE TALK: docs/MCP_Client_Notes.md says this SHOULD NOT
+is draft-only and therefore not a gap in either supported revision, which is the
+opposite of what the conformance suite says. The slide follows the suite. Item 7
+of "What to fix in the repository before the talk".
+-->
+
+---
+
+<!-- _class: demo -->
+
+# DEMO G — Alice runs code as Alice
+
+```bash
+./run-auth-server.sh          # TLS, an IdP, and a reachable port
+```
+
+1. **The browser login** through the IdP
+2. `execute_code` — and `status` showing **Alice's own GemStone userId**
+3. `System cacheStatisticsForAllSlotsShort` — the `McpServer:…` row **is hers**
+
+<span class="fine">**The point to land: the worker gem is her session, not the server's.** Needs the 3.7.6 stone. If the browser flow looks risky on the day, `verify-oidc-login.sh` plus a curl with a **pre-fetched token** is the safe version — have one ready either way.</span>
+
+<span class="fine">**Not built, and an invitation:** mapping **scopes to privileges**, and **loading toolsets by scope**. The router already resolves the tool surface **per session, on the side that can see the token** (§2, §4) — the mechanism is in place and unused. What is missing is the policy. §13.</span>
+
+<span class="fine">**2 minutes.**</span>
+
+<!--
+The riskiest demo in the deck: a browser, an IdP, a different stone, and a
+redirect that has to come back. Decide by the morning which version is running
+and rehearse THAT one -- switching to the fallback live is how this becomes four
+minutes.
+
+Have a pre-fetched token in scrollback regardless. Even in the good case it turns
+a failed redirect into a five-second recovery.
+
+What to point at, in order: her userId in the status output, then her row in the
+cache statistics. Those two together are the whole section -- the authorization
+did not just let her in, it decided which GemStone user is executing her code.
+
+The invitation at the end is deliberate and section 13 picks it up. Say it as an
+open question rather than a roadmap: the surface is already resolved per session
+on the side that holds the token, so the mechanism exists; what nobody has
+decided is the policy, and whether GemStone's own privileges should carry any of
+it. That is a question for this room specifically, and it is worth leaving in the
+air rather than answering.
 -->

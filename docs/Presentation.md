@@ -1652,6 +1652,28 @@ audience will have the README open.
    on 3.6.2, 3.7.2, 3.7.5 and 3.7.6"* and the slide's *"measured against 3.7.6"* agree — the report
    is the 3.7.6 filing of defects that reproduce on all four.
 
+7. **Two documents disagree about whether the `offline_access` SHOULD NOT applies to a supported
+   revision**, and §9's deviation slide rests on the answer. Found while cutting §9.
+   * `src/auth/McpAuthConformanceTest.gs` (class comment): SEP-2207 is *"status Final, so it binds
+     independently of which revision we claim"* — and the suite asserts the rule against
+     `conformantRouter` accordingly.
+   * `docs/MCP_Client_Notes.md` (line 38): *"the `offline_access` 'SHOULD NOT' and the
+     scope-hierarchy MUST are **draft-only**, and so are not gaps in either supported revision."*
+   Those are opposite claims. If the rule is draft-only, §9's deviation is not a deviation from
+   anything this server claims to implement, and the slide overstates it; if it binds, the Client
+   Notes tell a reader the opposite of what the suite enforces. **The slide follows the conformance
+   suite**, because that is the reading the code actually enforces — but this room may have either
+   document open. **Recommendation:** decide which is right and make the other say so. The most
+   likely reconciliation is that the SEP is Final *as a SEP* while its requirement text lands in the
+   draft revision, in which case both sentences are half-true and both should say which half.
+8. **`./run-conformance.sh` does not exist.** It is cited from `McpAuthRouter`'s class comment
+   (*"Conformance status: see `McpAuthConformanceTest`, one test per normative requirement, scored
+   by ./run-conformance.sh"*) and from `McpAuthConformanceTest` itself (*"./run-conformance.sh still
+   exists to score it test-by-test"*). No slide mentions it and none should until it is back — but
+   the class comment is the first thing a curious attendee will read about conformance, and it names
+   a script that is not in the tree. Same family as item 2, and cheaper: either restore it or reword
+   both comments to point at `./run-unit-tests.sh`, which does run the suite.
+
 ---
 
 ## Open items
