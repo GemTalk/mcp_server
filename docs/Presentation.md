@@ -1381,22 +1381,27 @@ inside the "is the buffer big enough?" test** — conflating *big enough* with *
   commit was not evidence of absence.** It passed once only because a smaller class happened to put
   the method being checked inside the good first kilobyte.
 
-### 12.3 What the code still carries from the old floor
+### 12.3 What the floor moving actually deleted
 
-Worth 20 seconds so nobody reads it as dead code in the file-outs. Two expansions in `forkOnPort:`
-and `McpSession>>startWithId:readOnly:` are still written the 3.7.2 way, and their comments still
-say so:
+**Rewritten 2026-09-12.** This section used to describe two expansions still written the 3.7.2 way
+in `forkOnPort:` and `McpSession>>startWithId:readOnly:`. **They are gone** — removed on 2026-09-11
+in `e3ce652`, four days after the floor moved — so the slide is no longer *what the code still
+carries* but the better one: **what moving a floor bought.**
 
-* `newDefault` + `gemNRS: (GsNetworkResourceString defaultGemNRSFromCurrent node: 'localhost')`
-  instead of `newDefaultForGemHost:` — kept because the expansions are **proven byte-identical on
-  3.7.5** (the NRS strings compare equal), and because plain `newDefault` **silently moves the gem
-  to the machine's host name**, which is a trap independent of version;
-* `onetimePassword: (GsCurrentSession currentSession createOnetimePasswordValidForSeconds: 300)`
-  instead of `useOnetimePassword`.
-
-They stay because they are correct and identical, not because 3.7.2 is supported — and they are now
-candidates for simplification rather than compatibility requirements. `jwtPassword:` never had an
-expansion, which was the second reason auth could not run before 3.7.5.
+* `forkOnPort:` and `McpSession>>newWorkerSession` now send **`newDefaultForGemHost:`** and
+  **`useOnetimePassword`** directly. The expansions bought nothing and cost a reader two comments
+  explaining an image nobody runs. *Moving a floor is not an abstraction: it is permission to
+  delete.*
+* **One `newDefault` + `gemNRS:` survives, and not for compatibility** — worth saying, because a
+  reader will find it in the file-outs and assume it was missed.
+  `McpGrailToolset>>newGrailTestSession` sets an **NRS body** (`gemnetobject -C …`) to pin the forked
+  test gem's memory budget (§10), and `newDefaultForGemHost:` gives no way to pass one. That was
+  always the real reason; the commit removed only the clause that had *claimed* 3.7.2 as the reason.
+* `jwtPassword:` **never had an expansion at all**, which was the second reason auth could not run
+  before 3.7.5 (§9).
+* `docs/GemStone_Notes.md` **keeps the 3.7.2 selector table** — the expansions are still the
+  substitution to make if anyone *has* to run there — but no longer tells you to use them
+  unconditionally.
 
 ## 13. Future work, and what to ask the room (4–5 slides)
 
