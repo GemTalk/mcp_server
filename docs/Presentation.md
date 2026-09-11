@@ -223,19 +223,31 @@ differently-configured routers can run at once.**
 | `allowedOriginHosts` | loopback | DNS-rebinding defence |
 | `messageTrace` | false | a traced log holds every argument every client sent |
 
-* **The worker surface, also decided here.** `workerClassName` `nil` → `McpServer`;
-  `toolsetNames` `nil` → the installed default surface, which is
-  `McpServer class>>installedDefaultToolsetNames`: the seven core toolsets plus `McpGrailToolset`
-  *if that file is loaded in the worker's image*. Resolved **per session**, not at boot — so a Grail
-  install that lands after startup reaches the next client, and (§9) an authenticated router will
-  later be able to narrow the surface per token, since the token is only visible on the front-end
-  side.
+* **The worker surface, also decided here — and it is *named*, never discovered.**
+  `workerClassName` `nil` → `McpServer`; `toolsetNames` `nil` →
+  `McpServer class>>defaultToolsetNames`: **the core seven and nothing else.** Until 2026-09-11 the
+  default probed the symbol list and appended `McpGrailToolset` whenever `src/grail/` had been filed
+  in — so *installing* the group configured every server in the image, including ones whose operator
+  had never heard of Grail. `installedDefaultToolsetNames` is gone. Two reasons: an optional toolset
+  can carry a dependency the image knows nothing about (Grail's tools read the `.py` checkout that
+  `grailDirectory` names, so such a server was answering for a directory nobody chose, and on an
+  image where `MCP_GRAIL_DIR` was never set it advertised nine tools that could not work); and
+  turning a toolset on should look the same whoever wrote it, which makes `McpGrailToolset` the
+  worked example §10 can tell a developer to copy rather than a special case that reads as built in.
+  `MCP_TOOLSETS` names the surface — the core seven **plus** yours; `MCP_GRAIL_DIR` only *configures*
+  it. **31 tools by default, 40 when Grail is named.** Breaking and pre-release, so it is called out
+  rather than shimmed, and nothing silently degrades: the tools are absent from `tools/list` rather
+  than present and failing. Resolved **per session**, not at boot — so a toolset filed in after
+  startup reaches the next client, and (§9) an authenticated router will later be able to narrow the
+  surface per token, since the token is only visible on the front-end side.
 * **Two validations run in the launching session as well as in the child**
   (`validateWorkerConfig`, `validateTimerConfig`). Deliberate: without it the operator sees a
   cheerful "forked into gem session N" and a port that never opens, with the reason buried in a
   detached gem's log. `validateTimerConfig` refuses a combination whose *counts* would round to
   something other than what was written — a probe interval shorter than a pass, an idle timeout
-  shorter than a probe interval.
+  shorter than a probe interval. `validateWorkerConfig` also refuses to start a router holding
+  **options for a toolset it does not serve**, which is what catches an `MCP_GRAIL_DIR` set without
+  `McpGrailToolset` in the surface.
 
 ---
 

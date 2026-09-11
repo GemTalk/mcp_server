@@ -29,18 +29,18 @@ style: |
 ---
 
 <!--
-THREE VERTICAL SLICES so far. In RUNNING order: sections 0 and 1 (nine slides), then section 7
-(fourteen), then section 8 (ten). In the order they were CUT that is slice 3, slice 1, slice 2 --
-the two centrepieces were cut first on purpose, because they are what the budget has to fit
-around. Sections 2-6 and 9-13 are not cut yet. Each slice's own header comment sits beside its
-first slide.
+FOUR VERTICAL SLICES so far. In RUNNING order: sections 0 and 1 (nine slides), then sections 2
+and 3 (nine), then section 7 (fourteen), then section 8 (ten). In the order they were CUT that is
+slice 3, slice 4, slice 1, slice 2 -- the two centrepieces were cut first on purpose, because they
+are what the budget has to fit around. Sections 4-6 and 9-13 are not cut yet. Each slice's own
+header comment sits beside its first slide.
 
 Source of truth for the argument and the notes is docs/Presentation.md; each slice is derived from
 the matching section of it. Where the two disagree THIS FILE IS RIGHT and the outline should be
 brought into line with it, which is how both slices were reconciled.
 
 Rendering, either way from this one file. --html IS REQUIRED, not optional: Marp Core defaults
-html:false and STRIPS raw HTML, which would silently drop all four inline <svg> diagrams and every
+html:false and STRIPS raw HTML, which would silently drop all five inline <svg> diagrams and every
 <span class="fine"> / .verbatim / .ex block. Front matter cannot turn it on (it is a CLI/config-level
 setting); use the flag, or html:true in a .marprc.yml beside the file.
   marp --html --pdf --allow-local-files docs/slides/deck.md
@@ -53,8 +53,9 @@ NEVER PUT A BLANK LINE INSIDE AN <svg> BLOCK. A blank line ends the HTML block a
 markdown parser is concerned, so everything after it in the same element is re-parsed as markdown:
 the <path> elements vanish, and every <text> after the blank line is emitted as ordinary flow text,
 centred and stacked, spilling off the bottom of the slide. It looks like a broken stylesheet rather
-than a parse error, and nothing warns. All four diagrams had this and all four were silently wrong
-until rendered (found 2026-09-10). Group the elements with comments or indentation, never blanks.
+than a parse error, and nothing warns. The first four diagrams all had this and all four were
+silently wrong until rendered (found 2026-09-10). Group the elements with comments or indentation,
+never blanks.
 
 The deck renders to PPTX (marp --pptx) but WITHOUT the speaker notes -- the notesSlide parts
 contain only the slide number. PDF via --pdf-notes is the only export that carries them.
@@ -413,6 +414,507 @@ Do NOT get drawn into GEMSTONE_GLOBAL_DIR here beyond the one sentence. The full
 README and it is a ten-minute conversation: netldi and stone each bind an ephemeral port and record
 it under that directory, /etc/services is a trap rather than a fix, and install.sh logs in linked
 (-l) specifically so it needs no netldi at all.
+-->
+
+---
+
+<!--
+================================================================================
+VERTICAL SLICE 4 -- sections 2 and 3: starting a server, and the fork. Nine
+slides -- a lead, three for section 2, four for section 3, the last of them demo
+B. Cut 2026-09-11: second in running order, fourth to be cut.
+
+Running order and plans, in seconds -- lead 10; config on an instance 30, what
+initialize seeds 35, the tool surface 45 (110s, section 2); the one fact + the
+deployment picture 50, forkOnPort: 45, in the child 40, the banner 30,
+transactionless 50 (215s, section 3); demo B 90. About 7 minutes.
+
+THE THESIS OF THE PAIR is one sentence and the lead says it: a server is a gem,
+started by evaluating an expression, configured entirely on an instance, and
+detached. Nothing about it is committed and nothing about it is a fact about the
+image -- which is what lets several differently-configured routers serve one
+stone at once, and is also why there is no file on disk to read afterwards (hence
+the banner slide).
+
+Section 2 is the cheap half and should be run fast. Section 3 is where this
+audience is, and the slide that lands is "a gem executes no Smalltalk while it is
+idle" -- it is the reason the architecture is shaped this way rather than a
+preference, and the room knows it is true before you say it. It is a CALLBACK
+slide: section 6 and section 8 each come back to it, and section 8's own notes
+already point here.
+
+THE DEPLOYMENT DIAGRAM LIVES HERE, on purpose, and it is the first picture in the
+deck. Slice 3 deliberately drew nothing so this one would land: sections 0 and 1
+described three kinds of gem in a table, and this is that table as a picture, at
+the moment the reader first needs to hold all three at once. The request picture
+is section 4's and stays there.
+
+DEPARTURES from docs/Presentation.md:
+  * the outline gives section 2 two slides; it gets three. The extra one is the
+    tool surface, which the merge of 2026-09-11 (33974ec) turned from a bullet
+    into an argument -- see the next paragraph.
+  * the outline gives section 3 "2-3 slides"; it gets four plus the demo. The
+    banner is a slide of its own because it is the only artefact that records
+    what a running router was told, and because DEMO B is nothing but that banner
+    on a projector.
+  * the outline's forkOnPort: step 2 carries a 3.7.2-compatibility aside -- the
+    long-way spelling of newDefaultForGemHost: and useOnetimePassword. The slide
+    does not mention it at all, because the code is being changed to the 3.7.5
+    spelling and there will be nothing left to explain. Step 2 reads as what it
+    does: same user, one-time password, valid 300s, which is true either way.
+    Section 12.3 still owns whatever the old floor left behind.
+
+WHAT CHANGED ON 2026-09-11 and what the deck now says. McpServer class>>installed
+DefaultToolsetNames is GONE: the default surface no longer probes the symbol list
+for McpGrailToolset, so nothing joins a server's tool surface by being loaded.
+The outline still describes the probe in section 2 and MUST be corrected. Two
+consequences the slides take:
+  * section 2 gains slide 3, whose argument is that configuring a toolset now
+    looks the same whoever wrote it;
+  * section 10 ("a server for YOUR software") gets a worked example it did not
+    have -- McpGrailToolset is now wired exactly as a third party's would be, so
+    section 10 can say "copy this" and mean it literally. Slide 3's last line is
+    the forward reference; do not spend section 10's argument here.
+Breaking, pre-release, and called out rather than shimmed: a Grail server's
+run-server.sh line needs MCP_TOOLSETS or it comes up with 31 tools instead of 40.
+================================================================================
+-->
+
+<!-- _class: lead -->
+
+# Starting a server
+
+### A gem, forked and detached, whose main activity is the accept loop
+
+<br>
+
+**§2–3** · nothing here is committed, and nothing here is a fact about the image
+
+<!--
+Where we are: section 1 said there are three kinds of gem and showed the table.
+This pair is the first of them being born. Sections 4 and 5 are the second.
+
+Say the thesis before the first slide, because it makes the rest of the pair
+coherent and it is the part this audience will test: a server is an EXPRESSION
+someone evaluated. There is no server object in the repository, no configuration
+file, no installed service. Kill the gem and there is nothing left to clean up.
+
+Seven minutes for the pair including the demo. Section 2 is the half to run fast;
+section 3 is the half this room came for.
+
+If we are behind: this lead slide is the first thing to cut in the whole deck.
+-->
+
+---
+
+## All the config is on an instance. None of it is committed
+
+`run-server.sh` is a here-doc into `topaz -l`. Stripped of the environment handling, the whole of it:
+
+```smalltalk
+| r |
+r := McpRouter new.
+r readOnly: false.
+"…any MCP_* setters the environment asked for…"
+r forkOnPort: 8000
+```
+
+* **There is no class-side config state.** A launch script or a test reconfigures the *instance*; `forkOnPort:` serializes it into the child gem's fork string as JSON
+* So **several differently-configured routers can serve one stone at once** — a read-only one on 8001, an authenticated one on 8443 — and none of them is a fact about the image
+* What travels in that string is **paths and identifiers only, never key material**
+
+<span class="fine">The other ~200 lines of the script are environment handling, a port-in-use check, and turning `MCP_*` into setter lines. The five above are the program.</span>
+
+<!--
+Run this slide fast. It exists so that nobody spends the rest of the hour looking
+for the config file, and it is worth exactly that much.
+
+The claim to make explicitly, because it is unusual enough to be worth saying out
+loud: there is no server object in the repository. Nothing was committed when this
+started. If you want to know what a running server was told, you read its gem log
+-- which is why the banner gets a slide of its own in a moment.
+
+`readOnly:` is on the slide only because the script always writes it. Section 11
+is the one-slide answer to what it does; do not take the question here beyond "it
+hides and refuses the mutating tools, and it is a convenience rather than a
+boundary".
+
+If someone asks why not a config file: the fork string IS the config file, and it
+has the property a file does not -- it cannot drift from the process that is
+running. Two routers on one stone would need two files and a way to say which.
+-->
+
+---
+
+## What `initialize` seeds, and why the rest stays `nil`
+
+**The rule:** seed a field when `nil` would be unsafe, **or when `nil` is itself a setting**.
+
+| what it bounds | seeded defaults |
+|---|---|
+| concurrency | `maxSessions` **3** — `nil` would mean *no cap*, which is a setting in itself |
+| session lifetime | `sessionIdleTimeoutSeconds` 1800 · `livenessProbeIntervalSeconds` 120 · `reaperIntervalSeconds` 60 · two stream deadlines, 60 and 10 (§8) |
+| view hygiene (§8) | `maxCommitsBehind` 20 · `stuckViewGraceSeconds` 60 · `pinnedViewGraceSeconds` 300 |
+| this gem (§3) | `frontEndTransactionMode` `transactionless` |
+| security | `allowedOriginHosts` loopback · `messageTrace` **false** |
+| **left `nil`** = off | `requestTimeoutSeconds` — **no request deadline by default**, and §8 is why · `maxSessionLifetimeSeconds` · `toolsetOptions` · the TLS files |
+
+<span class="fine">`validateTimerConfig` refuses any interval whose *count* would round to something other than what was written. §8: why all of this is counted rather than timed.</span>
+
+<!--
+Do not read the table. Say the rule, let them scan, and move on -- the numbers
+are all on later slides where they matter, and this one is here so that section 8
+does not have to stop and explain where 20 came from. maintenanceCallTimeoutSeconds
+(5), streamlessIdleTimeoutSeconds (60) and streamLossGraceSeconds (10) are the
+three seeded values not spelled out, for room; section 8 introduces all three
+where they are used.
+
+The awkward cases are the ones where nil is MEANINGFUL, and they are worth the
+extra sentence if there is time. maxSessions nil is "no cap at all". maxCommits
+Behind nil is "view hygiene off". Neither could double as "use the default", so
+both are seeded, and the class comment says so at each one.
+
+The rule is the slide, and it is worth one extra sentence if there is time: the
+awkward cases are the ones where nil is MEANINGFUL. maxSessions nil is "no cap at
+all". maxCommitsBehind nil is "view hygiene off". Neither could double as "use the
+default", so both are seeded, and the class comment says so at each one.
+
+messageTrace false is a security default, not a performance one: a traced log
+records every tool argument every client sent -- a compile_method body, an
+execute_code body -- and an operator has to CHOOSE that rather than discover it.
+The cap on each traced body is not optional for the same reason.
+
+requestTimeoutSeconds nil is the one that draws a question. The honest answer is
+section 8's and it is one sentence: a deadline on the front end cannot stop the
+work, it can only stop waiting for it, which left the gem running and the client
+told it had failed. Promise section 8 and move on.
+-->
+
+---
+
+## The tool surface is **named**, never discovered
+
+`workerClassName` `nil` → `McpServer`; `toolsetNames` `nil` → `defaultToolsetNames` — **the core seven, and nothing else.**
+
+> **Changed this week.** The default used to probe the symbol list and append `McpGrailToolset` whenever `src/grail/` had been filed in. So *installing* the group configured every server in the image.
+
+* An optional toolset can carry a dependency the image knows nothing about — Grail's tools read the `.py` checkout that `grailDirectory` names, so such a server was **answering for a directory nobody chose**
+* And **turning a toolset on should look the same whoever wrote it.** With the probe gone, `McpGrailToolset` is wired exactly as a third party's would be — which makes it the worked example §10 can tell you to copy
+
+`MCP_TOOLSETS` names the surface — the core seven **plus** yours. `MCP_GRAIL_DIR` only *configures* it; `validateWorkerConfig` refuses to start a router holding options for a toolset it does not serve.
+
+<span class="fine">Resolved **per session, in the front end**: a toolset filed in after startup reaches the next client, and (§9) an authenticated router can narrow the list per principal — only possible on the side that holds the token. **31 tools by default, 40 when Grail is named.**</span>
+
+<!--
+This slide is four days old and it replaced a bullet. Say the change out loud --
+this room may have read the README before the probe came out -- and say which way
+it broke: a Grail server's launch line now needs MCP_TOOLSETS or it comes up with
+31 tools instead of 40. Pre-release, so it is called out rather than shimmed.
+
+Nothing silently degrades, which is the part that makes it a safe break: the
+tools are ABSENT from tools/list rather than present and failing. A client cannot
+call what it was never offered. The sharpest version of the old behaviour, if you
+want it: on an image where MCP_GRAIL_DIR had never been set, every server in the
+image advertised nine tools that could not work.
+
+The second bullet is the one that matters for the rest of the hour, and it is why
+this is a slide rather than a footnote. Before the merge, the only optional
+toolset in the tree was wired by a mechanism nobody else could use -- so section
+10 had to describe how you WOULD add a toolset. Now McpGrailToolset is the worked
+example: nine tools, its own options, its own suite, and not one line of special
+handling anywhere in core. Section 10 can say "copy this". Do NOT spend that
+argument here; one sentence and the forward reference.
+
+If asked why the probe existed at all: convenience, and it was wrong for a
+reason worth naming -- installing something and running it are different
+decisions, and conflating them meant an operator who had never heard of Grail was
+serving its tools.
+
+McpContractTest pins this in the CORE suite rather than the Grail one, which is
+the right place for it: the property is that an unconfigured router's surface
+does not depend on which optional groups the image happens to carry, so it has to
+be asserted on an image that carries them.
+-->
+
+---
+
+## A gem executes no Smalltalk while it is idle
+
+<div style="text-align:center">
+<svg viewBox="0 0 960 212" width="900" role="img" aria-label="Deployment: a launching topaz session forks and detaches a front-end gem, which owns the listen socket, the reaper and the signal poller, and runs transactionless; that gem logs in one worker gem per client session over GCI. The launching session then logs out and the child keeps serving.">
+  <defs>
+    <marker id="m2" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <!-- the launching session -->
+  <rect x="10" y="65" width="160" height="64" rx="4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="6 4" opacity=".75"/>
+  <text x="90" y="92" font-size="16" text-anchor="middle" font-weight="600" fill="currentColor">topaz -l</text>
+  <text x="90" y="113" font-size="13" text-anchor="middle" fill="currentColor" opacity=".7">run-server.sh</text>
+  <text x="90" y="152" font-size="13" text-anchor="middle" fill="currentColor" opacity=".62">logs out, and the</text>
+  <text x="90" y="170" font-size="13" text-anchor="middle" fill="currentColor" opacity=".62">child keeps serving</text>
+  <!-- fork arrow -->
+  <line x1="172" y1="97" x2="294" y2="97" stroke="currentColor" stroke-width="1.5" marker-end="url(#m2)"/>
+  <text x="233" y="76" font-size="13" text-anchor="middle" fill="currentColor" opacity=".8">fork + detach</text>
+  <text x="233" y="118" font-size="13" text-anchor="middle" fill="currentColor" opacity=".8">config as JSON</text>
+  <!-- the front end -->
+  <rect x="298" y="42" width="322" height="110" rx="4" fill="none" stroke="currentColor" stroke-width="1.9"/>
+  <text x="459" y="66" font-size="16" text-anchor="middle" font-weight="600" fill="currentColor">detached gem &#8212; McpRouter:8000</text>
+  <text x="459" y="92" font-size="14" text-anchor="middle" fill="currentColor">accept loop &#8212; the gem&#8217;s <tspan font-style="italic">blocking main activity</tspan></text>
+  <text x="459" y="114" font-size="14" text-anchor="middle" fill="currentColor">reaper (&#167;8) &#183; signal poller (&#167;6)</text>
+  <text x="459" y="136" font-size="14" text-anchor="middle" fill="#b4451f" font-weight="600">transactionless</text>
+  <!-- workers -->
+  <line x1="622" y1="97" x2="694" y2="66" stroke="currentColor" stroke-width="1.4" marker-end="url(#m2)"/>
+  <line x1="622" y1="97" x2="694" y2="97" stroke="currentColor" stroke-width="1.4" marker-end="url(#m2)"/>
+  <line x1="622" y1="97" x2="694" y2="128" stroke="currentColor" stroke-width="1.4" marker-end="url(#m2)"/>
+  <rect x="698" y="50" width="248" height="32" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+  <rect x="698" y="82" width="248" height="32" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+  <rect x="698" y="114" width="248" height="32" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+  <text x="822" y="71" font-size="14" text-anchor="middle" fill="currentColor">worker gem &#8212; McpServer</text>
+  <text x="822" y="103" font-size="14" text-anchor="middle" fill="currentColor">worker gem &#8212; McpServer</text>
+  <text x="822" y="135" font-size="14" text-anchor="middle" fill="currentColor">worker gem &#8212; McpServer</text>
+  <text x="822" y="166" font-size="13" text-anchor="middle" fill="currentColor" opacity=".7">one per client session: a login, a view,</text>
+  <text x="822" y="184" font-size="13" text-anchor="middle" fill="currentColor" opacity=".7">a commit record the stone cannot dispose of</text>
+  <text x="659" y="90" font-size="12" text-anchor="middle" fill="currentColor" opacity=".6">GCI</text>
+</svg>
+</div>
+
+> A forked `GsProcess` runs only while its gem is **actively executing Smalltalk**. A GCI-driven session is parked in the C client between commands, so an accept loop forked there is frozen and never serves a request.
+
+**Therefore the accept loop must be a dedicated gem's blocking main activity.** The same fact decides two more things later: the front end must own the client's stream (§6), and the front end must own view hygiene (§8) — because **only the front end has a heartbeat.**
+
+<!--
+This is the slide that lands with this audience, and the only one in the pair
+worth slowing down for. They know the fact is true; what they have not
+necessarily done is follow it to three separate conclusions. Say it once, put the
+picture up, and promise the other two.
+
+The third conclusion is the interesting one and section 8 spends it properly, so
+do not do it here -- but have the sentence ready if somebody jumps ahead, because
+somebody will. On every OTHER count the worker is the better-informed party: it
+can read its own commits-behind, the stone's backlog, whether it holds the oldest
+commit record, and needsCommit, none of which the front end can see. The action
+still belongs to the front end because the problem case is precisely the IDLE
+worker holding a stale view -- the one moment that worker cannot run a line of
+code.
+
+The picture is the section 1 table with the boxes drawn. Point at the three parts
+in order: one gem owning the socket, three GsProcesses inside it, one worker gem
+per client. Then point at "transactionless" and say it is the last slide of this
+section.
+
+The dashed box is the launching session and the dash is the point -- it is gone
+by the time anything is served. If someone asks what happens to the workers when
+the front end dies: every attached worker dies with the process owning its GCI
+connection, which is also why ./stop-server.sh leaks nothing. That is section 8's
+material; one sentence here at most.
+-->
+
+---
+
+## `McpRouter>>forkOnPort:`, in order
+
+1. `validateWorkerConfig` + `validateTimerConfig` — **in the launching session, not just the child**
+2. Build a `GsTsExternalSession`: **same user, one-time password**, valid 300s
+3. `login`
+4. **Capture `stoneSessionId` and the host pid _before_ launching the loop** — once the non-blocking call is running, the external session refuses further queries (`GciError`, *operation in progress*)
+5. `forkAndDetachString: 'McpRouter runOnPort: 8000 configJson: ''{…}'''`
+6. `logout` the handle — **the child is independent**
+7. Answer a status string carrying **three ways to stop it**: `./stop-server.sh` (by port), `System stopSession: <id>` (from any session), `kill <pid>` (shell)
+
+Step 1 is the one that earns its keep: without it the operator sees a cheerful *“forked into gem session 42”* and **a port that never opens**, with the reason buried in a detached gem's log.
+
+<!--
+Two things on this slide are worth the room's time and the rest is narration.
+
+Step 4 is the ordering constraint: it is not obvious, it cost time, and it is
+exactly the kind of thing this audience will have hit. Once forkAndDetachString:
+is running, the external session will not answer stoneSessionId -- so the id and
+the pid have to be taken while the child is still idle. Get it backwards and the
+operator gets a server with no way to name it.
+
+Step 1 is the argument for validating twice. Say the failure mode rather than the
+principle: a validation that only runs in the child produces a successful-looking
+launch and a dead port.
+
+Step 7 matters more than it looks. There is no pid file and no service manager, so
+the status string IS the record -- and it is printed once, to the terminal that
+launched it. stop-server.sh finds the gem by port with lsof, which is the only one
+of the three that still works an hour later when the terminal is gone.
+
+If asked about the one-time password: the child logs in as the same GemStone user
+as the launching session, with a credential valid for 300 seconds and usable once.
+No password is written into the fork string, which is the whole point -- the fork
+string is visible to anything that can read the session's arguments.
+-->
+
+---
+
+## Then, in the child: bind, name, fork, loop
+
+`McpRouter class>>runOnPort:configJson:` → `applyConfigJson:` → `applyFrontEndTransactionMode` → the instance-side `runOnPort:`
+
+* `makeListenerOnPort:` — **loopback only**, and `bindAddress` has **no setter on the base class**: a base `McpRouter` authenticates nothing, so a reachable port would be an open door into the repository. `McpAuthRouter` is the class that adds one (§9)
+* `nameThisGem: 'McpRouter:8000'` — **after the bind.** A gem that failed to take the port is not this server
+* `forkReaper` (§8) + `forkSignalPoller` (§6) — two `GsProcess`es, running *during the loop's waits*
+
+```smalltalk
+[isRunning] whileTrue: [
+  (serverSocket readWillNotBlockWithin: 500) == true ifTrue: [
+    client := serverSocket accept.
+    client ifNotNil: [self serve: client]]]
+```
+
+Gated on **readiness**, not `acceptTimeoutMs:` — for a `GsSecureSocket` listener `acceptTimeoutMs:` *raises* on an idle timeout, and would kill the loop every 500ms.
+
+<!--
+Three practical facts, in descending order of how likely they are to be asked
+about.
+
+The listener is loopback and cannot be told otherwise. That is a class-shaped
+decision rather than a configuration one, and it is deliberate: to get a reachable
+port you must instantiate a different class, one that requires a bearer token and
+enforces TLS. Section 9. If the answer stops there, good.
+
+The 500ms readiness gate is a GsSecureSocket bug story in one line, and it is
+worth telling only if the room looks interested: acceptTimeoutMs: treats the nil a
+plain socket returns on an idle timeout as a failure and raises, so the obvious
+spelling of this loop dies twice a second on TLS and works fine on plain HTTP.
+readWillNotBlockWithin: behaves identically for both.
+
+Naming after the bind is thirty seconds of DBA goodwill: the name is what makes
+the gem findable in System cacheStatisticsForAllSlots, and it would be actively
+misleading on a gem that never got the port.
+
+Have this ready if anyone is reading along in the source and asks why the
+transaction mode is applied in the CLASS-side runOnPort:configJson: and nowhere
+else. That is the only way in that owns its session outright -- the gem was forked
+to evaluate this expression and does nothing afterwards. The instance-side
+runOnPort: runs in an interactive topaz, in YOUR session, and applying the mode
+there would abort and silently discard your uncommitted work. It is the difference
+between a method that owns its gem and one that is a guest in yours.
+-->
+
+---
+
+## The banner is the only record of what this router was told
+
+Nothing is committed and nothing is on disk, so the gem log **is** the configuration. Seven lines, written after the bind:
+
+* listening address and scheme · **workers and toolsets** — the surface §2 resolved
+* session lifetime · concurrent-session cap (its own line: *how many at once* is a different question from *how long each lasts*)
+* **shared cache name, read back from the cache** — so the log and `System cacheStatisticsForAllSlots` cannot disagree; a name too long arrives truncated
+* **transaction mode as the gem reports it**, not as it was configured
+* view hygiene, in full (§8) · and the trace line **only when tracing is on**
+
+> A reader has to be able to tell a **quiet** server from an **untraced** one. Otherwise an absence of message lines reads as an absence of traffic, which is the wrong conclusion and the expensive one.
+
+<span class="fine">Find the log with `lsof -nP -iTCP:8000 -sTCP:LISTEN`.</span>
+
+<!--
+This slide is here because the demo is about to be this slide, and because it is
+the answer to the question section 2 raised and left open: if nothing is
+committed, how do you find out what a running server is doing?
+
+The two "read it back rather than report it" lines are the ones worth pointing
+at, and they are the same idea twice. The banner must say what IS, not what was
+intended -- because the two diverge in exactly the cases an operator is reading
+the log to understand. A cache name over 31 characters is truncated; a
+transactionless mode that could not be set leaves the gem in whatever mode it
+logged in with, logged at the time with the reason.
+
+The transaction-mode line is also the one that tells you whether the once-a-pass
+abort is releasing a commit record or re-pinning a fresh one. That is the next
+slide.
+
+The blockquote is a small thing that generalises well, and if the room is warm it
+is worth ten seconds: silence is ambiguous, so a log has to say when it is not
+recording. It applies to more of this server than the trace line.
+-->
+
+---
+
+## The front end runs `transactionless` — and what that costs
+
+**Why:** a front-end gem left in transaction sat on the stone's **oldest commit record for 15 hours**, its last transaction boundary its own login — and *nothing stone-side could ever have moved it*. An in-transaction gem is immune to `sigAbort` unless it asked not to be.
+
+**So:** the mode at startup, and an abort at the top of **every maintenance pass** (`refreshFrontEndView`). It holds no commit record longer than one interval.
+
+* **The price: front-end code must not read persistent object graphs.** No walking a committed collection, no caching a persistent object across statements. Stone primitives and lookups by name are fine — the class comment says so in capitals
+* **The payoff, the same fact from the other side:** a committed recompile of front-end code **takes effect in a running server**, within two passes. That is the answer to *“my transport fix didn't take”* — wait one pass, then check the gem's start time
+
+`refreshFrontEndView` also carries a **bug detector**. Out of transaction, a write to a committed object is allowed, sets `needsCommit`, and is then discarded by the abort with **no error raised anywhere**. The front end writes nothing today; if that ever stops being true, that log line is the only thing that will say so.
+
+<!--
+The measurement is the slide. Fifteen hours, one gem, and the stone with no way
+to move it -- that number is why the mode is not a preference, and this audience
+will recognise the shape of the problem immediately.
+
+Say the asymmetry plainly, because it is the part that surprises: the stone's
+sigAbort mechanism, which exists precisely for this, fires only when the backlog
+is over StnSignalAbortCrBacklog AND the session is on the oldest record AND the
+session is not in a transaction. The gem that is hurting you most is the one
+least reachable.
+
+The price and the payoff are the same property and it is worth saying so. A gem
+that cannot hold a view across statements is a gem whose code is re-read from the
+repository constantly -- which is why a recompile lands in a running server, and
+also why front-end code that cached a persistent object would be reading
+something that no longer exists.
+
+The bug detector is the best small thing in this section and takes fifteen
+seconds. Out of transaction, the mistake that would raise 2030 at commit time in
+an ordinary gem raises NOTHING -- the write is simply discarded. A one-line check
+at the top of each pass is the whole defence, and it has never fired.
+
+If asked "so what if the mode cannot be set": it is logged and swallowed. A front
+end that could not get the mode is still a working front end, just one that pins
+a commit record; refusing to serve for that reason would be the worse trade. The
+failure that actually happens is transactionless in a SOLO session -- the
+repository open by this gem alone -- which is no way to run a server but is
+exactly how someone tries one out.
+-->
+
+---
+
+<!-- _class: demo -->
+
+# DEMO B — a server, from a here-doc
+
+```bash
+./run-server.sh
+lsof -nP -iTCP:8000 -sTCP:LISTEN     # find the gem, and its log
+```
+
+1. The script returns immediately — and prints **the session id, the host pid, and three ways to stop it**
+2. `tail` the gem log: **the banner**, the whole configuration of a server that has nothing on disk
+3. `System cacheStatisticsForAllSlotsShort` — **`McpRouter:8000`**, alone, with no workers yet
+
+<span class="fine">Leave the `tail -f` running. DEMO C adds the worker rows to the same cache statistics, and DEMO F reads view hygiene out of this same log.</span>
+
+<span class="fine">**90 seconds.**</span>
+
+<!--
+Have the log path resolved BEFORE the talk and the lsof line in scrollback -- the
+one-liner is the demo's only fragile part, and hunting for a gem log on a
+projector is dead air.
+
+What to point at, in order: the three stop lines (there is no pid file, this is
+the record), then the toolsets line in the banner -- which is section 2's slide
+three, live, and the moment to say "seven toolsets, thirty-one tools, and Grail
+is not among them because I did not name it". If the demo machine has a Grail
+checkout, having a SECOND server on 8001 with MCP_TOOLSETS set is a thirty-second
+addition that makes the point better than any slide: same image, two servers,
+different surfaces.
+
+Then the single cache row. It is worth a beat on its own precisely because it is
+lonely -- one gem, no workers, nothing else in the repository knows this server
+exists. DEMO C is the payoff.
+
+Fallback if the fork fails on stage: the banner is a screenshot, and say so
+without apologising. The thing that actually fails here is a netldi that is not
+running, which --check would have caught; run install.sh --check in demo A and
+this one is already de-risked.
 -->
 
 ---
