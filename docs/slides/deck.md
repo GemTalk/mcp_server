@@ -29,16 +29,13 @@ style: |
 ---
 
 <!--
-TEN VERTICAL SLICES so far. Cut: sections 0-10 and section 12. NOT cut: section 11 (one slide) and
-section 13. Sections 0 and 1 (nine slides), then sections 2 and 3 (nine), then section 4 (ten),
-then section 5 (seven), then section 6 (six), then section 7 (fourteen), then section 8 (ten), then
-section 9 (six), then section 10 (five), then section 12 (five). In the order they were CUT that is
-slice 3, slice 4, slice 5, slice 6, slice 7, slice 1, slice 2, slice 8, slice 9, slice 10 -- the two
-centrepieces were cut first on purpose, because they are what the budget has to fit around.
-
-THE FILE IS IN RUNNING ORDER WITH ONE GAP: section 11's slide belongs between slice 9 (section 10)
-and slice 10 (section 12), and is not written yet. Slice 10's header repeats this beside the slides
-it affects. Put section 11 there when it is cut, and this paragraph goes away.
+ELEVEN VERTICAL SLICES. Sections 0-12 are cut, and THIS FILE IS IN RUNNING ORDER THROUGHOUT.
+Section 13 is the only one left. Sections 0 and 1 (nine slides), then sections 2 and 3 (nine), then
+section 4 (ten), then section 5 (seven), then section 6 (six), then section 7 (fourteen), then
+section 8 (ten), then section 9 (six), then section 10 (five), then section 11 (three), then
+section 12 (five). In the order they were CUT that is slice 3, slice 4, slice 5, slice 6, slice 7,
+slice 1, slice 2, slice 8, slice 9, slice 10, slice 11 -- the two centrepieces were cut first on
+purpose, because they are what the budget has to fit around.
 
 Each slice's own header comment sits beside its first slide.
 
@@ -113,14 +110,11 @@ TWO DELIBERATE DEPARTURES from docs/Presentation.md:
     McpConcurrentEditTest, and the outline has been corrected.
 
 WHAT WAS ASKED FOR ON 2026-09-11, and where it landed -- both on the status slide,
-which is the slide those two notes turned into:
+which is the slide that note turned into:
   * server-initiated messages are NOT a feature and will not become one, because
     the 2026-07-28 draft forbids the direction outright. Slide 4 says "machinery,
-    not a feature" and hands the consequence to section 13;
-  * read-only mode is a placeholder and must not be oversold. Slide 4 says "a tool
-    gate, not an access-control boundary" and names what such a session still
-    costs -- a login, and a view.
-  The README's own status line still reads both as features; that is now item 5 in
+    not a feature" and hands the consequence to section 13.
+  The README's own status line still reads it as a feature; that is item 5 in
   docs/Presentation.md's fix list.
 
 WATCH -- the Grail toolset is about to stop being auto-detected. McpServer class>>
@@ -236,22 +230,19 @@ section 7 answers properly.
 **Built, and verified end to end** — by curl, by a TLS run, and by the in-image suites:
 
 * Streamable HTTP transport · **per-client worker gems** · **31 base tools** (+9 optional Python)
-* OAuth 2.1 / JWT bearer tokens, and TLS
+* OAuth 2.1 / JWT bearer tokens, and TLS · a **configurable worker user** (§11)
 
-**Two things on that list I am not going to sell you:**
+**One thing on that list I am not going to sell you:**
 
-* **Read-only mode** is a **tool gate, not an access-control boundary** — a localhost convenience so one user cannot mutate by accident. A read-only session still costs a login and still holds a view (§11)
 * **Server-initiated messages** are built, and this server needs them — every count in §8 rests on them — but the `2026-07-28` draft removes that direction outright. **Machinery, not a feature** (§13)
 
 <!--
 The honesty on this slide is the point of the slide, and it is worth the seconds. The README's own
 status line currently reads both of these as features and is the thing to correct.
 
-Read-only mode: the honest framing is the one section 11 gives -- gated tools are never registered
-for a read-only worker, so they are hidden from tools/list rather than refused on call, which is
-stronger than it sounds. But underneath it is still an ordinary read-write GemStone login. A
-read-only DATABASE login, or a user whose privileges cannot write, is what would make it a
-boundary, and that is a question for this room.
+The worker user is on the BUILT list rather than the caveat list, and section 11
+is where it is spent: the boundary is the GemStone user the worker gem logs in
+as, enforced by the VM on every operation. Do not open it here.
 
 Server-initiated messages: the draft says it plainly -- "servers do not initiate JSON-RPC requests
 and clients do not send JSON-RPC responses". That deletes server-initiated ping, which is what
@@ -525,13 +516,12 @@ If we are behind: this lead slide is the first thing to cut in the whole deck.
 ```smalltalk
 | r |
 r := McpRouter new.
-r readOnly: false.
 "…any MCP_* setters the environment asked for…"
 r forkOnPort: 8000
 ```
 
 * **There is no class-side config state.** A launch script or a test reconfigures the *instance*; `forkOnPort:` serializes it into the child gem's fork string as JSON
-* So **several differently-configured routers can serve one stone at once** — a read-only one on 8001, an authenticated one on 8443 — and none of them is a fact about the image
+* So **several differently-configured routers can serve one stone at once** — a browsing-only one on 8001, an authenticated one on 8443 — and none of them is a fact about the image
 * What travels in that string is **paths and identifiers only, never key material**
 
 <span class="fine">The other ~200 lines of the script are environment handling, a port-in-use check, and turning `MCP_*` into setter lines. The five above are the program.</span>
@@ -544,11 +534,6 @@ The claim to make explicitly, because it is unusual enough to be worth saying ou
 loud: there is no server object in the repository. Nothing was committed when this
 started. If you want to know what a running server was told, you read its gem log
 -- which is why the banner gets a slide of its own in a moment.
-
-`readOnly:` is on the slide only because the script always writes it. Section 11
-is the one-slide answer to what it does; do not take the question here beyond "it
-hides and refuses the mutating tools, and it is a convenience rather than a
-boundary".
 
 If someone asks why not a config file: the fork string IS the config file, and it
 has the property a file does not -- it cannot drift from the process that is
@@ -981,9 +966,9 @@ DEPARTURES from docs/Presentation.md:
 
 THE MERGE OF 2026-09-11/12 touches two numbers in this slice. defaultServerVersion
 is 0.8.0 now, which nothing on a slide states (it reaches the room only through
-serverInfo in demo C). And McpSession>>startWithId:readOnly: sends
-useOnetimePassword directly, so the worker login is the plain 3.7.5 spelling --
-which is why slide 5's bullet says "one-time password" and explains nothing.
+serverInfo in demo C). And the worker login is the plain 3.7.5
+useOnetimePassword spelling, which is why slide 5's bullet says "one-time
+password" and explains nothing.
 ================================================================================
 -->
 
@@ -1221,13 +1206,13 @@ open twenty gems, not a tuned number. Section 8 says what it is protecting.
 
 ## What travels into the worker, and why it travels at all
 
-`McpSession startWithId: newId readOnly:` — `GsTsExternalSession`, **one-time password**, `login`, then `cacheWorkerIds`: the worker's stone session id and host pid, **fetched once, at login**.
+`McpSession startWithId: newId workerUser:` — `GsTsExternalSession`, **one-time password**, `login`, then `cacheWorkerIds`: the worker's stone session id and host pid, **fetched once, at login**.
 
 Then the front end **pushes what the worker is to be** — its class, its toolsets and their options, the identity it advertises, and its two deadlines — and `prepareWorker` sends **one expression**:
 
 ```smalltalk
 McpServer prepareWorkerWithToolsets: #('McpBrowsingToolset' 'McpExecutionToolset' …)
-  options: nil readOnly: false serverName: nil title: nil version: nil
+  options: nil serverName: nil title: nil version: nil
   frontEnd: 5 cacheName: 'McpServer:5:978EC559'
 ```
 
@@ -1273,14 +1258,12 @@ so a single expression would leave printOn: still calling out.
 
 ```smalltalk
 self nameThisGem: aCacheNameOrNil.
-self sessionReadOnly: aBoolean.
 SessionTemps current at: #McpFrontEndSession put: aFrontEndSessionOrNil.
 srv := self newWithToolsetNames: … toolsetOptions: … .
 SessionTemps current at: #McpServer put: srv.
 ```
 
 * **`nameThisGem:` first**, before anything in this method that can fail
-* **`sessionReadOnly:` before the build**, so the build can leave gated tools **out of the registry entirely** (§11) — a stronger gate than refusing them on call
 * `#McpFrontEndSession` — the doorbell for a tool's progress (§6), pushed **once**, not per request
 * **Tool registration happens now, at session open** — not on the client's first request. An unresolvable worker class or toolset fails **here**, where the message can say what to fix
 * **`#McpServer` in `SessionTemps` for the gem's life**, answered only by `currentServer`: there are **two** entries into a worker, and **the blind-write ledgers live on the instance** — a second would licence writes on reads it never saw
@@ -1311,12 +1294,6 @@ foundation. Say it slowly: the guardrail's ledgers are instance state on the
 McpServer, so "which instance" is not a style question. Two instances would be
 two ledgers, and the second one would licence a write on the strength of a read
 it never saw. That is why currentServer exists and why nothing else builds one.
-
-The read-only ordering is the small one people like: a gated tool is not refused
-at call time, it is never REGISTERED, so it is absent from tools/list. A
-read-only session does not advertise what it cannot do. The one subtlety, if
-asked: tools/call still distinguishes "forbidden" from "unknown", because a model
-that is told a tool does not exist will go looking for another way to do it.
 
 "31 tool(s)" is the core seven's count, and it is the same 31 that was on section
 2's toolset slide. Point at that if the room caught it.
@@ -1639,7 +1616,6 @@ becomes a 202 with no body -- the same 202 as section 4's slide.
 ## `handleToolsCall:` — and **two** different failure envelopes
 
 * `params.name` missing → **`-32602`** `invalidParams` · unknown tool → **`-32602`** `notFound`
-* A **read-only gated** tool → **`-32601`**, `data.kind = "readOnly"` — deliberately *not* `notFound`, so a client can tell **“exists but forbidden here”** from “no such tool” (§11)
 * **Schema enforcement is structural, and says so.** `validationErrorFor:` rejects unknown top-level keys under `additionalProperties: false` *naming the allowed ones*, and requires every `required` key. **No deep type checks.** Schemas are JSON Schema 2020-12; no `$schema` needed
 
 > **Per MCP 2025-11-25, the two are split by what the model can act on.** A malformed **request** — missing name, unknown tool — is a **protocol** error `-32602`: the model is unlikely to recover. Arguments that violate the **tool's own `inputSchema`** come back as a **tool execution error**, `isError: true` *in the result*, because they carry actionable feedback a model can use to self-correct and retry.
@@ -1659,10 +1635,9 @@ deeper. In practice that has been enough, because the failure mode it catches is
 a model guessing an argument name, and the errors name the allowed ones -- which
 is the actionable feedback the spec is asking for.
 
-The read-only kind is a small thing that matters more than it looks, and section
-11 has the rest: a model told a tool does not exist will go and find another way
-to do the same thing, which on a read-only server is exactly what you do not
-want it doing.
+tools/list is unfiltered: every tool a session's toolsets registered is offered,
+and none is refused for being unsafe. What bounds a session is the GemStone user
+its worker gem logs in as -- section 11.
 -->
 
 ---
@@ -2228,8 +2203,9 @@ here, and which of its properties outlive a call. Kept short because it is prepe
 model's context for the whole conversation, so every sentence competes with the client's own
 prompt for attention.
 
-If asked: a read-only session is sent none of this. Telling a session that cannot write how to
-commit would be a page about tools it does not have.
+If asked: a session whose user cannot commit is still sent this, and still needs it -- it
+accumulates pending work exactly as any other does, and the [session] line points it at abort
+rather than at commit. Section 11.
 -->
 
 ---
@@ -2687,8 +2663,8 @@ is not caught · `execute_code` · the grains differ.
 <!--
 Say this plainly rather than burying it. The guardrail covers the tools that name their subject,
 and the tool that names nothing is exempt. A deployment that needs the guarantee removes
-McpExecutionToolset, which is resolved per session like any other — the same mechanism read-only
-mode uses.
+McpExecutionToolset, which is resolved per session like any other — though the boundary that
+actually holds is the worker gem's GemStone user, which is section 11.
 
 The three observability failures are worth naming because each is a thing I tried. needsCommit
 reports the case that does not matter and misses the case that does. PomWriteSet is empty until
@@ -2832,7 +2808,7 @@ front end observed. Promise that and they will spend the section checking it.
 ## One `GsProcess`, one pass every 60 seconds
 
 <div style="text-align:center">
-<svg viewBox="0 0 960 330" width="900" role="img" aria-label="The maintenance pass: refresh the front end's own view, then measure each worker's view hygiene, then probe quiet sessions, then reap. Step one comes first so everything after it reasons about the repository as it is now; reaping comes last so a session found gone while probing is freed in the same pass.">
+<svg viewBox="0 0 960 330" width="900" role="img" aria-label="The maintenance pass as it runs by default: refresh the front end's own view, then measure each worker's view hygiene, then probe quiet sessions, then reap. Step one comes first so everything after it reasons about the repository as it is now; reaping comes last so a session found gone while probing is freed in the same pass. A fifth arm, off by default, ends sessions holding write locks.">
   <defs>
     <marker id="m8" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -2887,9 +2863,11 @@ is actively executing Smalltalk. A worker sitting between calls is executing not
 inside it does not fire. This is the third design that fact decides, after the detached front end
 and the front end owning the client stream.
 
-One honest footnote if somebody is reading the source along with you: the numbered list in
-#maintainSessions's comment has three steps, and the method sends four -- maintainViewHygiene is
-missing from the list. The code is right and the comment is stale.
+The pass has a FIFTH arm that is not drawn, because it is off by default and belongs to section 11:
+#maintainWriteLockHolders, between view hygiene and probing, which ends the in-flight call of a busy
+session found holding write locks. It sits there because the reap in the last box deliberately never
+touches a busy session. Mention it only if section 11 has already run, or if somebody reads
+#maintainSessions along with you and counts five sends.
 -->
 
 ---
@@ -3480,7 +3458,7 @@ McpSession startWithId: newId user: aUserId jwt: aJwtString
 * Missing · malformed · forged · expired · wrong-audience → **401 `invalid_token`**. Missing a required scope → **403 `insufficient_scope`**
 * Both carry `WWW-Authenticate: Bearer` with `error`, `error_description`, `scope` and `resource_metadata` — everything a client needs to fix itself
 
-<span class="fine">**`supportedScopes` is derived, never configured** — the union of `requiredScopes`, `writeScope` and `extraScopes` — so a required scope is *always* advertised and the write scope is *always* requestable. The two ways to get it wrong are made **unrepresentable** rather than checked for.</span>
+<span class="fine">**`supportedScopes` is derived, never configured** — the union of `requiredScopes` and `extraScopes` — so a required scope is *always* advertised. The way to get it wrong is made **unrepresentable** rather than checked for.</span>
 
 <!--
 The headline is the payoff of the whole section and it is what demo G shows: the
@@ -3494,11 +3472,10 @@ who a user is -- and that second check is against the USER's JwtSecurityData,
 which is a fact about the account rather than about the request.
 
 The derived scope set is a small design point that generalises, and it is the
-same move as section 2's "the tool surface is named": the wrong states are not
-detected, they are made impossible to express. A required scope no client is told
-to request, and an unrequestable writeScope that leaves every session read-only
-forever -- both unrepresentable, so requireResourceServerConfig has no subset
-rule to check and no caller has one to maintain.
+same move as section 2's "the tool surface is named": the wrong state is not
+detected, it is made impossible to express. A required scope that no client is
+ever told to request is unrepresentable, so requireResourceServerConfig has no
+subset rule to check and no caller has one to maintain.
 
 If asked about userIdClaim: sub is the default because it is the one claim OIDC
 guarantees, but it is usually a UUID. preferred_username is what a Keycloak
@@ -3516,7 +3493,6 @@ Every session is capped at its access token's own `exp`, **whatever the idle pol
 
 * The fix is to read the credential in front of you: a request bearing a **refreshed** token for the same user extends the session to the **new** token's `exp` (`renewSessionExpiry:from:`). Refreshing sooner would not have helped — **the renewed token was never consulted about lifetime**
 * **Two boundaries kept**, which is why it is a separate selector and not a relaxed ratchet: a **nil `exp` moves nothing**, and a session with **no** deadline is left alone — renewal extends a deadline, it never introduces one
-* A read-write session is **not** extended by a token that has lost the write scope. That token keeps working, **buys no time**, and the client's next session opens read-only — which is what its grant now actually says
 
 <!--
 Spend the time here. The first paragraph is policy and the rest is a bug worth
@@ -3533,12 +3509,9 @@ clock, and the idle clock was never what was going to end this session. The
 absolute deadline was, and nothing was moving it. The client had been presenting
 a renewed grant on every single request and the server was not reading its exp.
 
-The third bullet is the one that shows this is a rule and not a loophole. A token
-that has lost the write scope is still valid and still that user's, so it keeps
-working -- but extending a read-WRITE session on it would keep a broader
-authorization alive on the strength of a narrower grant, which is a privilege the
-client has just demonstrably lost. It buys no time, and the next session opens
-read-only.
+What bounds what an authenticated session may DO is not a scope -- it is the
+GemStone user the bearer token names, whose UserProfile an administrator
+restricts. Section 11. A scope decides whether a client gets in at all.
 
 One of only two wall-clock grounds in the whole reaper -- section 8 -- which is
 worth saying if that section has already run.
@@ -3705,13 +3678,12 @@ DEPARTURES from docs/Presentation.md:
 
 ## To add tools, write a **toolset**
 
-Subclass `McpToolset` and implement three things:
+Subclass `McpToolset` and implement two things:
 
 * **`registerOn:`** — one `name:description:inputSchema:do:` per tool, with schemas from the inherited builders (`objectSchema:required:`, `propString:`, `boolProperty:`)
 * **`toolNames`** — what this toolset offers
-* **`readOnlySafeToolNames`** — whichever of your tools **cannot persist a change**
 
-> **The default is that *no* tool is read-only safe.** Fail closed: a tool a toolset does not list is gated in a read-only session — **including a future one whose author forgot to classify it** (§11).
+> **`tools/list` is unfiltered: every tool a session's toolsets registered is offered, and none is refused for being “unsafe”.** What a session may *do* is decided by the GemStone user its worker gem logs in as (§11).
 
 Handlers are instance methods taking the parsed arguments and answering a `String`; `resolveClass:`, `dictNamed:`, `linesFrom:` and `capResult:` cover the usual lookups and output capping.
 
@@ -3726,10 +3698,10 @@ Nobody hand-writes JSON Schema -- the builders are there so a tool's schema is
 Smalltalk, and so that the closed-by-default additionalProperties rule of section
 5's slide 33 is applied for you rather than remembered.
 
-The fail-closed default is the design decision worth defending, because its cost
-is real -- you must remember to classify a new tool or it silently will not run
-in a read-only session. That is the right way round. The other way, a tool is
-safe until somebody notices it is not, and the noticing happens in production.
+There is no per-tool safety classification to write, and the blockquote says why
+in the positive: a toolset declares what it offers, and the boundary is somewhere
+else entirely. Section 11 is where "somewhere else" gets its slide, so do not
+open it here beyond the pointer.
 
 assertMutableClass: forwarding to the SERVER is the bit that is easy to get
 wrong and it generalises: policy belongs to the deployment, not to the component.
@@ -3794,8 +3766,8 @@ WOULD add one. Now it can say copy this.
 
 "It needs nothing from the server" is the claim to make deliberately. Grail's
 toolset gets no hook, no special case, no entry in core -- it resolves by name
-like any other, takes its options like any other, and is gated read-only like any
-other. If it needed a privilege, it would not be an example of anything.
+like any other and takes its options like any other. If it needed a hook of its
+own, it would not be an example of anything.
 
 Two options rather than one matters for the same reason: one option looks like a
 special case, two looks like a mechanism.
@@ -3814,7 +3786,7 @@ startup instead of silently dropping them. Section 2's validateWorkerConfig.
 > **Measured 2026-09-01:** the same three test classes gave **132 defects** run in a long-lived worker session, and **386 run / 386 passed / 0 failed / 0 errors** run fresh. **Every one of those defects was an artifact of the session.**
 
 * A real disagreement between two models. Grail's rule: **a module is a compiled artifact in the database, bound — never rebuilt — by every import afterwards.** Its SUnit isolates tests by **evicting framework modules from `sys.modules`** — and where those modules are *committed*, re-importing **raises**. **A long-lived MCP worker is exactly the session that accumulates that state**
-* Forking settles three more things at once: the caller's transaction is **untouched**, where an in-session run dirties it *silently* — **a cold Grail import is a database write**, measured at **31 modified objects for a 7-test class**; the child's writes are **never committed**; and that is what makes the tool **read-only safe**
+* Forking settles three more things at once: the caller's transaction is **untouched**, where an in-session run dirties it *silently* — **a cold Grail import is a database write**, measured at **31 modified objects for a 7-test class**; and the child's writes are **never committed**, so a run leaves the repository exactly as it found it
 * **The cost is honest and stated in the tool.** Every run is fully cold — `FlaskScaffoldingTestCase` alone is **262 seconds**. Hence the `classNames` argument, and why this is the flagship consumer of progress (§6): **an unbounded wait with no word is worse than a slow one that says so**
 
 <!--
@@ -3886,14 +3858,184 @@ tracker with a talk mentioning it.
 
 <!--
 ================================================================================
+VERTICAL SLICE 11 -- section 11, the worker gem's GemStone user. Three slides,
+no demo. Cut 2026-09-13, and it closes the running-order gap: this file is now in
+running order for every cut section, 0-12. Section 13 is the only one left.
+
+Running order and plans, in seconds -- the boundary 55, what it costs 50, the
+lock and the ask 55. About 2 1/2 minutes.
+
+THE OUTLINE SAYS 1 SLIDE, and that entry describes a feature this server does not
+have. Rewrite it. What section 11 is now is a real boundary with a real open
+question attached, and the question is one of the two things this talk is
+actually asking the room for -- the other being section 5's defect table.
+
+THE SECTION'S THESIS: the only boundary that holds is the GemStone user the
+worker gem logs in as, because it is enforced in the stone, by the VM, on every
+operation, and cannot be talked around from inside the session. Everything else a
+server could do -- narrowing the tool surface, refusing a tool by name -- states
+an intention. Say the positive version and do not spend time on what it replaces:
+this audience is meeting the project for the first time and has no stake in an
+earlier design.
+
+SLIDE 3 IS THE ASK, and it is the slide this section exists for. System writeLock:
+is gated by no privilege, so a browsing-only session has it, and a lock blocks
+OTHER sessions from committing -- including a privileged developer committing
+code, measured. MCP_REAP_LOCK_HOLDERS bounds it at ONE MAINTENANCE PASS, because
+a server can only act on what it has noticed. A privilege that withheld
+writeLock: would bound it at zero. That is a GemStone question, not an mcp_server
+one, and it goes to the room.
+
+WHAT TO CUT: slide 2 (50s), whose privilege detail is in docs/ReadOnly_User.md and
+whose symbol-list consequence is an operational footnote. Do NOT cut slide 3.
+
+NO DEMO. The convincing demonstration here is a negative -- a commit that raises
+2249 -- and demo E already puts a failing commit on screen for a better reason.
+The lock reap is a 10-second pass plus a 120-second delay, which is not a stage
+demo. Both are measured in docs/ReadOnly_User.md if anyone asks for evidence.
+
+THE SLIDES DO NOT MENTION WHAT THIS REPLACED, deliberately and by instruction.
+The notes reference it once, on slide 1, only because "why is the tool surface not
+the boundary" is a question a toolset author may ask after section 10 -- and the
+answer is about execute_code, not about history.
+================================================================================
+-->
+
+## The boundary is the GemStone user the worker logs in as
+
+```bash
+MCP_WORKER_USER=McpReadOnly ./run-server.sh
+```
+
+`McpRouter>>workerUserId` names it; `startWithId:workerUser:` logs the gem in. **Default `nil` — the front end's own user.** Enforced **in the stone, by the VM, on every operation**.
+
+* **No credential is configured.** The front end mints a **one-time password per session**, needing **one committed grant** — `addOnetimePasswordUserId:` on the front-end user. So `configDict` carries **only an identifier** (§3)
+* **`McpAuthRouter` refuses `workerUserId:`** — a fourth class invariant (§9): there each worker is **the user its bearer token names**, and **silently ignoring a configured one would be the dangerous reading**
+* **The commit lock.** `UserProfile>>disableCommits` → `sessionCanCommit` is false **from login**; `commit` raises **`TransactionError` 2249**. Reads and compiling still work — the session accumulates pending work it cannot keep, so the **`[session]` line points it at `abort`**
+* **Object authorization does better where it applies:** a write this user is not authorized for is refused **`SecurityError` 2116 *at the write*** — `needsCommit` stays false, so **no dirty state** and no phantom value for its own later reads
+
+<!--
+Lead with the positive claim and stay on it: this is a boundary because the stone
+enforces it, not because the server declines to offer something. Everything a
+server can do on its own side states an intention.
+
+If a toolset author asks after section 10 why narrowing the tool surface is not
+the boundary, the answer is about execute_code and not about history:
+execute_code evaluates arbitrary Smalltalk, run_test_class runs arbitrary test
+bodies, and a tool that compiles can be followed by one that runs. A shorter
+toolsetNames list is still worth having -- it narrows what a model is OFFERED,
+and a smaller surface is a clearer one -- it is just not a control.
+
+The one-time password grant is the part an operator has to do once and will
+otherwise hit at session open: the stone lets you mint a password for another
+user only if that user is on your allowlist. setup-read-only-user.sh makes the
+grant. Without it the mint raises, and it raises at session open rather than
+mid-conversation, which is the right end.
+
+The two refusals are worth distinguishing carefully, because 2116 is the nicer
+one and is not available everywhere. Object authorization refuses AT THE WRITE
+and leaves nothing behind. The commit lock catches everything else -- the user's
+own UserGlobals, and anything it is authorized to write -- and it catches it at
+commit time, so the work exists until it is aborted. Both were measured on 3.7.5;
+docs/ReadOnly_User.md has the probe tables.
+-->
+
+---
+
+## What it costs, and what it does not close
+
+**One privilege is granted on purpose:** `CodeModification`. Without it `execute_code` raises **2151** on so much as a helper class, and `run_test_class` cannot run a suite that compiles anything. **Nothing compiled can be committed**, so it dies with the gem.
+
+* Four **inverse** privileges are withheld, and they are cached in the VM **at login** — they must be on the profile *before* the worker gem logs in: `NoPerformOnServer`, `NoUserAction`, `NoGsFileOnServer`, `NoGsFileOnClient`
+* **Which one closes the second-gem route** — can a commit-locked session log in a *second* gem that is not locked? Measured, one privilege at a time: **the commit lock alone does not close it.** `GsTsExternalSession>>login` is an **FFI callout**, and **`NoUserAction` or `NoGsFileOnServer` each refuse it** with 2151. The default set has both
+* **A different user resolves names differently.** A symbol list is name *resolution*, not authorization — but `Mcp` is not in a new profile's default list, and a worker that cannot see it **fails its first session**. `setup-read-only-user.sh` copies the front-end user's list, **a point-in-time snapshot**
+
+<span class="fine">**What stays open:** reads (object security policies are the answer to *that*, not this), resources (§8's lifetimes), and **locks**.</span>
+
+<!--
+Run this one briskly; the full table is in docs/ReadOnly_User.md and this slide
+is the shape of it. Three facts and a hand-off.
+
+compile_method fails too, without it. CodeModification is the interesting grant
+because it looks wrong and is not. The
+reasoning is the same one the whole section rests on: the commit lock is
+downstream of everything, so a privilege whose products cannot be kept costs
+nothing. Withholding it would cost the tool surface most of its value.
+
+The second-gem measurement is the one to say out loud, because it is the
+attribution nobody would guess. Six users differing in one privilege each;
+read-only-ness does nothing, NoPerformOnServer does nothing, and the two that
+work do so because login is an FFI callout rather than because anyone designed
+them to. Either is enough and the default set has both.
+
+The symbol list is the operational trap. It is not a security property at all --
+adding a dictionary changes nothing about what may be written -- but get it wrong
+and the very first session fails with Toolset not found, which reads like a
+broken install. And re-provision a dictionary later and the snapshot is stale.
+
+Then hand off: reads, resources, locks. Reads are broad -- anything world-readable
+comes back through a tool result, including other UserProfiles, and the answer to
+that is object security policies rather than anything here. Resources -- a loop, a
+full scan, temp object space, a pinned view -- are bounded by section 8's
+lifetimes, not by privileges. The third is the next slide and the reason this
+section is three slides.
+-->
+
+---
+
+## `System writeLock:` is gated by **no** privilege — and that is my question
+
+A browsing-only session has it. A write lock **blocks other sessions from committing** the locked object — and it is **not limited to application data**.
+
+> **Measured.** The restricted gem locked *only* `McpServer`'s method dictionary; a `DataCurator` session then compiled a method into `McpServer` and committed — **`false`, conflict `#'Write-WriteLock'` n=1.** **Locking a class's method dictionary stops a privileged developer committing code to that class.** And it scales: one `execute_code` walking `Globals` took **2,291 locks in a single statement**.
+
+* **The reassuring half:** the front end's `McpRouter` and a worker's `McpServer` are **transient** and never committed, so no other session can reach them at all — locking one "succeeds" and excludes nobody
+* **`MCP_REAP_LOCK_HOLDERS=1`** makes *holding a lock* the ground for ending a session — **no grace, no idleness test**. An **idle** holder is reaped by `reapReasonFor:`; a **busy** one by `maintainWriteLockHolders`, which ends the call first so the client is **told**, kind `lockRelease`. **Off by default**
+
+> **So the bound is one maintenance pass, not zero** — a server can only act on what it has noticed. **Should there be a GemStone privilege that withholds `writeLock:`?** That is the only bound that would not depend on somebody noticing.
+
+<!--
+THE SLIDE THIS SECTION EXISTS FOR. Everything before it earns the right to ask.
+
+Build it in three beats. One: a lock needs no privilege, so the most confined
+session you can provision still has it. Two: a lock does not change anything --
+it stops OTHER people changing things, including a developer committing code, and
+that is measured rather than reasoned. Three: this server can bound it, but only
+at the resolution of its own heartbeat.
+
+Then ask, and STOP TALKING. This is the second of the talk's two asks and it is a
+GemStone question rather than an mcp_server one: writeLock: is ungated, the
+confined user has it by construction, and no arrangement of UserProfile
+privileges takes it away. A privilege would move the bound from one pass to zero.
+
+Anticipate the obvious answer, which is "stop the session": that already works
+and needs nothing from this project. System systemLocksDetailedReport names the
+holding stone session, descriptionOfSession: gives its UserProfile and pid, and
+stopSession: ends it and releases the locks -- DataCurator has SessionAccess
+already. That is the escape hatch when the setting is off or the holder is not an
+MCP session at all. It is still a person noticing.
+
+install.sh would fail the same way as that DataCurator commit -- worth adding if
+the room looks unconvinced that this reaches past application data.
+
+Why OFF by default, if pressed: an application that takes a lock deliberately is
+doing something legitimate, and this would end that session mid-call. It is meant
+to be turned on alongside MCP_WORKER_USER, where a lock could only be an attack.
+
+The count is read STONE-SIDE -- System sessionLocks: on the worker's cached stone
+session id -- never by sending into the worker, because a worker inside a long
+call cannot answer a maintenance send and that is exactly the session that has to
+be seen. Only the SIZE is taken, so the transactionless front end faults nothing
+in. It needs SessionAccess, and a front end whose user lacks it sees every session
+as holding nothing: the same fail-open as the default.
+-->
+
+---
+
+<!--
+================================================================================
 VERTICAL SLICE 10 -- section 12, versions: the floor moved, and why. Five slides,
 no demo. Cut 2026-09-12: tenth to be cut.
-
-RUNNING ORDER WARNING, and it is the first time this file has one. Section 11
-(read-only mode, one slide) is NOT CUT YET, and in running order it sits BETWEEN
-slice 9 and this slice. Everything else in this file is in running order; when
-section 11 is cut, its slide goes immediately before this header comment. Sections
-0-10 and 12 are cut; 11 and 13 are not.
 
 Running order and plans, in seconds -- the floor moved 40, the obstacle (1) 55,
 the obstacle (2) 50, #51438 50, what it deleted 35. About 4 minutes.
@@ -3921,9 +4063,9 @@ longer bounds support and section 13 does not depend on it. Do NOT cut slides 2
 and 3.
 
 12.3 IS REWRITTEN, because the outline describes code that no longer exists. It
-says two expansions are "still written the 3.7.2 way" in forkOnPort: and
-McpSession>>startWithId:readOnly:. They were removed on 2026-09-11 (e3ce652):
-both now send newDefaultForGemHost: and useOnetimePassword directly. So the slide
+says two expansions are "still written the 3.7.2 way" in forkOnPort: and the
+worker login. They were removed on 2026-09-11 (e3ce652): both now send
+newDefaultForGemHost: and useOnetimePassword directly. So the slide
 is no longer "what the code still carries" -- it is the better slide, "what the
 floor moving actually deleted", four days ago, in the tree. THE OUTLINE'S 12.3
 SHOULD BE BROUGHT INTO LINE; it is the one place in it that now describes the

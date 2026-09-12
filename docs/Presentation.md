@@ -27,7 +27,7 @@ time counted separately so it is visible what the demos actually cost:
 | 7 | **The transaction model and the guardrail** | 8.2 | 3 (E) | 11.2 |
 | 8 | **The maintenance cycle** | 5.7 | 1.5 (F) | 7.2 |
 | 9 | `McpAuthRouter` | 2.5 | 2 (G) | 4.5 |
-| 10–11 | Extending it; read-only mode | 1.5 | | 1.5 |
+| 10–11 | Extending it; the worker gem's user | 1.5 | | 1.5 |
 | 12–13 | Versions; future work and the asks | 2.5 | | 2.5 |
 | | | **40.9** | **12.5** | **53.4** |
 
@@ -86,12 +86,8 @@ properly.
   *any* MCP client over plain HTTP.
 * **Status, honestly — and the slide is called that because the honesty is the point of it.** Built
   and verified end to end, by curl, by a TLS run and by the in-image suites: the Streamable HTTP
-  transport, per-client worker gems, 31 base tools (+9 optional Python), OAuth 2.1/JWT + TLS. Then
-  **two things on that list which are not being sold**, both settled on 2026-09-11:
-  * **read-only mode is a tool gate, not an access-control boundary** — a localhost convenience so
-    one user cannot mutate by accident, and a read-only session still costs a login and still holds
-    a view. It is a placeholder, and §11 is where the ideas for making it a boundary live. Do not
-    let the slide imply more than §11 will deliver;
+  transport, per-client worker gems, 31 base tools (+9 optional Python), OAuth 2.1/JWT + TLS, and a
+  **configurable worker user** (§11). Then **one thing on that list which is not being sold**:
   * **server-initiated messages are machinery, not a feature.** They are built, and this server
     needs them — every count in §8 rests on server-initiated `ping` — but the `2026-07-28` draft
     forbids the direction outright ("servers do not initiate JSON-RPC requests"), so it is not a
@@ -197,7 +193,6 @@ differently-configured routers can run at once.**
   ```smalltalk
   | r |
   r := McpRouter new.
-  r readOnly: false.
   "…any MCP_* setters the environment asked for…"
   r forkOnPort: 8000
   ```
@@ -423,7 +418,7 @@ at the end of the section.
      bearing the request's own id, no `MCP-Session-Id`, and **no login attempted**. Why a cap at all
      is §8's material, but the number belongs here: **3 by default**.
    * The id is `nextSessionId` — a cryptographically-random **128-bit** token as hex.
-   * `McpSession startWithId: newId readOnly:` — a `GsTsExternalSession`, one-time password, `login`,
+   * `McpSession startWithId: newId workerUser:` — a `GsTsExternalSession`, one-time password, `login`,
      `cacheWorkerIds` (stone session id + host pid, captured at login).
    * Then the front end **pushes what the worker is**: `workerClassName:`, `toolsetNames:`,
      `toolsetOptions:`, `serverName:`, `serverTitle:`, `serverVersion:`, `requestTimeoutSeconds:`,
@@ -436,7 +431,7 @@ at the end of the section.
 
    ```smalltalk
    McpServer prepareWorkerWithToolsets: #('McpBrowsingToolset' 'McpExecutionToolset' …)
-     options: nil readOnly: false serverName: nil title: nil version: nil
+     options: nil serverName: nil title: nil version: nil
      frontEnd: 5 cacheName: 'McpServer:5:978EC559'
    ```
 
@@ -447,8 +442,7 @@ at the end of the section.
 9. **In the worker: `McpServer class>>prepareWorkerWithToolsets:…` — and the order is the point.**
    * `nameThisGem:` **first**, before anything that can fail: a bootstrap that dies on an
      unresolvable toolset is exactly when an operator is looking at the session list.
-   * `sessionReadOnly:` **before the build**, so the build can leave gated tools out of the registry
-     entirely (§12) — a stronger gate than refusing them on call.
+
    * `SessionTemps current at: #McpFrontEndSession put:` — where to ring the doorbell when a tool
      reports progress (§6). Constant for this worker's life, so pushed once here rather than per
      request.
@@ -591,8 +585,8 @@ POST /mcp   MCP-Session-Id: 978EC559…
    session with a call in flight (`McpSession>>isBusy`) instead of logging a worker out mid-request.
 6. **In the worker: `McpDispatcher>>handleToolsCall:id:`** — this is the slide to spend time on.
    * `params.name` missing → **`-32602`** `invalidParams`. Unknown tool → **`-32602`** `notFound`.
-   * A **read-only gated** tool → `-32601` with `data.kind = "readOnly"` — deliberately *not*
-     `notFound`, so a client can tell "exists but forbidden here" from "no such tool".
+   * `tools/list` is **unfiltered**: every tool a session's toolsets registered is offered, and none
+     is refused for being "unsafe". What a session may *do* is §11.
    * **Schema enforcement:** `tool validationErrorFor: args` → `McpTool>>validationErrorFor:`.
      Structural, and honestly so: with `additionalProperties: false` it rejects unknown top-level
      keys naming the allowed ones, and it requires every `required` key. **No deep type checks.**
@@ -837,7 +831,7 @@ thing *fits on one slide*. Walk them in order; the one to dwell on is `THE DATAB
 because its closing instruction to the model — *"If you read something, thought about it, and are
 only now acting, re-read it first"* — exists because of the failure two slides later. Extract the
 text programmatically rather than transcribing it (`McpServer class>>defaultServerInstructions`);
-a read-only session is sent none of it.
+a session whose user cannot commit is still sent all of it, and still needs it — the [session] line points it at abort rather than commit (§11).
 
 **3 — the `[session]` line.** Four of the five shapes, verbatim: uncommitted work; the client's own
 commit refused; the server's refresh having doomed the pending work; and reads gone stale. Read the
@@ -1102,8 +1096,8 @@ line is all the evidence anyone needs.
     than a relaxed ratchet: a **nil** `exp` moves nothing (a token with no readable expiry cannot
     turn a bounded session unbounded), and a session with **no** deadline is left alone (renewal
     extends a deadline, it never introduces one). A read-write session is **not** extended by a
-    token that has lost the write scope: that token keeps working, buys no time, and the next session
-    opens read-only.
+    (there is no per-session write gate here; what bounds an authenticated session is the GemStone
+    user its token names, whose UserProfile an administrator restricts — §11).
 * **The `offline_access` deviation** — a slide of its own, because it is a deliberate, documented
   departure from a `SHOULD NOT` and this audience should hear the reasoning rather than find it in a
   test comment.
@@ -1134,9 +1128,9 @@ line is all the evidence anyone needs.
     one test per normative requirement, and the untested known gap is named too: the draft's *scope
     hierarchies* MUST, which exact-string comparison satisfies only while all configured scopes are
     flat and unrelated (true of `mcp:use` / `mcp:write` today).
-* **`supportedScopes` is derived, not configured** — the union of `requiredScopes`, `writeScope` and
-  `extraScopes` — so a required scope is always advertised and the write scope is always requestable,
-  and no configuration slip can leave one out.
+* **`supportedScopes` is derived, not configured** — the union of `requiredScopes` and
+  `extraScopes` — so a required scope is always advertised, and no configuration slip can leave one
+  out.
 
 `[DEMO G — 2 min]` `./run-auth-server.sh`, then Alice: browser login through the IdP, and
 `execute_code` running as **Alice's own GemStone user** — `status` showing her userId, and the
@@ -1157,12 +1151,10 @@ Two extension points, and the first is the one you usually want.
 
 * **To add tools, write a toolset.** Subclass `McpToolset`; implement `registerOn:` (one
   `name:description:inputSchema:do:` per tool, schemas built with the inherited `objectSchema:
-  required:` / `propString:` / `boolProperty:`), `toolNames`, and **`readOnlySafeToolNames`** for
-  whichever of your tools cannot persist a change. Handlers are instance methods taking the parsed
+  required:` / `propString:` / `boolProperty:`) and `toolNames`. Handlers are instance methods taking the parsed
   argument dictionary and answering a `String`; `resolveClass:`, `dictNamed:`, `linesFrom:`,
   `capResult:` cover the usual image lookups and output capping.
-* **The default is *no* tool is read-only safe** — fail closed, so a newly added tool is gated until
-  its toolset explicitly vouches for it.
+* **`tools/list` is unfiltered** and no tool is refused for being "unsafe"; the boundary is §11.
 * **A handler that mutates should pass through the inherited kernel guard**
   (`self assertMutableClass: cls`) **before** it changes anything. That forwards to the *server*,
   because what counts as protected is one answer per deployment rather than each toolset's to
@@ -1192,7 +1184,7 @@ Two extension points, and the first is the one you usually want.
   * Forking settles three other things at once: the caller's transaction is untouched, where an
     in-session run dirties it **silently** — *a cold Grail import is a database write*, measured at
     **31 modified objects for a 7-test class**; the child's writes are never committed, so a run
-    leaves the repository exactly as it found it; and that is what makes the tool **read-only safe**.
+    leaves the repository exactly as it found it.
   * The cost is honest and stated in the tool: every run is fully cold, so framework-heavy classes
     recompile each time (`FlaskScaffoldingTestCase` alone: **262 seconds**) — which is why the tool
     takes a `classNames` argument, and why it is the flagship consumer of progress reporting (§6).
@@ -1224,44 +1216,79 @@ Two extension points, and the first is the one you usually want.
 
 ---
 
-## 11. Read-only mode (1 slide)
+## 11. The worker gem's GemStone user (3 slides)
 
-* **What it is**: a router can refuse every state-changing tool. Primarily a **localhost
-  convenience** so a single user cannot *accidentally* mutate or commit — a **tool gate, not an
-  access-control boundary**. Say that plainly; it is the honest framing and it is what the README
-  says.
-* **Per-router, two ways in**: `(McpRouter new readOnly: true)` / `MCP_READONLY=1`, or — on
-  `McpAuthRouter` — **by OAuth scope**: give the router a `writeScope`, and a token carrying it gets
-  a read-write worker while a token lacking it gets a read-only one **for that session**. Advertising
-  without requiring is the point: an entitled user is granted the scope and gets read-write, an
-  unentitled one still connects, read-only.
-* **Gated**: everything that can persist a change or run arbitrary code — `execute_code`, `commit`,
-  and all the mutation tools. Everything else stays, including `abort`/`refresh`/`status` and the
-  test runners.
-* **Screening at two levels**, which matters because one family is mixed: `McpSessionToolset` holds
-  `abort`/`refresh`/`status` (safe) *and* `commit` (not), so a toolset declaring nothing safe is
-  dropped **whole** while a mixed one keeps only its safe tools.
-* **Two moments**: a read-only worker **never registers** its gated tools (the flag is set before
-  the build — §4), which is stronger than refusing on call; the dispatcher's check still runs for a
-  server whose flag was set afterwards. Either way the tool is **hidden from `tools/list`** and, if
-  called, answers `-32601` with `data.kind = "readOnly"` — *not* `notFound`, so a client can tell
-  "exists but forbidden here" from "no such tool".
-* `McpServer class>>coreReadOnlySafeToolNames` remains as the **audit list** — one place to read the
-  whole core answer — and `McpContractTest` pins the union of the seven core toolsets against it, so
-  a tool cannot quietly become "safe".
-* **One consistency worth a sentence, because it shows the mode is a mode and not a filter**: a
-  read-only session is sent **no `instructions`** at all (`McpServer>>serverInstructions` answers
-  nil). Telling a session that cannot write how to commit its changes, or how to recover a commit
-  that failed, would be a page about tools it does not have — and such a session never has
-  uncommitted changes, so it never sees a `[session]` line either, which is the thing the
-  instructions exist to explain.
-* **Ideas for improving it**, which is where this slide should end rather than on the caveat:
-  * a **read-only GemStone login** (or a user whose privileges cannot write) underneath the tool
-    gate, so it stops being only a gate — this is the natural place to ask the room what the image
-    offers;
-  * **scope → toolset** selection (§9's future work), which subsumes the boolean;
-  * the honest limit today: a read-only router still holds a **transaction view**, so it still costs
-    a login and still pins a commit record between refreshes.
+**Rewritten 2026-09-13.** This section used to describe a per-router read-only tool gate. There is
+no such thing; the reference is `docs/ReadOnly_User.md`. **The slides say nothing about what this
+replaced** — the audience is meeting the project for the first time and has no stake in an earlier
+design — and neither should this section beyond the line you are reading.
+
+**The thesis:** the only boundary that holds is the GemStone user the worker gem logs in as, because
+it is enforced in the stone, by the VM, on every operation, and cannot be talked around from inside
+the session. Everything a server can do on its own side — narrowing the tool surface, refusing a tool
+by name — states an intention. `execute_code` evaluates arbitrary Smalltalk; `run_test_class` runs
+arbitrary test bodies; a tool that compiles can be followed by one that runs.
+
+### 11.1 The boundary
+
+* `MCP_WORKER_USER=McpReadOnly ./run-server.sh`. `McpRouter>>workerUserId` names it;
+  `McpSession>>startWithId:workerUser:` logs the gem in. **Default `nil`** = the front end's own
+  user, so an unconfigured router is unchanged.
+* **No credential is configured.** The front end mints a one-time password per session, which needs
+  **one committed grant** — `addOnetimePasswordUserId:` on the front-end user. So `configDict`
+  carries only an identifier and the fork string stays free of key material (§3).
+* **`McpAuthRouter` refuses `workerUserId:`** — a fourth class invariant (§9). There each worker is
+  the user its bearer token names, so one configured user would have to override that or be ignored,
+  and silently ignoring it would be the dangerous reading.
+* **The commit lock.** `UserProfile>>disableCommits` → `System sessionCanCommit` false **from login**;
+  `commit` raises `TransactionError` **2249**. Reads and compiling still work, so the session
+  accumulates pending work it cannot keep — and the `[session]` line points it at **`abort`**.
+* **Object authorization does better where it applies:** a write this user is not authorized for is
+  refused `SecurityError` **2116 at the write**, `needsCommit` stays false, so there is no dirty
+  state and no phantom value for its own later reads.
+
+### 11.2 What it costs, and what it does not close
+
+* **`CodeModification` is granted on purpose.** Without it `execute_code` raises **2151** on so much
+  as a helper class, `compile_method` fails, and `run_test_class` cannot run a suite that compiles
+  anything. Nothing compiled can be committed, so it dies with the gem.
+* **Four inverse privileges withheld**, cached in the VM **at login** so they must be on the profile
+  before the worker gem logs in: `NoPerformOnServer`, `NoUserAction`, `NoGsFileOnServer`,
+  `NoGsFileOnClient`.
+* **Which one closes the second-gem route.** Measured one privilege at a time: the commit lock alone
+  does **not**. `GsTsExternalSession>>login` is an FFI callout, and `NoUserAction` or
+  `NoGsFileOnServer` each refuse it with 2151. The default set has both.
+* **A different user resolves names differently.** A symbol list is name *resolution*, not
+  authorization — but `Mcp` is not in a new profile's default list, and a worker that cannot see it
+  fails its first session. `setup-read-only-user.sh` copies the front-end user's list; that copy is a
+  **point-in-time snapshot**.
+* **What stays open:** reads (the answer is object security policies), resources (§8's lifetimes),
+  and locks — 11.3.
+
+### 11.3 `System writeLock:`, and the second ask of the talk
+
+* **It is gated by no privilege**, so the most confined session you can provision still has it. A
+  write lock does not change anything — it stops *other* sessions **committing** the locked object.
+* **Measured, and not limited to application data:** the restricted gem locked only `McpServer`'s
+  instance-side method dictionary, and a `DataCurator` compile-and-commit then failed `false`,
+  conflict `#'Write-WriteLock'` n=1. `install.sh` would fail the same way. It scales: one
+  `execute_code` walking `Globals` took **2,291 locks in a single statement**.
+* **The reassuring half:** the front end's `McpRouter` instance and a worker's `McpServer` are
+  transient and never committed, so no other session can reach them at all.
+* **`MCP_REAP_LOCK_HOLDERS=1`** makes holding a lock itself the ground for ending a session, with no
+  grace period and no idleness test. An **idle** holder is reaped by `reapReasonFor:`; a **busy** one
+  is reached by `maintainWriteLockHolders`, which ends the call first so the client is told, with
+  kind `lockRelease`. **Off by default**, because a deliberate lock is legitimate.
+* **THE ASK, and it is a GemStone question rather than an mcp_server one:** the bound is **one
+  maintenance pass**, not zero, because a server can only act on what it has noticed. *Should there
+  be a privilege that withholds `writeLock:`?* That is the only bound that would not depend on
+  somebody noticing. Anticipate "stop the session", which already works and needs nothing from this
+  project — `systemLocksDetailedReport`, `descriptionOfSession:`, `stopSession:` — and is still a
+  person noticing.
+
+No demo: the convincing demonstration is a negative (a commit raising 2249), and demo E already puts
+a failing commit on screen for a better reason. Everything above is measured in
+`docs/ReadOnly_User.md`.
 
 ---
 
@@ -1571,7 +1598,7 @@ audience will have the README open.
 1. **The README's conformance list is stale in four places, all about things that now exist.**
    * `## Protocol conformance`, the "Not implemented, all optional at these revisions" sentence,
      lists **`progress notifications`** — implemented (§6) — and **server `instructions`** —
-     implemented, sent by `initializeResultFor:`, and omitted only for a read-only session (§11).
+     implemented, and sent by `initializeResultFor:`.
    * `## Server-initiated messages`, "Not yet built: anything originating in a **worker** gem —
      progress during a long tool call…" — built; that is `McpProgressReporter` +
      `InterSessionSignal` + `forkSignalPoller`. What is genuinely not built is the *rest* of that
@@ -1620,12 +1647,12 @@ audience will have the README open.
 
 5. **The README's status line oversells the same two things §0's status slide now refuses to
    oversell**, and it is the first paragraph anybody in the room will read. It lists "per-router
-   read-only mode and server-initiated messages" among what is "built and verified end-to-end",
-   which is true of both and misleading about both: read-only mode is a **tool gate rather than an
-   access-control boundary** (the README says so itself 700 lines later, under *Read-only mode*),
-   and server-initiated messages are a direction the **`2026-07-28` draft removes outright**, so
-   they are machinery this server needs rather than a capability to advertise. Two clauses of
-   qualification, in the sentence that currently reads as a feature list.
+   read-only mode and server-initiated messages" among what is "built and verified end-to-end". The
+   read-only half is now simply **wrong** — there is no read-only mode; `MCP_WORKER_USER` and
+   `docs/ReadOnly_User.md` are what that sentence should name (§11). And server-initiated messages
+   are a direction the **`2026-07-28` draft removes outright**, so they are machinery this server
+   needs rather than a capability to advertise. Check the whole README for the removed mode before
+   the talk; this room will have it open.
 
 6. **`McpJson`'s class comment and the §5 defect table number the same defects differently**, which
    is not a stale comment but reads exactly like one — and one cross-reference is already wrong
