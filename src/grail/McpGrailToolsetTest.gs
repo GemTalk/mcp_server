@@ -747,41 +747,6 @@ testGrailToolsetIsExposedOnlyWhenNamed
 %
 category: 'tests'
 method: McpGrailToolsetTest
-testGrailToolsetIsGatedInReadOnlySession
-  "A read-only worker keeps FOUR of these tools, for three different reasons. run_python_tests runs
-   in a fresh gem that is thrown away and never committed in, so it can persist nothing.
-   python_module_state only reads. find_python_senders and search_python_source only read too, and
-   that is a consequence of a design decision rather than luck: they match a Python name
-   SYNTACTICALLY and never resolve it, because resolving would import, and in Grail a cold import
-   is a database write.
-
-   Every other one is dropped: running arbitrary Python can persist anything, and
-   get_python_source imports the module it is asked about.
-
-   The gated ones must still be reported as FORBIDDEN rather than unknown -- 'you may not' and 'no
-   such tool' are different answers and only one of them is worth showing a user as a permissions
-   problem."
-  | ts |
-  ts := McpGrailToolset on: McpServer new.
-  self assert: ts readOnlySafeToolNames asSortedCollection asArray
-    equals: #( 'find_python_senders' 'python_module_state' 'run_python_tests'
-               'search_python_source' ).
-  SessionTemps current removeKey: #McpReadOnly ifAbsent: [nil].
-  [ | names err |
-    McpServer sessionReadOnly: true.
-    names := (McpServer newWithToolsetNames: (Array with: 'McpGrailToolset'))
-      toolRegistry descriptors collect: [:d | d at: 'name'].
-    self assert: names asSortedCollection asArray
-      equals: #( 'find_python_senders' 'python_module_state' 'run_python_tests'
-                 'search_python_source' ).
-    err := (self dispatch: (self toolCall: 'eval_python'
-      args: (Dictionary new at: 'code' put: '1'; yourself))) at: 'error'.
-    self assert: (err at: 'code') equals: -32601.
-    self assert: ((err at: 'data') at: 'kind') equals: 'readOnly']
-      ensure: [SessionTemps current removeKey: #McpReadOnly ifAbsent: [nil]]
-%
-category: 'tests'
-method: McpGrailToolsetTest
 testListPythonMethodsGivesRealSignaturesAndLines
   "The reason this is not just `dir(cls)`: the answer carries parameter NAMES and DEFAULTS, which the
    Smalltalk selector cannot express -- `pop(key, default=None)` compiles to `_pop:kw:` -- and the
@@ -1045,26 +1010,6 @@ six
     self assert: (self includesCS: 'four' in: second).
     self deny: (self includesCS: 'one' in: second) ]
       ensure: [GsFile removeServerFile: path]
-%
-category: 'tests'
-method: McpGrailToolsetTest
-testReadOnlySafeGrailToolsAreTheOnesThatCannotPersist
-  "Renamed from testRunPythonTestsIsTheOnlyReadOnlySafeTool, which stopped being true when
-   python_module_state joined the list and is now wrong by three.
-
-   run_python_tests is safe because of WHERE it runs -- a fresh gem that is thrown away and never
-   committed in, so the caller's transaction is not even reachable from it. The two search tools are
-   safe because they never resolve a name, which is what keeps them from importing. The others stay
-   gated: eval_python runs arbitrary Python, and get_python_source IMPORTS the module it is asked
-   about, which in Grail is a database write."
-  | safe |
-  safe := McpGrailToolset new readOnlySafeToolNames.
-  self assert: (safe includes: 'run_python_tests').
-  self assert: (safe includes: 'find_python_senders').
-  self assert: (safe includes: 'search_python_source').
-  self deny: (safe includes: 'eval_python').
-  self deny: (safe includes: 'get_python_source').
-  self deny: (safe includes: 'compile_python')
 %
 category: 'tests'
 method: McpGrailToolsetTest

@@ -70,15 +70,15 @@ initBody
 %
 category: 'helpers'
 method: McpAuthTest
-jwtForUser: aUserId expiringIn: seconds writeScope: aBoolean
-  "A parseable JWT carrying sub, exp and (optionally) the write scope. The signature segment is
+jwtForUser: aUserId expiringIn: seconds
+  "A parseable JWT carrying sub, exp and a scope claim. The signature segment is
    filler: every method under test here parses the token WITHOUT verifying it, because verification
    already happened in #tokenRejectionFor: earlier in the request. alg must still name a real
    algorithm -- JsonWebToken rejects alg 'none' outright, so a token that claims to be unsigned
    cannot even be built by accident."
   | enc scopes |
   enc := [:str | (str asByteArray asBase64UrlString) select: [:c | c ~= $=]].
-  scopes := aBoolean ifTrue: ['mcp:use mcp:write'] ifFalse: ['mcp:use'].
+  scopes := 'mcp:use'.
   ^(enc value: '{"alg":"RS256","typ":"JWT"}')
     , '.' , (enc value: '{"sub":"' , aUserId , '","exp":'
         , (System timeGmt + seconds) printString , ',"scope":"' , scopes , '"}')
@@ -98,12 +98,11 @@ post: body headers: extraHeaderLines
 category: 'helpers'
 method: McpAuthTest
 renewingRouter
-  "An auth router with per-session write gating on, which is what makes the scope half of renewal
-   meaningful: with no writeScope configured every token grants write."
-  | router |
-  router := McpAuthRouter new.
-  router writeScope: 'mcp:write'.
-  ^router
+  "A plain auth router, for the renewal tests. Renewal now turns on the TOKEN'S EXPIRY alone: a
+   fresh, valid token for the session's own user moves the deadline, and nothing about scope enters
+   into it. (It once did -- a writeScope could downgrade a session, so renewal had to refuse to
+   extend a write session on a narrower token. Both halves went when the tool-gate did.)"
+  ^McpAuthRouter new
 %
 category: 'helpers'
 method: McpAuthTest
@@ -157,22 +156,7 @@ testAnUnreadableTokenExpiryLeavesTheIdlePolicyInCharge
 %
 category: 'tests'
 method: McpAuthTest
-testAReadOnlySessionIsRenewedByAReadOnlyToken
-  "The mirror of the above: a session that never had write access is not being handed anything it
-   lacks, so a token without the write scope renews it normally. Otherwise read-only sessions would
-   be the only ones still capped at their opening token."
-  | router sess |
-  router := self renewingRouter.
-  sess := McpStubSession new startWithId: 'sid-ro'; beReadOnly; yourself.
-  sess expiresAtSeconds: System timeGmt + 60.
-  self assert: sess readOnly.
-  self assert: (router renewSessionExpiry: sess
-    from: (self jwtForUser: 'alice' expiringIn: 1800 writeScope: false)).
-  self assert: sess expiresAtSeconds > (System timeGmt + 1000)
-%
-category: 'tests'
-method: McpAuthTest
-testARefreshedTokenBuysAWriteSessionMoreLife
+testARefreshedTokenBuysASessionMoreLife
   "The defect this exists to fix. A session's deadline is stamped once, from the token that opened
    it, so a client working steadily lost its worker gem -- and the uncommitted transaction in it --
    one access-token lifetime after opening, however recently it had called. A fresh token for the
@@ -182,26 +166,8 @@ testARefreshedTokenBuysAWriteSessionMoreLife
   sess := McpStubSession new startWithId: 'sid-renew'.
   sess expiresAtSeconds: System timeGmt + 60.
   self assert: (router renewSessionExpiry: sess
-    from: (self jwtForUser: 'alice' expiringIn: 1800 writeScope: true)).
+    from: (self jwtForUser: 'alice' expiringIn: 1800)).
   self assert: sess expiresAtSeconds > (System timeGmt + 1000)
-%
-category: 'tests'
-method: McpAuthTest
-testATokenThatLostTheWriteScopeBuysNoMoreLife
-  "A read-WRITE session must not be extended on a token that no longer carries the write scope: the
-   session's mode was fixed at open, so that would keep a broader authorization alive on the strength
-   of a grant the client has demonstrably lost. The token still WORKS -- it is valid and belongs to
-   the session's user -- it just buys no time, so the session ends at its existing deadline and the
-   next one opens read-only, which is what the current grant actually says."
-  | router sess deadline |
-  router := self renewingRouter.
-  sess := McpStubSession new startWithId: 'sid-narrowed'.
-  self deny: sess readOnly.
-  deadline := System timeGmt + 60.
-  sess expiresAtSeconds: deadline.
-  self deny: (router renewSessionExpiry: sess
-    from: (self jwtForUser: 'alice' expiringIn: 1800 writeScope: false)).
-  self assert: sess expiresAtSeconds equals: deadline
 %
 category: 'tests'
 method: McpAuthTest
@@ -226,6 +192,27 @@ testAudienceMismatchRejected401
   self deny: r isNil.
   self assert: (r at: 1) equals: 401.
   self assert: (r at: 2) equals: 'invalid_token'
+%
+category: 'tests'
+method: McpAuthTest
+testAuthenticatedSessionRunsAsItsOwnTokensUser
+  "The whole tool surface is offered to every authenticated session -- there is no scope that
+   narrows it -- and the worker gem IS the token's GemStone user, which is what actually bounds what
+   the session can do. So: execute_code runs, and `status` reports the token's user rather than the
+   front end's."
+  | router |
+  router := McpAuthRouter new.
+  router expectedAudience: nil; expectedIssuer: nil; requiredScopes: #(); userIdClaim: 'sub'.
+  self withJwtUser: 'McpTokenUserTest' router: router do: [:jwt | | sid out |
+    out := self runRequest: (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: router.
+    sid := self sessionIdFrom: out.
+    self deny: sid isNil.
+    out := self runRequest: (self post: (self callBody: 'execute_code' arguments: '{"code":"6 * 7"}')
+      headers: 'MCP-Session-Id: ' , sid , self crlf , 'Authorization: Bearer ' , jwt , self crlf) on: router.
+    self assert: (self includesCS: '42' in: out).
+    out := self runRequest: (self post: self statusBody
+      headers: 'MCP-Session-Id: ' , sid , self crlf , 'Authorization: Bearer ' , jwt , self crlf) on: router.
+    self assert: (self includesCS: 'user=McpTokenUserTest' in: out)]
 %
 category: 'tests'
 method: McpAuthTest
@@ -267,20 +254,17 @@ testConfigJsonRoundTripsCarriesRsKeys
    McpTransportTest). Every set field is carried; an unset field keeps its safe default."
   | src dst |
   src := McpAuthRouter new.
-  src readOnly: true;
-    allowedOriginHosts: #('example.com');
+  src allowedOriginHosts: #('example.com');
     bindAddress: '172.16.73.10';
     userIdClaim: 'preferred_username';
     requiredScopes: #('mcp:use');
     extraScopes: #('profile');
     expectedIssuer: 'https://issuer';
-    writeScope: 'mcp:write';
     workerClassName: 'McpFixtureServer';
     toolsetNames: #('McpFixtureToolset');
     serverName: 'acme-db-mcp';
     serverVersion: '2.5.0'.
   dst := McpAuthRouter new applyConfigJson: src configJson.
-  self assert: dst readOnly.
   "the worker-config keys inherited from McpRouter travel too -- McpAuthRouter extends the base
    allow-list via super, so an authenticated deployment can pick its tool surface the same way"
   self assert: dst workerClassName equals: 'McpFixtureServer'.
@@ -293,17 +277,20 @@ testConfigJsonRoundTripsCarriesRsKeys
   self assert: dst requiredScopes equals: #('mcp:use').
   self assert: dst extraScopes equals: #('profile').
   self assert: dst expectedIssuer equals: 'https://issuer'.
-  self assert: dst writeScope equals: 'mcp:write'.
   self assert: dst expectedAudience isNil.       "unset optional stays nil through the round-trip"
   self assert: dst tlsCertificateFile isNil.
-  "supportedScopes is derived, not carried: the far side rebuilds the same union from the three
+  "workerUserId travels (inherited from McpRouter) but is only ever nil here: this router REFUSES a
+   value for it, so a config carrying one must fail in the child gem rather than be applied"
+  self assert: dst workerUserId isNil.
+  self should: [McpAuthRouter new workerUserId: 'McpReadOnly'] raise: Error.
+  "supportedScopes is derived, not carried: the far side rebuilds the same union from the two
    configured fields, so it must come out identical without ever appearing in the config dict"
   self deny: (src configDict includesKey: 'supportedScopes').
-  self assert: dst supportedScopes equals: #('mcp:use' 'mcp:write' 'profile').
+  self assert: dst supportedScopes equals: #('mcp:use' 'profile').
   self assert: dst supportedScopes equals: src supportedScopes.
   "an unconfigured router round-trips to its defaults -- bindAddress must stay loopback, since a
-   silently-widened bind would expose the server; with nothing required, no writeScope and no
-   extras, the derived union is empty"
+   silently-widened bind would expose the server; with nothing required and no extras, the derived
+   union is empty"
   self assert: (McpAuthRouter new applyConfigJson: McpAuthRouter new configJson) userIdClaim equals: 'sub'.
   self assert: (McpAuthRouter new applyConfigJson: McpAuthRouter new configJson) bindAddress equals: '127.0.0.1'.
   self assert: (McpAuthRouter new applyConfigJson: McpAuthRouter new configJson) supportedScopes equals: #()
@@ -400,7 +387,7 @@ testPresentingTheSameTokenAgainRenewsNothing
   | router sess jwt |
   router := self renewingRouter.
   sess := McpStubSession new startWithId: 'sid-same'.
-  jwt := self jwtForUser: 'alice' expiringIn: 1800 writeScope: true.
+  jwt := self jwtForUser: 'alice' expiringIn: 1800.
   sess expiresAtSeconds: (router tokenExpirySecondsOf: jwt).
   self deny: (router renewSessionExpiry: sess from: jwt)
 %
@@ -446,27 +433,24 @@ testProtectedResourceMetadataServed
 %
 category: 'tests'
 method: McpAuthTest
-testRequiredScopeAndWriteScopeAlwaysAdvertised
-  "The advertised set is derived, so the two configurations that used to need validating are now
-   unrepresentable. A required scope a client is never told to request could never be obtained
-   (every token refused insufficient_scope); a writeScope a client is never told to request could
-   never be granted (every session read-only forever). Neither can be expressed: extraScopes cannot
-   displace what the union already contains, so requireResourceServerConfig has nothing to check and
-   accepts any extras at all -- there is no superset rule for a caller to get wrong."
+testRequiredScopeAlwaysAdvertised
+  "The advertised set is derived, so the configuration that used to need validating is now
+   unrepresentable: a required scope a client is never told to request could never be obtained
+   (every token refused insufficient_scope). It cannot be expressed, because extraScopes cannot
+   displace what the union already contains -- so requireResourceServerConfig has nothing to check
+   and accepts any extras at all, and there is no superset rule for a caller to get wrong."
   | r |
   r := McpAuthRouter new.
   r useTlsCertificateFile: '/tmp/x.crt' privateKeyFile: '/tmp/x.key';
     expectedAudience: 'https://mcp.example/mcp';
     authorizationServers: #('https://issuer.example');
     requiredScopes: #('mcp:use');
-    writeScope: 'mcp:write';
-    extraScopes: #('unrelated').   "an extras list naming NEITHER of them"
+    extraScopes: #('unrelated').   "an extras list NOT naming it"
   self assert: (r supportedScopes includes: 'mcp:use').
-  self assert: (r supportedScopes includes: 'mcp:write').
   self shouldnt: [r requireResourceServerConfig] raise: Error.
-  "and with no extras at all, both are still advertised"
+  "and with no extras at all, it is still advertised"
   r extraScopes: #().
-  self assert: r supportedScopes equals: #('mcp:use' 'mcp:write').
+  self assert: r supportedScopes equals: #('mcp:use').
   self shouldnt: [r requireResourceServerConfig] raise: Error
 %
 category: 'tests'
@@ -528,7 +512,7 @@ testSufficientScopeAccepted
 category: 'tests'
 method: McpAuthTest
 testSupportedScopesIsRequiredScopesWhenNothingElseSet
-  "With no writeScope and no extras, the derived union collapses to exactly requiredScopes -- in the
+  "With no extras, the derived union collapses to exactly requiredScopes -- in the
    metadata scopes_supported AND the WWW-Authenticate scope= -- so a router configured only with
    requiredScopes advertises precisely what it requires."
   | router |
@@ -542,70 +526,27 @@ testSupportedScopesIsRequiredScopesWhenNothingElseSet
 %
 category: 'tests'
 method: McpAuthTest
-testSupportedScopesUnionsWriteScopeAndExtras
-  "The advertised set is the union of requiredScopes, the writeScope and extraScopes, so it is WIDER
-   than what is enforced. The writeScope in particular is advertised without anyone asking: clients
-   must be able to request it or the role-gated grant could never happen, yet a token carrying only
-   the required scope is still ACCEPTED. Advertise != require. Duplicates collapse, so naming a scope
-   in two places is harmless."
+testSupportedScopesUnionsExtras
+  "The advertised set is the union of requiredScopes and extraScopes, so it is WIDER than what is
+   enforced: extraScopes names scopes this router does not gate on but the client still needs, and a
+   token carrying only the required scope is still ACCEPTED. Advertise != require. Duplicates
+   collapse, so naming a scope in two places is harmless."
   | router meta challenge p |
   router := McpAuthRouter new.
   router expectedAudience: nil; expectedIssuer: nil;
     requiredScopes: #('mcp:use');
-    writeScope: 'mcp:write';
     extraScopes: #('profile' 'mcp:use').   "'mcp:use' repeated on purpose -- must not appear twice"
-  self assert: router supportedScopes equals: #('mcp:use' 'mcp:write' 'profile').
+  self assert: router supportedScopes equals: #('mcp:use' 'profile').
   meta := self runRequest: (self get: '/.well-known/oauth-protected-resource') on: router.
   self assert: (self includesCS: '"mcp:use"' in: meta).
-  self assert: (self includesCS: '"mcp:write"' in: meta).
-  self assert: (self includesCS: '"profile"' in: meta).
   challenge := self runRequest: (self post: self initBody headers: '') on: router.
-  self assert: (self includesCS: 'scope="mcp:use mcp:write profile"' in: challenge).
-  "enforcement requires only mcp:use: a token with mcp:use but NOT mcp:write is accepted"
+  self assert: (self includesCS: 'scope="mcp:use profile"' in: challenge).
+  "enforcement requires only mcp:use: a token with mcp:use but NOT profile is accepted"
   p := Dictionary new. p at: 'exp' put: System timeGmt + 1000. p at: 'scope' put: 'mcp:use'.
   self assert: (router rejectionForPayload: p) isNil.
   "a token lacking the required mcp:use is still refused, even though it carries an advertised scope"
-  p := Dictionary new. p at: 'exp' put: System timeGmt + 1000. p at: 'scope' put: 'mcp:write'.
+  p := Dictionary new. p at: 'exp' put: System timeGmt + 1000. p at: 'scope' put: 'profile'.
   self deny: (router rejectionForPayload: p) isNil
-%
-category: 'tests'
-method: McpAuthTest
-testTokenWithoutWriteScopeGivesReadOnlySession
-  "#7b: with a writeScope configured, a token lacking it opens a read-only worker -- a mutating tool
-   is refused (kind readOnly) while a safe tool still works. Target a kernel class so a regression
-   can't mutate anything."
-  | router |
-  router := McpAuthRouter new.
-  router expectedAudience: nil; expectedIssuer: nil; requiredScopes: #(); writeScope: 'mcp:write';
-    userIdClaim: 'sub'.
-  self withJwtUser: 'McpWriteScopeUser' router: router do: [:jwt | | sid out |
-    out := self runRequest: (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: router.
-    self assert: (self includesCS: 'HTTP/1.1 200 OK' in: out).
-    sid := self sessionIdFrom: out.
-    self deny: sid isNil.
-    out := self runRequest: (self post: (self callBody: 'compile_method' arguments: '{"className":"Object","source":"x ^1"}')
-      headers: 'MCP-Session-Id: ' , sid , self crlf , 'Authorization: Bearer ' , jwt , self crlf) on: router.
-    self assert: (self includesCS: 'readOnly' in: out).
-    out := self runRequest: (self post: self statusBody headers: 'MCP-Session-Id: ' , sid , self crlf , 'Authorization: Bearer ' , jwt , self crlf) on: router.
-    self assert: (self includesCS: 'user=McpWriteScopeUser' in: out)]
-%
-category: 'tests'
-method: McpAuthTest
-testTokenWithWriteScopeGivesWritableSession
-  "#7b: a token that DOES carry the writeScope opens a full read-write worker -- a mutating/execution
-   tool runs normally."
-  | router |
-  router := McpAuthRouter new.
-  router expectedAudience: nil; expectedIssuer: nil; requiredScopes: #(); writeScope: 'mcp:write';
-    userIdClaim: 'sub'.
-  self withJwtUser: 'McpWriteScopeUser' scope: 'openid mcp:write' router: router do: [:jwt | | sid out |
-    out := self runRequest: (self post: self initBody headers: 'Authorization: Bearer ' , jwt , self crlf) on: router.
-    sid := self sessionIdFrom: out.
-    self deny: sid isNil.
-    out := self runRequest: (self post: (self callBody: 'execute_code' arguments: '{"code":"6 * 7"}')
-      headers: 'MCP-Session-Id: ' , sid , self crlf , 'Authorization: Bearer ' , jwt , self crlf) on: router.
-    self assert: (self includesCS: '42' in: out).
-    self deny: (self includesCS: 'readOnly' in: out)]
 %
 category: 'tests'
 method: McpAuthTest

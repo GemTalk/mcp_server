@@ -15,6 +15,53 @@ has to act on. The measurements, the alternatives weighed and the kernel behavio
 belong in its commit message and in `docs/` — an entry that has to carry all of that is a sign the
 reasoning has nowhere better to live, not that the entry should grow.
 
+## Unreleased
+
+* **Breaking: read-only mode is gone, replaced by the worker gem's GemStone user.** `McpRouter`'s
+  `readOnly` flag, `MCP_READONLY`, `McpServer class>>sessionReadOnly:` /
+  `coreReadOnlySafeToolNames`, `McpServer>>isReadOnly` / `isToolAllowed:`, every toolset's
+  `readOnlySafeToolNames`, the dispatcher's gating and its `readOnly` error kind, and
+  `McpAuthRouter`'s `writeScope` / `MCP_WRITE_SCOPE` are all **removed**. `tools/list` is now
+  unfiltered and no tool is refused for being "unsafe".
+
+  The gate could only ever be advisory: `execute_code` evaluates arbitrary Smalltalk, `run_test_class`
+  runs arbitrary test bodies, and a tool that compiles can be followed by one that runs. The danger
+  was that it *looked* like an access-control boundary in the one place that mattered — an
+  administrator starting `MCP_READONLY=1 ./run-server.sh` on a privileged user.
+
+  In its place, `McpRouter>>workerUserId` (`MCP_WORKER_USER`) names the GemStone user every worker
+  gem logs in as; it defaults to the front end's own user, so an unconfigured router behaves as
+  before. `./setup-read-only-user.sh` provisions one that cannot commit
+  (`UserProfile>>disableCommits`, which covers forked gems too) and cannot reach the host. No
+  credential is configured — the front end mints a one-time password per session against a single
+  committed grant — so the router carries only an identifier. `McpAuthRouter` **refuses**
+  `workerUserId:`: there the bearer token names the user, so restricting someone means restricting
+  that GemStone UserProfile.
+
+  **To migrate:** replace `MCP_READONLY=1 ./run-server.sh` with `./setup-read-only-user.sh` once,
+  then `MCP_WORKER_USER=McpReadOnly ./run-server.sh`. Replace `MCP_WRITE_SCOPE` with a read-only
+  UserProfile for the users who should not write. Narrowing `toolsetNames` still narrows what is
+  *offered*, and is worth doing — it is just not a security control.
+  **[docs/ReadOnly_User.md](docs/ReadOnly_User.md)** is the new reference: every privilege, the
+  risk of granting it, the cost of withholding it, and what remains open afterwards (broad reads;
+  a session can take a write lock that blocks *other* sessions' commits; resource use).
+
+* **`MCP_REAP_LOCK_HOLDERS` ends sessions that hold GemStone write locks.** A session that can change
+  nothing can still take a write lock, which blocks *other* sessions from committing the objects it
+  covers — measured: a commit-locked, privilege-less worker locked `McpServer`'s method dictionary and
+  a `DataCurator` compile-and-commit then failed `Write-WriteLock`; one `execute_code` statement
+  walking `Globals` took 2,291 locks. Idleness is no bound on it, because a client that keeps calling
+  never goes idle and one client can hold several sessions. `McpRouter>>reapWriteLockHolders`
+  (default **off**) makes holding a lock the ground for ending a session, with no grace period:
+  an idle holder is reaped on the next pass, and a busy one — the case an adversary would arrange —
+  has its call ended first by `maintainWriteLockHolders`, so the client is answered with the new
+  `lockRelease` ended-call kind instead of a bare 404. Off by default because an application may take
+  a lock deliberately. See [docs/ReadOnly_User.md](docs/ReadOnly_User.md).
+
+* **The `[session]` line no longer tells a commit-locked session to commit.** Where
+  `System sessionCanCommit` is false, pending work is reported as uncommittable and the line points
+  at `abort` — previously it advised `commit`, which such a session can only ever fail.
+
 ## 0.8.0 — 2026-09-11
 
 * **Breaking: the Grail (Python) toolset is no longer served by default.** `McpServer

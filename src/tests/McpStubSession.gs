@@ -4,7 +4,8 @@ expectvalue /Class
 doit
 McpSession subclass: 'McpStubSession'
   instVarNames: #( wasPrepared fakeWorkerStoneSession fakeRefreshVerdict
-                    fakeRefreshVerdictSet refreshRequests fakeIsBusy viewReleaseRequests)
+                    fakeRefreshVerdictSet refreshRequests fakeIsBusy viewReleaseRequests
+                    fakeWriteLockCount lockReleaseRequests)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -40,14 +41,6 @@ removeallmethods McpStubSession
 removeallclassmethods McpStubSession
 ! ------------------- Class methods for McpStubSession
 ! ------------------- Instance methods for McpStubSession
-category: 'accessing'
-method: McpStubSession
-beReadOnly
-  "Make this stub a read-ONLY session. #startWithId: opens read-write, which is the mode most tests
-   want; the expiry-renewal rules differ between the two, so both have to be reachable."
-  readOnly := true.
-  ^self
-%
 category: 'testing support'
 method: McpStubSession
 fakeIsBusy: aBoolean
@@ -73,8 +66,23 @@ fakeWorkerStoneSession: anIntegerOrNil
 %
 category: 'testing support'
 method: McpStubSession
+fakeWriteLockCount: anInteger
+  "Report this instead of asking the stone how many write locks the (absent) worker gem holds.
+   McpSession>>writeLockCount is a System sessionLocks: call on a real stone session id, which a
+   stub has not got -- so without this the policy that reads it could only ever be tested in its
+   'holds nothing' arm."
+  fakeWriteLockCount := anInteger
+%
+category: 'testing support'
+method: McpStubSession
 isBusy
   ^fakeIsBusy ifNil: [super isBusy]
+%
+category: 'testing support'
+method: McpStubSession
+lockReleaseRequests
+  "How many times the front end has asked this session to end its call over write locks."
+  ^lockReleaseRequests ifNil: [0]
 %
 category: 'initialization'
 method: McpStubSession
@@ -98,6 +106,14 @@ refreshWorkerView
   refreshRequests := self refreshRequests + 1.
   ^fakeRefreshVerdictSet == true ifTrue: [fakeRefreshVerdict] ifFalse: ['kept']
 %
+category: 'write locks'
+method: McpStubSession
+requestLockRelease
+  "Record the ask instead of flagging a call that does not exist, and answer whether this stub is
+   pretending to be busy -- which is what the real method answers, and what the caller logs on."
+  lockReleaseRequests := (lockReleaseRequests ifNil: [0]) + 1.
+  ^self isBusy
+%
 category: 'testing support'
 method: McpStubSession
 requestViewRelease
@@ -113,7 +129,6 @@ startWithId: anId
    spawn and log in a gem. That is what lets a router test register a real, findable, reapable
    session (and drain its outbox) without a NETLDI."
   id := anId.
-  readOnly := false.
   ^self touch
 %
 category: 'testing support'
@@ -131,4 +146,9 @@ category: 'testing support'
 method: McpStubSession
 workerStoneSession
   ^fakeWorkerStoneSession ifNil: [super workerStoneSession]
+%
+category: 'write locks'
+method: McpStubSession
+writeLockCount
+  ^fakeWriteLockCount ifNil: [0]
 %

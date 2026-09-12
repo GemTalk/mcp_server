@@ -61,10 +61,3 @@ register: aTool
   tools at: aTool name put: aTool.
   ^aTool
 %
-category: 'registration'
-method: McpToolRegistry
-removeToolNamed: aName
-  "Unregister aName if present (no-op if not). Used when building a read-only worker, to keep a
-   toolset's unsafe tools out of the registry entirely -- see McpServer>>registerToolsets."
-  ^tools removeKey: aName ifAbsent: [nil]
-%

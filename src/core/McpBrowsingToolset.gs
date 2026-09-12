@@ -15,8 +15,8 @@ expectvalue /Class
 doit
 McpBrowsingToolset comment: 
 'The class-browsing tools: describe a class, export its source, read its definition, walk its
-hierarchy, read one method''s source, list its selectors by category. All read-only-safe -- nothing
-here can persist a change, so none of these handlers needs the server''s kernel guard.'
+hierarchy, read one method''s source, list its selectors by category. Nothing here can persist a
+change, so none of these handlers needs the server''s kernel guard.'
 %
 expectvalue /Class
 doit
@@ -42,12 +42,6 @@ methodsReportFor: aBehavior label: aLabel
     s nextPutAll: '  '; nextPutAll: cat; nextPut: Character lf.
     (byCat at: cat) asSortedCollection do: [:sel | s nextPutAll: '    '; nextPutAll: sel; nextPut: Character lf]].
   ^s contents
-%
-category: 'read-only'
-method: McpBrowsingToolset
-readOnlySafeToolNames
-  "Every browsing tool only reads."
-  ^self toolNames
 %
 category: 'registration'
 method: McpBrowsingToolset
