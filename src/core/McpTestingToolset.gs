@@ -21,7 +21,7 @@ Running a test EXECUTES CODE -- arbitrary code, whatever the test body happens t
 toolset is exactly as powerful as the gem''s GemStone user is. That is true of every tool here and
 is not a thing this pack can bound; what bounds it is the user the worker gem logs in as. A
 deployment that wants a browsing-only surface picks a user that cannot commit or reach the host,
-not a shorter tool list: see McpRouter>>workerUserId and docs/read-only-user.md.'
+not a shorter tool list: see McpRouter>>workerUserId and docs/ReadOnly_User.md.'
 %
 expectvalue /Class
 doit

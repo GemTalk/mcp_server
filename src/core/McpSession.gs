@@ -962,7 +962,7 @@ startWithId: anId workerUser: aUserIdOrNil
    A NAMED user is how a deployment bounds what its sessions can do: the worker is that user, so
    everything a tool can reach -- execute_code included -- is bounded by that user's GemStone
    privileges and authorization rather than by anything in this image. See McpRouter>>workerUserId
-   and docs/read-only-user.md.
+   and docs/ReadOnly_User.md.
    NO CREDENTIAL IS INVOLVED, which is why the router can carry the user's NAME in ordinary config
    (McpRouter>>configDict is a fixed allow-list that must never carry key material). The one-time
    password is minted here, by this gem, for the named user; minting for ANOTHER user requires that

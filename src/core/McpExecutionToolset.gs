@@ -21,7 +21,7 @@ Leaving this toolset out of a deployment''s McpRouter>>toolsetNames narrows what
 a reasonable thing to do -- but it is not a security boundary: run_test_class runs arbitrary test
 bodies, and any tool that compiles can be followed by one that runs. What actually bounds this tool
 is the GemStone user the worker gem logs in as, which is set outside this image: see
-McpRouter>>workerUserId and docs/read-only-user.md.
+McpRouter>>workerUserId and docs/ReadOnly_User.md.
 
 The handler caps its result at the shared 50k output limit (McpToolset>>capResult:); everything else
 about an evaluation -- errors included -- is the dispatcher''s business.'

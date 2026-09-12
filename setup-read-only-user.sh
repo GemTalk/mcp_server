@@ -10,7 +10,7 @@
 #
 #     MCP_WORKER_USER=McpReadOnly ./run-server.sh
 #
-# and every worker gem of that router is that user.  docs/read-only-user.md is the
+# and every worker gem of that router is that user.  docs/ReadOnly_User.md is the
 # privilege-by-privilege account -- what each one does, what it costs to withhold, and what is
 # STILL open afterwards.  Read it before trusting this to an untrusted client; the short version is
 # that this bounds what a session can CHANGE, not what it can READ or how much of the machine it
@@ -49,7 +49,7 @@ MCP_RO_USER="${MCP_RO_USER:-McpReadOnly}"
 MCP_COPY_SYMBOL_LIST="${MCP_COPY_SYMBOL_LIST:-1}"
 TOPAZ="$GEMSTONE/bin/topaz"
 
-# The default set.  Each entry is argued in docs/read-only-user.md; briefly:
+# The default set.  Each entry is argued in docs/ReadOnly_User.md; briefly:
 #   CodeModification  GRANTED, not withheld -- without it execute_code cannot so much as define a
 #                     helper class, and the tool stops being worth having.  It is safe to grant
 #                     precisely because nothing this user compiles can ever be committed.
@@ -150,4 +150,4 @@ echo
 echo "Done.  Start a browsing-only server with:"
 echo "    MCP_WORKER_USER=$MCP_RO_USER ./run-server.sh"
 echo "Verify from a client:  status  (reports user=$MCP_RO_USER), then try  commit  -- it must fail."
-echo "What this does and does NOT bound: docs/read-only-user.md"
+echo "What this does and does NOT bound: docs/ReadOnly_User.md"

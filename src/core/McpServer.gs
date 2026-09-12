@@ -827,7 +827,7 @@ registerToolsets
   "Register every tool of every toolset I was built with. There is no filter here and no per-tool
    policy: a deployment chooses its surface by choosing its TOOLSET LIST (McpRouter>>toolsetNames),
    and what a session may actually change is decided by the worker gem's GemStone user, outside this
-   image entirely (McpRouter>>workerUserId, docs/read-only-user.md).
+   image entirely (McpRouter>>workerUserId, docs/ReadOnly_User.md).
    This replaced a read-only allow-list that pruned 'unsafe' tools at build time. That gate was
    removed because it could only ever be advisory -- execute_code can reach anything the gem's user
    can reach, so a list of 'safe' tool names was a statement about intent, not a boundary."

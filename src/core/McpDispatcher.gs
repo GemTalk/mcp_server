@@ -477,7 +477,7 @@ transactionStateNote
     "A session whose GEMSTONE USER cannot commit must not be told to call commit: it would be
      advice that cannot be taken, and the tool would answer with a TransactionError the model then
      has to interpret. Such a session is the point of a browsing-only deployment
-     (McpRouter>>workerUserId, docs/read-only-user.md), and its pending work is real -- later reads
+     (McpRouter>>workerUserId, docs/ReadOnly_User.md), and its pending work is real -- later reads
      in THIS session see it while the database does not -- so the line still has to appear, saying
      the one thing that is actually true about it."
     System sessionCanCommit ifFalse: [

@@ -31,7 +31,7 @@
 #                     so what a session can read, write, commit, compile or run on the host is that
 #                     user's privileges and object authorization -- decided in the stone, not by the
 #                     tool list. ./setup-read-only-user.sh provisions a user that cannot commit and
-#                     cannot reach the host; docs/read-only-user.md explains each privilege, what it
+#                     cannot reach the host; docs/ReadOnly_User.md explains each privilege, what it
 #                     costs to withhold, and what is still open afterwards.
 #                     No password is needed here: the front end mints a one-time password for the
 #                     named user, which requires one committed grant that setup-read-only-user.sh
@@ -43,7 +43,7 @@
 #                     still do to everyone else. Idleness is no bound on it: a client that keeps
 #                     calling never goes idle. OFF by default because an application may take a lock
 #                     deliberately; turn it on together with MCP_WORKER_USER, where a lock could only
-#                     be an attack. See docs/read-only-user.md.
+#                     be an attack. See docs/ReadOnly_User.md.
 #   MCP_WORKER_CLASS - McpServer subclass the workers should instantiate (default McpServer).
 #                     Subclass to change BEHAVIOR; to add tools write a toolset instead.
 #   MCP_TOOLSETS - space-separated McpToolset names to expose instead of the default surface,

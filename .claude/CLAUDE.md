@@ -20,7 +20,7 @@ Nothing here is machine-specific. Facts about *your* stones, netldis, IdP and ho
 * [docs/blind-write-guardrail.md](../docs/blind-write-guardrail.md),
   [docs/session-lifetime.md](../docs/session-lifetime.md),
   [docs/utf8-wire.md](../docs/utf8-wire.md) — deep dives on three subsystems.
-* [docs/read-only-user.md](../docs/read-only-user.md) — what bounds a session, now that nothing in
+* [docs/ReadOnly_User.md](../docs/ReadOnly_User.md) — what bounds a session, now that nothing in
   this image does: the worker gem's GemStone user, privilege by privilege, and what is still open.
   Read it before adding anything that claims to restrict what a client can do.
 * [CHANGELOG.md](../CHANGELOG.md) — what changed per release.

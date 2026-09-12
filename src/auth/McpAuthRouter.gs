@@ -51,7 +51,7 @@ and extraScopes. Configure a router and fork it, e.g. via run-auth-server.sh.
 WHAT A SESSION MAY DO IS ITS GEMSTONE USER''S BUSINESS, not this router''s. A worker gem here logs in
 as the token''s own user, so that user''s privileges and object authorization decide what it can read,
 write, commit or run -- an operator grants a read-only analyst a read-only UserProfile
-(docs/read-only-user.md). This router had a `writeScope` that downgraded a scope-less token to a
+(docs/ReadOnly_User.md). This router had a `writeScope` that downgraded a scope-less token to a
 reduced tool list instead; it was removed because a tool list was never a boundary (execute_code, and
 any test body, reach whatever the user reaches) and because two answers to one question is worse than
 one. McpRouter>>workerUserId is the same idea for the unauthenticated front end, which has no token
@@ -783,7 +783,7 @@ workerUserId: aUserIdOrNil
   aUserIdOrNil isNil ifTrue: [^super workerUserId: nil].
   ^self error: 'McpAuthRouter does not accept workerUserId: every worker gem logs in as the ' ,
     'GemStone user its bearer token names, so one configured user cannot apply. To bound what a ' ,
-    'user may do, restrict that GemStone UserProfile (see docs/read-only-user.md); to run every ' ,
+    'user may do, restrict that GemStone UserProfile (see docs/ReadOnly_User.md); to run every ' ,
     'session as one user, use McpRouter.'
 %
 category: 'auth'

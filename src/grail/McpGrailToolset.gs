@@ -49,7 +49,7 @@ MOST TOOLS HERE WRITE, including ones that look like reads: the browsing tools R
 subject, which imports the module it lives in, and in Grail a cold import is a database write. Only
 python_module_state is a pure read. That is a fact about Grail worth knowing before pointing a
 browsing-only deployment at this toolset -- what decides whether those writes can be KEPT is the
-worker gem''s GemStone user (docs/read-only-user.md), not the tool list.
+worker gem''s GemStone user (docs/ReadOnly_User.md), not the tool list.
 
 BROWSING A PYTHON CLASS IS NOT BROWSING A SMALLTALK ONE. Grail creates every user Python class
 anonymously (inDictionary: nil), so no symbol dictionary names it and list_classes cannot see it at

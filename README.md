@@ -768,7 +768,7 @@ from login, forked gems included) and the privileges `CodeModification`, `NoPerf
 `performOnServer:`, `GsFile`, one-time-password minting, `stopSession:` and logging in a second gem
 all raise. Reads and compiling still work, which is what makes the browsing surface worth having.
 
-**[docs/read-only-user.md](docs/read-only-user.md) is the reference**: every privilege, what it does,
+**[docs/ReadOnly_User.md](docs/ReadOnly_User.md) is the reference**: every privilege, what it does,
 the risk of granting it, the cost of withholding it — and, just as important, what is **still open**
 afterwards (reads are broad; resource consumption is bounded only by session lifetime). Read it
 before pointing an untrusted client at this.

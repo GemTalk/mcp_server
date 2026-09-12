@@ -232,7 +232,7 @@ the renewed token was never consulted about lifetime.
 Renewal now turns on the token's expiry alone. It once also refused to extend a read-WRITE session on
 a token that had lost the router's `writeScope` — both that scope and the tool-gate it drove are
 gone, because what a session may do is now decided by its GemStone user rather than by which tools it
-was shown (`docs/read-only-user.md`).
+was shown (`docs/ReadOnly_User.md`).
 
 **The log says what was in force.** The startup banner records the whole lifetime configuration and
 the concurrency cap beside it (`concurrent sessions: at most 3`); a refused `initialize` is logged

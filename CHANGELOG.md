@@ -42,7 +42,7 @@ reasoning has nowhere better to live, not that the entry should grow.
   then `MCP_WORKER_USER=McpReadOnly ./run-server.sh`. Replace `MCP_WRITE_SCOPE` with a read-only
   UserProfile for the users who should not write. Narrowing `toolsetNames` still narrows what is
   *offered*, and is worth doing — it is just not a security control.
-  **[docs/read-only-user.md](docs/read-only-user.md)** is the new reference: every privilege, the
+  **[docs/ReadOnly_User.md](docs/ReadOnly_User.md)** is the new reference: every privilege, the
   risk of granting it, the cost of withholding it, and what remains open afterwards (broad reads;
   a session can take a write lock that blocks *other* sessions' commits; resource use).
 
@@ -56,7 +56,7 @@ reasoning has nowhere better to live, not that the entry should grow.
   an idle holder is reaped on the next pass, and a busy one — the case an adversary would arrange —
   has its call ended first by `maintainWriteLockHolders`, so the client is answered with the new
   `lockRelease` ended-call kind instead of a bare 404. Off by default because an application may take
-  a lock deliberately. See [docs/read-only-user.md](docs/read-only-user.md).
+  a lock deliberately. See [docs/ReadOnly_User.md](docs/ReadOnly_User.md).
 
 * **The `[session]` line no longer tells a commit-locked session to commit.** Where
   `System sessionCanCommit` is false, pending work is reported as uncommittable and the line points

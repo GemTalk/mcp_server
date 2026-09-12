@@ -22,7 +22,7 @@ Three of the four only read: abort discards uncommitted work rather than persist
 refresh and status move or report the view. `commit` is the one that persists -- and whether it is
 ALLOWED to is not this toolset''s question. A worker gem whose GemStone user cannot commit gets a
 TransactionError from the stone, which is the honest refusal and the only one that cannot be
-talked around: see McpRouter>>workerUserId and docs/read-only-user.md.
+talked around: see McpRouter>>workerUserId and docs/ReadOnly_User.md.
 
 THE TRANSACTION MODEL THESE TOOLS EXPOSE (changed 2026-08-28; docs/server-to-client-messaging.md
 10.11 and 15). A worker gem sits in one long-lived GemStone transaction and sees one consistent

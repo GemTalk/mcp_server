@@ -85,7 +85,7 @@ Foreground (blocks this session):
 Detached, independent (survives logout); stop it by port with ./stop-server.sh:
     McpRouter new forkOnPort: 8000
 Run every worker as a DIFFERENT GemStone user -- how a deployment bounds what its sessions can do,
-since the worker gem IS that user (see workerUserId, docs/read-only-user.md, setup-read-only-user.sh):
+since the worker gem IS that user (see workerUserId, docs/ReadOnly_User.md, setup-read-only-user.sh):
     (McpRouter new workerUserId: ''McpReadOnly'') forkOnPort: 8000
 Label THIS INSTANCE for humans -- what an operator running two instances of one product needs. The
 name and version stay truthful (every box reports the same software); only the display title differs:
@@ -2108,7 +2108,7 @@ reapWriteLockHolders
    hold several sessions, so idleness is not a bound an adversary has to respect.
    OFF BY DEFAULT because a lock is legitimate in an application that takes one deliberately: this
    would end that session mid-call. Turn it on wherever a session's user is confined and a lock could
-   only be an attack -- which is exactly the browsing-only deployment docs/read-only-user.md
+   only be an attack -- which is exactly the browsing-only deployment docs/ReadOnly_User.md
    describes."
   ^reapWriteLockHolders
 %
@@ -3501,7 +3501,7 @@ workerUserId
    user, so what a session can read, write, commit, compile, run on the host or do to the stone is
    decided by that user's privileges and object authorization -- in the stone, not in this image.
    Narrowing the TOOL LIST (toolsetNames) narrows what is offered and nothing more: execute_code and
-   any test body reach whatever the user reaches. docs/read-only-user.md is the privilege-by-privilege
+   any test body reach whatever the user reaches. docs/ReadOnly_User.md is the privilege-by-privilege
    account, and setup-read-only-user.sh provisions the user this was built for.
    Naming a user needs no secret here -- see McpSession>>startWithId:workerUser: for the one-time
    password mint and the single committed grant it depends on."

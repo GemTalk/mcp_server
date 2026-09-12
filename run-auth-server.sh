@@ -53,10 +53,10 @@
 #   (There is no write-scope setting, and no read-only setting. A worker gem here logs in as the
 #    GemStone user its bearer token names, so what a session may do is that user's privileges and
 #    object authorization: give a read-only analyst a read-only UserProfile. See
-#    docs/read-only-user.md, and ./setup-read-only-user.sh for a user to model one on. MCP_WRITE_SCOPE
+#    docs/ReadOnly_User.md, and ./setup-read-only-user.sh for a user to model one on. MCP_WRITE_SCOPE
 #    and MCP_READONLY existed here until the release after 0.8.0; they are now ignored if set.)
 #   MCP_REAP_LOCK_HOLDERS - 1 to end any session found holding a GemStone WRITE LOCK (default 0).
-#                         Same setting and same reasoning as run-server.sh; see docs/read-only-user.md.
+#                         Same setting and same reasoning as run-server.sh; see docs/ReadOnly_User.md.
 #   MCP_TOOLSETS        - space-separated McpToolset names to expose instead of the default surface
 #                         (the core seven, McpServer class>>defaultToolsetNames). Same variable and
 #                         same meaning as run-server.sh. Needed to serve an OPTIONAL toolset at all,

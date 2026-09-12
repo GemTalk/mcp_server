@@ -151,7 +151,7 @@ testACommitLockedSessionIsNotToldToCommit
    IN A FORKED GEM, and it has to be: System disableCommitsWithReason: holds until LOGOUT with no
    way back, so asking it of the session running this suite would leave every later test unable to
    commit. The lock dies with the gem, which tearDown closes. (A deployment reaches the same state
-   the durable way, through a read-only UserProfile -- see docs/read-only-user.md; this is the same
+   the durable way, through a read-only UserProfile -- see docs/ReadOnly_User.md; this is the same
    #sessionCanCommit false that the profile produces, staged where a test can undo it.)"
   | note |
   other := McpSession startWithId: 'commit-locked-note-fixture'.
