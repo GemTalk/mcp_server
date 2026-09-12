@@ -22,9 +22,8 @@ MCP over Streamable HTTP gives the server no socket to call out on: it can only 
 connection the client opened, and the only such connection that is not tied to a request is the
 GET stream. That stream is accepted by the FRONT END''s process, and a socket is a file descriptor
 meaningful only inside the process that owns it, so the stream can live nowhere but McpRouter --
-which is also where this outbox lives, one per McpSession, gem-local and NEVER committed (the same
-reasoning that keeps readOnly inside the worker gem: transient per-session state needs no
-persistence and must not be visible to other sessions).
+which is also where this outbox lives, one per McpSession, gem-local and NEVER committed: transient
+per-session state needs no persistence and must not be visible to other sessions.
 
 There is no gem in an outbox, which is the point: it is the whole server-to-client pathway reduced
 to something directly unit-testable (McpOutboxTest), with the socket on the other side of #drain.

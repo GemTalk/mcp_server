@@ -54,8 +54,8 @@ charsOf: anArrayOfCodePoints
 category: 'helpers'
 method: McpContractTest
 dispatch: requestDict
-  "Route requestDict through a fresh dispatcher wired to its owning server, so read-only gating is
-   exercised through the real path."
+  "Route requestDict through a fresh dispatcher wired to its owning server, so the real dispatch
+   path -- registry lookup, validation, identity -- is what gets exercised."
   | s |
   s := McpServer new.
   ^(McpDispatcher withToolRegistry: s toolRegistry server: s) handle: requestDict
@@ -69,7 +69,7 @@ includesCS: aSubstring in: aString
 category: 'helpers'
 method: McpContractTest
 listedToolNames
-  "The tool names returned by tools/list through the (read-only-aware) dispatcher."
+  "The tool names returned by tools/list through the dispatcher."
   ^(((self dispatch: (self request: 'tools/list' params: nil)) at: 'result') at: 'tools')
     collect: [:d | d at: 'name']
 %
@@ -84,15 +84,6 @@ request: methodName params: paramsDict
   paramsDict ifNotNil: [d at: 'params' put: paramsDict].
   ^d
 %
-category: 'helpers'
-method: McpContractTest
-savingReadOnlyDo: aBlock
-  "Run aBlock with the per-session read-only flag cleared BEFORE and after, so a read-only test
-   starts clean and cannot leak the flag into other tests. Read-only is purely the per-session
-   #McpReadOnly flag now -- there is no global switch to save/restore."
-  SessionTemps current removeKey: #McpReadOnly ifAbsent: [nil].
-  ^[aBlock value] ensure: [SessionTemps current removeKey: #McpReadOnly ifAbsent: [nil]]
-%
 category: 'tests - guard'
 method: McpContractTest
 testAssertMutableClassRaisesRefused
@@ -101,18 +92,6 @@ testAssertMutableClassRaisesRefused
   kind := [McpServer new assertMutableClass: Object. #noRaise]
     on: McpError do: [:e | e kind].
   self assert: kind equals: #refused
-%
-category: 'tests - read-only'
-method: McpContractTest
-testCoreReadOnlyAllowListIsPinned
-  "The read-only allow-list is now distributed -- each toolset declares its own safe names and the
-   server answers their union -- so pin that union against the audit list
-   (McpServer class>>coreReadOnlySafeToolNames). Without this, a new core tool could quietly become
-   'safe', or drop out of the gate, with no single place showing it."
-  | union pinned |
-  union := McpServer new readOnlySafeToolNames asSortedCollection asArray.
-  pinned := McpServer coreReadOnlySafeToolNames asSortedCollection asArray.
-  self assert: union equals: pinned
 %
 category: 'tests - toolsets'
 method: McpContractTest
@@ -150,6 +129,19 @@ testEverySchemaIsClosed
     schema := d at: 'inputSchema'.
     self assert: (schema at: 'type') equals: 'object'.
     self assert: (schema at: 'additionalProperties' ifAbsent: [true]) == false]
+%
+category: 'tests - registry'
+method: McpContractTest
+testEveryToolIsListed
+  "tools/list is unfiltered: the whole registry is offered, all 31 tools of the default surface,
+   mutating ones included. There is no per-tool gate left in this image -- a deployment narrows what
+   it offers by choosing its toolset list, and what a session may actually DO is decided by the
+   worker gem's GemStone user (McpRouter>>workerUserId)."
+  | names |
+  names := self listedToolNames.
+  self assert: names size equals: 31.
+  self assert: (names includes: 'compile_method').
+  self assert: (names includes: 'execute_code')
 %
 category: 'tests - guard'
 method: McpContractTest
@@ -216,15 +208,6 @@ testNoArgumentToolReportsNoArguments
   self assert: (self includesCS: 'takes no arguments' in: text).
   self deny: (self includesCS: 'Allowed:' in: text)
 %
-category: 'tests - read-only'
-method: McpContractTest
-testNotReadOnlyByDefault
-  "Sanity: with the switch off, tools/list shows all 31 tools including the mutating ones."
-  | names |
-  names := self listedToolNames.
-  self assert: names size equals: 31.
-  self assert: (names includes: 'compile_method')
-%
 category: 'tests - lifecycle'
 method: McpContractTest
 testPingReturnsEmptyResult
@@ -237,39 +220,25 @@ testPingReturnsEmptyResult
 %
 category: 'tests - worker'
 method: McpContractTest
-testPrepareWorkerAppliesReadOnlyBeforeBuilding
-  "Read-only must be set before the build, or the gated tools would already be registered."
-  self withFreshWorkerCacheDo: [
-    self savingReadOnlyDo: [ | out |
-      McpServer prepareWorkerWithToolsets: McpServer defaultToolsetNames options: nil
-        readOnly: true serverName: nil title: nil version: nil frontEnd: nil cacheName: nil.
-      out := McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'.
-      self deny: (self includesCS: 'execute_code' in: out).
-      self deny: (self includesCS: 'compile_method' in: out).
-      self assert: (self includesCS: 'describe_class' in: out)]]
-%
-category: 'tests - worker'
-method: McpContractTest
 testPrepareWorkerBuildsNamedSurfaceAndCaches
-  "The bootstrap the front end sends at session open: it sets read-only, builds the named surface, and
-   caches the instance where handleJsonString: finds it -- so the client's first request has no build to
-   do and dispatches through what was prepared."
-  self withFreshWorkerCacheDo: [
-    self savingReadOnlyDo: [ | note listed |
-      note := McpServer
-        prepareWorkerWithToolsets: #('McpBrowsingToolset') options: nil
-        readOnly: false serverName: 'acme-db-mcp' title: 'Acme Labels - sandbox' version: '2.5.0'
-        frontEnd: nil cacheName: nil.
-      self assert: (self includesCS: 'McpServer ready' in: note).
-      listed := (((McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
-        indexOfSubCollection: 'describe_class') > 0).
-      self assert: listed.
-      "the prepared instance is what answers -- not a freshly built default surface"
-      self deny: ((McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
-        indexOfSubCollection: 'execute_code') > 0.
-      "and the configured identity is what initialize reports"
-      self assert: (self includesCS: 'acme-db-mcp'
-        in: (McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'))]]
+  "The bootstrap the front end sends at session open: it builds the named surface and caches the
+   instance where handleJsonString: finds it -- so the client's first request has no build to do and
+   dispatches through what was prepared."
+  self withFreshWorkerCacheDo: [ | note listed |
+    note := McpServer
+      prepareWorkerWithToolsets: #('McpBrowsingToolset') options: nil
+      serverName: 'acme-db-mcp' title: 'Acme Labels - sandbox' version: '2.5.0'
+      frontEnd: nil cacheName: nil.
+    self assert: (self includesCS: 'McpServer ready' in: note).
+    listed := (((McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
+      indexOfSubCollection: 'describe_class') > 0).
+    self assert: listed.
+    "the prepared instance is what answers -- not a freshly built default surface"
+    self deny: ((McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
+      indexOfSubCollection: 'execute_code') > 0.
+    "and the configured identity is what initialize reports"
+    self assert: (self includesCS: 'acme-db-mcp'
+      in: (McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'))]
 %
 category: 'tests - guard'
 method: McpContractTest
@@ -299,84 +268,6 @@ testRaisedErrorCarriesStructuredKind
   struct := result at: 'structuredContent'.
   self assert: ((struct at: 'error') includesKey: 'kind').
   self deny: ((struct at: 'error') at: 'message') isEmpty
-%
-category: 'tests - read-only'
-method: McpContractTest
-testReadOnlyAllowsSafeToolCall
-  "#7: a safe (read) tool still works while read-only."
-  self savingReadOnlyDo: [ | result |
-    McpServer sessionReadOnly: true.
-    result := (self dispatch: (self toolCall: 'describe_class' args:
-      (Dictionary new at: 'className' put: 'Object'; yourself))) at: 'result'.
-    self deny: (result at: 'isError')]
-%
-category: 'tests - toolsets'
-method: McpContractTest
-testReadOnlyBuildDropsUnsafeToolsetWhole
-  "Build-time gating (McpServer>>registerToolsets): when the worker is already read-only as the server
-   is built -- the production path -- an all-unsafe toolset contributes NOTHING to the registry, and a
-   mixed one keeps only its safe tools. Stronger than refusing on call: the tool is not there at all."
-  self savingReadOnlyDo: [ | names |
-    McpServer sessionReadOnly: true.
-    names := (McpServer newWithToolsetNames: #('McpMutationToolset' 'McpSessionToolset'))
-      toolRegistry descriptors collect: [:d | d at: 'name'].
-    self deny: (names includes: 'compile_method').   "all-unsafe toolset: dropped whole"
-    self deny: (names includes: 'delete_class').
-    self deny: (names includes: 'commit').           "mixed toolset: unsafe tool pruned"
-    self assert: (names includes: 'abort').          "mixed toolset: safe tools kept"
-    self assert: (names includes: 'status')]
-%
-category: 'tests - read-only'
-method: McpContractTest
-testReadOnlyDistinguishesGatedFromUnknownTool
-  "The boundary the read-only build introduces: a gated tool is pruned from the registry, so both it
-   and a nonexistent tool are registry misses -- but they must NOT answer the same. The gated one is
-   -32601/readOnly ('exists, forbidden here'), a typo stays -32602/notFound."
-  self savingReadOnlyDo: [ | gated unknown |
-    McpServer sessionReadOnly: true.
-    gated := (self dispatch: (self toolCall: 'commit' args: Dictionary new)) at: 'error'.
-    unknown := (self dispatch: (self toolCall: 'no_such_tool' args: Dictionary new)) at: 'error'.
-    self assert: (gated at: 'code') equals: -32601.
-    self assert: ((gated at: 'data') at: 'kind') equals: 'readOnly'.
-    self assert: (unknown at: 'code') equals: -32602.
-    self assert: ((unknown at: 'data') at: 'kind') equals: 'notFound']
-%
-category: 'tests - read-only'
-method: McpContractTest
-testReadOnlyGatesDangerousToolCall
-  "#7: a direct call to a gated tool is refused -32601 kind readOnly, before any validation or side
-   effect. Targets a kernel class so a regression can't mutate anything even if the gate failed."
-  self savingReadOnlyDo: [ | err |
-    McpServer sessionReadOnly: true.
-    err := (self dispatch: (self toolCall: 'compile_method' args:
-      (Dictionary new at: 'className' put: 'Object'; at: 'source' put: 'x ^1'; yourself))) at: 'error'.
-    self assert: (err at: 'code') equals: -32601.
-    self assert: ((err at: 'data') at: 'kind') equals: 'readOnly']
-%
-category: 'tests - read-only'
-method: McpContractTest
-testReadOnlyGatesExecuteCode
-  "#7: execute_code (arbitrary code -- the tool that most needs gating) is refused -32601 readOnly
-   when the session is read-only."
-  self savingReadOnlyDo: [ | err |
-    McpServer sessionReadOnly: true.
-    err := (self dispatch: (self toolCall: 'execute_code' args:
-      (Dictionary new at: 'code' put: '1'; yourself))) at: 'error'.
-    self assert: (err at: 'code') equals: -32601.
-    self assert: ((err at: 'data') at: 'kind') equals: 'readOnly']
-%
-category: 'tests - read-only'
-method: McpContractTest
-testReadOnlyHidesDangerousToolsFromList
-  "#7: read-only hides the gated (dangerous) tools from tools/list; safe tools remain."
-  self savingReadOnlyDo: [ | names |
-    McpServer sessionReadOnly: true.
-    names := self listedToolNames.
-    self deny: (names includes: 'compile_method').
-    self deny: (names includes: 'execute_code').
-    self deny: (names includes: 'commit').
-    self assert: (names includes: 'describe_class').
-    self assert: (names includes: 'status')]
 %
 category: 'tests - toolsets'
 method: McpContractTest
@@ -469,15 +360,6 @@ testToolsetGuardForwardsToTheServer
   [self assert: (ts assertMutableClass: probe) == probe]
     ensure: [UserGlobals removeKey: #McpGuardForwardProbe ifAbsent: [nil]]
 %
-category: 'tests - read-only'
-method: McpContractTest
-testToolsetSafeNamesAreItsOwnTools
-  "A toolset may only vouch for tools it actually provides: every name in its readOnlySafeToolNames
-   must be one of its toolNames. Catches a copy-paste that would whitelist another toolset's tool."
-  McpServer new toolsets do: [:ts |
-    ts readOnlySafeToolNames do: [:name |
-      self assert: (ts toolNames includes: name)]]
-%
 category: 'tests - registry'
 method: McpContractTest
 testToolsetsCoverEveryRegisteredTool
@@ -529,7 +411,7 @@ testUnknownToolsetNameIsRefusedByName
 category: 'tests - validation'
 method: McpContractTest
 testValidArgumentsAccepted
-  "A well-formed call is not rejected by validation (describe_class is read-only -> not isError)."
+  "A well-formed call is not rejected by validation (describe_class only reads -> not isError)."
   | result |
   result := (self dispatch: (self toolCall: 'describe_class' args:
     (Dictionary new at: 'className' put: 'Object'; yourself))) at: 'result'.

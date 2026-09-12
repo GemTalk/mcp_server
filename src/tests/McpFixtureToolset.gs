@@ -15,12 +15,10 @@ expectvalue /Class
 doit
 McpFixtureToolset comment: 
 'A third-party toolset, in miniature: one tool (fixture_echo) that the extension tests use to prove a
-developer can add tools without touching McpServer, combine them with the core toolsets, and have
-read-only honor their own safety declaration.
+developer can add tools without touching McpServer and combine them with the core toolsets.
 
-Written the way a real third-party toolset should be: it owns its handler, needs nothing from the
-server (echoing a string consults no server-level policy -- see McpToolset), and declares its tool
-read-only safe because echoing an argument cannot persist anything.
+Written the way a real third-party toolset should be: it owns its handler and needs nothing from the
+server (echoing a string consults no server-level policy -- see McpToolset).
 
 It also declares one DEPLOYMENT OPTION, echoPrefix, which is how the extension tests exercise the
 whole options chain end to end -- declared here, set on the router, validated against this
@@ -43,13 +41,6 @@ declaredOptionNames
   ^#( 'echoPrefix' )
 %
 ! ------------------- Instance methods for McpFixtureToolset
-category: 'read-only'
-method: McpFixtureToolset
-readOnlySafeToolNames
-  "Echoing a string cannot persist a change, so this survives a read-only session -- the point being
-   that a toolset decides this for its OWN tools, rather than a central list deciding for it."
-  ^self toolNames
-%
 category: 'registration'
 method: McpFixtureToolset
 registerOn: aToolRegistry

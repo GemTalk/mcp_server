@@ -328,7 +328,9 @@ only after they are committed. The commit result reports how many `execute_code`
 the window, which is the most that can be said without inventing precision.
 
 A deployment that needs a hard guarantee **composes the toolset out** — `McpExecutionToolset` is
-resolved per session like any other, the same mechanism read-only mode uses.
+resolved per session like any other. Note that composing it out narrows what is *offered* and is not
+itself a boundary: a test body is arbitrary Smalltalk too. What bounds a session is the GemStone
+user its worker gem logs in as (`docs/ReadOnly_User.md`).
 
 That guarantee was until now hollow, because `compile_class_definition` took a source string and
 did `source evaluate`, checking only afterwards that the result was a `Behavior` — by which point

@@ -4,14 +4,14 @@ expectvalue /Class
 doit
 Object subclass: 'McpSession'
   instVarNames: #( id worker workerMutex
-                    lastActivitySeconds userId readOnly workerClassName
-                    toolsetNames toolsetOptions serverName serverTitle
-                    serverVersion workerPid workerStoneSession outbox
-                    startedAtSeconds expiresAtSeconds quietProbes unansweredProbes
-                    streamlessPasses passesSinceProbe streamClosedByClient requestTimeoutSeconds
-                    workerAbandoned inFlightRequestId cancelRequested waitAction
-                    commitsBehind maintenanceCallTimeoutSeconds stuckViewPasses stuckViewReason
-                    pinnedViewPasses viewReleaseRequested)
+                    lastActivitySeconds userId workerClassName toolsetNames
+                    toolsetOptions serverName serverTitle serverVersion
+                    workerPid workerStoneSession outbox startedAtSeconds
+                    expiresAtSeconds quietProbes unansweredProbes streamlessPasses
+                    passesSinceProbe streamClosedByClient requestTimeoutSeconds workerAbandoned
+                    inFlightRequestId cancelRequested waitAction commitsBehind
+                    maintenanceCallTimeoutSeconds stuckViewPasses stuckViewReason pinnedViewPasses
+                    viewReleaseRequested lockReleaseRequested)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -71,10 +71,11 @@ endedCallKinds
      #cancelled    the client said it no longer wants it
      #maintenance  the front end's own send into the worker did not answer in time
      #viewRelease  its view was pinning the repository's oldest commit record under real pressure
+     #lockRelease  its session held write locks, which block OTHER sessions from committing
    #maintenance cannot reach a client -- a maintenance send only happens when no client call is in
    flight -- and is named here anyway, because a list that is the definition of a category should not
    omit a member on the grounds that one caller cannot see it."
-  ^#( #timeout #cancelled #maintenance #viewRelease )
+  ^#( #timeout #cancelled #maintenance #viewRelease #lockRelease )
 %
 category: 'ended calls'
 classmethod: McpSession
@@ -96,16 +97,9 @@ new
 category: 'instance creation'
 classmethod: McpSession
 startWithId: anId
-  "Spawn a worker gem (current user, one-time password) and answer a started session with the
-   given client id."
+  "Spawn a worker gem as the FRONT END'S OWN user and answer a started session with the given
+   client id. See startWithId:workerUser: for the variant that names a different one."
   ^self new startWithId: anId
-%
-category: 'instance creation'
-classmethod: McpSession
-startWithId: anId readOnly: aBoolean
-  "As startWithId:, but marks the local worker read-only when aBoolean (a read-only McpRouter -- a
-   localhost convenience so a single user cannot accidentally mutate)."
-  ^self new startWithId: anId readOnly: aBoolean
 %
 category: 'instance creation'
 classmethod: McpSession
@@ -116,10 +110,10 @@ startWithId: anId user: aUserId jwt: aJwtString
 %
 category: 'instance creation'
 classmethod: McpSession
-startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
-  "As startWithId:user:jwt:, but marks the worker read-only when aBoolean is true (the token lacked
-   the configured write scope -- see McpAuthRouter writeScope)."
-  ^self new startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
+startWithId: anId workerUser: aUserIdOrNil
+  "Spawn a worker gem logged in as aUserIdOrNil (nil means the front end's own user) and answer a
+   started session with the given client id. See the instance-side method."
+  ^self new startWithId: anId workerUser: aUserIdOrNil
 %
 ! ------------------- Instance methods for McpSession
 category: 'private'
@@ -181,6 +175,8 @@ awaitWorkerResultUntil: aDeadlineOrNil because: aReasonSymbol
       ifTrue: [^self endCallBecause: #cancelled].
     (worker isCallInProgress and: [viewReleaseRequested == true])
       ifTrue: [^self endCallBecause: #viewRelease].
+    (worker isCallInProgress and: [lockReleaseRequested == true])
+      ifTrue: [^self endCallBecause: #lockRelease].
     (worker isCallInProgress and: [aDeadlineOrNil notNil and: [System timeGmt >= aDeadlineOrNil]])
       ifTrue: [^self endCallBecause: aReasonSymbol]].
   ^self
@@ -305,6 +301,12 @@ endingPhraseFor: aReasonSymbol
   aReasonSymbol == #maintenance ifTrue: [
     ^'This server''s own maintenance call into the worker gem did not finish within '
       , self maintenanceCallTimeoutSeconds printString , ' seconds and was ended. '].
+  aReasonSymbol == #lockRelease ifTrue: [
+    ^'This request was ended, and this session is being closed, because it holds WRITE LOCKS on '
+      , 'committed objects. A write lock changes nothing by itself, but it stops every OTHER '
+      , 'session on this repository from committing the objects it covers, for as long as this '
+      , 'session lives -- so it is not something a session here may hold. Locks are released when '
+      , 'the session ends; open a new one to continue. '].
   aReasonSymbol == #viewRelease ifTrue: [
     ^'This request was ended because its database view was holding the repository''s oldest commit '
       , 'record open while the repository was over its commit-record backlog threshold, and no other '
@@ -318,7 +320,7 @@ method: McpSession
 expiresAtSeconds
   "The absolute wall-clock second at which this session must end regardless of activity, or nil when
    nothing bounds it. Set by an authenticated front end from the access token's exp (see
-   McpAuthRouter>>openSessionForUser:jwt:readOnly:): the worker gem is logged in as that token's
+   McpAuthRouter>>openSessionForUser:jwt:): the worker gem is logged in as that token's
    user, so letting the session outlive the token would leave the authorization it was granted in
    force after the grant expired."
   ^expiresAtSeconds
@@ -391,12 +393,13 @@ forward: aRawJsonString lifetimeBounds: anArrayOrNil requestId: anIdOrNil progre
   ^[inFlightRequestId := anIdOrNil.
     cancelRequested := false.
     viewReleaseRequested := false.
+    lockReleaseRequested := false.
     pinnedViewPasses := 0.
     waitAction := aBlockOrNil.
     self runWorker: (self workerExpressionFor: aRawJsonString lifetimeBounds: anArrayOrNil
       progressCallId: aCallIdOrNil)]
       ensure: [inFlightRequestId := nil. cancelRequested := false. viewReleaseRequested := false.
-        pinnedViewPasses := 0. waitAction := nil]
+        lockReleaseRequested := false. pinnedViewPasses := 0. waitAction := nil]
 %
 category: 'accessing'
 method: McpSession
@@ -443,6 +446,7 @@ initialize
   stuckViewReason := nil.
   pinnedViewPasses := 0.
   viewReleaseRequested := false.
+  lockReleaseRequested := false.
   ^self
 %
 category: 'activity'
@@ -654,13 +658,13 @@ pinnedViewPasses
 category: 'initialization'
 method: McpSession
 prepareWorker
-  "Prepare this client's worker gem in ONE call, before any request reaches it: set read-only, resolve
-   the named toolsets, apply the advertised identity, and pre-build the server instance. The front end
-   calls this after configuring the session (McpRouter>>openSessionCreating:) and BEFORE the session is
+  "Prepare this client's worker gem in ONE call, before any request reaches it: resolve the named
+   toolsets, apply the advertised identity, and pre-build the server instance. The front end calls
+   this after configuring the session (McpRouter>>openSessionCreating:) and BEFORE the session is
    registered, so there is no window in which a request could run unprepared.
-   One round trip replaces the conditional 'sessionReadOnly:' send this used to make, and it moves tool
-   registration off the client's first request. A worker class or toolset the worker cannot resolve
-   fails HERE, where the message can say what to fix -- see McpServer class>>toolsetClassNamed:."
+   One round trip, which moves tool registration off the client's first request. A worker class or
+   toolset the worker cannot resolve fails HERE, where the message can say what to fix -- see
+   McpServer class>>toolsetClassNamed:."
   ^[self runWorker: self workerBootstrapExpression]
     on: Error
     do: [:ex | self error: 'Could not prepare the MCP worker gem for session ' , id printString
@@ -688,13 +692,6 @@ quotedNameArrayFor: aCollectionOfNames
     s nextPutAll: n asString printString; nextPut: Character space].
   s nextPut: $).
   ^s contents
-%
-category: 'accessing'
-method: McpSession
-readOnly
-  "Whether this client's worker is read-only. Recorded when the session starts and applied to the
-   worker gem by prepareWorker."
-  ^readOnly == true
 %
 category: 'view hygiene'
 method: McpSession
@@ -749,6 +746,23 @@ requestCancel: anId
   inFlightRequestId isNil ifTrue: [^false].
   anId = inFlightRequestId ifFalse: [^false].
   cancelRequested := true.
+  ^true
+%
+category: 'write locks'
+method: McpSession
+requestLockRelease
+  "Ask for the in-flight call to be ended because this session holds write locks. Answers whether
+   there was one to end.
+   Sets a flag and NOTHING else, exactly as #requestViewRelease and #requestCancel: do and for the
+   same reason: this runs in the reaper's GsProcess while another process is inside #runWorker:
+   holding the worker mutex with a GCI call in progress. #awaitWorkerResultUntil:because: picks it up
+   on its next wait and does the ending from the process that owns the mutex.
+   Ending the call does NOT release the locks -- they are held by the SESSION and go when it logs
+   out -- so the caller reaps the session too (McpRouter>>maintainWriteLockHolders). The ending
+   exists so the client is told why, with a reason it can branch on, rather than meeting a bare 404
+   on its next call."
+  self isBusy ifFalse: [^false].
+  lockReleaseRequested := true.
   ^true
 %
 category: 'session lifetime'
@@ -890,7 +904,14 @@ signalCallEnded: aReasonSymbol
    both with it. It also says what an interrupted call does NOT guarantee -- it was cut partway, so
    whatever it had already done in that gem's view is still there, uncommitted. That last sentence
    matters more for a cancellation than for a deadline: a user who pressed a key to stop something
-   may well assume it did not happen, and it half did."
+   may well assume it did not happen, and it half did.
+   #lockRelease is the exception to the middle case: the call is ended AND the session is then
+   reaped, because ending the call does not release the locks -- they belong to the session. So it
+   must not be told the session is still usable, which is what the ordinary phrasing would say."
+  (aReasonSymbol == #lockRelease and: [workerAbandoned not]) ifTrue: [
+    ^McpError signalKind: aReasonSymbol message: (self endingPhraseFor: aReasonSymbol)
+      , 'This session is being released so its locks are given up, so it is finished: call '
+      , 'initialize again to continue. Anything the call had already done is discarded with it.'].
   ^McpError signalKind: aReasonSymbol message: (self endingPhraseFor: aReasonSymbol)
     , (workerAbandoned
         ifTrue: ['Its worker gem could not be interrupted and has been stopped, so this session is '
@@ -910,40 +931,19 @@ startedAtSeconds
 category: 'initialization'
 method: McpSession
 startWithId: anId
-  "Local worker login with full read-write access (see the readOnly: variant)."
-  ^self startWithId: anId readOnly: false
-%
-category: 'initialization'
-method: McpSession
-startWithId: anId readOnly: aBoolean
-  "Log in a fresh worker gem as the current (server) user via a one-time password (the local,
-   unauthenticated front end, McpRouter). When aBoolean, mark the worker read-only for its whole
-   life -- set inside the worker gem itself, so it needs no commit and is private to that gem."
-  id := anId.
-  userId := System myUserProfile userId.
-  worker := self newWorkerSession.
-  worker useOnetimePassword.
-  worker login.
-  self cacheWorkerIds.
-  readOnly := aBoolean.
-  self touch.
-  ^self
+  "Local worker login as the front end's own user (see startWithId:workerUser:)."
+  ^self startWithId: anId workerUser: nil
 %
 category: 'initialization'
 method: McpSession
 startWithId: anId user: aUserId jwt: aJwtString
-  "JWT worker login with full read-write access (see the readOnly: variant)."
-  ^self startWithId: anId user: aUserId jwt: aJwtString readOnly: false
-%
-category: 'initialization'
-method: McpSession
-startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
   "Log in a fresh worker gem authenticated by a JWT (an OAuth/OIDC access token), for the
    network-facing authenticated front end (McpAuthRouter). The caller has already validated the
    token and derived aUserId from its claims; GemStone re-validates the JWT's signature (against its
-   trusted keys) and claims when the worker logs in -- a bad/expired token fails the login. When
-   aBoolean is true the worker is marked read-only for its whole life (its token lacked the write
-   scope) -- set inside the worker gem itself, so it needs no commit and cannot affect other sessions."
+   trusted keys) and claims when the worker logs in -- a bad/expired token fails the login.
+   The worker IS that token's GemStone user, so what the session may do is that user's privileges
+   and authorization -- which is why McpAuthRouter has no workerUserId of its own: McpRouter's is
+   for the unauthenticated front end, which has no other way to say who a worker should be."
   id := anId.
   userId := aUserId.
   worker := self newWorkerSession.
@@ -951,7 +951,38 @@ startWithId: anId user: aUserId jwt: aJwtString readOnly: aBoolean
   worker jwtPassword: aJwtString.
   worker login.
   self cacheWorkerIds.
-  readOnly := aBoolean.
+  self touch.
+  ^self
+%
+category: 'initialization'
+method: McpSession
+startWithId: anId workerUser: aUserIdOrNil
+  "Log in a fresh worker gem via a one-time password, for the local, unauthenticated front end
+   (McpRouter). nil means this gem's own user, which is the default and the historical behavior.
+   A NAMED user is how a deployment bounds what its sessions can do: the worker is that user, so
+   everything a tool can reach -- execute_code included -- is bounded by that user's GemStone
+   privileges and authorization rather than by anything in this image. See McpRouter>>workerUserId
+   and docs/ReadOnly_User.md.
+   NO CREDENTIAL IS INVOLVED, which is why the router can carry the user's NAME in ordinary config
+   (McpRouter>>configDict is a fixed allow-list that must never carry key material). The one-time
+   password is minted here, by this gem, for the named user; minting for ANOTHER user requires that
+   user to be on this gem's user's allowlist, one committed grant an operator makes once:
+     (AllUsers userWithId: '<front end user>') addOnetimePasswordUserId: '<worker user>'
+   setup-read-only-user.sh does that. Without the grant the mint raises, and the failure surfaces
+   at session open (McpRouter>>openSession) rather than mid-conversation.
+   300 seconds matches what GsTsExternalSession>>useOnetimePassword allows itself; the password is
+   single-use and is spent by the login on the next line."
+  id := anId.
+  userId := aUserIdOrNil ifNil: [System myUserProfile userId].
+  worker := self newWorkerSession.
+  aUserIdOrNil
+    ifNil: [worker useOnetimePassword]
+    ifNotNil: [:u |
+      worker username: u.
+      worker onetimePassword: (GsCurrentSession currentSession
+        createOnetimePasswordForUserId: u validForSeconds: 300)].
+  worker login.
+  self cacheWorkerIds.
   self touch.
   ^self
 %
@@ -1075,7 +1106,6 @@ workerBootstrapExpression
     , ' options: ' , ((toolsetOptions isNil or: [toolsetOptions isEmpty])
         ifTrue: ['nil']
         ifFalse: [(McpJson write: toolsetOptions) printString])
-    , ' readOnly: ' , self readOnly printString
     , ' serverName: ' , (serverName isNil ifTrue: ['nil'] ifFalse: [serverName printString])
     , ' title: ' , (serverTitle isNil ifTrue: ['nil'] ifFalse: [serverTitle printString])
     , ' version: ' , (serverVersion isNil ifTrue: ['nil'] ifFalse: [serverVersion printString])
@@ -1223,4 +1253,22 @@ workerWaitSeconds
    done. It bounds the re-check interval only, not latency: the wait answers as soon as the worker
    does, because it is waiting on the session's socket."
   ^1
+%
+category: 'write locks'
+method: McpSession
+writeLockCount
+  "How many GemStone WRITE LOCKS this session's worker gem holds, or 0 if that cannot be asked.
+   STONE-SIDE, via System sessionLocks: on the worker's stone session id, rather than by sending
+   anything into the worker. Two reasons, and the first is what matters: a worker that has taken a
+   lock and is still inside a long call cannot answer a maintenance send at all, and that is exactly
+   the session this has to be able to see. The second is that it costs no round trip.
+   Only the SIZE of the answer is read. #sessionLocks: answers arrays of the locked OBJECTS, and the
+   front end is transactionless and must not fault committed objects in (see McpRouter's class
+   comment); taking size builds no such reference.
+   Guarded, answering 0 on any error, because the call needs the SessionAccess privilege, which the
+   front end's user may not have. A router that cannot ask sees every session as holding nothing --
+   fail-open, matching the default of the setting that reads this
+   (McpRouter>>reapWriteLockHolders)."
+  workerStoneSession isNil ifTrue: [^0].
+  ^[((System sessionLocks: workerStoneSession) at: 2) size] on: Error do: [:e | e return: 0]
 %

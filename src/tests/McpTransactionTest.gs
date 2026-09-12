@@ -142,6 +142,42 @@ testAbortIsTheWayOutAndSaysNothingElse
 %
 category: 'tests'
 method: McpTransactionTest
+testACommitLockedSessionIsNotToldToCommit
+  "The [session] line a browsing-only deployment sees. A worker whose GEMSTONE USER cannot commit
+   still accumulates pending work -- compiling and writing are allowed, only keeping them is not --
+   and the ordinary note would tell it to 'call commit to persist them', advice it cannot take.
+   The note must instead say the work is uncommittable and point at abort.
+
+   IN A FORKED GEM, and it has to be: System disableCommitsWithReason: holds until LOGOUT with no
+   way back, so asking it of the session running this suite would leave every later test unable to
+   commit. The lock dies with the gem, which tearDown closes. (A deployment reaches the same state
+   the durable way, through a read-only UserProfile -- see docs/ReadOnly_User.md; this is the same
+   #sessionCanCommit false that the profile produces, staged where a test can undo it.)"
+  | note |
+  other := McpSession startWithId: 'commit-locked-note-fixture'.
+  note := other runWorker: 'System disableCommitsWithReason: ''test fixture''.
+    UserGlobals at: #McpCommitLockedProbe put: 42.
+    (McpDispatcher withToolRegistry: McpServer new toolRegistry) transactionNote'.
+  self deny: note isNil.
+  self assert: (note findString: 'CANNOT COMMIT THEM' startingAt: 1) > 0.
+  self assert: (note findString: 'call abort' startingAt: 1) > 0.
+  "and crucially NOT the ordinary advice"
+  self assert: (note findString: 'call commit to persist' startingAt: 1) equals: 0
+%
+category: 'tests'
+method: McpTransactionTest
+testAnOrdinarySessionIsStillToldToCommit
+  "The other side of the branch above, in THIS session, which can commit: pending work is reported
+   with the ordinary advice. Pins that the new arm did not swallow the common case."
+  | note |
+  UserGlobals at: self probeKey put: 'pending'.
+  note := (McpDispatcher withToolRegistry: McpServer new toolRegistry) transactionNote.
+  self deny: note isNil.
+  self assert: (note findString: 'call commit to persist' startingAt: 1) > 0.
+  self assert: (note findString: 'CANNOT COMMIT THEM' startingAt: 1) equals: 0
+%
+category: 'tests'
+method: McpTransactionTest
 testAStaleWriteIsRefusedRatherThanSilentlyOverwriting
   "The guardrail, in the shape it is actually needed. A client reads something, thinks (or asks a
    human) across several calls, and only then acts on what it read. In between, another session

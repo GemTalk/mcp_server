@@ -31,9 +31,9 @@
 #   MCP_REQUIRED_SCOPES - space-separated scopes a token MUST carry (default: mcp:use)
 #   MCP_EXTRA_SCOPES    - space-separated ADDITIONAL scopes to advertise (default: none). What the
 #                         router advertises -- published as scopes_supported and offered in the
-#                         WWW-Authenticate scope= -- is DERIVED: MCP_REQUIRED_SCOPES plus
-#                         MCP_WRITE_SCOPE plus these, deduplicated. Required and write scopes are
-#                         therefore advertised automatically; do not repeat them here. Use this only
+#                         WWW-Authenticate scope= -- is DERIVED: MCP_REQUIRED_SCOPES plus these,
+#                         deduplicated. Required scopes are therefore advertised automatically; do
+#                         not repeat them here. Use this only
 #                         for scopes the router does not gate on but the client must still request
 #                         from the authorization server -- e.g. "profile" so the userIdClaim is
 #                         present in the token.
@@ -50,10 +50,13 @@
 #                         omitting it breaks login outright rather than merely shortening sessions.
 #                         This is the general remedy for that combination, not a fix for one vendor.
 #                         Leave it out unless login needs it.
-#   MCP_WRITE_SCOPE     - scope granting write; a token lacking it gets a READ-ONLY worker (default: none).
-#                         Advertised automatically so clients can request it -- an unrequestable write
-#                         scope would leave every session read-only.
-#   MCP_READONLY        - 1 to force EVERY session read-only regardless of scope (default: 0)
+#   (There is no write-scope setting, and no read-only setting. A worker gem here logs in as the
+#    GemStone user its bearer token names, so what a session may do is that user's privileges and
+#    object authorization: give a read-only analyst a read-only UserProfile. See
+#    docs/ReadOnly_User.md, and ./setup-read-only-user.sh for a user to model one on. MCP_WRITE_SCOPE
+#    and MCP_READONLY existed here until the release after 0.8.0; they are now ignored if set.)
+#   MCP_REAP_LOCK_HOLDERS - 1 to end any session found holding a GemStone WRITE LOCK (default 0).
+#                         Same setting and same reasoning as run-server.sh; see docs/ReadOnly_User.md.
 #   MCP_TOOLSETS        - space-separated McpToolset names to expose instead of the default surface
 #                         (the core seven, McpServer class>>defaultToolsetNames). Same variable and
 #                         same meaning as run-server.sh. Needed to serve an OPTIONAL toolset at all,
@@ -114,8 +117,6 @@ MCP_AUDIENCE="${MCP_AUDIENCE:-https://localhost:8443/mcp}"
 MCP_USERID_CLAIM="${MCP_USERID_CLAIM:-preferred_username}"
 MCP_REQUIRED_SCOPES="${MCP_REQUIRED_SCOPES:-mcp:use}"
 MCP_EXTRA_SCOPES="${MCP_EXTRA_SCOPES:-}"
-MCP_WRITE_SCOPE="${MCP_WRITE_SCOPE:-}"
-MCP_READONLY="${MCP_READONLY:-0}"
 MCP_TOOLSETS="${MCP_TOOLSETS:-}"
 MCP_TITLE="${MCP_TITLE:-}"
 MCP_TRACE="${MCP_TRACE:-0}"
@@ -188,22 +189,19 @@ SCOPES_ST=""
 for s in $MCP_REQUIRED_SCOPES; do SCOPES_ST="$SCOPES_ST '$s'"; done
 
 # Smalltalk array literal of the ADDITIONAL advertised scopes; blank when unset -> the router
-# advertises just the union of requiredScopes and writeScope, which it derives on its own.
+# advertises just requiredScopes, which it derives on its own.
 EXTRA_ST=""
 for s in $MCP_EXTRA_SCOPES; do EXTRA_ST="$EXTRA_ST '$s'"; done
 
 # Optional config statements, each its OWN statement rather than a leg of the cascade below, because
-# an unset one expands to nothing and a cascade cannot carry an empty leg. None of these can be sent
-# unconditionally: writeScope: '' would be a scope no token carries (every session read-only, not
-# ungated) and bindAddress: '' is not loopback, so "unset" has to mean "never sent" and let
+# an unset one expands to nothing and a cascade cannot carry an empty leg. Neither can be sent
+# unconditionally: bindAddress: '' is not loopback, so "unset" has to mean "never sent" and let
 # McpAuthRouter>>initialize supply the default. TLS is NOT here -- it is required, so it joins the
 # cascade; a guard on it would be unreachable after the check above.
 EXTRA_LINE=""
 [ -n "$MCP_EXTRA_SCOPES" ] && EXTRA_LINE="r extraScopes: #($EXTRA_ST )."
-WRITE_LINE=""
-[ -n "$MCP_WRITE_SCOPE" ] && WRITE_LINE="r writeScope: '$MCP_WRITE_SCOPE'."
-RO_LINE=""
-[ "$MCP_READONLY" = "1" ] && RO_LINE="r readOnly: true."
+LOCKS_LINE=""
+[ "${MCP_REAP_LOCK_HOLDERS:-0}" = "1" ] && LOCKS_LINE="r reapWriteLockHolders: true."
 BIND_LINE=""
 [ -n "$MCP_BIND_ADDRESS" ] && BIND_LINE="r bindAddress: '$MCP_BIND_ADDRESS'."
 # Message tracing; both settings travel to the forked gem in the config (McpRouter>>configDict).
@@ -279,8 +277,7 @@ r userIdClaim: '$MCP_USERID_CLAIM';
   authorizationServers: #( '$MCP_ISSUER' );
   useTlsCertificateFile: '$MCP_TLS_CERT' privateKeyFile: '$MCP_TLS_KEY'.
 $EXTRA_LINE
-$WRITE_LINE
-$RO_LINE
+$LOCKS_LINE
 $VIEW_HYGIENE_LINES
 $BIND_LINE
 $TRACE_LINE

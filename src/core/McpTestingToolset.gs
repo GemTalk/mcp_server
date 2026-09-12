@@ -17,9 +17,11 @@ McpTestingToolset comment:
 'The SUnit tools: list TestCase subclasses, run a class or a single method, list the failing tests,
 and re-run one test for its failure detail.
 
-All read-only-safe, which is worth stating plainly: running a test executes code, but a read-only
-session forbids execute_code and every mutation tool, so no NEW code can be introduced in that
-session -- a test can only run already-committed (trusted) code.'
+Running a test EXECUTES CODE -- arbitrary code, whatever the test body happens to do -- so this
+toolset is exactly as powerful as the gem''s GemStone user is. That is true of every tool here and
+is not a thing this pack can bound; what bounds it is the user the worker gem logs in as. A
+deployment that wants a browsing-only surface picks a user that cannot commit or reach the host,
+not a shorter tool list: see McpRouter>>workerUserId and docs/ReadOnly_User.md.'
 %
 expectvalue /Class
 doit
@@ -86,12 +88,6 @@ formatTestResult: aTestResult label: aLabel
     failed asSortedCollection do: [:k | s nextPutAll: '  FAIL  '; nextPutAll: k; nextPut: Character lf].
     errorOnly asSortedCollection do: [:k | s nextPutAll: '  ERROR '; nextPutAll: k; nextPut: Character lf]].
   ^s contents
-%
-category: 'read-only'
-method: McpTestingToolset
-readOnlySafeToolNames
-  "All of them -- see the class comment on why running a test is safe in a read-only session."
-  ^self toolNames
 %
 category: 'registration'
 method: McpTestingToolset

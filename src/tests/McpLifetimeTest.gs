@@ -79,6 +79,22 @@ streamedSessionOn: aRouter
   sess outbox attachStream.
   ^sess
 %
+category: 'tests - write locks'
+method: McpLifetimeTest
+testABusyLockHolderIsAskedToEndItsCall
+  "The case the whole arm exists for. #reapReasonFor: answers nil for a BUSY session on every
+   ground, so an adversary holding a lock inside a long call would never be reached by the reap --
+   #maintainWriteLockHolders is what reaches it, and it tells the client why rather than leaving it
+   to meet a bare 404 later."
+  | r sess |
+  r := McpFixtureRouter new.
+  r reapWriteLockHolders: true.
+  sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
+  sess fakeWriteLockCount: 1; fakeIsBusy: true.
+  self assert: (r reapReasonFor: sess) isNil.     "busy: the reap will not touch it"
+  self assert: r maintainWriteLockHolders equals: 1.
+  self assert: sess lockReleaseRequests equals: 1
+%
 category: 'tests - counting'
 method: McpLifetimeTest
 testAClientRequestResetsEverythingCounted
@@ -139,6 +155,18 @@ testAClosedStreamReleasesTheGemWithoutWaitingForTheFloor
   self assert: (self includesCS: 'closed the event stream' in: (r reapReasonFor: sess)).
   self assert: sess streamlessPasses equals: 0     "not one pass has had to go by"
 %
+category: 'tests - write locks'
+method: McpLifetimeTest
+testALockHolderIsNotReapedWhenTheSettingIsOff
+  "Default OFF. A write lock is legitimate in an application that takes one deliberately, so a stock
+   router must not end a session for holding one."
+  | r sess |
+  r := McpFixtureRouter new.
+  self deny: r reapWriteLockHolders.
+  sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
+  sess fakeWriteLockCount: 3.
+  self assert: (r reapReasonFor: sess) isNil
+%
 category: 'tests - counting'
 method: McpLifetimeTest
 testAnAnsweredPingWithNoWorkInBetweenIsOneConfirmation
@@ -150,6 +178,25 @@ testAnAnsweredPingWithNoWorkInBetweenIsOneConfirmation
   sess noteAlive.
   self assert: sess quietProbes equals: 1.
   self assert: sess unansweredProbes equals: 0
+%
+category: 'tests - write locks'
+method: McpLifetimeTest
+testAnEndedLockCallTellsTheClientWhy
+  "#lockRelease is a first-class ended-call kind, so the client is answered with an McpError whose
+   kind it can branch on and whose message names write locks -- the thing #isEndedCallKind: exists
+   to guarantee, after a live run in which a new reason reached a client as a bare -32603."
+  | phrase full |
+  self assert: (McpSession endedCallKinds includes: #lockRelease).
+  self assert: (McpSession isEndedCallKind: #lockRelease).
+  phrase := McpStubSession new endingPhraseFor: #lockRelease.
+  self assert: (self includesCS: 'WRITE LOCKS' in: phrase).
+  self assert: (self includesCS: 'OTHER' in: phrase).
+  "and the whole message must not promise a session that is about to be reaped is still usable"
+  full := [McpStubSession new signalCallEnded: #lockRelease. nil]
+    on: McpError do: [:e | e messageText].
+  self deny: full isNil.
+  self assert: (self includesCS: 'finished' in: full).
+  self deny: (self includesCS: 'still usable' in: full)
 %
 category: 'tests - expiry'
 method: McpLifetimeTest
@@ -198,6 +245,23 @@ testAnExpiryOnlyEverMovesEarlier
   self assert: sess expiresAtSeconds equals: now + 50.
   sess expiresAtSeconds: nil.
   self assert: sess expiresAtSeconds equals: now + 50
+%
+category: 'tests - write locks'
+method: McpLifetimeTest
+testAnIdleLockHolderIsReapedImmediately
+  "With the setting on, holding a write lock is itself the ground -- no grace, no count of passes,
+   and nothing about idleness. The session that matters is one that is being actively used, so a
+   ground that waited for quiet would be no bound at all."
+  | r sess why |
+  r := McpFixtureRouter new.
+  r reapWriteLockHolders: true.
+  sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
+  self assert: (r reapReasonFor: sess) isNil.      "holds none: nothing to answer for"
+  sess fakeWriteLockCount: 2.
+  why := r reapReasonFor: sess.
+  self deny: why isNil.
+  self assert: (self includesCS: 'write lock' in: why).
+  self assert: (self includesCS: '2' in: why)
 %
 category: 'tests - counting'
 method: McpLifetimeTest
@@ -671,6 +735,24 @@ testRenewalNeverShortensAndSaysSoWhenItDoesNothing
   self deny: (sess renewExpiryTo: now + 500).
   self deny: (sess renewExpiryTo: now + 200).
   self assert: sess expiresAtSeconds equals: now + 500
+%
+category: 'tests - write locks'
+method: McpLifetimeTest
+testTheBusyArmLeavesInnocentAndOffRoutersAlone
+  "Two ways not to be asked: hold no locks, or run on a router with the setting off."
+  | r sess busyNoLocks |
+  r := McpFixtureRouter new.
+  r reapWriteLockHolders: true.
+  busyNoLocks := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
+  busyNoLocks fakeIsBusy: true.
+  self assert: r maintainWriteLockHolders equals: 0.
+  self assert: busyNoLocks lockReleaseRequests equals: 0.
+  "same session, same locks, setting off"
+  r reapWriteLockHolders: false.
+  sess := r openSessionCreating: [:newId | McpStubSession startWithId: newId].
+  sess fakeWriteLockCount: 5; fakeIsBusy: true.
+  self assert: r maintainWriteLockHolders equals: 0.
+  self assert: sess lockReleaseRequests equals: 0
 %
 category: 'tests - the session cap'
 method: McpLifetimeTest

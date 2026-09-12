@@ -15,7 +15,7 @@ expectvalue /Class
 doit
 McpSearchToolset comment: 
 'The code-search tools: implementors of a selector, senders of a selector, references to a global,
-and a substring search over method source. All read-only-safe.
+and a substring search over method source. Nothing here persists a change.
 
 All four page with limit/offset (McpToolset>>page:args:defaultLimit:). Three of them materialise
 every hit before answering and so report a true total; search_method_source stops scanning at the
@@ -71,12 +71,6 @@ methodLines: aCollection
     cat := [m inClass categoryOfSelector: m selector] on: Error do: [:e | nil].
     line := m inClass name asString , '>>' , m selector asString.
     cat isNil ifTrue: [line] ifFalse: [line , '  [' , cat asString , ']']]
-%
-category: 'read-only'
-method: McpSearchToolset
-readOnlySafeToolNames
-  "Every search tool only reads."
-  ^self toolNames
 %
 category: 'registration'
 method: McpSearchToolset

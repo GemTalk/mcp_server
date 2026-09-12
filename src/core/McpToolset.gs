@@ -26,9 +26,8 @@ inheritance could never do).
 
 To write your own: subclass this, implement registerOn: (one toolRegistry name:description:
 inputSchema:do: send per tool, building schemas with the helpers here, each block calling one of your
-own tool_* handlers), implement toolNames, and declare readOnlySafeToolNames -- which defaults to
-NONE, so a tool is gated in a read-only session until it is deliberately listed as unable to persist
-a change. Then name your class in the router''s toolsetNames config. Your class must be visible in the
+own tool_* handlers) and implement toolNames. Then name your class in the router''s toolsetNames
+config. Your class must be visible in the
 WORKER gem''s symbol list (Mcp, not the operator''s UserGlobals), because the worker may log in
 as a different user.
 
@@ -37,8 +36,7 @@ data directory is, which host a subsystem talks to. Declare the names you accept
 class>>declaredOptionNames and read them with optionNamed:ifAbsent:; an operator sets them on the
 ROUTER (McpRouter>>toolsetOptions:), keyed by toolset name, and they are carried into the worker with
 the rest of the session config. This completes what a toolset declares about itself -- its tools
-(toolNames), which of them are safe read-only (readOnlySafeToolNames), and now how it may be
-configured -- rather than growing the core a new ivar per vendor.
+(toolNames) and how it may be configured -- rather than growing the core a new ivar per vendor.
 
 declaredOptionNames is an ALLOW-LIST, checked by the router when the option is set: an undeclared
 name is refused at configuration time, naming what this toolset does declare. That is the same
@@ -64,8 +62,7 @@ be modified at all?'' is one answer per deployment, not per tool pack -- so it s
 (protectedDictionaryNames / isProtectedClass:), which is what a subclass overrides to change
 behavior, and the guards here forward to it. A mutating handler writes `self assertMutableClass: cls`
 exactly as it writes `self resolveClass:`; see McpMutationToolset. A toolset is free to impose a
-STRICTER guard of its own on top (or, knowing what it is doing, to skip these and answer to the
-server''s read-only gate alone) -- what it must not do is answer the deployment''s question
+STRICTER guard of its own on top -- what it must not do is answer the deployment''s question
 differently. Handlers that need no policy never touch `server` at all (McpGrailToolset and
 McpFixtureToolset are examples).'
 %
@@ -702,14 +699,6 @@ method: McpToolset
 propString: aDescription
   ^self class propString: aDescription
 %
-category: 'read-only'
-method: McpToolset
-readOnlySafeToolNames
-  "Which of MY tools cannot persist a change, and so may run in a read-only session. FAIL-CLOSED:
-   the default is none, so a tool this toolset does not list here is gated in read-only mode --
-   including a future one its author forgot to classify."
-  ^#()
-%
 category: 'transaction'
 method: McpToolset
 refreshViewResult
@@ -824,7 +813,7 @@ stringArrayProperty: aDescription
 category: 'accessing'
 method: McpToolset
 toolNames
-  "The names of the tools I register, for config diagnostics and for the contract test that pins the
-   read-only allow-list. Subclasses implement this."
+  "The names of the tools I register, for config diagnostics and for the contract test that pins
+   each toolset's declaration against what it actually registers. Subclasses implement this."
   ^self subclassResponsibility
 %

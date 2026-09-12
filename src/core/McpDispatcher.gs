@@ -53,8 +53,8 @@ withToolRegistry: aRegistry
 category: 'instance creation'
 classmethod: McpDispatcher
 withToolRegistry: aRegistry server: aServerOrNil
-  "aServerOrNil is the owning McpServer, consulted for read-only gating; nil (e.g. in isolated
-   dispatcher tests) means never read-only."
+  "aServerOrNil is the owning McpServer, consulted for the advertised identity (serverName and
+   friends); nil (e.g. in isolated dispatcher tests) falls back to the class defaults."
   ^self new setRegistry: aRegistry server: aServerOrNil
 %
 ! ------------------- Instance methods for McpDispatcher
@@ -178,14 +178,8 @@ handleToolsCall: params id: id
   name := params at: 'name' ifAbsent: [nil].
   name isNil ifTrue: [^self errorFor: id code: -32602 message: 'Missing tool name' kind: 'invalidParams'].
   tool := toolRegistry at: name.
-  (tool isNil and: [(self readOnlyGated: name) not]) ifTrue: [
+  tool isNil ifTrue: [
     ^self errorFor: id code: -32602 message: 'Unknown tool: ' , name kind: 'notFound'].
-  "Read-only refusal, for a gated tool whether or not it is still in the registry: a read-only worker
-   built by the front end never registers its unsafe tools (McpServer>>registerToolsets), but the
-   client must still learn that the tool EXISTS and is forbidden -- not that it is unknown."
-  (tool isNil or: [(self toolAllowed: name) not]) ifTrue: [
-    ^self errorFor: id code: -32601
-      message: '''' , name , ''' is not available: the server is read-only' kind: 'readOnly'].
   args := params at: 'arguments' ifAbsent: [Dictionary new].
   argErr := tool validationErrorFor: args.
   argErr ifNotNil: [
@@ -288,19 +282,10 @@ method: McpDispatcher
 pingResult
   "The MCP ping result: an EMPTY object. The spec (basic/utilities/ping) is a MUST -- 'the receiver
    MUST respond promptly with an empty response' -- and either party may ping at any time, so this
-   is routed ahead of everything except initialize, is never read-only gated (it is not a tool),
-   and deliberately does no repository work (no abort, no transaction touch) so it stays cheap and
+   is routed ahead of everything except initialize (it is not a tool, and never reaches the
+   registry), and deliberately does no repository work (no abort, no transaction touch) so it stays cheap and
    answers even when the image is busy."
   ^Dictionary new
-%
-category: 'read-only'
-method: McpDispatcher
-readOnlyGated: aToolName
-  "Whether aToolName is one of the server's own tools that this read-only session may not run --
-   i.e. absent from the registry (or refused) because of read-only, not because it does not exist.
-   False when there is no server (isolated dispatcher tests), so an unknown tool stays 'notFound'."
-  ^server notNil
-    and: [(server allToolNames includes: aToolName) and: [(server isToolAllowed: aToolName) not]]
 %
 category: 'responses'
 method: McpDispatcher
@@ -316,8 +301,7 @@ category: 'accessing'
 method: McpDispatcher
 serverInstructions
   "The initialize result's `instructions`, or nil for none -- see serverName for why this asks the
-   server rather than caching. nil means the key is omitted entirely, which is also what a
-   read-only session gets (McpServer>>serverInstructions)."
+   server rather than caching. nil means the key is omitted entirely."
   ^server isNil ifTrue: [McpServer defaultServerInstructions] ifFalse: [server serverInstructions]
 %
 category: 'accessing'
@@ -399,13 +383,6 @@ structuredErrorContent: aMessage kind: aKind
   d at: 'structuredContent' put: struct.
   ^d
 %
-category: 'read-only'
-method: McpDispatcher
-toolAllowed: aToolName
-  "Whether aToolName may be listed/called now. Always yes when there's no server or it isn't
-   read-only; otherwise only the read-only-safe tools (server decides)."
-  ^server isNil or: [server isToolAllowed: aToolName]
-%
 category: 'responses'
 method: McpDispatcher
 toolErrorContentFrom: ex
@@ -418,11 +395,11 @@ toolErrorContentFrom: ex
 category: 'responses'
 method: McpDispatcher
 toolsListResult
-  "tools/list. When the session is read-only, hide the gated (dangerous) tools so an agent only
-   sees what it may actually call (they still error clearly on a direct call -- see handleToolsCall:)."
+  "tools/list: every registered tool. The registry IS the surface -- nothing is filtered here, and a
+   deployment narrows what it offers by choosing its toolset list (McpRouter>>toolsetNames)."
   | d |
   d := Dictionary new.
-  d at: 'tools' put: (toolRegistry descriptors select: [:desc | self toolAllowed: (desc at: 'name')]).
+  d at: 'tools' put: toolRegistry descriptors.
   ^d
 %
 category: 'transaction'
@@ -497,6 +474,19 @@ transactionStateNote
       , 'outer one until it is closed.'].
   System needsCommit ifTrue: [ | note |
     note := self sessionLifetimeNote.
+    "A session whose GEMSTONE USER cannot commit must not be told to call commit: it would be
+     advice that cannot be taken, and the tool would answer with a TransactionError the model then
+     has to interpret. Such a session is the point of a browsing-only deployment
+     (McpRouter>>workerUserId, docs/ReadOnly_User.md), and its pending work is real -- later reads
+     in THIS session see it while the database does not -- so the line still has to appear, saying
+     the one thing that is actually true about it."
+    System sessionCanCommit ifFalse: [
+      ^'[session] You have uncommitted changes, and this session CANNOT COMMIT THEM: its GemStone '
+        , 'user is not permitted to. Your own later reads will see them and the database will not, '
+        , 'so call abort to discard them once you are done with them. '
+        , (note isNil
+            ifTrue: ['They are discarded when this session ends.']
+            ifFalse: ['They are discarded when this session ends: ' , note , '.'])].
     ^'[session] You have uncommitted changes. No tool commits for you: call commit to persist '
       , 'them or abort to discard them. '
       , (note isNil
