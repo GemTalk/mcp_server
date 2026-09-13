@@ -62,6 +62,24 @@ reasoning has nowhere better to live, not that the entry should grow.
   `System sessionCanCommit` is false, pending work is reported as uncommittable and the line points
   at `abort` — previously it advised `commit`, which such a session can only ever fail.
 
+* **The stone-version check no longer refuses every 4.0.0.Alpha1 stone.** `gs_env_require_stone`
+  compared `gslist`'s version against one parsed out of `$GEMSTONE/version.txt`, and both halves were
+  wrong for a version that is not purely numeric: the parse stopped at the first letter and answered
+  `4.0.0.`, while `gslist` reports `4.0.0.Alpha` because the lock file it reads carries the version in
+  a fixed twelve-byte field. So `install.sh`, `run-server.sh` and `run-unit-tests.sh` all refused a
+  4.0.0.Alpha1 stone under its own product tree, with `error: stone 'x' is version 4.0.0.Alpha, but
+  GEMSTONE is 4.0.0.`, and no environment could satisfy them. The version is now read as line 2's
+  whole first field, and a version at the eleven-character limit is compared as a prefix — so a
+  genuine mismatch (3.7.5 against 4.0.0.Alpha1, either way round) is still refused exactly, and still
+  names the stones that would work. With this, all 463 unit tests pass on 4.0.0.Alpha1.
+
+* **GemStone 4.0.0.Alpha1 is now tested, and it is where the Grail toolset is tested.** CI gains a
+  4.0 leg — both plain and `--grail` — downloaded from `dl.gemdb.com`, where the pre-release is
+  published. Measured there: 565 tests across 22 suites, including all 49 of `McpGrailToolsetTest`,
+  plus 126 over-the-wire checks and 15 TLS ones. The `3.7.5 + Grail` leg is excluded instead, since
+  Grail dropped 3.7.x on 2026-09-12 and its installer refuses the image, so the Grail toolset is
+  covered on the one image that can load it rather than failing on the one that cannot.
+
 ## 0.8.0 — 2026-09-11
 
 * **Breaking: the Grail (Python) toolset is no longer served by default.** `McpServer

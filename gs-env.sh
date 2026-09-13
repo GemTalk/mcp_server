@@ -153,8 +153,36 @@ gs_env_resolve() {
 
 # The gem's own version, from the product tree we are about to log in WITH. Line 2 of version.txt,
 # first field: the line 1 "GemStone/S 64 Bit" banner would otherwise yield "64".
+#
+# The WHOLE first field, not a leading run of digits and dots. A version is not always numeric --
+# 4.0.0.Alpha1 is one -- and `[0-9][0-9.]*` stopped at the letter and answered "4.0.0.", a string no
+# stone anywhere reports, so every 4.0.0.Alpha1 stone was refused by the check below against its own
+# product tree.
 gs_env_gem_version() {
-  sed -n '2s/^\([0-9][0-9.]*\).*/\1/p' "$GEMSTONE/version.txt" 2>/dev/null
+  awk 'NR == 2 { print $1 }' "$GEMSTONE/version.txt" 2>/dev/null
+}
+
+# gslist cannot report a version longer than eleven characters, so a long one has to be compared as
+# a prefix. The lock file it reads carries the version in a fixed `char version[12]` field
+# (`src/netinfo.hf`), NUL-terminated, so a stone running 4.0.0.Alpha1 is published -- and listed --
+# as `4.0.0.Alpha`. The engine truncates it on the way in; nothing downstream can recover it.
+#
+# Only a version AT that limit can have been truncated, so the prefix rule is applied only there.
+# An ordinary mismatch is still compared exactly and still caught: 3.7.5 is eleven characters short
+# of the limit, so a 3.7.5 stone under a 4.0.0.Alpha1 product is refused as loudly as before.
+#
+# What this cannot do is separate two versions that differ only past the eleventh character --
+# 4.0.0.Alpha1 from 4.0.0.Alpha2 -- because gslist does not carry the difference. That is the
+# engine's to fix; accepting the pair is the lesser error, since refusing it would mean refusing
+# every correct pairing as well.
+GS_ENV_GSLIST_VERSION_MAX=11
+
+gs_env_versions_match() {
+  local stone_v="$1" gem_v="$2"
+  [ "$stone_v" = "$gem_v" ] && return 0
+  [ "${#stone_v}" -ge "$GS_ENV_GSLIST_VERSION_MAX" ] || return 1
+  case "$gem_v" in "$stone_v"*) return 0 ;; esac
+  return 1
 }
 
 gs_env_require_stone() {
@@ -170,12 +198,14 @@ gs_env_require_stone() {
     local stone_v gem_v
     stone_v="$(printf '%s' "$row" | awk '{print $2}')"
     gem_v="$(gs_env_gem_version)"
-    if [ -n "$stone_v" ] && [ -n "$gem_v" ] && [ "$stone_v" != "$gem_v" ]; then
+    if [ -n "$stone_v" ] && [ -n "$gem_v" ] && ! gs_env_versions_match "$stone_v" "$gem_v"; then
       echo "error: stone '$stone' is version $stone_v, but GEMSTONE is $gem_v." >&2
       echo "       A login would fail with 'The Gem and Stone versions are incompatible' (error 4044)." >&2
       echo "       Either point GS_STONE at a $gem_v stone:" >&2
       "$GEMSTONE/bin/gslist" -l 2>/dev/null \
-        | awk -v v="$gem_v" '$(NF-1) == "Stone" && $2 == v { print "         " $NF }' >&2
+        | awk -v v="$gem_v" -v max="$GS_ENV_GSLIST_VERSION_MAX" \
+            '$(NF-1) == "Stone" && ($2 == v || (length($2) >= max && index(v, $2) == 1)) \
+               { print "         " $NF }' >&2
       echo "       or source the setenv for $stone_v and run again." >&2
       return 1
     fi
