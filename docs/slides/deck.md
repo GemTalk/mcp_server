@@ -2083,7 +2083,7 @@ party that can act while nothing is happening -- which is also the reaper's whol
 
 <div class="boxnote">
 
-Registered in the router&#8217;s `callId``callId`&#8594;channel map#8594; channel map for the life of one streamed `tools/call`, and drained to the socket after every wait for the worker. Ticks must be **strictly increasing**, and that is refused **twice** &#8212; once at the reporter, again here &#8212; because the reporter runs arbitrary tool code and this end owes the client a conforming stream.
+Registered in the router&#8217;s `callId`&#8594; channel map for the life of one streamed `tools/call`, and drained to the socket after every wait for the worker. Ticks must be **strictly increasing**, and that is refused **twice** &#8212; once at the reporter, again here &#8212; because the reporter runs arbitrary tool code and this end owes the client a conforming stream.
 
 </div>
 
