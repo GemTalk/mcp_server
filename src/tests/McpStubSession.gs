@@ -4,8 +4,7 @@ expectvalue /Class
 doit
 McpSession subclass: 'McpStubSession'
   instVarNames: #( wasPrepared fakeWorkerStoneSession fakeRefreshVerdict
-                    fakeRefreshVerdictSet refreshRequests fakeIsBusy viewReleaseRequests
-                    fakeWriteLockCount lockReleaseRequests)
+                    fakeRefreshVerdictSet refreshRequests fakeIsBusy viewReleaseRequests)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -66,23 +65,8 @@ fakeWorkerStoneSession: anIntegerOrNil
 %
 category: 'testing support'
 method: McpStubSession
-fakeWriteLockCount: anInteger
-  "Report this instead of asking the stone how many write locks the (absent) worker gem holds.
-   McpSession>>writeLockCount is a System sessionLocks: call on a real stone session id, which a
-   stub has not got -- so without this the policy that reads it could only ever be tested in its
-   'holds nothing' arm."
-  fakeWriteLockCount := anInteger
-%
-category: 'testing support'
-method: McpStubSession
 isBusy
   ^fakeIsBusy ifNil: [super isBusy]
-%
-category: 'testing support'
-method: McpStubSession
-lockReleaseRequests
-  "How many times the front end has asked this session to end its call over write locks."
-  ^lockReleaseRequests ifNil: [0]
 %
 category: 'initialization'
 method: McpStubSession
@@ -105,14 +89,6 @@ refreshWorkerView
    sent."
   refreshRequests := self refreshRequests + 1.
   ^fakeRefreshVerdictSet == true ifTrue: [fakeRefreshVerdict] ifFalse: ['kept']
-%
-category: 'write locks'
-method: McpStubSession
-requestLockRelease
-  "Record the ask instead of flagging a call that does not exist, and answer whether this stub is
-   pretending to be busy -- which is what the real method answers, and what the caller logs on."
-  lockReleaseRequests := (lockReleaseRequests ifNil: [0]) + 1.
-  ^self isBusy
 %
 category: 'testing support'
 method: McpStubSession
@@ -146,9 +122,4 @@ category: 'testing support'
 method: McpStubSession
 workerStoneSession
   ^fakeWorkerStoneSession ifNil: [super workerStoneSession]
-%
-category: 'write locks'
-method: McpStubSession
-writeLockCount
-  ^fakeWriteLockCount ifNil: [0]
 %

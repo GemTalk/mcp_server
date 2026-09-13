@@ -647,3 +647,21 @@ runtime error, not a syntax error, so `bash -n` and a newer bash on PATH both pa
 when the script runs on 3.2. Keep `(` off the start of a body line — assign to a temp first. Mid-line
 `(…)` with no `#` between the parens is fine. `run-unit-tests.sh` carries a note about this. Verify
 script edits with the *system* `/bin/bash`.
+
+**`gslist` truncates a version to eleven characters, and nothing downstream can recover it.** A
+stone publishes itself in `$GEMSTONE_GLOBAL_DIR/locks/<name>..LCK`, whose format carries the version
+in a fixed `char version[12]` field, NUL-terminated. So a stone running **4.0.0.Alpha1** is listed as
+**4.0.0.Alpha** — measured on arm64.Darwin, 2026-09-13:
+
+```
+Status        Version    Owner       Pid   Port   Started     Type       Name
+exists       4.0.0.Alpha jfoster      46247 64110 Sep 13 06:35 Stone       probe40
+```
+
+`$GEMSTONE/version.txt` has the full string, so the two sources disagree by construction for any
+version of twelve characters or more, and an exact comparison between them can never succeed. That
+is what `gs_env_versions_match` in `gs-env.sh` exists for. Two consequences worth carrying: a
+version must be read from `version.txt` as line 2's **whole first field** — `4.0.0.Alpha1` is a
+version number and a numeric-prefix parse silently answers `4.0.0.` — and two versions differing
+only past the eleventh character (`4.0.0.Alpha1` vs `4.0.0.Alpha2`) are indistinguishable in a
+listing, so nothing here can tell them apart.
