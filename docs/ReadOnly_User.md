@@ -269,6 +269,16 @@ lock, reap that MCP session". The pieces are there — `McpSession` caches its w
 the stone session id does the same job one level down, and the worker gem's death is noticed by the
 front end the way any other dead worker is.
 
+That path has been built once and taken back out: commit `b0a5180` added a `MCP_REAP_LOCK_HOLDERS`
+setting that ended any session found holding a lock, and it worked — measured, an idle holder reaped
+in one pass and a busy one answered mid-call. It was reverted because a reaper is the wrong layer for
+this. It can only act **once per maintenance pass**, so a lock is still held for up to that interval,
+and every window it leaves is one an attacker chooses the timing of; a session that keeps taking
+fresh locks is chased rather than stopped. What would actually close it is GemStone gating
+`System writeLock:` behind a privilege, so a confined user cannot take the lock in the first place —
+that is the fix worth asking for, and the reason this document records the exposure instead of
+papering over it.
+
 ## Provisioning
 
 ```
