@@ -337,9 +337,14 @@ Leave this one on screen a beat longer than it needs. It is the table I would pu
 anyone working on this, and every row of it is a section: the front end is 3 and 8, the worker is
 4 and 5, the driver is 1.
 
-The worker picks up a recompile on the next request because the dispatcher ABORTS before each tool
-call -- so it is not that anything reloads, it is that the worker's view moves and the new method
-is simply what is there. Section 5.
+The worker picks up a recompile when its VIEW MOVES -- not merely because another request arrived.
+Nothing reloads; the new method is simply what is there once the view has moved. The dispatcher does
+NOT abort before a call, and no tool refreshes the view: it did abort until 2026-08-28, and stopping
+was the fix, because refreshing under the client tells the stone it has seen changes it has not.
+Three things move a worker's view: the client calling commit, abort or refresh; the front end's
+maintenance pass refreshing a worker that has fallen too far behind (System continueTransaction,
+section 8); or a NEW session, whose gem logs in with a current view -- which is the one this row of
+the table is really about, since a worker is built per session. Section 5.
 
 Two passes rather than one for the front end, because the pass that notices is not necessarily the
 pass that acts -- worth saying only if someone asks why it is not "within 60 seconds".
