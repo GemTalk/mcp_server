@@ -30,13 +30,45 @@ beat guessing at an API. See [docs/GemStone_Notes.md](../docs/GemStone_Notes.md#
 
 ## The shape of the thing
 
-Three kinds of gem, and which one runs your code decides how it gets refreshed:
+Three kinds of gem, and which one runs your code decides when your change reaches it:
 
-| | class | gem | picks up a recompile |
-|---|---|---|---|
-| front end | `McpRouter` / `McpAuthRouter`, `McpHttpConnection` | one detached gem owning the listen socket | within **two** maintenance passes (`reaperIntervalSeconds`, default 60s) |
-| worker | `McpServer`, `McpDispatcher`, the `Mcp*Toolset`s | one per client session | next request (a worker is built per session, so a new session gets the new code) |
-| driver | the suites | whatever topaz or MCP session you are in | immediately |
+| | class | gem |
+|---|---|---|
+| front end | `McpRouter` / `McpAuthRouter`, `McpHttpConnection` | one detached gem owning the listen socket |
+| worker | `McpServer`, `McpDispatcher`, the `Mcp*Toolset`s | one per client session |
+| driver | the suites | whatever topaz or MCP session you are in |
+
+### When a recompile takes effect
+
+**Two conditions, in order, and both are easy to forget.** A compiled method is a repository object
+like any other, so it reaches another gem only once you have **committed** it *and* that gem's
+**view has moved** past your commit. Neither happens on its own.
+
+1. **Commit, or nobody else sees anything.** Your own session sees an uncommitted `compile_method`
+   immediately — that is the point of the snapshot, and it is why you can compile and then run the
+   tests against what you just compiled. No other gem in the image can see it at all: not the
+   running front end, not another worker, not a topaz you have open beside it. Nothing commits for
+   you.
+2. **Then the other gem's view has to move.** What moves it differs per gem:
+
+| gem | its view moves |
+|---|---|
+| **driver** — the session you are working in | you compiled it there, so: **immediately**, committed or not |
+| **front end** | on its own, **within two maintenance passes** (`reaperIntervalSeconds`, default 60s) — it runs transactionless and `refreshFrontEndView` moves its view once per pass. No restart needed for a committed change |
+| **worker** | **not** merely because another request arrived. Three things move it: the client calling `commit`, `abort` or `refresh`; the front end's maintenance pass refreshing a worker that has fallen too far behind (`McpServer refreshViewForFrontEnd`, one `System continueTransaction`); or a **new session**, whose gem logs in with a current view |
+
+**The worker row is the one that catches people**, so it is worth saying plainly: **the dispatcher
+does not abort before a call, and no tool refreshes the view.** It did abort until 2026-08-28, and
+removing that was the fix, not a regression — refreshing under a client tells the stone the client
+has seen changes it has not, and a commit that should have been refused as stale is accepted
+instead, silently discarding somebody's work. `McpDispatcher`'s `tools/call` comment is the
+authority, and `docs/blind-write-guardrail.md` is the argument. So a live MCP session goes on
+running the code it was already seeing until **you** move its view.
+
+**In practice, working through MCP:** `compile_method` → run the tests → `commit` → `refresh` (or
+reconnect) in any *other* session that needs to see it. If your own session's tests pass and the
+server still behaves as it did, you have almost certainly not committed, or not refreshed the
+session you are testing through.
 
 `./stop-server.sh && ./run-server.sh` is the only way to be *certain* which code a running server
 is on. A transport fix that "doesn't take" while tool-layer fixes are live is usually just the front
