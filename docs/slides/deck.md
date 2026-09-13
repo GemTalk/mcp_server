@@ -917,6 +917,14 @@ memoizing REMOTE accessor, so logging a worker nothing had queried would answer 
 gem's pid where its JSON-RPC response belongs. McpSession>>cacheWorkerIds fetches both at login,
 once, while nothing is in flight; memoized, every later print is inert. Log those cached ids,
 never the worker itself.
+IF ASKED whether that arrow is only client requests: no, and the label still holds -- all of it
+is nbExecute:. Three kinds of traffic take it. The bootstrap at session open (prepareWorker, one
+round trip, before any request can arrive). Every client request (runWorker:). And the reaper's
+view refresh, runMaintenanceExpression: 'McpServer refreshViewForFrontEnd', which differs in two
+ways worth saying: it takes the worker mutex with tryLock and gives up at once rather than
+parking the reaper behind somebody's five-minute test run, and it does NOT touch the session --
+a maintenance send that counted as activity would make a dead client's session immortal.
+NOT on that arrow: cacheWorkerIds and logout, which are GCI calls on the handle, not expressions.
 -->
 
 ---

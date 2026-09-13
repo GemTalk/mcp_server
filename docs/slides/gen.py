@@ -291,7 +291,15 @@ SLIDES = [
   "memoizing REMOTE accessor, so logging a worker nothing had queried would answer a client with the\n"
   "gem's pid where its JSON-RPC response belongs. McpSession>>cacheWorkerIds fetches both at login,\n"
   "once, while nothing is in flight; memoized, every later print is inert. Log those cached ids,\n"
-  "never the worker itself."),
+  "never the worker itself.\n"
+  "IF ASKED whether that arrow is only client requests: no, and the label still holds -- all of it\n"
+  "is nbExecute:. Three kinds of traffic take it. The bootstrap at session open (prepareWorker, one\n"
+  "round trip, before any request can arrive). Every client request (runWorker:). And the reaper's\n"
+  "view refresh, runMaintenanceExpression: 'McpServer refreshViewForFrontEnd', which differs in two\n"
+  "ways worth saying: it takes the worker mutex with tryLock and gives up at once rather than\n"
+  "parking the reaper behind somebody's five-minute test run, and it does NOT touch the session --\n"
+  "a maintenance send that counted as activity would make a dead client's session immortal.\n"
+  "NOT on that arrow: cacheWorkerIds and logout, which are GCI calls on the handle, not expressions."),
 
  ("c-temps", "SessionTemps &#8212; where the instance actually lives",
   "The worker gem&#8217;s own scratch dictionary: **per gem, per login, never committed**. The front end "
