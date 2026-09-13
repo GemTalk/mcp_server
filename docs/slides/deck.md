@@ -42,7 +42,7 @@ style: |
 
 <!--
 ELEVEN VERTICAL SLICES. Sections 0-12 are cut, and THIS FILE IS IN RUNNING ORDER THROUGHOUT.
-Section 13 is the only one left. Sections 0 and 1 (seven slides), then sections 2 and 3 (nine), then
+Section 13 is the only one left. Sections 0 and 1 (six slides), then sections 2 and 3 (nine), then
 section 4 (ten), then section 5 (seven), then section 6 (six), then section 7 (fourteen), then
 section 8 (ten), then section 9 (six), then section 10 (five), then section 11 (three), then
 section 12 (five). In the order they were CUT that is slice 3, slice 4, slice 5, slice 6, slice 7,
@@ -97,18 +97,18 @@ command with a quoted argument in it (found 2026-09-12).
 
 <!--
 ================================================================================
-VERTICAL SLICE 3 -- sections 0 and 1: framing, and the repository. Eight slides --
-three for section 0, five for section 1, the last of them demo A. Cut 2026-09-11:
+VERTICAL SLICE 3 -- sections 0 and 1: framing, and the repository. Six slides --
+two for section 0, four for section 1, the last of them demo A. Cut 2026-09-11:
 first in running order, third to be cut.
 
-Running order and plans, in seconds -- title 10, what is different 40, status
-honestly 35 (85s, section 0); nothing to install 35, load.gs 35, how it is
-verified 40 (110s, section 1); demo A 60.
+Running order and plans, in seconds -- title 10, what is different 40 (50s,
+section 0); nothing to install 35, load.gs 35, how it is verified 40 (110s,
+section 1); demo A 60.
 
-Section 0 is no longer contiguous: "What is different" runs immediately after the
-title, and the gem-contents sequence then runs before "Status, honestly". That is
-deliberate -- the room gets the reason for gems before it is shown what is in
-them -- and it is why the seconds above are not a single block of running time.
+Section 0 is now the title and one slide, and they are not adjacent to anything
+else of their own: the gem-contents sequence runs between "What is different" and
+section 1. That is deliberate -- the room gets the reason for gems before it is
+shown what is in them.
 
 Section 0's thesis is one sentence and slide 2 is the whole of it: it runs inside
 the image, so a session is a login, a session is a transaction view, and a view is
@@ -145,13 +145,23 @@ TWO DELIBERATE DEPARTURES from docs/Presentation.md:
     outline also attributed that test to McpBlindWriteTest; it lives in
     McpConcurrentEditTest, and the outline has been corrected.
 
-WHAT WAS ASKED FOR ON 2026-09-11, and where it landed -- both on the status slide,
-which is the slide that note turned into:
-  * server-initiated messages are NOT a feature and will not become one, because
-    the 2026-07-28 draft forbids the direction outright. Slide 4 says "machinery,
-    not a feature" and hands the consequence to section 13.
-  The README's own status line still reads it as a feature; that is item 5 in
-  docs/Presentation.md's fix list.
+"STATUS, HONESTLY" IS GONE, deleted 2026-09-13, and its four claims were not
+dropped so much as sent to where each is already earned:
+  * the built list -- Streamable HTTP, per-client worker gems, 31 tools -- is what
+    the gem-contents sequence and the inventory slide show one box at a time.
+  * OAuth 2.1 / JWT and TLS belong to McpAuthRouter: the router slide names the
+    class, and section 9 spends it in full.
+  * the configurable worker user is section 11, which says it better -- and says
+    the thing the status bullet never did, that it is configured PER ROUTER and
+    not per session.
+  * server-initiated messages -- NOT a feature and never becoming one, because the
+    2026-07-28 draft forbids the direction outright -- are now a speaker note on
+    the McpProgressChannel slide, which is where they are on screen. That is
+    WHAT WAS ASKED FOR ON 2026-09-11, and it still hands the consequence to
+    section 13.
+  The README's own status line still reads server-initiated messages as a feature;
+  that is item 5 in docs/Presentation.md's fix list, and README's Future work is
+  still the thing to point at rather than reading a second list aloud.
 
 WATCH -- the Grail toolset is about to stop being auto-detected. McpServer class>>
 installedDefaultToolsetNames appends McpGrailToolset whenever that class is loaded
@@ -162,11 +172,12 @@ unaffected because the suite runs either way -- but section 2 does assert it
 (docs/Presentation.md, "Resolved per session, not at boot") and section 10 will.
 Re-read both when that merge lands.
 
-Budget: 4:45 -- 225s of slides plus the 60s demo, against the 5.0 minutes the
-outline's table allows for 0 and 1 together. Consolidating "MCP, in one slide" and
-"What is different here" into one slide on 2026-09-13 gave 20s back: section 0 is
-now 5s UNDER its 1.5 rather than 15s over, and section 1 stays 10s under its 3.5,
-so the pair has slack and the table does not move.
+Budget: 4:10 -- 190s of slides plus the 60s demo, against the 5.0 minutes the
+outline's table allows for 0 and 1 together. Two cuts on 2026-09-13 gave 55s back:
+consolidating "MCP, in one slide" with "What is different here" (20s), and
+deleting "Status, honestly" (35s). Section 0 is now 40s under its 1.5 and section
+1 stays 10s under its 3.5, so the pair has real slack -- which is the first place
+to look when a later section overruns, rather than a reason to put a slide back.
 ================================================================================
 -->
 
@@ -481,14 +492,20 @@ objects rather than classes-in-general, and move. Everything on this slide gets 
 
 <div class="boxnote">
 
-Claude Code, a VS Code extension, `curl`. It speaks **HTTP/1.1 and JSON-RPC 2.0**: it POSTs each request, and may hold open a `text/event-stream` GET for anything the server wants to say on its own. **One client is one session, and one session is one GemStone login** &#8212; which is the whole reason there is a cap.
+Claude Code, a VS Code extension, `curl`. It speaks **HTTP/1.1 and JSON-RPC 2.0**: it POSTs each request, and may hold open a `text/event-stream` GET to listen to the server.
 
 </div>
 
 <!--
 Worth saying out loud that the client is not ours and we do not get to change it -- the protocol
-era split is section 3's material. The login point is the one to land: a reconnect loop in a
-client opens a NEW session each time, and the login that exhausts a stone fails for topaz too.
+era split is section 3's material.
+
+This slide said "one client is one session, and one session is one GemStone login -- which is the
+whole reason there is a cap" until 2026-09-13. The login half is now the third bullet of "What is
+different", two slides earlier, so saying it here is repetition; the cap is left to section 8's
+maxSessions slide, which is where it is actually configured. Still the point to land IF it is
+asked: a reconnect loop in a client opens a NEW session each time, and the login that exhausts a
+stone fails for topaz too.
 -->
 
 ---
@@ -2160,6 +2177,19 @@ The bug worth telling: the worker sends its final tick and returns in the same b
 tick was still in the Stone's queue when the call's ensure: forgot the channel. Every reported
 call lost its last step -- the one saying the work is finished. Hence an explicit drain before
 the unregister. A bug that only exists end to end.
+
+SERVER-INITIATED MESSAGES, if they are said here: this is where the status slide's caveat went
+when that slide was deleted on 2026-09-13. They are built, and this server needs them -- every
+idleness count in section 8 rests on a server-initiated ping -- but the 2026-07-28 draft removes
+the direction outright: "servers do not initiate JSON-RPC requests and clients do not send
+JSON-RPC responses". Machinery, not a feature with a future to sell.
+
+Be precise about what that wording deletes, because this slide is on the right side of it:
+server-initiated REQUESTS go, which is ping and the pending-request table underneath section 8.
+Notifications travelling server to client -- progress ticks, this channel -- are not requests and
+read as untouched. Do not assert that harder than the quote supports; it is section 13's to
+settle. Why build it at all: it is what the clients in the room speak today. Claude Code sends a
+session id, opens the GET stream, answers pings, and hands over a progressToken on every call.
 -->
 
 ---
@@ -2278,6 +2308,9 @@ Everything the server wants to say that is not an answer to a request, waiting f
 <!--
 Never committed is not a detail: this is queued work for a socket, and a socket does not survive
 a commit record. If the front end dies the queue should die with it.
+
+The protocol caveat on this whole direction -- built, needed here, and forbidden by the
+2026-07-28 draft -- is one slide back, on McpProgressChannel, so that it is said once.
 -->
 
 ---
@@ -2401,41 +2434,6 @@ IDLE worker holding a stale view, the one moment that worker cannot run a line o
 -->
 
 <!-- MCP-GEM-SEQUENCE:END -->
----
-
-## Status, honestly
-
-**Built, and verified end to end** — by curl, by a TLS run, and by the in-image suites:
-
-* Streamable HTTP transport · **per-client worker gems** · **31 base tools** (+9 optional Python)
-* OAuth 2.1 / JWT bearer tokens, and TLS · a **configurable worker user** (§11)
-
-**One thing on that list I am not going to sell you:**
-
-* **Server-initiated messages** are built, and this server needs them — every count in §8 rests on them — but the `2026-07-28` draft removes that direction outright. **Machinery, not a feature** (§13)
-
-<!--
-The honesty on this slide is the point of the slide, and it is worth the seconds. The README's own
-status line currently reads both of these as features and is the thing to correct.
-
-The worker user is on the BUILT list rather than the caveat list, and section 11
-is where it is spent: the boundary is the GemStone user the worker gem logs in
-as, enforced by the VM on every operation. Do not open it here.
-
-Server-initiated messages: the draft says it plainly -- "servers do not initiate JSON-RPC requests
-and clients do not send JSON-RPC responses". That deletes server-initiated ping, which is what
-section 8's idleness counting is made of, and deletes the reason the pending-request table exists.
-It is not built wrong; it is built for the era that is ending. Section 13 has the worked answer,
-including which half of section 8 survives (the reaping policy, which is a GemStone question) and
-which half does not (the evidence underneath it, which is a protocol question).
-
-If asked "so why build it": because it is what the clients in the room actually speak today.
-Claude Code sends a session id, opens the GET stream, answers pings, and hands over a progressToken
-on every call.
-
-Point at README's Future work for what is not built, rather than reading a second list here.
--->
-
 ---
 
 ## There is nothing to install but topaz file-outs
@@ -6059,7 +6057,7 @@ different history, it is on the slide on purpose, and it is what earns the ask.
 MCP_WORKER_USER=McpReadOnly ./run-server.sh
 ```
 
-`McpRouter>>workerUserId` names it; `startWithId:workerUser:` logs the gem in. **Default `nil` — the front end's own user.** Enforced **in the stone, by the VM, on every operation**.
+`McpRouter>>workerUserId` names it — **one user per router, not per session**: every worker gem this router opens logs in as that user. `startWithId:workerUser:` does the login. **Default `nil` — the front end's own user.** Enforced **in the stone, by the VM, on every operation**.
 
 * **No credential is configured.** The front end mints a **one-time password per session**, needing **one committed grant** — `addOnetimePasswordUserId:` on the front-end user. So `configDict` carries **only an identifier** (§3)
 * **`McpAuthRouter` refuses `workerUserId:`** — a fourth class invariant (§9): there each worker is **the user its bearer token names**, and **silently ignoring a configured one would be the dangerous reading**
@@ -6070,6 +6068,14 @@ MCP_WORKER_USER=McpReadOnly ./run-server.sh
 Lead with the positive claim and stay on it: this is a boundary because the stone
 enforces it, not because the server declines to offer something. Everything a
 server can do on its own side states an intention.
+
+Per router, not per session, is worth saying rather than leaving to be inferred:
+the read-only work gave McpRouter a configured worker user, and it configures the
+WHOLE router -- one identity for every session it opens, chosen by whoever forked
+the gem. Two identities means two routers on two ports, which is the second
+example in McpRouter's class comment. The per-session answer is McpAuthRouter, and
+it is the next bullet: there the identity comes from the token, so the router
+cannot be told one.
 
 If a toolset author asks after section 10 why narrowing the tool surface is not
 the boundary, the answer is about execute_code and not about history:

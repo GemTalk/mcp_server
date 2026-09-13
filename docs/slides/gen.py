@@ -234,12 +234,16 @@ SLIDES = [
 
  ("c-client", "MCP client &#8212; one per editor",
   "Claude Code, a VS Code extension, `curl`. It speaks **HTTP/1.1 and JSON-RPC 2.0**: it POSTs each "
-  "request, and may hold open a `text/event-stream` GET for anything the server wants to say on its "
-  "own. **One client is one session, and one session is one GemStone login** &#8212; which is the whole "
-  "reason there is a cap.",
+  "request, and may hold open a `text/event-stream` GET to listen to the server.",
   "Worth saying out loud that the client is not ours and we do not get to change it -- the protocol\n"
-  "era split is section 3's material. The login point is the one to land: a reconnect loop in a\n"
-  "client opens a NEW session each time, and the login that exhausts a stone fails for topaz too."),
+  "era split is section 3's material.\n"
+  "\n"
+  "This slide said \"one client is one session, and one session is one GemStone login -- which is the\n"
+  "whole reason there is a cap\" until 2026-09-13. The login half is now the third bullet of \"What is\n"
+  "different\", two slides earlier, so saying it here is repetition; the cap is left to section 8's\n"
+  "maxSessions slide, which is where it is actually configured. Still the point to land IF it is\n"
+  "asked: a reconnect loop in a client opens a NEW session each time, and the login that exhausts a\n"
+  "stone fails for topaz too."),
 
  ("c-http", "McpHttpConnection &#8212; one per request",
   "Reads **one** HTTP/1.1 request and writes **one** JSON response, `MCP-Session-Id` header included. "
@@ -396,7 +400,20 @@ SLIDES = [
   "The bug worth telling: the worker sends its final tick and returns in the same breath, so that\n"
   "tick was still in the Stone's queue when the call's ensure: forgot the channel. Every reported\n"
   "call lost its last step -- the one saying the work is finished. Hence an explicit drain before\n"
-  "the unregister. A bug that only exists end to end."),
+  "the unregister. A bug that only exists end to end.\n"
+  "\n"
+  "SERVER-INITIATED MESSAGES, if they are said here: this is where the status slide's caveat went\n"
+  "when that slide was deleted on 2026-09-13. They are built, and this server needs them -- every\n"
+  "idleness count in section 8 rests on a server-initiated ping -- but the 2026-07-28 draft removes\n"
+  "the direction outright: \"servers do not initiate JSON-RPC requests and clients do not send\n"
+  "JSON-RPC responses\". Machinery, not a feature with a future to sell.\n"
+  "\n"
+  "Be precise about what that wording deletes, because this slide is on the right side of it:\n"
+  "server-initiated REQUESTS go, which is ping and the pending-request table underneath section 8.\n"
+  "Notifications travelling server to client -- progress ticks, this channel -- are not requests and\n"
+  "read as untouched. Do not assert that harder than the quote supports; it is section 13's to\n"
+  "settle. Why build it at all: it is what the clients in the room speak today. Claude Code sends a\n"
+  "session id, opens the GET stream, answers pings, and hands over a progressToken on every call."),
 
  ("c-outbox", "McpOutbox &#8212; one session&#8217;s queue of server-initiated messages",
   "Everything the server wants to say that is not an answer to a request, waiting for this "
@@ -404,7 +421,10 @@ SLIDES = [
   "policy, the closing handshake, and the **latest-GET-wins** rule &#8212; because a client may reattach a "
   "stream, and only one of them can be the live one.",
   "Never committed is not a detail: this is queued work for a socket, and a socket does not survive\n"
-  "a commit record. If the front end dies the queue should die with it."),
+  "a commit record. If the front end dies the queue should die with it.\n"
+  "\n"
+  "The protocol caveat on this whole direction -- built, needed here, and forbidden by the\n"
+  "2026-07-28 draft -- is one slide back, on McpProgressChannel, so that it is said once."),
 
  ("c-reaper", "reaper GsProcess &#8212; one pass every 60 seconds",
   "Refresh the front end&#8217;s own view **first**, so everything after it reasons about the repository as "
