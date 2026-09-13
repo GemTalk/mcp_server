@@ -3,7 +3,8 @@
 """Generate the "which gem holds which instance" build sequence in deck.md.
 
 Seventeen slides that step through one diagram, highlighting a different box or
-arrow on each. Every copy of the SVG is byte-identical except that ONE group
+arrow on each -- plus one interleaf, the tool inventory, which carries no diagram
+at all (see AFTER, below). Every copy of the SVG is byte-identical except that ONE group
 carries an extra `hl` class; the front matter's stylesheet is what paints that
 group in the accent. So the geometry lives in exactly one place -- SVG, below --
 and a change to it is one edit here, never seventeen.
@@ -19,6 +20,33 @@ is lost the next time anyone regenerates. Edit SLIDES or SVG here instead.
 Adding a slide: append a tuple to SLIDES -- (highlight, title, prose, notes).
 The highlight is a class from the SVG (`c-session`, `a-request`, ...) or None
 for no highlight. Order in SLIDES is running order.
+
+ONE SLIDE IN THE RUN IS NOT A DIAGRAM. The tool inventory interrupts the sequence
+after the McpToolset slide, because that is the one moment the audience has just
+been told what a toolset IS and has not yet been shown what is in one. It is not
+a SLIDES entry -- it carries no diagram -- so it lives in AFTER, a map from a
+highlight class to raw slide text emitted immediately after that slide. Keying on
+the class rather than an index means reordering SLIDES carries it along. It still
+has to be generated rather than hand-written into deck.md, because --apply
+replaces everything between the markers and the interleaf is inside them.
+
+THE INVENTORY SLIDE NEEDS FOUR MORE FRONT-MATTER RULES, or it renders as one
+long single-column list that runs off the bottom:
+
+    .tools { display: flex; gap: 26px; margin-top: 10px; font-size: 17px; line-height: 1.5; }
+    .tools > div { flex: 1 1 0; }
+    .tools p { margin: 0; font-family: ui-monospace, monospace; }
+    .tools .tset { font-family: inherit; font-weight: 600; color: #b4451f; font-size: 15px; }
+
+plus `.tools .tset + p { }` spacing, the `.tools .grail` dashed rule that sets the
+Grail column apart, and `.tnote`. The dashed border is the whole point of laying
+this out in flex rather than `column-count`: a CSS column break lands where the
+text happens to run out, and the Grail group has to be a column of its own.
+
+Keep the tool names in REGISTRATION order -- the order each toolset's registerOn:
+sends `name:`, which is the order tools/list answers in. It is alphabetical in the
+seven core toolsets by accident and thematic in McpGrailToolset on purpose; either
+way the slide is checkable against the source, which is why it is worth keeping.
 
 THE FRONT MATTER MUST CARRY THESE FIVE RULES or nothing highlights and the prose
 renders at body size:
@@ -185,8 +213,8 @@ SLIDES = [
  (None, "Two gems, and what is in each",
   "Every box is **one object**. The front-end gem owns the socket and knows who the sessions are; "
   "the worker gem runs the tools. Nothing is shared between them &#8212; not a variable, not a view, "
-  "not a transaction. **One string crosses the gap in each direction**, and the next sixteen slides "
-  "walk them in order.",
+  "not a transaction. **One string crosses the gap in each direction**, and sixteen more slides "
+  "walk them in order, one box or one arrow at a time.",
   "The establishing shot. Do not explain anything yet -- name the two gems, say that the boxes are\n"
   "objects rather than classes-in-general, and move. Everything on this slide gets its own slide."),
 
@@ -349,6 +377,92 @@ SLIDES = [
   "IDLE worker holding a stale view, the one moment that worker cannot run a line of code."),
 ]
 
+INTERLEAF_TOOLS = """
+## The tools themselves &#8212; 31 in seven toolsets, and Grail&#8217;s nine
+
+<div class="tools">
+<div>
+<p class="tset">McpSessionToolset</p>
+<p>abort</p>
+<p>commit</p>
+<p>refresh</p>
+<p>status</p>
+<p class="tset">McpExecutionToolset</p>
+<p>execute_code</p>
+<p class="tset">McpListingToolset</p>
+<p>list_all_classes</p>
+<p>list_classes</p>
+<p>list_dictionaries</p>
+<p>list_dictionary_entries</p>
+</div>
+<div>
+<p class="tset">McpBrowsingToolset</p>
+<p>describe_class</p>
+<p>export_class_source</p>
+<p>get_class_definition</p>
+<p>get_class_hierarchy</p>
+<p>get_method_source</p>
+<p>list_methods</p>
+<p class="tset">McpSearchToolset</p>
+<p>find_implementors</p>
+<p>find_references_to</p>
+<p>find_senders</p>
+<p>search_method_source</p>
+</div>
+<div>
+<p class="tset">McpMutationToolset</p>
+<p>add_dictionary</p>
+<p>compile_class_definition</p>
+<p>compile_method</p>
+<p>delete_class</p>
+<p>delete_method</p>
+<p>remove_dictionary</p>
+<p>set_class_comment</p>
+<p class="tset">McpTestingToolset</p>
+<p>describe_test_failure</p>
+<p>list_failing_tests</p>
+<p>list_test_classes</p>
+<p>run_test_class</p>
+<p>run_test_method</p>
+</div>
+<div class="grail">
+<p class="tset">McpGrailToolset</p>
+<p class="tnote">not in the default surface &#8212; named, or absent</p>
+<p>compile_python</p>
+<p>eval_python</p>
+<p>describe_python_class</p>
+<p>list_python_methods</p>
+<p>python_module_state</p>
+<p>run_python_tests</p>
+<p>get_python_source</p>
+<p>find_python_senders</p>
+<p>search_python_source</p>
+</div>
+</div>
+
+<span class="fine">Registration order, which is the order `tools/list` answers in. The seven on the left are `defaultToolsetNames`; a deployment takes any subset. Only two of these forty ever report progress &#8212; `list_failing_tests`, and `run_python_tests`.</span>
+
+<!--
+Do not read the list. It is here so nobody has to take the tool surface on faith, and so the
+shape is visible at a glance: the verbs are GemStone's, not a generic file-and-shell set --
+there is no read_file and no bash, because there is no filesystem in the argument.
+
+The column that matters is the first one. FOUR tools drive the transaction, and one of them is
+the only thing in the image that commits. Everything else in the picture -- 36 tools -- leaves
+the transaction exactly where it found it. Section 7 is built on that sentence.
+
+The dashed column is a third party's toolset that happens to live in this tree: nine tools, its
+own options, its own suite, not one line of special handling in core. Section 10 says "copy
+this"; here it is only worth pointing at.
+
+If asked why execute_code sits beside the session tools rather than with the writers -- because
+it is the one tool that can do anything the other 30 can, which is section 7's full-disclosure
+slide, not this one.
+"""
+
+AFTER = {"c-toolset": INTERLEAF_TOOLS}
+
+
 def block():
     out = []
     for hl, title, prose, notes in SLIDES:
@@ -359,6 +473,8 @@ def block():
                    + '\n## %s\n\n<div style="text-align:center">\n%s\n</div>\n\n'
                      '<div class="boxnote">\n\n%s\n\n</div>\n\n<!--\n%s\n-->\n'
                    % (title, svg, prose, notes))
+        if hl in AFTER:
+            out.append("\n---\n" + AFTER[hl])
     return BEGIN + "\n" + "".join(out) + "\n" + END + "\n"
 
 
@@ -380,6 +496,6 @@ if __name__ == "__main__":
         if arg == "--check":
             sys.exit(0 if deck == want else "deck.md is out of date; run gen.py --apply")
         open(DECK, "w", encoding="utf-8").write(want)
-        print("deck.md updated: %d slides" % len(SLIDES))
+        print("deck.md updated: %d diagram slides + %d interleaf" % (len(SLIDES), len(AFTER)))
     else:
         sys.stdout.write(block())
