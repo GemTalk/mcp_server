@@ -202,11 +202,11 @@ the same section in full with nothing on screen.
 
 ## What is different
 
-* This exists to replace the **GCI-based Jasper MCP server**, with something **any** MCP client can reach over plain HTTP
+* This exists to replace the **GCI-based Jasper MCP server** with something **any** MCP client can reach over plain HTTP
 * It runs **inside the image**. No Node process, no GCI bridge, no FFI
-* The socket runs in a **gem.** The tools execute in a session in a **gem** — with a **login,** a **transaction view,** and a **commit record.**
-* This server conforms to MCP specifications [2025-06-18](https://modelcontextprotocol.io/specification/2025-06-18) and [2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25) but not yet to [2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28).
-* It answers `initialize`, `ping`, `tools/list`, and `tools/call`. Others — resources, prompts, sampling, elicitation — are answered `-32601`.
+* The socket runs in a **gem**. The tools execute in a session in a **gem** — with a **login**, a **transaction view**, and a **commit record**
+* This server conforms to MCP specifications [2025-06-18](https://modelcontextprotocol.io/specification/2025-06-18) and [2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25) but not yet to [2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28)
+* It answers `initialize`, `ping`, `tools/list`, and `tools/call`. Everything else — `resources/*`, `prompts/*`, `completion/complete`, `logging/setLevel` — is answered `-32601`, because this server declares exactly one capability: `tools`
 
 <!--
 This slide is section 0's thesis and MCP's whole surface in one, and it was two slides until
@@ -231,10 +231,13 @@ notification has no id, so it gets no response at all -- the dispatcher answers 
 transport sends 202. That is JSON-RPC, not an MCP rule.
 
 On what is NOT declared, if asked: tools/listChanged (no session's tool surface changes after
-initialize), resources, prompts, completions -- none of which exist here. `logging` was declared
-until 2026-08-27 and was removed rather than left as a promise nothing would keep. Progress needs
-no declaration at all: it is a base-protocol utility a client opts into per REQUEST by putting a
-progressToken in _meta, so there has never been anything for a server to advertise.
+initialize), resources, prompts, completions, tasks (2025-11-25's task-augmented requests --
+tasks/get, tasks/result, tasks/list, tasks/cancel; nothing here is long-running in the
+protocol's sense, progress is the mechanism instead) -- none of which exist here. `logging` was
+declared until 2026-08-27 and was removed rather than left as a promise nothing would keep.
+Progress needs no declaration at all: it is a base-protocol utility a client opts into per
+REQUEST by putting a progressToken in _meta, so there has never been anything for a server to
+advertise.
 
 On the version bullet, if pressed: McpDispatcher class>>supportedProtocolVersions is the authority
 and names exactly the two, with 2025-11-25 the default; 2026-07-28 is the draft that forbids
