@@ -1275,14 +1275,20 @@ arbitrary test bodies; a tool that compiles can be followed by one that runs.
   `execute_code` walking `Globals` took **2,291 locks in a single statement**.
 * **The reassuring half:** the front end's `McpRouter` instance and a worker's `McpServer` are
   transient and never committed, so no other session can reach them at all.
-* **`MCP_REAP_LOCK_HOLDERS=1`** makes holding a lock itself the ground for ending a session, with no
-  grace period and no idleness test. An **idle** holder is reaped by `reapReasonFor:`; a **busy** one
-  is reached by `maintainWriteLockHolders`, which ends the call first so the client is told, with
-  kind `lockRelease`. **Off by default**, because a deliberate lock is legitimate.
-* **THE ASK, and it is a GemStone question rather than an mcp_server one:** the bound is **one
-  maintenance pass**, not zero, because a server can only act on what it has noticed. *Should there
-  be a privilege that withholds `writeLock:`?* That is the only bound that would not depend on
-  somebody noticing. Anticipate "stop the session", which already works and needs nothing from this
+* **What bounds it today is session lifetime, not policy.** Locks die with the gem, so §8's reaper
+  releases them as a side effect — measured, a session holding all 2,291 locks was reaped for having
+  no event stream open and `systemLocksDetailedReport` went from 2,299 write locks to `no locks`
+  with no operator action.
+* **A reaper is the wrong layer, and this project built one to find that out.** `b0a5180` added an
+  `MCP_REAP_LOCK_HOLDERS` setting that ended any session found holding a lock — an idle holder
+  reaped, a busy one answered mid-call so the client was told. It worked, measured, and it was
+  **reverted**: policing a lock once per maintenance pass works around the gap in the privilege
+  model rather than closing it, the holder chooses when the unguarded interval falls, and a session
+  that keeps taking fresh locks is chased rather than stopped.
+* **THE ASK, and it is a GemStone question rather than an mcp_server one:** *should there be a
+  privilege that withholds `writeLock:`?* Stopped at the source the bound is **zero** rather than one
+  heartbeat — and that is the layer this should be addressed at, not a maintenance cycle chasing
+  lock holders. Anticipate "stop the session", which already works and needs nothing from this
   project — `systemLocksDetailedReport`, `descriptionOfSession:`, `stopSession:` — and is still a
   person noticing.
 

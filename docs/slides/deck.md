@@ -4715,7 +4715,7 @@ front end observed. Promise that and they will spend the section checking it.
 ## One `GsProcess`, one pass every 60 seconds
 
 <div style="text-align:center">
-<svg viewBox="0 0 960 330" width="900" role="img" aria-label="The maintenance pass as it runs by default: refresh the front end's own view, then measure each worker's view hygiene, then probe quiet sessions, then reap. Step one comes first so everything after it reasons about the repository as it is now; reaping comes last so a session found gone while probing is freed in the same pass. A fifth arm, off by default, ends sessions holding write locks.">
+<svg viewBox="0 0 960 330" width="900" role="img" aria-label="The maintenance pass as it runs by default: refresh the front end's own view, then measure each worker's view hygiene, then probe quiet sessions, then reap. Step one comes first so everything after it reasons about the repository as it is now; reaping comes last so a session found gone while probing is freed in the same pass.">
   <defs>
     <marker id="m8" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -4770,11 +4770,9 @@ is actively executing Smalltalk. A worker sitting between calls is executing not
 inside it does not fire. This is the third design that fact decides, after the detached front end
 and the front end owning the client stream.
 
-The pass has a FIFTH arm that is not drawn, because it is off by default and belongs to section 11:
-#maintainWriteLockHolders, between view hygiene and probing, which ends the in-flight call of a busy
-session found holding write locks. It sits there because the reap in the last box deliberately never
-touches a busy session. Mention it only if section 11 has already run, or if somebody reads
-#maintainSessions along with you and counts five sends.
+Four sends, and the diagram is all four -- if somebody reads #maintainSessions along with you, the
+count matches. An arm that ended sessions holding write locks was built and taken back out; section
+11 says why, and it is that section's argument rather than this one's.
 -->
 
 ---
@@ -5788,23 +5786,27 @@ earlier design.
 SLIDE 3 IS THE ASK, and it is the slide this section exists for. System writeLock:
 is gated by no privilege, so a browsing-only session has it, and a lock blocks
 OTHER sessions from committing -- including a privileged developer committing
-code, measured. MCP_REAP_LOCK_HOLDERS bounds it at ONE MAINTENANCE PASS, because
-a server can only act on what it has noticed. A privilege that withheld
-writeLock: would bound it at zero. That is a GemStone question, not an mcp_server
-one, and it goes to the room.
+code, measured. What bounds it today is session lifetime and an operator
+noticing. A reaper that ended lock holders WAS built here and taken back out,
+because it can only act once per heartbeat and the holder picks when the window
+falls -- chasing a lock holder is not the same as not being able to take the
+lock. A privilege that withheld writeLock: would bound it at zero. That is a
+GemStone question, not an mcp_server one, and it goes to the room.
 
 WHAT TO CUT: slide 2 (50s), whose privilege detail is in docs/ReadOnly_User.md and
 whose symbol-list consequence is an operational footnote. Do NOT cut slide 3.
 
 NO DEMO. The convincing demonstration here is a negative -- a commit that raises
 2249 -- and demo E already puts a failing commit on screen for a better reason.
-The lock reap is a 10-second pass plus a 120-second delay, which is not a stage
-demo. Both are measured in docs/ReadOnly_User.md if anyone asks for evidence.
+The lock result is a two-session setup that reads as a non-event on a projector.
+Both are measured in docs/ReadOnly_User.md if anyone asks for evidence.
 
 THE SLIDES DO NOT MENTION WHAT THIS REPLACED, deliberately and by instruction.
 The notes reference it once, on slide 1, only because "why is the tool surface not
 the boundary" is a question a toolset author may ask after section 10 -- and the
-answer is about execute_code, not about history.
+answer is about execute_code, not about history. Slide 3's reverted lock reaper
+is NOT an exception to that rule and should not be tidied away as one: it is a
+different history, it is on the slide on purpose, and it is what earns the ask.
 ================================================================================
 -->
 
@@ -5892,49 +5894,57 @@ section is three slides.
 
 ## `System writeLock:` is gated by **no** privilege — and that is my question
 
-A browsing-only session has it. A write lock **blocks other sessions from committing** the locked object — and it is **not limited to application data**.
+A browsing-only session has it. A lock **stops other sessions committing** the locked object — and **not only application data**.
 
-> **Measured.** The restricted gem locked *only* `McpServer`'s method dictionary; a `DataCurator` session then compiled a method into `McpServer` and committed — **`false`, conflict `#'Write-WriteLock'` n=1.** **Locking a class's method dictionary stops a privileged developer committing code to that class.** And it scales: one `execute_code` walking `Globals` took **2,291 locks in a single statement**.
+> **Measured.** The restricted gem locked *only* `McpServer`'s method dictionary; a `DataCurator` compile-and-commit then failed — **conflict `#'Write-WriteLock'` n=1.** One `execute_code` walking `Globals` took **2,291 locks in a single statement**.
 
-* **The reassuring half:** the front end's `McpRouter` and a worker's `McpServer` are **transient** and never committed, so no other session can reach them at all — locking one "succeeds" and excludes nobody
-* **`MCP_REAP_LOCK_HOLDERS=1`** makes *holding a lock* the ground for ending a session — **no grace, no idleness test**. An **idle** holder is reaped by `reapReasonFor:`; a **busy** one by `maintainWriteLockHolders`, which ends the call first so the client is **told**, kind `lockRelease`. **Off by default**
+* **The reassuring half:** `McpRouter` and `McpServer` are **transient** — never committed, so locking one excludes nobody
+* **All that bounds it today is session lifetime.** Locks die with the gem — measured, all 2,291 went when §8's reaper took the holder. On demand, `stopSession:`: a person noticing
+* **A reaper is the wrong layer, and I built one to find that out.** It acts only **once per maintenance pass**: the lock is held for up to an interval, **the holder picks when that window falls**, and a session taking fresh locks is **chased, not stopped.** Reverted
 
-> **So the bound is one maintenance pass, not zero** — a server can only act on what it has noticed. **Should there be a GemStone privilege that withholds `writeLock:`?** That is the only bound that would not depend on somebody noticing.
+> **So: should there be a privilege that withholds `writeLock:`?** At the source the bound is **zero**, not one heartbeat — and that is the layer to fix it at, not a maintenance cycle.
 
 <!--
 THE SLIDE THIS SECTION EXISTS FOR. Everything before it earns the right to ask.
 
 Build it in three beats. One: a lock needs no privilege, so the most confined
 session you can provision still has it. Two: a lock does not change anything --
-it stops OTHER people changing things, including a developer committing code, and
-that is measured rather than reasoned. Three: this server can bound it, but only
-at the resolution of its own heartbeat.
+it stops OTHER people changing things, and that is measured rather than reasoned.
+SAY THE LINE THAT IS NOT ON THE SLIDE, because it is the one that lands: locking
+a class's method dictionary stops a PRIVILEGED DEVELOPER committing code to that
+class. Three: everything available today is either a gem eventually going away or
+a person noticing.
 
 Then ask, and STOP TALKING. This is the second of the talk's two asks and it is a
 GemStone question rather than an mcp_server one: writeLock: is ungated, the
 confined user has it by construction, and no arrangement of UserProfile
-privileges takes it away. A privilege would move the bound from one pass to zero.
+privileges takes it away.
+
+LEAD WITH THE REVERT RATHER THAN BEING CAUGHT BY IT -- it is the strongest part of
+the argument, which is why bullet 3 says "I built one to find that out". Commit
+b0a5180 added an MCP_REAP_LOCK_HOLDERS setting: an idle holder reaped, a busy one
+answered mid-call so the client was told. It worked, measured, and it was taken
+back out. The reason is a design argument and not a bug: policing a lock once per
+heartbeat works around a gap in the privilege model instead of closing it, the
+holder chooses when the unguarded interval falls, and a session that keeps taking
+fresh locks is chased forever. docs/ReadOnly_User.md records the whole thing,
+revert included, because the exposure is real and should be arguable from.
+
+The session-lifetime bound is worth saying plainly so the room does not hear
+"unbounded": locks are released when the holding gem logs out, and section 8's
+reaper logs idle workers out on a schedule. That is exactly why the idle and
+lifetime settings are worth configuring deliberately on a deployment that hands
+execute_code to anyone less than trusted.
 
 Anticipate the obvious answer, which is "stop the session": that already works
 and needs nothing from this project. System systemLocksDetailedReport names the
 holding stone session, descriptionOfSession: gives its UserProfile and pid, and
 stopSession: ends it and releases the locks -- DataCurator has SessionAccess
-already. That is the escape hatch when the setting is off or the holder is not an
-MCP session at all. It is still a person noticing.
+already. That is the escape hatch, including when the holder is not an MCP session
+at all. It is still a person noticing.
 
 install.sh would fail the same way as that DataCurator commit -- worth adding if
 the room looks unconvinced that this reaches past application data.
-
-Why OFF by default, if pressed: an application that takes a lock deliberately is
-doing something legitimate, and this would end that session mid-call. It is meant
-to be turned on alongside MCP_WORKER_USER, where a lock could only be an attack.
-
-The count is read STONE-SIDE -- System sessionLocks: on the worker's cached stone
-session id -- never by sending into the worker, because a worker inside a long
-call cannot answer a maintenance send and that is exactly the session that has to
-be seen. Only the SIZE is taken, so the transactionless front end faults nothing
-in. It needs SessionAccess, and a front end whose user lacks it sees every session
-as holding nothing: the same fail-open as the default.
 -->
 
 ---
