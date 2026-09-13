@@ -48,27 +48,37 @@ jobs:
         # contributor runs. This doubles with every version added -- add an `exclude:` entry for a
         # version with no Grail support (see docs/Development.md's version matrix) rather than
         # letting that leg fail.
-        gemstone-version: ['3.7.5']
+        gemstone-version: ['3.7.5', '4.0.0.Alpha1']
         grail: [false, true]
+        include:
+          # Where each version's Linux build is published. These differ, and the difference is not
+          # incidental: 3.7.5 is a released product on GemTalk's public download server, while
+          # 4.0.0.Alpha1 is a pre-release that is NOT there. It is published on dl.gemdb.com
+          # alongside GemDB's engine catalog, which is also where anything running this server on
+          # 4.0 gets its engine, so testing against that host tests what users actually install.
+          # Carried as matrix data rather than a `case` in the step below, so a version is one
+          # line in one place and a job cannot silently download the wrong thing.
+          - gemstone-version: '3.7.5'
+            download-base: 'https://downloads.gemtalksystems.com/pub/GemStone64/3.7.5'
+          - gemstone-version: '4.0.0.Alpha1'
+            download-base: 'https://dl.gemdb.com/4.0.0.Alpha1'
         exclude:
-          # Grail dropped 3.7.x on 2026-09-12 and its own install_base.sh now refuses the image
+          # Grail dropped 3.7.x on 2026-09-12, and its own install_base.sh now refuses the image
           # before anything of ours runs: "Error: GemStone 3.7.5 is not supported. Grail requires
-          # GemStone 4.0 (build 2026-07-29 or later)." Nothing in this repository can cover that,
-          # and this leg clones Grail's DEFAULT branch, so it broke for every PR at once rather
-          # than for the one that touched it.
+          # GemStone 4.0 (build 2026-07-29 or later)." Nothing in this repository can cover that.
           #
           # Excluded rather than pinned to Grail's last 3.7-capable commit: pinning would keep a
-          # green leg testing a Grail nobody will run again, which is worse than an honest gap.
-          #
-          # The cost is real and is not hidden: with 3.7.5 the only version here, NOTHING now
-          # exercises src/grail or McpGrailToolsetTest. Closing that needs a 4.0 entry in
-          # `gemstone-version` above, which needs a 4.0 build the download step can reach --
-          # 4.0.0.Alpha1 is not on downloads.gemtalksystems.com, so that is a distribution
-          # decision before it is a CI one. See docs/Development.md's version matrix.
+          # green leg testing a Grail nobody will run again, which is worse than no leg at all.
+          # src/grail and McpGrailToolsetTest are covered by the 4.0.0.Alpha1 leg instead, which
+          # is the only image Grail still supports -- so this exclusion narrows the matrix to what
+          # can work rather than dropping coverage.
           - gemstone-version: '3.7.5'
             grail: true
     env:
       GEMSTONE_VERSION: ${{ matrix.gemstone-version }}
+      # Through the environment rather than straight into the `run` block, so nothing from the
+      # matrix is ever expanded into a shell command's text.
+      GEMSTONE_DOWNLOAD_BASE: ${{ matrix.download-base }}
     steps:
       - name: Check out mcp_server
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -99,7 +109,7 @@ jobs:
           mkdir -p downloads
           if [ ! -f "downloads/$FILENAME" ]; then
             curl -fL --progress-bar -o "downloads/$FILENAME" \
-              "https://downloads.gemtalksystems.com/pub/GemStone64/${GEMSTONE_VERSION}/${FILENAME}"
+              "${GEMSTONE_DOWNLOAD_BASE}/${FILENAME}"
           fi
           mkdir -p "$HOME/gemstone"
           unzip -q "downloads/$FILENAME" -d "$HOME/gemstone"

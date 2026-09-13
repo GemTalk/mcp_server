@@ -73,6 +73,13 @@ reasoning has nowhere better to live, not that the entry should grow.
   genuine mismatch (3.7.5 against 4.0.0.Alpha1, either way round) is still refused exactly, and still
   names the stones that would work. With this, all 463 unit tests pass on 4.0.0.Alpha1.
 
+* **GemStone 4.0.0.Alpha1 is now tested, and it is where the Grail toolset is tested.** CI gains a
+  4.0 leg — both plain and `--grail` — downloaded from `dl.gemdb.com`, where the pre-release is
+  published. Measured there: 565 tests across 22 suites, including all 49 of `McpGrailToolsetTest`,
+  plus 126 over-the-wire checks and 15 TLS ones. The `3.7.5 + Grail` leg is excluded instead, since
+  Grail dropped 3.7.x on 2026-09-12 and its installer refuses the image, so the Grail toolset is
+  covered on the one image that can load it rather than failing on the one that cannot.
+
 ## 0.8.0 — 2026-09-11
 
 * **Breaking: the Grail (Python) toolset is no longer served by default.** `McpServer

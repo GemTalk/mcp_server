@@ -159,9 +159,11 @@ Expected failures are real signal, not noise:
 
 ## Version support
 
-**Supported: 3.7.5 and 3.7.6+.** The server's view handling relies on those images' implementation
-of `System continueTransaction`; earlier ones differ below the Smalltalk, in ways nothing in `src/`
-can detect or work around. Whether the floor settles at 3.7.5 or 3.7.6 is not yet decided.
+**Supported: 3.7.5, 3.7.6+ and 4.0.0.Alpha1.** The server's view handling relies on those images'
+implementation of `System continueTransaction`; earlier ones differ below the Smalltalk, in ways
+nothing in `src/` can detect or work around. Whether the floor settles at 3.7.5 or 3.7.6 is not yet
+decided. The 4.0 ceiling is now held by CI rather than by assumption — every suite runs there,
+including the Grail toolset, which 4.0 alone can load.
 
 | image | base server | OAuth/OIDC front end | notes |
 |---|---|---|---|
@@ -169,14 +171,18 @@ can detect or work around. Whether the floor settles at 3.7.5 or 3.7.6 is not ye
 | 3.7.2 | **no** | no — no kernel JWT classes | dropped 2026-09-10: `System continueTransaction` differs below the image in two ways nothing in `src/` can detect or cover, and it carries #51438 |
 | 3.7.5 | yes | yes, against a local IdP | **no Grail**: Grail dropped 3.7.x on 2026-09-12 and requires 4.0 |
 | 3.7.6+ | yes | yes, including an external OIDC IdP | ditto |
-| 4.0.0 | untested here | untested here | the only image Grail still supports |
+| 4.0.0.Alpha1 | yes | yes | **in CI**, and the only image that can carry Grail |
 
-**The Grail leg of CI is excluded, not fixed.** Grail's own `install_base.sh` refuses anything
-before 4.0, so `3.7.5 + Grail` could only ever fail, and the exclusion means **nothing in CI
-exercises `src/grail` or `McpGrailToolsetTest`** until a 4.0 entry joins `gemstone-version`. That
-needs a 4.0 build the workflow's download step can reach: 4.0.0.Alpha1 is published on
-`dl.gemdb.com`, not on `downloads.gemtalksystems.com`, so it is a distribution question first.
-Until then the Grail toolset is covered by hand, or by whatever bundles it.
+**Grail is tested on 4.0 and nowhere else, because nowhere else can run it.** Grail's own
+`install_base.sh` refuses anything before 4.0, so CI excludes `3.7.5 + Grail` and runs the Grail leg
+on `4.0.0.Alpha1` instead — which is what keeps `src/grail` and `McpGrailToolsetTest` covered rather
+than the exclusion quietly dropping them.
+
+**4.0.0.Alpha1 is downloaded from `dl.gemdb.com`, not from the public download server**, because it
+is a pre-release and is not published there. The base URL per version is matrix data in
+`health-check.yml`, so a version that moves is one line. Both hosts are GemTalk's, and the 4.0 one
+is the same catalog anything running this server on 4.0 installs its engine from, so the leg tests
+what users actually have.
 
 Anything present in **3.7.5** may be referenced directly, with no existence guard; the live concern
 is only what is newer than that. Genuinely optional things (Grail) still use an `objectNamed:`
