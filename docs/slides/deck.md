@@ -37,7 +37,6 @@ style: |
   .tools .tset { font-family: inherit; font-weight: 600; color: #b4451f; font-size: 16px;
                  margin: 0 0 .15em; }
   .tools p + .tset { margin-top: 1em; }
-  .tools .tnote { font-family: inherit; font-size: 13px; color: #4a5560; margin: -.1em 0 .3em; }
   .tools .grail { flex: 0 0 auto; border-left: 2px dashed #b4451f; padding-left: 22px; }
 ---
 
@@ -1587,7 +1586,6 @@ a third-party toolset. If someone is going to write one, this is the slide to po
 </div>
 <div class="grail">
 <p class="tset">McpGrailToolset</p>
-<p class="tnote">not in the default surface &#8212; named, or absent</p>
 <p>compile_python</p>
 <p>eval_python</p>
 <p>describe_python_class</p>
@@ -1599,8 +1597,6 @@ a third-party toolset. If someone is going to write one, this is the slide to po
 <p>search_python_source</p>
 </div>
 </div>
-
-<span class="fine">Registration order, which is the order `tools/list` answers in. The seven on the left are `defaultToolsetNames`; a deployment takes any subset. Only two of these forty ever report progress &#8212; `list_failing_tests`, and `run_python_tests`.</span>
 
 <!--
 Do not read the list. It is here so nobody has to take the tool surface on faith, and so the
@@ -1618,6 +1614,11 @@ this"; here it is only worth pointing at.
 If asked why execute_code sits beside the session tools rather than with the writers -- because
 it is the one tool that can do anything the other 30 can, which is section 7's full-disclosure
 slide, not this one.
+
+Three facts this slide deliberately does NOT print, for whoever asks. The order within a toolset
+is registration order, which is the order tools/list answers in. The seven on the left are
+defaultToolsetNames -- a deployment takes any subset, and section 2 spends that. And of these
+forty, exactly two ever report progress: list_failing_tests, and run_python_tests.
 
 ---
 
