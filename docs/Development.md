@@ -167,9 +167,16 @@ can detect or work around. Whether the floor settles at 3.7.5 or 3.7.6 is not ye
 |---|---|---|---|
 | 3.6.2 | **no** | no | no `GsTsExternalSession` on macOS (its own header parser crashes), so no worker gems at all |
 | 3.7.2 | **no** | no — no kernel JWT classes | dropped 2026-09-10: `System continueTransaction` differs below the image in two ways nothing in `src/` can detect or cover, and it carries #51438 |
-| 3.7.5 | yes | yes, against a local IdP | |
-| 3.7.6+ | yes | yes, including an external OIDC IdP | |
-| 4.0.0 | untested here | untested here | |
+| 3.7.5 | yes | yes, against a local IdP | **no Grail**: Grail dropped 3.7.x on 2026-09-12 and requires 4.0 |
+| 3.7.6+ | yes | yes, including an external OIDC IdP | ditto |
+| 4.0.0 | untested here | untested here | the only image Grail still supports |
+
+**The Grail leg of CI is excluded, not fixed.** Grail's own `install_base.sh` refuses anything
+before 4.0, so `3.7.5 + Grail` could only ever fail, and the exclusion means **nothing in CI
+exercises `src/grail` or `McpGrailToolsetTest`** until a 4.0 entry joins `gemstone-version`. That
+needs a 4.0 build the workflow's download step can reach: 4.0.0.Alpha1 is published on
+`dl.gemdb.com`, not on `downloads.gemtalksystems.com`, so it is a distribution question first.
+Until then the Grail toolset is covered by hand, or by whatever bundles it.
 
 Anything present in **3.7.5** may be referenced directly, with no existence guard; the live concern
 is only what is newer than that. Genuinely optional things (Grail) still use an `objectNamed:`

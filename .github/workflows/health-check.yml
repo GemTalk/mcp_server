@@ -50,6 +50,23 @@ jobs:
         # letting that leg fail.
         gemstone-version: ['3.7.5']
         grail: [false, true]
+        exclude:
+          # Grail dropped 3.7.x on 2026-09-12 and its own install_base.sh now refuses the image
+          # before anything of ours runs: "Error: GemStone 3.7.5 is not supported. Grail requires
+          # GemStone 4.0 (build 2026-07-29 or later)." Nothing in this repository can cover that,
+          # and this leg clones Grail's DEFAULT branch, so it broke for every PR at once rather
+          # than for the one that touched it.
+          #
+          # Excluded rather than pinned to Grail's last 3.7-capable commit: pinning would keep a
+          # green leg testing a Grail nobody will run again, which is worse than an honest gap.
+          #
+          # The cost is real and is not hidden: with 3.7.5 the only version here, NOTHING now
+          # exercises src/grail or McpGrailToolsetTest. Closing that needs a 4.0 entry in
+          # `gemstone-version` above, which needs a 4.0 build the download step can reach --
+          # 4.0.0.Alpha1 is not on downloads.gemtalksystems.com, so that is a distribution
+          # decision before it is a CI one. See docs/Development.md's version matrix.
+          - gemstone-version: '3.7.5'
+            grail: true
     env:
       GEMSTONE_VERSION: ${{ matrix.gemstone-version }}
     steps:
