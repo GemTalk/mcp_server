@@ -293,7 +293,7 @@ the same section in full with nothing on screen.
   <text x="897" y="259" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,189 L566,189 L566,92 L676,92" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
-    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">every request</text>
+    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
   </g>
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
@@ -412,7 +412,7 @@ objects rather than classes-in-general, and move. Everything on this slide gets 
   <text x="897" y="259" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,189 L566,189 L566,92 L676,92" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
-    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">every request</text>
+    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
   </g>
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
@@ -532,7 +532,7 @@ client opens a NEW session each time, and the login that exhausts a stone fails 
   <text x="897" y="259" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,189 L566,189 L566,92 L676,92" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
-    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">every request</text>
+    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
   </g>
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
@@ -652,7 +652,7 @@ session lifetime actually gets argued.
   <text x="897" y="259" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,189 L566,189 L566,92 L676,92" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
-    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">every request</text>
+    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
   </g>
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
@@ -773,7 +773,7 @@ because only this side can see the token.
   <text x="897" y="259" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,189 L566,189 L566,92 L676,92" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
-    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">every request</text>
+    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
   </g>
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
@@ -894,7 +894,7 @@ startup reaches the next client without a restart.
   <text x="897" y="259" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request hl">
     <path d="M528,189 L566,189 L566,92 L676,92" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
-    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">every request</text>
+    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
   </g>
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
@@ -906,7 +906,7 @@ startup reaches the next client without a restart.
 
 <div class="boxnote">
 
-`worker nbExecute: 'McpServer handleJsonString: ', body printString`. **Non-blocking**, so one client&#8217;s five-minute test run no longer stalls anyone else. Every embedded string is `printString`-quoted, so a request body cannot smuggle anything into the worker&#8217;s compiler &#8212; load-bearing for the server **title** in particular, which is free-form operator prose.
+`worker nbExecute: 'McpServer handleJsonString: ', body printString`. **Non-blocking**, so one client&#8217;s five-minute test run no longer stalls anyone else. Every embedded string is `printString`-quoted, so a request body cannot smuggle anything into the worker&#8217;s compiler. The answer comes back as that same call&#8217;s **`lastResult`**, read once the call is finished &#8212; so nothing may send GCI to this worker in between.
 
 </div>
 
@@ -914,6 +914,16 @@ startup reaches the next client without a restart.
 The body does not arrive as the bytes the socket read: the worker COMPILES that literal, so its
 class comes from the worker session's StringConfiguration. That is why parseBody: has a leading
 asString. Section 7 if anyone pulls on it.
+printString-quoting is load-bearing for the server TITLE in particular, which unlike a name or a
+version is free-form operator prose, so quotes in it must be doubled rather than closing the
+literal.
+WHY lastResult is on the slide. It is read AFTER the call, so anything that sends GCI to this
+worker in between overwrites it and the client silently gets the wrong answer. The live trap is
+printing the worker: GsTsExternalSession>>printOn: sends stoneSessionId and gemProcessId, each a
+memoizing REMOTE accessor, so logging a worker nothing had queried would answer a client with the
+gem's pid where its JSON-RPC response belongs. McpSession>>cacheWorkerIds fetches both at login,
+once, while nothing is in flight; memoized, every later print is inert. Log those cached ids,
+never the worker itself.
 -->
 
 ---
@@ -1014,7 +1024,7 @@ asString. Section 7 if anyone pulls on it.
   <text x="897" y="259" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,189 L566,189 L566,92 L676,92" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
-    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">every request</text>
+    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
   </g>
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
@@ -1142,7 +1152,7 @@ polled signal's sendingSession both speak the System session one.
   <text x="897" y="259" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,189 L566,189 L566,92 L676,92" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
-    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">every request</text>
+    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
   </g>
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
@@ -1262,7 +1272,7 @@ session list. Then the front-end session, then registration, then the instance i
   <text x="897" y="259" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,189 L566,189 L566,92 L676,92" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
-    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">every request</text>
+    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
   </g>
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
@@ -1386,7 +1396,7 @@ The [session] line is appended AFTER the call, so it describes what the call lef
   <text x="897" y="259" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,189 L566,189 L566,92 L676,92" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
-    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">every request</text>
+    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
   </g>
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
@@ -1505,7 +1515,7 @@ assembled per call, so the surface a client sees is fixed for the life of its se
   <text x="897" y="259" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,189 L566,189 L566,92 L676,92" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
-    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">every request</text>
+    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
   </g>
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
@@ -1707,7 +1717,7 @@ slide, not this one.
   <text x="897" y="259" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,189 L566,189 L566,92 L676,92" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
-    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">every request</text>
+    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
   </g>
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
@@ -1826,7 +1836,7 @@ warning dressed as a design note; it is in CLAUDE.md for the same reason.
   <text x="897" y="259" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,189 L566,189 L566,92 L676,92" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
-    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">every request</text>
+    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
   </g>
   <g class="bx a-progress hl">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
@@ -1952,7 +1962,7 @@ McpTool holds only a name, a description, a schema and that block.
   <text x="897" y="259" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,189 L566,189 L566,92 L676,92" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
-    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">every request</text>
+    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
   </g>
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
@@ -2071,7 +2081,7 @@ party that can act while nothing is happening -- which is also the reaper's whol
   <text x="897" y="259" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,189 L566,189 L566,92 L676,92" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
-    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">every request</text>
+    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
   </g>
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
@@ -2192,7 +2202,7 @@ the unregister. A bug that only exists end to end.
   <text x="897" y="259" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,189 L566,189 L566,92 L676,92" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
-    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">every request</text>
+    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
   </g>
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
@@ -2311,7 +2321,7 @@ a commit record. If the front end dies the queue should die with it.
   <text x="897" y="259" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,189 L566,189 L566,92 L676,92" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
-    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">every request</text>
+    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
   </g>
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
