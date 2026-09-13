@@ -1036,6 +1036,12 @@ second set of ledgers, licensing writes on the strength of reads it never saw. S
 slowly.
 #McpFrontEndSession is pushed down once at session open -- it is where to ring the doorbell when
 a tool reports progress, and it is constant for the worker's life.
+If asked what it points AT: a session NUMBER, not an object. System session as the ROUTER's gem
+answers it, embedded in the bootstrap string the worker compiles. It could not be a reference --
+two processes, two object memories, and the only thing they share is the repository, which an
+McpSession never reaches because nothing about a socket survives a commit. It is also NOT the
+worker's cached stoneSessionId: different number, different namespace. sendSignal:to: and a
+polled signal's sendingSession both speak the System session one.
 -->
 
 ---

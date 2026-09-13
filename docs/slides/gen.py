@@ -277,7 +277,13 @@ SLIDES = [
   "second set of ledgers, licensing writes on the strength of reads it never saw. Say that sentence\n"
   "slowly.\n"
   "#McpFrontEndSession is pushed down once at session open -- it is where to ring the doorbell when\n"
-  "a tool reports progress, and it is constant for the worker's life."),
+  "a tool reports progress, and it is constant for the worker's life.\n"
+  "If asked what it points AT: a session NUMBER, not an object. System session as the ROUTER's gem\n"
+  "answers it, embedded in the bootstrap string the worker compiles. It could not be a reference --\n"
+  "two processes, two object memories, and the only thing they share is the repository, which an\n"
+  "McpSession never reaches because nothing about a socket survives a commit. It is also NOT the\n"
+  "worker's cached stoneSessionId: different number, different namespace. sendSignal:to: and a\n"
+  "polled signal's sendingSession both speak the System session one."),
 
  ("c-server", "McpServer &#8212; the per-client worker, built before the first request",
   "Registry, dispatcher, toolsets, identity, the kernel guards and the blind-write read/write "
