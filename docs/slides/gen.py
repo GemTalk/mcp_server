@@ -57,9 +57,15 @@ renders at body size:
     svg .hl { color: #b4451f; }
     .boxnote { font-size: 21px; line-height: 1.5; max-width: 1010px; margin: 16px auto 0; text-align: left; }
 
-The last `svg .hl` rule is the non-obvious one: an arrowhead is a marker filled
-with `currentColor`, so setting `color` is what carries the accent into the head
-of a highlighted arrow rather than leaving it black on a red shaft.
+The last `svg .hl` rule is the non-obvious one, and it now earns its place for
+the loop glyph alone, which names `currentColor` in an inline style. Arrowheads
+used to need it and no longer do. A marker's contents inherit from where the
+MARKER sits in the document -- inside `<defs>` -- not from the element that
+references it, so a head filled with `currentColor` came out black on a red
+shaft no matter how the arrow was styled. The marker fills with `context-stroke`
+instead: it resolves to whatever paint stroked the line, so every head follows
+its own shaft, highlighted or not, and no rule has to reach into the marker.
+Chromium has supported it since 97 and Marp renders in Chromium.
 
 The loop glyph in the McpRouter box -- the circular arrow marking the accept
 loop -- states its fill and stroke in an inline `style=` rather than as SVG
@@ -84,6 +90,15 @@ down the request path. Drawing one arrow into the gap between those two boxes
 says McpSession owns both, which is what the picture used to say and the c-channel
 prose has always contradicted.
 
+LEAVE 20 UNITS BETWEEN STACKED BOXES. `markerUnits` defaults to `strokeWidth`,
+so the head of a connector drawn at stroke-width 1.5 is 7 x 1.5 = 10.5 units
+long -- and a 14-unit gap, which is what this diagram had, is very nearly all
+arrowhead. 20 leaves an 18-unit line, three fifths of it shaft. That is the
+constraint the row positions are solved against, and it is why the boxes are
+36 units tall rather than 38: the two gems have to fit the same 316-unit frame
+they always did, because the slide beneath the diagram has no vertical room to
+give (the c-router slide's prose already runs to the bottom margin).
+
 NEVER PUT A BLANK LINE INSIDE THE <svg> STRING. deck.md's own header comment
 explains why; the failure is silent and only shows up in the render.
 """
@@ -98,102 +113,102 @@ DECK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "deck.md")
 SVG = '''<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="{ARIA}">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
-      <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
+      <path d="M0,0 L7,3 L0,6 Z" fill="context-stroke"/>
     </marker>
   </defs>
   <g class="bx c-client">
-    <rect x="6" y="62" width="100" height="38" rx="4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="6 4" opacity=".8"/>
-    <text x="56" y="86" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">MCP client</text>
+    <rect x="6" y="58" width="100" height="36" rx="4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="6 4" opacity=".8"/>
+    <text x="56" y="81" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">MCP client</text>
   </g>
-  <line x1="110" y1="74" x2="162" y2="74" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
-  <text x="126" y="66" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">POST</text>
-  <line x1="162" y1="90" x2="110" y2="90" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
-  <text x="126" y="104" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">SSE</text>
+  <line x1="110" y1="70" x2="162" y2="70" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="126" y="62" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">POST</text>
+  <line x1="162" y1="86" x2="110" y2="86" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="126" y="100" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">SSE</text>
   <rect x="146" y="24" width="400" height="316" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
-  <text x="346" y="50" font-size="17" text-anchor="middle" font-weight="600" fill="currentColor">front-end gem &#8212; McpRouter:8000</text>
+  <text x="346" y="46" font-size="17" text-anchor="middle" font-weight="600" fill="currentColor">front-end gem &#8212; McpRouter:8000</text>
   <g class="bx c-http">
-    <rect x="166" y="62" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
-    <text x="346" y="86" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpHttpConnection</text>
+    <rect x="166" y="58" width="360" height="36" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    <text x="346" y="81" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpHttpConnection</text>
   </g>
-  <line x1="300" y1="100" x2="300" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
-  <text x="292" y="111" font-size="10.5" text-anchor="end" fill="currentColor" opacity=".7">request</text>
-  <line x1="392" y1="114" x2="392" y2="102" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
-  <text x="400" y="111" font-size="10.5" text-anchor="start" fill="currentColor" opacity=".7">response</text>
+  <line x1="300" y1="94" x2="300" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="292" y="108" font-size="10.5" text-anchor="end" fill="currentColor" opacity=".7">request</text>
+  <line x1="392" y1="114" x2="392" y2="96" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="400" y="108" font-size="10.5" text-anchor="start" fill="currentColor" opacity=".7">response</text>
   <g class="bx c-router">
     <rect x="166" y="114" width="360" height="42" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
     <path d="M196.1,127.7 A9.5,9.5 0 1 1 186.8,126.1" style="fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round"/>
     <path d="M189.9,124.9 L184.2,124.1 L186.1,129.2 Z" style="fill:currentColor;stroke:none"/>
     <text x="346" y="141" font-size="16" text-anchor="middle" font-weight="600" fill="currentColor">McpRouter &#160;/&#160; McpAuthRouter</text>
   </g>
-  <line x1="346" y1="156" x2="346" y2="168" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="346" y1="156" x2="346" y2="174" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
   <g class="bx c-session">
-    <rect x="166" y="170" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
-    <text x="346" y="194" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpSession</text>
+    <rect x="166" y="176" width="360" height="36" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    <text x="346" y="199" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpSession</text>
   </g>
-  <line x1="253" y1="208" x2="253" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="253" y1="212" x2="253" y2="230" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
   <g class="bx c-outbox">
-    <rect x="166" y="222" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
-    <text x="253" y="246" font-size="14" text-anchor="middle" font-weight="600" fill="currentColor">McpOutbox</text>
+    <rect x="166" y="232" width="175" height="36" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    <text x="253" y="255" font-size="14" text-anchor="middle" font-weight="600" fill="currentColor">McpOutbox</text>
   </g>
   <g class="bx c-channel">
-    <rect x="351" y="222" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
-    <text x="438" y="246" font-size="14" text-anchor="middle" font-weight="600" fill="currentColor">McpProgressChannel</text>
+    <rect x="351" y="232" width="175" height="36" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    <text x="438" y="255" font-size="14" text-anchor="middle" font-weight="600" fill="currentColor">McpProgressChannel</text>
   </g>
   <g class="bx c-reaper">
-    <rect x="166" y="278" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 3"/>
-    <text x="253" y="302" font-size="13.5" text-anchor="middle" font-weight="600" fill="currentColor">reaper GsProcess</text>
+    <rect x="166" y="288" width="175" height="36" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 3"/>
+    <text x="253" y="311" font-size="13.5" text-anchor="middle" font-weight="600" fill="currentColor">reaper GsProcess</text>
   </g>
   <g class="bx c-poller">
-    <rect x="351" y="278" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 3"/>
-    <text x="438" y="302" font-size="13.5" text-anchor="middle" font-weight="600" fill="currentColor">signal poller GsProcess</text>
+    <rect x="351" y="288" width="175" height="36" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 3"/>
+    <text x="438" y="311" font-size="13.5" text-anchor="middle" font-weight="600" fill="currentColor">signal poller GsProcess</text>
   </g>
-  <line x1="438" y1="278" x2="438" y2="262" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
-  <text x="446" y="270" font-size="11" text-anchor="start" fill="currentColor" opacity=".7">by call id</text>
+  <line x1="438" y1="288" x2="438" y2="270" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="446" y="283" font-size="11" text-anchor="start" fill="currentColor" opacity=".7">by call id</text>
   <rect x="660" y="24" width="474" height="316" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
-  <text x="897" y="50" font-size="17" text-anchor="middle" font-weight="600" fill="currentColor">worker gem &#8212; McpServer:5:978EC559</text>
+  <text x="897" y="46" font-size="17" text-anchor="middle" font-weight="600" fill="currentColor">worker gem &#8212; McpServer:5:978EC559</text>
   <g class="bx c-temps">
-    <rect x="680" y="66" width="434" height="52" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="6 3"/>
-    <text x="897" y="90" font-size="16" text-anchor="middle" font-weight="600" fill="currentColor">SessionTemps</text>
-    <text x="897" y="108" font-size="12.5" text-anchor="middle" fill="currentColor" opacity=".78">#McpServer &#160;&#183;&#160; #McpFrontEndSession &#160;&#183;&#160; #McpProgress</text>
+    <rect x="680" y="58" width="434" height="52" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="6 3"/>
+    <text x="897" y="82" font-size="16" text-anchor="middle" font-weight="600" fill="currentColor">SessionTemps</text>
+    <text x="897" y="100" font-size="12.5" text-anchor="middle" fill="currentColor" opacity=".78">#McpServer &#160;&#183;&#160; #McpFrontEndSession &#160;&#183;&#160; #McpProgress</text>
   </g>
-  <line x1="897" y1="118" x2="897" y2="132" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
-  <text x="906" y="130" font-size="11.5" text-anchor="start" fill="currentColor" opacity=".7">McpServer class&gt;&gt;currentServer</text>
+  <line x1="897" y1="110" x2="897" y2="132" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="906" y="125" font-size="11.5" text-anchor="start" fill="currentColor" opacity=".7">McpServer class&gt;&gt;currentServer</text>
   <g class="bx c-server">
     <rect x="680" y="136" width="434" height="42" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
     <text x="897" y="163" font-size="16" text-anchor="middle" font-weight="600" fill="currentColor">McpServer</text>
   </g>
-  <line x1="897" y1="178" x2="897" y2="188" stroke="currentColor" stroke-width="1.5"/>
-  <line x1="783" y1="188" x2="1011" y2="188" stroke="currentColor" stroke-width="1.5"/>
-  <line x1="783" y1="188" x2="783" y2="202" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
-  <line x1="1011" y1="188" x2="1011" y2="202" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="897" y1="178" x2="897" y2="192" stroke="currentColor" stroke-width="1.5"/>
+  <line x1="783" y1="192" x2="1011" y2="192" stroke="currentColor" stroke-width="1.5"/>
+  <line x1="783" y1="192" x2="783" y2="210" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="1011" y1="192" x2="1011" y2="210" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
   <g class="bx c-dispatcher">
-    <rect x="680" y="206" width="206" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
-    <text x="783" y="230" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">McpDispatcher</text>
+    <rect x="680" y="214" width="206" height="36" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    <text x="783" y="237" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">McpDispatcher</text>
   </g>
   <g class="bx c-registry">
-    <rect x="908" y="206" width="206" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
-    <text x="1011" y="230" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">McpToolRegistry</text>
+    <rect x="908" y="214" width="206" height="36" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    <text x="1011" y="237" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">McpToolRegistry</text>
   </g>
-  <line x1="888" y1="225" x2="904" y2="225" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
-  <line x1="1011" y1="244" x2="1011" y2="266" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="888" y1="232" x2="904" y2="232" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="1011" y1="250" x2="1011" y2="286" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
   <g class="bx c-toolset">
-    <rect x="680" y="270" width="206" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
-    <text x="783" y="294" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">Mcp*Toolset</text>
+    <rect x="680" y="288" width="206" height="36" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    <text x="783" y="311" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">Mcp*Toolset</text>
   </g>
   <g class="bx c-tool">
-    <rect x="908" y="270" width="206" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
-    <text x="1011" y="294" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">McpTool</text>
+    <rect x="908" y="288" width="206" height="36" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    <text x="1011" y="311" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">McpTool</text>
   </g>
-  <line x1="888" y1="289" x2="904" y2="289" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
-  <text x="897" y="259" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
+  <line x1="888" y1="306" x2="904" y2="306" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="897" y="272" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
-    <path d="M528,189 L566,189 L566,92 L676,92" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
-    <text x="574" y="142" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
+    <path d="M528,194 L566,194 L566,84 L676,84" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
+    <text x="574" y="139" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
   </g>
   <g class="bx a-progress">
-    <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
-    <text x="603" y="283" font-size="12" text-anchor="middle" fill="currentColor">progress ticks</text>
-    <text x="603" y="307" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".7">via #McpProgress</text>
+    <path d="M678,306 L528,306" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
+    <text x="603" y="296" font-size="12" text-anchor="middle" fill="currentColor">progress ticks</text>
+    <text x="603" y="320" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".7">via #McpProgress</text>
   </g>
 </svg>'''
 
