@@ -42,7 +42,7 @@ style: |
 
 <!--
 ELEVEN VERTICAL SLICES. Sections 0-12 are cut, and THIS FILE IS IN RUNNING ORDER THROUGHOUT.
-Section 13 is the only one left. Sections 0 and 1 (eight slides), then sections 2 and 3 (nine), then
+Section 13 is the only one left. Sections 0 and 1 (seven slides), then sections 2 and 3 (nine), then
 section 4 (ten), then section 5 (seven), then section 6 (six), then section 7 (fourteen), then
 section 8 (ten), then section 9 (six), then section 10 (five), then section 11 (three), then
 section 12 (five). In the order they were CUT that is slice 3, slice 4, slice 5, slice 6, slice 7,
@@ -51,8 +51,8 @@ purpose, because they are what the budget has to fit around.
 
 Each slice's own header comment sits beside its first slide.
 
-ONE BLOCK IN THIS FILE IS GENERATED. The gem-contents sequence that runs between the title slide
-and section 0 -- seventeen slides stepping through one diagram, plus the tool inventory that
+ONE BLOCK IN THIS FILE IS GENERATED. The gem-contents sequence that runs between the "What is
+different" slide and the rest of section 0 -- seventeen slides stepping through one diagram, plus the tool inventory that
 interrupts them after the McpToolset slide -- sits between the MCP-GEM-SEQUENCE:BEGIN and :END marker comments, and
 is produced by docs/slides/gen.py. Do not hand-edit those slides -- edit the generator and run
 `python3 docs/slides/gen.py --apply`, which rewrites the block in place. `--check` exits non-zero
@@ -97,16 +97,20 @@ command with a quoted argument in it (found 2026-09-12).
 
 <!--
 ================================================================================
-VERTICAL SLICE 3 -- sections 0 and 1: framing, and the repository. Nine slides --
-four for section 0, five for section 1, the last of them demo A. Cut 2026-09-11:
+VERTICAL SLICE 3 -- sections 0 and 1: framing, and the repository. Eight slides --
+three for section 0, five for section 1, the last of them demo A. Cut 2026-09-11:
 first in running order, third to be cut.
 
-Running order and plans, in seconds -- title 10, MCP in one slide 30, what is
-different 30, status honestly 35 (105s, section 0); nothing to install 35,
-load.gs 35, how it is verified 40 (110s, section 1);
-demo A 60.
+Running order and plans, in seconds -- title 10, what is different 40, status
+honestly 35 (85s, section 0); nothing to install 35, load.gs 35, how it is
+verified 40 (110s, section 1); demo A 60.
 
-Section 0's thesis is one sentence and slide 3 is the whole of it: it runs inside
+Section 0 is no longer contiguous: "What is different" runs immediately after the
+title, and the gem-contents sequence then runs before "Status, honestly". That is
+deliberate -- the room gets the reason for gems before it is shown what is in
+them -- and it is why the seconds above are not a single block of running time.
+
+Section 0's thesis is one sentence and slide 2 is the whole of it: it runs inside
 the image, so a session is a login, a session is a transaction view, and a view is
 a commit record the stone cannot dispose of. Everything the rest of the hour finds
 difficult follows from those three, and not one of them is an MCP problem.
@@ -158,10 +162,11 @@ unaffected because the suite runs either way -- but section 2 does assert it
 (docs/Presentation.md, "Resolved per session, not at boot") and section 10 will.
 Re-read both when that merge lands.
 
-Budget: 5:05 -- 245s of slides plus the 60s demo, against the 5.0 minutes the
-outline's table allows for 0 and 1 together. Section 0 runs 15s over its 1.5 and
-section 1 comes in 10s under its 3.5, so the pair is within rounding and the table
-does not move.
+Budget: 4:45 -- 225s of slides plus the 60s demo, against the 5.0 minutes the
+outline's table allows for 0 and 1 together. Consolidating "MCP, in one slide" and
+"What is different here" into one slide on 2026-09-13 gave 20s back: section 0 is
+now 5s UNDER its 1.5 rather than 15s over, and section 1 stays 10s under its 3.5,
+so the pair has slack and the table does not move.
 ================================================================================
 -->
 
@@ -191,6 +196,58 @@ whole talk.
 Six demos, each with a hard stop rehearsed into it. If we run long the demos are what I will
 protect, because a section summarised in two sentences beside a live worker gem lands better than
 the same section in full with nothing on screen.
+-->
+
+---
+
+## What is different
+
+* This exists to replace the **GCI-based Jasper MCP server**, with something **any** MCP client can reach over plain HTTP
+* It runs **inside the image**. No Node process, no GCI bridge, no FFI
+* The socket runs in a *gem.* The tools execute in a session in a *gem* — with a *login,* a *transaction view,* and a *commit record.*
+* This server conforms to MCP protocol specifications [2025-06-18](https://modelcontextprotocol.io/specification/2025-06-18) and [2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25) but not yet to [2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28).
+* It answers `initialize`, `ping`, `tools/list`, and `tools/call`. Others — resources, prompts, sampling, elicitation — are answered `-32601`.
+
+<!--
+This slide is section 0's thesis and MCP's whole surface in one, and it was two slides until
+2026-09-13 -- "MCP, in one slide" and "What is different here" -- which said the same thing twice
+from opposite ends. It now runs THIRD in the file, before the gem-contents sequence, so that the
+room has the reason for gems before it is shown what is in them.
+
+Third bullet, slowly: it is the only thing on this slide anyone needs to carry forward, and it is
+the spine of sections 7, 8 and 9. A session is a login (9), a session is a transaction view (7),
+and a view is a commit record the stone cannot dispose of (8). That last one is what turns a
+convenience into a design constraint -- an idle MCP client is not free here the way an idle HTTP
+connection is free in a web server.
+
+The four-method surface is smaller than people expect and that is worth landing early: it is why
+the interesting parts of this project are all GemStone parts. There is very little protocol to get
+wrong. The entire declared capability surface is "capabilities": { "tools": {} } -- a server may
+send only what it has declared, so everything in the next hour is either a tool call or the
+machinery that keeps one alive.
+
+`notifications/*` is the fifth thing that arrives and the reason it is not in the list: a
+notification has no id, so it gets no response at all -- the dispatcher answers nil and the
+transport sends 202. That is JSON-RPC, not an MCP rule.
+
+On what is NOT declared, if asked: tools/listChanged (no session's tool surface changes after
+initialize), resources, prompts, completions -- none of which exist here. `logging` was declared
+until 2026-08-27 and was removed rather than left as a promise nothing would keep. Progress needs
+no declaration at all: it is a base-protocol utility a client opts into per REQUEST by putting a
+progressToken in _meta, so there has never been anything for a server to advertise.
+
+On the version bullet, if pressed: McpDispatcher class>>supportedProtocolVersions is the authority
+and names exactly the two, with 2025-11-25 the default; 2026-07-28 is the draft that forbids
+server-initiated requests, which is section 13's subject and the caveat on the status slide.
+
+STANDING RULE for the first half, which was on this slide until the consolidation and is now said
+out loud instead: the healthy path only -- no commit-record pressure, no timeouts, no pending
+ledger, no progress notifications, no auth. Every one of those is a later section that comes back
+to the same trace and adds one arm to it. Say it, or this audience spends the healthy-path half
+waiting for the caveat and asks in section 4 what section 7 answers properly.
+
+Deliberately not a diagram. The picture comes next, in the gem-contents sequence, and the request
+picture belongs to section 4 where it is walked line by line.
 -->
 
 ---
@@ -2341,68 +2398,6 @@ IDLE worker holding a stale view, the one moment that worker cannot run a line o
 -->
 
 <!-- MCP-GEM-SEQUENCE:END -->
----
-
-## MCP, in one slide
-
-* **JSON-RPC 2.0 over HTTP**, one endpoint. A client — an editor, an agent — asks a server what tools it has, and calls them
-* **Four methods are the whole of what this server answers**: `initialize`, `ping`, `tools/list`, `tools/call`
-* Resources, prompts, sampling, elicitation — **undeclared**, and answered `-32601`
-
-<p class="exlbl">the entire declared capability surface</p>
-<p class="ex">"capabilities": { "tools": {} }</p>
-
-> A server may send only what it has declared. **This one declares its tools and nothing else** — so everything in the next hour is either a tool call, or the machinery that keeps one alive.
-
-<!--
-Deliberately not a diagram. The orienting picture of the deployment belongs to section 3, where
-the fork and the detach are the subject, and the request picture belongs to section 4, where it is
-walked line by line. Drawing either here would spend 45 seconds to say worse what a later section
-says properly.
-
-The four-method surface is smaller than people expect and that is worth landing early: it is why
-the interesting parts of this project are all GemStone parts. There is very little protocol to get
-wrong.
-
-`notifications/*` is the fifth thing that arrives and the reason it is not in the list: a
-notification has no id, so it gets no response at all -- the dispatcher answers nil and the
-transport sends 202. That is JSON-RPC, not an MCP rule.
-
-On what is NOT declared, if asked: tools/listChanged (no session's tool surface changes after
-initialize), resources, prompts, completions -- none of which exist here. `logging` was declared
-until 2026-08-27 and was removed rather than left as a promise nothing would keep. Progress needs
-no declaration at all: it is a base-protocol utility a client opts into per REQUEST by putting a
-progressToken in _meta, so there has never been anything for a server to advertise.
--->
-
----
-
-## What is different here
-
-* It runs **inside the image**. No Node process, no GCI bridge, no FFI
-* The thing that executes `execute_code` is **a gem**. The thing that owns the socket is **a gem**
-
-That single decision is where every interesting consequence in this talk comes from:
-
-> a session is a **login** · a session is a **transaction view** · a view is a **commit record the stone cannot dispose of**
-
-* It exists to replace the **GCI-based Jasper MCP server**, with something **any** MCP client can reach over plain HTTP
-
-<span class="fine">**Standing rule for the first half:** the healthy path only — no commit-record pressure, no timeouts, no pending ledger, no progress notifications, no auth. Every one of those is a later section.</span>
-
-<!--
-The three consequences in the blockquote are the spine of sections 7, 8 and 9. Read them slowly;
-they are the only thing on this slide anyone needs to carry forward.
-
-"A view is a commit record the stone cannot dispose of" is the one that turns a convenience into a
-design constraint, and it is why section 8 exists at all. An idle MCP client is not free here the
-way an idle HTTP connection is free in a web server.
-
-Say the standing rule out loud rather than leaving it on the slide. This audience will otherwise
-spend the healthy-path half waiting for the caveat, and ask about failure modes in section 4 that
-section 7 answers properly.
--->
-
 ---
 
 ## Status, honestly
