@@ -191,7 +191,7 @@ the same section in full with nothing on screen.
 ## Two gems, and what is in each
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel. A tick starts at a toolset, which reaches the McpProgressReporter held in SessionTemps under #McpProgress.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -289,6 +289,7 @@ the same section in full with nothing on screen.
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
     <text x="603" y="283" font-size="12" text-anchor="middle" fill="currentColor">progress ticks</text>
+    <text x="603" y="307" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".7">via #McpProgress</text>
   </g>
 </svg>
 </div>
@@ -309,7 +310,7 @@ objects rather than classes-in-general, and move. Everything on this slide gets 
 ## MCP client &#8212; one per editor
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel. A tick starts at a toolset, which reaches the McpProgressReporter held in SessionTemps under #McpProgress.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -407,6 +408,7 @@ objects rather than classes-in-general, and move. Everything on this slide gets 
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
     <text x="603" y="283" font-size="12" text-anchor="middle" fill="currentColor">progress ticks</text>
+    <text x="603" y="307" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".7">via #McpProgress</text>
   </g>
 </svg>
 </div>
@@ -428,7 +430,7 @@ client opens a NEW session each time, and the login that exhausts a stone fails 
 ## McpHttpConnection &#8212; one per request
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel. A tick starts at a toolset, which reaches the McpProgressReporter held in SessionTemps under #McpProgress.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -526,6 +528,7 @@ client opens a NEW session each time, and the login that exhausts a stone fails 
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
     <text x="603" y="283" font-size="12" text-anchor="middle" fill="currentColor">progress ticks</text>
+    <text x="603" y="307" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".7">via #McpProgress</text>
   </g>
 </svg>
 </div>
@@ -547,7 +550,7 @@ session lifetime actually gets argued.
 ## McpRouter &#8212; the accept loop, and the gem&#8217;s blocking main activity
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel. A tick starts at a toolset, which reaches the McpProgressReporter held in SessionTemps under #McpProgress.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -645,6 +648,7 @@ session lifetime actually gets argued.
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
     <text x="603" y="283" font-size="12" text-anchor="middle" fill="currentColor">progress ticks</text>
+    <text x="603" y="307" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".7">via #McpProgress</text>
   </g>
 </svg>
 </div>
@@ -667,7 +671,7 @@ because only this side can see the token.
 ## McpSession &#8212; one per client, and the only thing that drives a worker
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel. A tick starts at a toolset, which reaches the McpProgressReporter held in SessionTemps under #McpProgress.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -765,6 +769,7 @@ because only this side can see the token.
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
     <text x="603" y="283" font-size="12" text-anchor="middle" fill="currentColor">progress ticks</text>
+    <text x="603" y="307" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".7">via #McpProgress</text>
   </g>
 </svg>
 </div>
@@ -787,7 +792,7 @@ startup reaches the next client without a restart.
 ## The hop &#8212; one string, non-blocking
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel. A tick starts at a toolset, which reaches the McpProgressReporter held in SessionTemps under #McpProgress.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -885,6 +890,7 @@ startup reaches the next client without a restart.
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
     <text x="603" y="283" font-size="12" text-anchor="middle" fill="currentColor">progress ticks</text>
+    <text x="603" y="307" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".7">via #McpProgress</text>
   </g>
 </svg>
 </div>
@@ -906,7 +912,7 @@ asString. Section 7 if anyone pulls on it.
 ## SessionTemps &#8212; where the instance actually lives
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel. A tick starts at a toolset, which reaches the McpProgressReporter held in SessionTemps under #McpProgress.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -1004,6 +1010,7 @@ asString. Section 7 if anyone pulls on it.
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
     <text x="603" y="283" font-size="12" text-anchor="middle" fill="currentColor">progress ticks</text>
+    <text x="603" y="307" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".7">via #McpProgress</text>
   </g>
 </svg>
 </div>
@@ -1027,7 +1034,7 @@ a tool reports progress, and it is constant for the worker's life.
 ## McpServer &#8212; the per-client worker, built before the first request
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel. A tick starts at a toolset, which reaches the McpProgressReporter held in SessionTemps under #McpProgress.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -1125,6 +1132,7 @@ a tool reports progress, and it is constant for the worker's life.
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
     <text x="603" y="283" font-size="12" text-anchor="middle" fill="currentColor">progress ticks</text>
+    <text x="603" y="307" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".7">via #McpProgress</text>
   </g>
 </svg>
 </div>
@@ -1146,7 +1154,7 @@ session list. Then the front-end session, then registration, then the instance i
 ## McpDispatcher &#8212; JSON-RPC 2.0, and two kinds of failure
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel. A tick starts at a toolset, which reaches the McpProgressReporter held in SessionTemps under #McpProgress.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -1244,6 +1252,7 @@ session list. Then the front-end session, then registration, then the instance i
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
     <text x="603" y="283" font-size="12" text-anchor="middle" fill="currentColor">progress ticks</text>
+    <text x="603" y="307" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".7">via #McpProgress</text>
   </g>
 </svg>
 </div>
@@ -1269,7 +1278,7 @@ The [session] line is appended AFTER the call, so it describes what the call lef
 ## McpToolRegistry &#8212; name to tool
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel. A tick starts at a toolset, which reaches the McpProgressReporter held in SessionTemps under #McpProgress.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -1367,6 +1376,7 @@ The [session] line is appended AFTER the call, so it describes what the call lef
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
     <text x="603" y="283" font-size="12" text-anchor="middle" fill="currentColor">progress ticks</text>
+    <text x="603" y="307" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".7">via #McpProgress</text>
   </g>
 </svg>
 </div>
@@ -1387,7 +1397,7 @@ assembled per call, so the surface a client sees is fixed for the life of its se
 ## Mcp*Toolset &#8212; the unit you add tools in
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel. A tick starts at a toolset, which reaches the McpProgressReporter held in SessionTemps under #McpProgress.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -1485,6 +1495,7 @@ assembled per call, so the surface a client sees is fixed for the life of its se
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
     <text x="603" y="283" font-size="12" text-anchor="middle" fill="currentColor">progress ticks</text>
+    <text x="603" y="307" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".7">via #McpProgress</text>
   </g>
 </svg>
 </div>
@@ -1505,7 +1516,7 @@ a third-party toolset. If someone is going to write one, this is the slide to po
 ## McpTool &#8212; one tool, and its schema
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel. A tick starts at a toolset, which reaches the McpProgressReporter held in SessionTemps under #McpProgress.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -1603,6 +1614,7 @@ a third-party toolset. If someone is going to write one, this is the slide to po
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
     <text x="603" y="283" font-size="12" text-anchor="middle" fill="currentColor">progress ticks</text>
+    <text x="603" y="307" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".7">via #McpProgress</text>
   </g>
 </svg>
 </div>
@@ -1623,7 +1635,7 @@ warning dressed as a design note; it is in CLAUDE.md for the same reason.
 ## Progress &#8212; a worker cannot write to its own client
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel. A tick starts at a toolset, which reaches the McpProgressReporter held in SessionTemps under #McpProgress.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -1721,6 +1733,7 @@ warning dressed as a design note; it is in CLAUDE.md for the same reason.
   <g class="bx a-progress hl">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
     <text x="603" y="283" font-size="12" text-anchor="middle" fill="currentColor">progress ticks</text>
+    <text x="603" y="307" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".7">via #McpProgress</text>
   </g>
 </svg>
 </div>
@@ -1736,6 +1749,11 @@ A per-test tick from a 5372-test suite would blow through 50 in the first second
 the reporter rate-limits. The limit is not politeness.
 A progress notification that failed a five-minute test run would make the server strictly worse
 than one that said nothing.
+If asked which tools actually tick: two. list_failing_tests, per test CLASS rather than per
+test, and -- on a Grail image -- run_python_tests, which ticks elapsed seconds while a forked
+gem runs. Everything else answers too fast to be worth reporting. The arrow leaves the TOOLSET
+because progress:of:message: is an McpToolset method and a handler block's self is its toolset;
+McpTool holds only a name, a description, a schema and that block.
 -->
 
 ---
@@ -1743,7 +1761,7 @@ than one that said nothing.
 ## signal poller GsProcess &#8212; the only gem with a heartbeat
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel. A tick starts at a toolset, which reaches the McpProgressReporter held in SessionTemps under #McpProgress.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -1841,6 +1859,7 @@ than one that said nothing.
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
     <text x="603" y="283" font-size="12" text-anchor="middle" fill="currentColor">progress ticks</text>
+    <text x="603" y="307" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".7">via #McpProgress</text>
   </g>
 </svg>
 </div>
@@ -1861,7 +1880,7 @@ party that can act while nothing is happening -- which is also the reaper's whol
 ## McpProgressChannel &#8212; one per streamed call
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel. A tick starts at a toolset, which reaches the McpProgressReporter held in SessionTemps under #McpProgress.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -1959,6 +1978,7 @@ party that can act while nothing is happening -- which is also the reaper's whol
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
     <text x="603" y="283" font-size="12" text-anchor="middle" fill="currentColor">progress ticks</text>
+    <text x="603" y="307" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".7">via #McpProgress</text>
   </g>
 </svg>
 </div>
@@ -1981,7 +2001,7 @@ the unregister. A bug that only exists end to end.
 ## McpOutbox &#8212; one session&#8217;s queue of server-initiated messages
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel. A tick starts at a toolset, which reaches the McpProgressReporter held in SessionTemps under #McpProgress.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -2079,6 +2099,7 @@ the unregister. A bug that only exists end to end.
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
     <text x="603" y="283" font-size="12" text-anchor="middle" fill="currentColor">progress ticks</text>
+    <text x="603" y="307" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".7">via #McpProgress</text>
   </g>
 </svg>
 </div>
@@ -2099,7 +2120,7 @@ a commit record. If the front end dies the queue should die with it.
 ## reaper GsProcess &#8212; one pass every 60 seconds
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel. A tick starts at a toolset, which reaches the McpProgressReporter held in SessionTemps under #McpProgress.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -2197,6 +2218,7 @@ a commit record. If the front end dies the queue should die with it.
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
     <text x="603" y="283" font-size="12" text-anchor="middle" fill="currentColor">progress ticks</text>
+    <text x="603" y="307" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".7">via #McpProgress</text>
   </g>
 </svg>
 </div>

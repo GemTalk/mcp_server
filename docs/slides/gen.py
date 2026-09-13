@@ -165,6 +165,7 @@ SVG = '''<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="{ARIA}"
   <g class="bx a-progress">
     <path d="M678,293 L528,293" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 3" marker-end="url(#g1)"/>
     <text x="603" y="283" font-size="12" text-anchor="middle" fill="currentColor">progress ticks</text>
+    <text x="603" y="307" font-size="10.5" text-anchor="middle" fill="currentColor" opacity=".7">via #McpProgress</text>
   </g>
 </svg>'''
 
@@ -176,7 +177,9 @@ ARIA = ("Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- w
         "the direction the work travels: a request runs down from McpHttpConnection through the "
         "router to McpSession and across to SessionTemps, the router writes every response back up "
         "on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the "
-        "worker to the signal poller, which routes it by call id to that call's McpProgressChannel.")
+        "worker to the signal poller, which routes it by call id to that call's McpProgressChannel. A "
+        "tick starts at a toolset, which reaches the McpProgressReporter held in SessionTemps under "
+        "#McpProgress.")
 
 SLIDES = [
  (None, "Two gems, and what is in each",
@@ -303,7 +306,12 @@ SLIDES = [
   "A per-test tick from a 5372-test suite would blow through 50 in the first second, which is why\n"
   "the reporter rate-limits. The limit is not politeness.\n"
   "A progress notification that failed a five-minute test run would make the server strictly worse\n"
-  "than one that said nothing."),
+  "than one that said nothing.\n"
+  "If asked which tools actually tick: two. list_failing_tests, per test CLASS rather than per\n"
+  "test, and -- on a Grail image -- run_python_tests, which ticks elapsed seconds while a forked\n"
+  "gem runs. Everything else answers too fast to be worth reporting. The arrow leaves the TOOLSET\n"
+  "because progress:of:message: is an McpToolset method and a handler block's self is its toolset;\n"
+  "McpTool holds only a name, a description, a schema and that block."),
 
  ("c-poller", "signal poller GsProcess &#8212; the only gem with a heartbeat",
   "`InterSessionSignal poll`, in a loop until empty, every **100 ms**, in the front-end gem. It parses "
