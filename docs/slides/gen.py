@@ -200,7 +200,6 @@ SVG = '''<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="{ARIA}"
     <text x="1011" y="311" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">McpTool</text>
   </g>
   <line x1="888" y1="306" x2="904" y2="306" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
-  <text x="897" y="272" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,194 L566,194 L566,84 L676,84" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
     <text x="574" y="139" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
@@ -344,9 +343,10 @@ SLIDES = [
 
  ("c-toolset", "Mcp*Toolset &#8212; the unit you add tools in",
   "A tool pack: `registerOn:` contributes its tools and their schemas, and it owns its `tool_*` "
-  "handlers and the shared schema builders. **Seven core toolsets**, one per tool family, plus the "
-  "optional `McpGrailToolset` on a Grail image. **Subclass this to add tools** &#8212; a deployment picks "
-  "any subset, or none of them alongside its own.",
+  "handlers and the shared schema builders.",
+  "SAY THE REST, the next slide shows it: seven core toolsets, one per tool family, plus the\n"
+  "optional McpGrailToolset on a Grail image -- and SUBCLASS THIS TO ADD TOOLS, which is the whole\n"
+  "point of the box. A deployment picks any subset of them, or none of them alongside its own.\n"
   "McpGrailToolset needs nothing from the server, which is why it doubles as the worked example for\n"
   "a third-party toolset. If someone is going to write one, this is the slide to point at."),
 
@@ -492,9 +492,43 @@ Three facts this slide deliberately does NOT print, for whoever asks. The order 
 is registration order, which is the order tools/list answers in. The seven on the left are
 defaultToolsetNames -- a deployment takes any subset, and section 2 spends that. And of these
 forty, exactly two ever report progress: list_failing_tests, and run_python_tests.
+-->
 """
 
 AFTER = {"c-toolset": INTERLEAF_TOOLS}
+
+
+def check_comments(text):
+    """Fail loudly on a presenter note that never closes.
+
+    An unterminated `<!--` swallows everything up to the NEXT `-->`, which is
+    the following slide's own note -- so that slide vanishes from the render
+    with no warning anywhere: no error, no blank page, just one fewer slide
+    than the file has. It cost a hunt to find. The tool-inventory interleaf
+    opened a note it never closed, and ate the McpTool slide whole.
+    """
+    pos, open_at = 0, -1
+    while True:
+        a, b = text.find("<!--", pos), text.find("-->", pos)
+        if a < 0 and b < 0:
+            break
+        if a >= 0 and (b < 0 or a < b):
+            if open_at >= 0:
+                sys.exit("gen.py: the note %s is missing its -->; the next note opens inside it"
+                         % where(text, open_at))
+            open_at, pos = a, a + 4
+        else:
+            if open_at < 0:
+                sys.exit("gen.py: a stray --> %s closes a note nothing opened" % where(text, b))
+            open_at, pos = -1, b + 3
+    if open_at >= 0:
+        sys.exit("gen.py: the note %s is never closed -- it would swallow the slide after it"
+                 % where(text, open_at))
+
+
+def where(text, pos):
+    head = text.rfind("\n## ", 0, pos)
+    return "after '%s'" % text[head + 4:text.find("\n", head + 4)] if head >= 0 else "at char %d" % pos
 
 
 def block():
@@ -509,7 +543,9 @@ def block():
                    % (title, svg, prose, notes))
         if hl in AFTER:
             out.append("\n---\n" + AFTER[hl])
-    return BEGIN + "\n" + "".join(out) + "\n" + END + "\n"
+    text = BEGIN + "\n" + "".join(out) + "\n" + END + "\n"
+    check_comments(text)
+    return text
 
 
 def splice(deck, new):

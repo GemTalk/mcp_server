@@ -289,7 +289,6 @@ the same section in full with nothing on screen.
     <text x="1011" y="311" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">McpTool</text>
   </g>
   <line x1="888" y1="306" x2="904" y2="306" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
-  <text x="897" y="272" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,194 L566,194 L566,84 L676,84" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
     <text x="574" y="139" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
@@ -408,7 +407,6 @@ objects rather than classes-in-general, and move. Everything on this slide gets 
     <text x="1011" y="311" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">McpTool</text>
   </g>
   <line x1="888" y1="306" x2="904" y2="306" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
-  <text x="897" y="272" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,194 L566,194 L566,84 L676,84" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
     <text x="574" y="139" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
@@ -528,7 +526,6 @@ client opens a NEW session each time, and the login that exhausts a stone fails 
     <text x="1011" y="311" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">McpTool</text>
   </g>
   <line x1="888" y1="306" x2="904" y2="306" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
-  <text x="897" y="272" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,194 L566,194 L566,84 L676,84" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
     <text x="574" y="139" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
@@ -648,7 +645,6 @@ session lifetime actually gets argued.
     <text x="1011" y="311" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">McpTool</text>
   </g>
   <line x1="888" y1="306" x2="904" y2="306" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
-  <text x="897" y="272" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,194 L566,194 L566,84 L676,84" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
     <text x="574" y="139" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
@@ -769,7 +765,6 @@ because only this side can see the token.
     <text x="1011" y="311" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">McpTool</text>
   </g>
   <line x1="888" y1="306" x2="904" y2="306" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
-  <text x="897" y="272" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,194 L566,194 L566,84 L676,84" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
     <text x="574" y="139" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
@@ -890,7 +885,6 @@ startup reaches the next client without a restart.
     <text x="1011" y="311" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">McpTool</text>
   </g>
   <line x1="888" y1="306" x2="904" y2="306" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
-  <text x="897" y="272" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request hl">
     <path d="M528,194 L566,194 L566,84 L676,84" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
     <text x="574" y="139" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
@@ -1020,7 +1014,6 @@ never the worker itself.
     <text x="1011" y="311" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">McpTool</text>
   </g>
   <line x1="888" y1="306" x2="904" y2="306" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
-  <text x="897" y="272" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,194 L566,194 L566,84 L676,84" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
     <text x="574" y="139" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
@@ -1148,7 +1141,6 @@ polled signal's sendingSession both speak the System session one.
     <text x="1011" y="311" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">McpTool</text>
   </g>
   <line x1="888" y1="306" x2="904" y2="306" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
-  <text x="897" y="272" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,194 L566,194 L566,84 L676,84" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
     <text x="574" y="139" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
@@ -1268,7 +1260,6 @@ session list. Then the front-end session, then registration, then the instance i
     <text x="1011" y="311" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">McpTool</text>
   </g>
   <line x1="888" y1="306" x2="904" y2="306" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
-  <text x="897" y="272" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,194 L566,194 L566,84 L676,84" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
     <text x="574" y="139" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
@@ -1392,7 +1383,6 @@ The [session] line is appended AFTER the call, so it describes what the call lef
     <text x="1011" y="311" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">McpTool</text>
   </g>
   <line x1="888" y1="306" x2="904" y2="306" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
-  <text x="897" y="272" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,194 L566,194 L566,84 L676,84" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
     <text x="574" y="139" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
@@ -1511,7 +1501,6 @@ assembled per call, so the surface a client sees is fixed for the life of its se
     <text x="1011" y="311" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">McpTool</text>
   </g>
   <line x1="888" y1="306" x2="904" y2="306" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
-  <text x="897" y="272" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,194 L566,194 L566,84 L676,84" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
     <text x="574" y="139" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
@@ -1526,11 +1515,14 @@ assembled per call, so the surface a client sees is fixed for the life of its se
 
 <div class="boxnote">
 
-A tool pack: `registerOn:` contributes its tools and their schemas, and it owns its `tool_*` handlers and the shared schema builders. **Seven core toolsets**, one per tool family, plus the optional `McpGrailToolset` on a Grail image. **Subclass this to add tools** &#8212; a deployment picks any subset, or none of them alongside its own.
+A tool pack: `registerOn:` contributes its tools and their schemas, and it owns its `tool_*` handlers and the shared schema builders.
 
 </div>
 
 <!--
+SAY THE REST, the next slide shows it: seven core toolsets, one per tool family, plus the
+optional McpGrailToolset on a Grail image -- and SUBCLASS THIS TO ADD TOOLS, which is the whole
+point of the box. A deployment picks any subset of them, or none of them alongside its own.
 McpGrailToolset needs nothing from the server, which is why it doubles as the worked example for
 a third-party toolset. If someone is going to write one, this is the slide to point at.
 -->
@@ -1619,6 +1611,7 @@ Three facts this slide deliberately does NOT print, for whoever asks. The order 
 is registration order, which is the order tools/list answers in. The seven on the left are
 defaultToolsetNames -- a deployment takes any subset, and section 2 spends that. And of these
 forty, exactly two ever report progress: list_failing_tests, and run_python_tests.
+-->
 
 ---
 
@@ -1715,7 +1708,6 @@ forty, exactly two ever report progress: list_failing_tests, and run_python_test
     <text x="1011" y="311" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">McpTool</text>
   </g>
   <line x1="888" y1="306" x2="904" y2="306" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
-  <text x="897" y="272" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,194 L566,194 L566,84 L676,84" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
     <text x="574" y="139" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
@@ -1834,7 +1826,6 @@ warning dressed as a design note; it is in CLAUDE.md for the same reason.
     <text x="1011" y="311" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">McpTool</text>
   </g>
   <line x1="888" y1="306" x2="904" y2="306" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
-  <text x="897" y="272" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,194 L566,194 L566,84 L676,84" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
     <text x="574" y="139" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
@@ -1960,7 +1951,6 @@ McpTool holds only a name, a description, a schema and that block.
     <text x="1011" y="311" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">McpTool</text>
   </g>
   <line x1="888" y1="306" x2="904" y2="306" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
-  <text x="897" y="272" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,194 L566,194 L566,84 L676,84" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
     <text x="574" y="139" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
@@ -2079,7 +2069,6 @@ party that can act while nothing is happening -- which is also the reaper's whol
     <text x="1011" y="311" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">McpTool</text>
   </g>
   <line x1="888" y1="306" x2="904" y2="306" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
-  <text x="897" y="272" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,194 L566,194 L566,84 L676,84" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
     <text x="574" y="139" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
@@ -2200,7 +2189,6 @@ the unregister. A bug that only exists end to end.
     <text x="1011" y="311" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">McpTool</text>
   </g>
   <line x1="888" y1="306" x2="904" y2="306" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
-  <text x="897" y="272" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,194 L566,194 L566,84 L676,84" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
     <text x="574" y="139" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
@@ -2319,7 +2307,6 @@ a commit record. If the front end dies the queue should die with it.
     <text x="1011" y="311" font-size="14.5" text-anchor="middle" font-weight="600" fill="currentColor">McpTool</text>
   </g>
   <line x1="888" y1="306" x2="904" y2="306" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
-  <text x="897" y="272" font-size="11" text-anchor="middle" fill="currentColor" opacity=".7">registerOn:</text>
   <g class="bx a-request">
     <path d="M528,194 L566,194 L566,84 L676,84" fill="none" stroke="currentColor" stroke-width="1.8" marker-end="url(#g1)"/>
     <text x="574" y="139" font-size="12" text-anchor="start" font-weight="600" fill="currentColor">nbExecute:</text>
