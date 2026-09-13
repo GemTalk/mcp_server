@@ -33,6 +33,14 @@ The last `svg .hl` rule is the non-obvious one: an arrowhead is a marker filled
 with `currentColor`, so setting `color` is what carries the accent into the head
 of a highlighted arrow rather than leaving it black on a red shaft.
 
+The loop glyph in the McpRouter box -- the circular arrow marking the accept
+loop -- states its fill and stroke in an inline `style=` rather than as SVG
+presentation attributes, deliberately: an inline style outranks a stylesheet
+rule, so `svg .hl path` cannot fatten the arc to stroke-width 3 or put a stroke
+round the arrowhead when that box is the highlighted one. Both still name
+`currentColor`, so the `svg .hl { color }` rule recolours them with the box.
+Convert them to plain attributes and the glyph deforms on exactly one slide.
+
 NEVER PUT A BLANK LINE INSIDE THE <svg> STRING. deck.md's own header comment
 explains why; the failure is silent and only shows up in the render.
 """
@@ -67,6 +75,8 @@ SVG = '''<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="{ARIA}"
   <line x1="346" y1="100" x2="346" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
   <g class="bx c-router">
     <rect x="166" y="114" width="360" height="42" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
+    <path d="M196.1,127.7 A9.5,9.5 0 1 1 186.8,126.1" style="fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round"/>
+    <path d="M189.9,124.9 L184.2,124.1 L186.1,129.2 Z" style="fill:currentColor;stroke:none"/>
     <text x="346" y="141" font-size="16" text-anchor="middle" font-weight="600" fill="currentColor">McpRouter &#160;/&#160; McpAuthRouter</text>
   </g>
   <line x1="346" y1="156" x2="346" y2="168" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
@@ -138,7 +148,8 @@ SVG = '''<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="{ARIA}"
   </g>
 </svg>'''
 
-ARIA = ("Two gems. The front-end gem holds McpHttpConnection, the McpRouter, McpSession, "
+ARIA = ("Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a "
+        "circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, "
         "McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the "
         "signal poller. The worker gem holds SessionTemps, and beneath it McpServer, "
         "McpDispatcher, McpToolRegistry, the toolsets and the tools. Every request crosses "
@@ -173,7 +184,10 @@ SLIDES = [
 
  ("c-router", "McpRouter &#8212; the accept loop, and the gem&#8217;s blocking main activity",
   "The socket, the routes, the `MCP-Session-Id`&#8594;`McpSession` map behind a mutex, the pending-request "
-  "table. It **never runs a tool**, and it runs **transactionless**, so it stops pinning the stone&#8217;s "
+  "table. The marked box is where the gem **loops**: `runOnPort:` blocks in its accept loop until `stop`, "
+  "and that loop is the gem&#8217;s only activity &#8212; a forked GsProcess runs only while the gem is executing "
+  "Smalltalk, so the reaper and the poller live off it. It **never runs a tool**, and it runs "
+  "**transactionless**, so it stops pinning the stone&#8217;s "
   "oldest commit record. `McpAuthRouter` adds the bearer token, TLS and RFC 9728 metadata, and logs "
   "each worker in as **the token&#8217;s own GemStone user**.",
   "Transactionless is the constraint with teeth: front-end code must not read persistent object\n"
