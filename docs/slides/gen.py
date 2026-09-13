@@ -41,6 +41,21 @@ round the arrowhead when that box is the highlighted one. Both still name
 `currentColor`, so the `svg .hl { color }` rule recolours them with the box.
 Convert them to plain attributes and the glyph deforms on exactly one slide.
 
+WHAT AN ARROW MEANS: a hand-off, drawn in the direction the work travels --
+never ownership, and never a bare method return. The one return arrow in the
+picture is McpRouter back up to McpHttpConnection, because that is where bytes
+reach the socket, and the router is what writes every one of them: a plain JSON
+body, a progress frame off a channel, an outbox frame off the GET stream. Both
+`drain:to:` senders are McpRouter methods.
+
+Two arrows here are easy to get wrong, so they are called out. McpSession owns
+its `outbox` and nothing else below it, so it feeds McpOutbox ALONE; the
+McpProgressChannel is the ROUTER's -- `callChannels`, keyed by call id, one per
+in-flight streamed call -- and a tick reaches it from the signal poller, not
+down the request path. Drawing one arrow into the gap between those two boxes
+says McpSession owns both, which is what the picture used to say and the c-channel
+prose has always contradicted.
+
 NEVER PUT A BLANK LINE INSIDE THE <svg> STRING. deck.md's own header comment
 explains why; the failure is silent and only shows up in the render.
 """
@@ -72,7 +87,10 @@ SVG = '''<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="{ARIA}"
     <rect x="166" y="62" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="86" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpHttpConnection</text>
   </g>
-  <line x1="346" y1="100" x2="346" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="300" y1="100" x2="300" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="292" y="111" font-size="10.5" text-anchor="end" fill="currentColor" opacity=".7">request</text>
+  <line x1="392" y1="114" x2="392" y2="102" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="400" y="111" font-size="10.5" text-anchor="start" fill="currentColor" opacity=".7">response</text>
   <g class="bx c-router">
     <rect x="166" y="114" width="360" height="42" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
     <path d="M196.1,127.7 A9.5,9.5 0 1 1 186.8,126.1" style="fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round"/>
@@ -84,7 +102,7 @@ SVG = '''<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="{ARIA}"
     <rect x="166" y="170" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="194" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpSession</text>
   </g>
-  <line x1="346" y1="208" x2="346" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="253" y1="208" x2="253" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
   <g class="bx c-outbox">
     <rect x="166" y="222" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="253" y="246" font-size="14" text-anchor="middle" font-weight="600" fill="currentColor">McpOutbox</text>
@@ -101,6 +119,8 @@ SVG = '''<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="{ARIA}"
     <rect x="351" y="278" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 3"/>
     <text x="438" y="302" font-size="13.5" text-anchor="middle" font-weight="600" fill="currentColor">signal poller GsProcess</text>
   </g>
+  <line x1="438" y1="278" x2="438" y2="262" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="446" y="270" font-size="11" text-anchor="start" fill="currentColor" opacity=".7">by call id</text>
   <rect x="660" y="24" width="474" height="316" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
   <text x="897" y="50" font-size="17" text-anchor="middle" font-weight="600" fill="currentColor">worker gem &#8212; McpServer:5:978EC559</text>
   <g class="bx c-temps">
@@ -152,8 +172,11 @@ ARIA = ("Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- w
         "circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, "
         "McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the "
         "signal poller. The worker gem holds SessionTemps, and beneath it McpServer, "
-        "McpDispatcher, McpToolRegistry, the toolsets and the tools. Every request crosses "
-        "from McpSession to SessionTemps; progress ticks come back the other way.")
+        "McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in "
+        "the direction the work travels: a request runs down from McpHttpConnection through the "
+        "router to McpSession and across to SessionTemps, the router writes every response back up "
+        "on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the "
+        "worker to the signal poller, which routes it by call id to that call's McpProgressChannel.")
 
 SLIDES = [
  (None, "Two gems, and what is in each",
@@ -290,7 +313,7 @@ SLIDES = [
   "party that can act while nothing is happening -- which is also the reaper's whole justification."),
 
  ("c-channel", "McpProgressChannel &#8212; one per streamed call",
-  "Registered in the router&#8217;s `callId`&#8594;channel map for the life of one streamed `tools/call`, and "
+  "Registered in the router&#8217;s `callId``callId`&#8594;channel map#8594; channel map for the life of one streamed `tools/call`, and "
   "drained to the socket after every wait for the worker. Ticks must be **strictly increasing**, and "
   "that is refused **twice** &#8212; once at the reporter, again here &#8212; because the reporter runs arbitrary "
   "tool code and this end owes the client a conforming stream.",

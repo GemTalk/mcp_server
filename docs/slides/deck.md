@@ -191,7 +191,7 @@ the same section in full with nothing on screen.
 ## Two gems, and what is in each
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. Every request crosses from McpSession to SessionTemps; progress ticks come back the other way.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -211,7 +211,10 @@ the same section in full with nothing on screen.
     <rect x="166" y="62" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="86" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpHttpConnection</text>
   </g>
-  <line x1="346" y1="100" x2="346" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="300" y1="100" x2="300" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="292" y="111" font-size="10.5" text-anchor="end" fill="currentColor" opacity=".7">request</text>
+  <line x1="392" y1="114" x2="392" y2="102" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="400" y="111" font-size="10.5" text-anchor="start" fill="currentColor" opacity=".7">response</text>
   <g class="bx c-router">
     <rect x="166" y="114" width="360" height="42" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
     <path d="M196.1,127.7 A9.5,9.5 0 1 1 186.8,126.1" style="fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round"/>
@@ -223,7 +226,7 @@ the same section in full with nothing on screen.
     <rect x="166" y="170" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="194" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpSession</text>
   </g>
-  <line x1="346" y1="208" x2="346" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="253" y1="208" x2="253" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
   <g class="bx c-outbox">
     <rect x="166" y="222" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="253" y="246" font-size="14" text-anchor="middle" font-weight="600" fill="currentColor">McpOutbox</text>
@@ -240,6 +243,8 @@ the same section in full with nothing on screen.
     <rect x="351" y="278" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 3"/>
     <text x="438" y="302" font-size="13.5" text-anchor="middle" font-weight="600" fill="currentColor">signal poller GsProcess</text>
   </g>
+  <line x1="438" y1="278" x2="438" y2="262" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="446" y="270" font-size="11" text-anchor="start" fill="currentColor" opacity=".7">by call id</text>
   <rect x="660" y="24" width="474" height="316" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
   <text x="897" y="50" font-size="17" text-anchor="middle" font-weight="600" fill="currentColor">worker gem &#8212; McpServer:5:978EC559</text>
   <g class="bx c-temps">
@@ -304,7 +309,7 @@ objects rather than classes-in-general, and move. Everything on this slide gets 
 ## MCP client &#8212; one per editor
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. Every request crosses from McpSession to SessionTemps; progress ticks come back the other way.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -324,7 +329,10 @@ objects rather than classes-in-general, and move. Everything on this slide gets 
     <rect x="166" y="62" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="86" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpHttpConnection</text>
   </g>
-  <line x1="346" y1="100" x2="346" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="300" y1="100" x2="300" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="292" y="111" font-size="10.5" text-anchor="end" fill="currentColor" opacity=".7">request</text>
+  <line x1="392" y1="114" x2="392" y2="102" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="400" y="111" font-size="10.5" text-anchor="start" fill="currentColor" opacity=".7">response</text>
   <g class="bx c-router">
     <rect x="166" y="114" width="360" height="42" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
     <path d="M196.1,127.7 A9.5,9.5 0 1 1 186.8,126.1" style="fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round"/>
@@ -336,7 +344,7 @@ objects rather than classes-in-general, and move. Everything on this slide gets 
     <rect x="166" y="170" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="194" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpSession</text>
   </g>
-  <line x1="346" y1="208" x2="346" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="253" y1="208" x2="253" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
   <g class="bx c-outbox">
     <rect x="166" y="222" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="253" y="246" font-size="14" text-anchor="middle" font-weight="600" fill="currentColor">McpOutbox</text>
@@ -353,6 +361,8 @@ objects rather than classes-in-general, and move. Everything on this slide gets 
     <rect x="351" y="278" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 3"/>
     <text x="438" y="302" font-size="13.5" text-anchor="middle" font-weight="600" fill="currentColor">signal poller GsProcess</text>
   </g>
+  <line x1="438" y1="278" x2="438" y2="262" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="446" y="270" font-size="11" text-anchor="start" fill="currentColor" opacity=".7">by call id</text>
   <rect x="660" y="24" width="474" height="316" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
   <text x="897" y="50" font-size="17" text-anchor="middle" font-weight="600" fill="currentColor">worker gem &#8212; McpServer:5:978EC559</text>
   <g class="bx c-temps">
@@ -418,7 +428,7 @@ client opens a NEW session each time, and the login that exhausts a stone fails 
 ## McpHttpConnection &#8212; one per request
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. Every request crosses from McpSession to SessionTemps; progress ticks come back the other way.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -438,7 +448,10 @@ client opens a NEW session each time, and the login that exhausts a stone fails 
     <rect x="166" y="62" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="86" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpHttpConnection</text>
   </g>
-  <line x1="346" y1="100" x2="346" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="300" y1="100" x2="300" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="292" y="111" font-size="10.5" text-anchor="end" fill="currentColor" opacity=".7">request</text>
+  <line x1="392" y1="114" x2="392" y2="102" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="400" y="111" font-size="10.5" text-anchor="start" fill="currentColor" opacity=".7">response</text>
   <g class="bx c-router">
     <rect x="166" y="114" width="360" height="42" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
     <path d="M196.1,127.7 A9.5,9.5 0 1 1 186.8,126.1" style="fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round"/>
@@ -450,7 +463,7 @@ client opens a NEW session each time, and the login that exhausts a stone fails 
     <rect x="166" y="170" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="194" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpSession</text>
   </g>
-  <line x1="346" y1="208" x2="346" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="253" y1="208" x2="253" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
   <g class="bx c-outbox">
     <rect x="166" y="222" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="253" y="246" font-size="14" text-anchor="middle" font-weight="600" fill="currentColor">McpOutbox</text>
@@ -467,6 +480,8 @@ client opens a NEW session each time, and the login that exhausts a stone fails 
     <rect x="351" y="278" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 3"/>
     <text x="438" y="302" font-size="13.5" text-anchor="middle" font-weight="600" fill="currentColor">signal poller GsProcess</text>
   </g>
+  <line x1="438" y1="278" x2="438" y2="262" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="446" y="270" font-size="11" text-anchor="start" fill="currentColor" opacity=".7">by call id</text>
   <rect x="660" y="24" width="474" height="316" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
   <text x="897" y="50" font-size="17" text-anchor="middle" font-weight="600" fill="currentColor">worker gem &#8212; McpServer:5:978EC559</text>
   <g class="bx c-temps">
@@ -532,7 +547,7 @@ session lifetime actually gets argued.
 ## McpRouter &#8212; the accept loop, and the gem&#8217;s blocking main activity
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. Every request crosses from McpSession to SessionTemps; progress ticks come back the other way.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -552,7 +567,10 @@ session lifetime actually gets argued.
     <rect x="166" y="62" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="86" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpHttpConnection</text>
   </g>
-  <line x1="346" y1="100" x2="346" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="300" y1="100" x2="300" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="292" y="111" font-size="10.5" text-anchor="end" fill="currentColor" opacity=".7">request</text>
+  <line x1="392" y1="114" x2="392" y2="102" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="400" y="111" font-size="10.5" text-anchor="start" fill="currentColor" opacity=".7">response</text>
   <g class="bx c-router hl">
     <rect x="166" y="114" width="360" height="42" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
     <path d="M196.1,127.7 A9.5,9.5 0 1 1 186.8,126.1" style="fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round"/>
@@ -564,7 +582,7 @@ session lifetime actually gets argued.
     <rect x="166" y="170" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="194" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpSession</text>
   </g>
-  <line x1="346" y1="208" x2="346" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="253" y1="208" x2="253" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
   <g class="bx c-outbox">
     <rect x="166" y="222" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="253" y="246" font-size="14" text-anchor="middle" font-weight="600" fill="currentColor">McpOutbox</text>
@@ -581,6 +599,8 @@ session lifetime actually gets argued.
     <rect x="351" y="278" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 3"/>
     <text x="438" y="302" font-size="13.5" text-anchor="middle" font-weight="600" fill="currentColor">signal poller GsProcess</text>
   </g>
+  <line x1="438" y1="278" x2="438" y2="262" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="446" y="270" font-size="11" text-anchor="start" fill="currentColor" opacity=".7">by call id</text>
   <rect x="660" y="24" width="474" height="316" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
   <text x="897" y="50" font-size="17" text-anchor="middle" font-weight="600" fill="currentColor">worker gem &#8212; McpServer:5:978EC559</text>
   <g class="bx c-temps">
@@ -647,7 +667,7 @@ because only this side can see the token.
 ## McpSession &#8212; one per client, and the only thing that drives a worker
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. Every request crosses from McpSession to SessionTemps; progress ticks come back the other way.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -667,7 +687,10 @@ because only this side can see the token.
     <rect x="166" y="62" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="86" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpHttpConnection</text>
   </g>
-  <line x1="346" y1="100" x2="346" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="300" y1="100" x2="300" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="292" y="111" font-size="10.5" text-anchor="end" fill="currentColor" opacity=".7">request</text>
+  <line x1="392" y1="114" x2="392" y2="102" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="400" y="111" font-size="10.5" text-anchor="start" fill="currentColor" opacity=".7">response</text>
   <g class="bx c-router">
     <rect x="166" y="114" width="360" height="42" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
     <path d="M196.1,127.7 A9.5,9.5 0 1 1 186.8,126.1" style="fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round"/>
@@ -679,7 +702,7 @@ because only this side can see the token.
     <rect x="166" y="170" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="194" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpSession</text>
   </g>
-  <line x1="346" y1="208" x2="346" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="253" y1="208" x2="253" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
   <g class="bx c-outbox">
     <rect x="166" y="222" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="253" y="246" font-size="14" text-anchor="middle" font-weight="600" fill="currentColor">McpOutbox</text>
@@ -696,6 +719,8 @@ because only this side can see the token.
     <rect x="351" y="278" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 3"/>
     <text x="438" y="302" font-size="13.5" text-anchor="middle" font-weight="600" fill="currentColor">signal poller GsProcess</text>
   </g>
+  <line x1="438" y1="278" x2="438" y2="262" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="446" y="270" font-size="11" text-anchor="start" fill="currentColor" opacity=".7">by call id</text>
   <rect x="660" y="24" width="474" height="316" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
   <text x="897" y="50" font-size="17" text-anchor="middle" font-weight="600" fill="currentColor">worker gem &#8212; McpServer:5:978EC559</text>
   <g class="bx c-temps">
@@ -762,7 +787,7 @@ startup reaches the next client without a restart.
 ## The hop &#8212; one string, non-blocking
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. Every request crosses from McpSession to SessionTemps; progress ticks come back the other way.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -782,7 +807,10 @@ startup reaches the next client without a restart.
     <rect x="166" y="62" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="86" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpHttpConnection</text>
   </g>
-  <line x1="346" y1="100" x2="346" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="300" y1="100" x2="300" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="292" y="111" font-size="10.5" text-anchor="end" fill="currentColor" opacity=".7">request</text>
+  <line x1="392" y1="114" x2="392" y2="102" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="400" y="111" font-size="10.5" text-anchor="start" fill="currentColor" opacity=".7">response</text>
   <g class="bx c-router">
     <rect x="166" y="114" width="360" height="42" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
     <path d="M196.1,127.7 A9.5,9.5 0 1 1 186.8,126.1" style="fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round"/>
@@ -794,7 +822,7 @@ startup reaches the next client without a restart.
     <rect x="166" y="170" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="194" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpSession</text>
   </g>
-  <line x1="346" y1="208" x2="346" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="253" y1="208" x2="253" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
   <g class="bx c-outbox">
     <rect x="166" y="222" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="253" y="246" font-size="14" text-anchor="middle" font-weight="600" fill="currentColor">McpOutbox</text>
@@ -811,6 +839,8 @@ startup reaches the next client without a restart.
     <rect x="351" y="278" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 3"/>
     <text x="438" y="302" font-size="13.5" text-anchor="middle" font-weight="600" fill="currentColor">signal poller GsProcess</text>
   </g>
+  <line x1="438" y1="278" x2="438" y2="262" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="446" y="270" font-size="11" text-anchor="start" fill="currentColor" opacity=".7">by call id</text>
   <rect x="660" y="24" width="474" height="316" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
   <text x="897" y="50" font-size="17" text-anchor="middle" font-weight="600" fill="currentColor">worker gem &#8212; McpServer:5:978EC559</text>
   <g class="bx c-temps">
@@ -876,7 +906,7 @@ asString. Section 7 if anyone pulls on it.
 ## SessionTemps &#8212; where the instance actually lives
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. Every request crosses from McpSession to SessionTemps; progress ticks come back the other way.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -896,7 +926,10 @@ asString. Section 7 if anyone pulls on it.
     <rect x="166" y="62" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="86" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpHttpConnection</text>
   </g>
-  <line x1="346" y1="100" x2="346" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="300" y1="100" x2="300" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="292" y="111" font-size="10.5" text-anchor="end" fill="currentColor" opacity=".7">request</text>
+  <line x1="392" y1="114" x2="392" y2="102" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="400" y="111" font-size="10.5" text-anchor="start" fill="currentColor" opacity=".7">response</text>
   <g class="bx c-router">
     <rect x="166" y="114" width="360" height="42" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
     <path d="M196.1,127.7 A9.5,9.5 0 1 1 186.8,126.1" style="fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round"/>
@@ -908,7 +941,7 @@ asString. Section 7 if anyone pulls on it.
     <rect x="166" y="170" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="194" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpSession</text>
   </g>
-  <line x1="346" y1="208" x2="346" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="253" y1="208" x2="253" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
   <g class="bx c-outbox">
     <rect x="166" y="222" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="253" y="246" font-size="14" text-anchor="middle" font-weight="600" fill="currentColor">McpOutbox</text>
@@ -925,6 +958,8 @@ asString. Section 7 if anyone pulls on it.
     <rect x="351" y="278" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 3"/>
     <text x="438" y="302" font-size="13.5" text-anchor="middle" font-weight="600" fill="currentColor">signal poller GsProcess</text>
   </g>
+  <line x1="438" y1="278" x2="438" y2="262" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="446" y="270" font-size="11" text-anchor="start" fill="currentColor" opacity=".7">by call id</text>
   <rect x="660" y="24" width="474" height="316" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
   <text x="897" y="50" font-size="17" text-anchor="middle" font-weight="600" fill="currentColor">worker gem &#8212; McpServer:5:978EC559</text>
   <g class="bx c-temps hl">
@@ -992,7 +1027,7 @@ a tool reports progress, and it is constant for the worker's life.
 ## McpServer &#8212; the per-client worker, built before the first request
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. Every request crosses from McpSession to SessionTemps; progress ticks come back the other way.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -1012,7 +1047,10 @@ a tool reports progress, and it is constant for the worker's life.
     <rect x="166" y="62" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="86" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpHttpConnection</text>
   </g>
-  <line x1="346" y1="100" x2="346" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="300" y1="100" x2="300" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="292" y="111" font-size="10.5" text-anchor="end" fill="currentColor" opacity=".7">request</text>
+  <line x1="392" y1="114" x2="392" y2="102" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="400" y="111" font-size="10.5" text-anchor="start" fill="currentColor" opacity=".7">response</text>
   <g class="bx c-router">
     <rect x="166" y="114" width="360" height="42" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
     <path d="M196.1,127.7 A9.5,9.5 0 1 1 186.8,126.1" style="fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round"/>
@@ -1024,7 +1062,7 @@ a tool reports progress, and it is constant for the worker's life.
     <rect x="166" y="170" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="194" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpSession</text>
   </g>
-  <line x1="346" y1="208" x2="346" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="253" y1="208" x2="253" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
   <g class="bx c-outbox">
     <rect x="166" y="222" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="253" y="246" font-size="14" text-anchor="middle" font-weight="600" fill="currentColor">McpOutbox</text>
@@ -1041,6 +1079,8 @@ a tool reports progress, and it is constant for the worker's life.
     <rect x="351" y="278" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 3"/>
     <text x="438" y="302" font-size="13.5" text-anchor="middle" font-weight="600" fill="currentColor">signal poller GsProcess</text>
   </g>
+  <line x1="438" y1="278" x2="438" y2="262" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="446" y="270" font-size="11" text-anchor="start" fill="currentColor" opacity=".7">by call id</text>
   <rect x="660" y="24" width="474" height="316" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
   <text x="897" y="50" font-size="17" text-anchor="middle" font-weight="600" fill="currentColor">worker gem &#8212; McpServer:5:978EC559</text>
   <g class="bx c-temps">
@@ -1106,7 +1146,7 @@ session list. Then the front-end session, then registration, then the instance i
 ## McpDispatcher &#8212; JSON-RPC 2.0, and two kinds of failure
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. Every request crosses from McpSession to SessionTemps; progress ticks come back the other way.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -1126,7 +1166,10 @@ session list. Then the front-end session, then registration, then the instance i
     <rect x="166" y="62" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="86" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpHttpConnection</text>
   </g>
-  <line x1="346" y1="100" x2="346" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="300" y1="100" x2="300" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="292" y="111" font-size="10.5" text-anchor="end" fill="currentColor" opacity=".7">request</text>
+  <line x1="392" y1="114" x2="392" y2="102" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="400" y="111" font-size="10.5" text-anchor="start" fill="currentColor" opacity=".7">response</text>
   <g class="bx c-router">
     <rect x="166" y="114" width="360" height="42" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
     <path d="M196.1,127.7 A9.5,9.5 0 1 1 186.8,126.1" style="fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round"/>
@@ -1138,7 +1181,7 @@ session list. Then the front-end session, then registration, then the instance i
     <rect x="166" y="170" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="194" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpSession</text>
   </g>
-  <line x1="346" y1="208" x2="346" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="253" y1="208" x2="253" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
   <g class="bx c-outbox">
     <rect x="166" y="222" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="253" y="246" font-size="14" text-anchor="middle" font-weight="600" fill="currentColor">McpOutbox</text>
@@ -1155,6 +1198,8 @@ session list. Then the front-end session, then registration, then the instance i
     <rect x="351" y="278" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 3"/>
     <text x="438" y="302" font-size="13.5" text-anchor="middle" font-weight="600" fill="currentColor">signal poller GsProcess</text>
   </g>
+  <line x1="438" y1="278" x2="438" y2="262" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="446" y="270" font-size="11" text-anchor="start" fill="currentColor" opacity=".7">by call id</text>
   <rect x="660" y="24" width="474" height="316" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
   <text x="897" y="50" font-size="17" text-anchor="middle" font-weight="600" fill="currentColor">worker gem &#8212; McpServer:5:978EC559</text>
   <g class="bx c-temps">
@@ -1224,7 +1269,7 @@ The [session] line is appended AFTER the call, so it describes what the call lef
 ## McpToolRegistry &#8212; name to tool
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. Every request crosses from McpSession to SessionTemps; progress ticks come back the other way.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -1244,7 +1289,10 @@ The [session] line is appended AFTER the call, so it describes what the call lef
     <rect x="166" y="62" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="86" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpHttpConnection</text>
   </g>
-  <line x1="346" y1="100" x2="346" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="300" y1="100" x2="300" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="292" y="111" font-size="10.5" text-anchor="end" fill="currentColor" opacity=".7">request</text>
+  <line x1="392" y1="114" x2="392" y2="102" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="400" y="111" font-size="10.5" text-anchor="start" fill="currentColor" opacity=".7">response</text>
   <g class="bx c-router">
     <rect x="166" y="114" width="360" height="42" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
     <path d="M196.1,127.7 A9.5,9.5 0 1 1 186.8,126.1" style="fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round"/>
@@ -1256,7 +1304,7 @@ The [session] line is appended AFTER the call, so it describes what the call lef
     <rect x="166" y="170" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="194" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpSession</text>
   </g>
-  <line x1="346" y1="208" x2="346" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="253" y1="208" x2="253" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
   <g class="bx c-outbox">
     <rect x="166" y="222" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="253" y="246" font-size="14" text-anchor="middle" font-weight="600" fill="currentColor">McpOutbox</text>
@@ -1273,6 +1321,8 @@ The [session] line is appended AFTER the call, so it describes what the call lef
     <rect x="351" y="278" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 3"/>
     <text x="438" y="302" font-size="13.5" text-anchor="middle" font-weight="600" fill="currentColor">signal poller GsProcess</text>
   </g>
+  <line x1="438" y1="278" x2="438" y2="262" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="446" y="270" font-size="11" text-anchor="start" fill="currentColor" opacity=".7">by call id</text>
   <rect x="660" y="24" width="474" height="316" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
   <text x="897" y="50" font-size="17" text-anchor="middle" font-weight="600" fill="currentColor">worker gem &#8212; McpServer:5:978EC559</text>
   <g class="bx c-temps">
@@ -1337,7 +1387,7 @@ assembled per call, so the surface a client sees is fixed for the life of its se
 ## Mcp*Toolset &#8212; the unit you add tools in
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. Every request crosses from McpSession to SessionTemps; progress ticks come back the other way.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -1357,7 +1407,10 @@ assembled per call, so the surface a client sees is fixed for the life of its se
     <rect x="166" y="62" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="86" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpHttpConnection</text>
   </g>
-  <line x1="346" y1="100" x2="346" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="300" y1="100" x2="300" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="292" y="111" font-size="10.5" text-anchor="end" fill="currentColor" opacity=".7">request</text>
+  <line x1="392" y1="114" x2="392" y2="102" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="400" y="111" font-size="10.5" text-anchor="start" fill="currentColor" opacity=".7">response</text>
   <g class="bx c-router">
     <rect x="166" y="114" width="360" height="42" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
     <path d="M196.1,127.7 A9.5,9.5 0 1 1 186.8,126.1" style="fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round"/>
@@ -1369,7 +1422,7 @@ assembled per call, so the surface a client sees is fixed for the life of its se
     <rect x="166" y="170" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="194" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpSession</text>
   </g>
-  <line x1="346" y1="208" x2="346" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="253" y1="208" x2="253" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
   <g class="bx c-outbox">
     <rect x="166" y="222" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="253" y="246" font-size="14" text-anchor="middle" font-weight="600" fill="currentColor">McpOutbox</text>
@@ -1386,6 +1439,8 @@ assembled per call, so the surface a client sees is fixed for the life of its se
     <rect x="351" y="278" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 3"/>
     <text x="438" y="302" font-size="13.5" text-anchor="middle" font-weight="600" fill="currentColor">signal poller GsProcess</text>
   </g>
+  <line x1="438" y1="278" x2="438" y2="262" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="446" y="270" font-size="11" text-anchor="start" fill="currentColor" opacity=".7">by call id</text>
   <rect x="660" y="24" width="474" height="316" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
   <text x="897" y="50" font-size="17" text-anchor="middle" font-weight="600" fill="currentColor">worker gem &#8212; McpServer:5:978EC559</text>
   <g class="bx c-temps">
@@ -1450,7 +1505,7 @@ a third-party toolset. If someone is going to write one, this is the slide to po
 ## McpTool &#8212; one tool, and its schema
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. Every request crosses from McpSession to SessionTemps; progress ticks come back the other way.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -1470,7 +1525,10 @@ a third-party toolset. If someone is going to write one, this is the slide to po
     <rect x="166" y="62" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="86" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpHttpConnection</text>
   </g>
-  <line x1="346" y1="100" x2="346" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="300" y1="100" x2="300" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="292" y="111" font-size="10.5" text-anchor="end" fill="currentColor" opacity=".7">request</text>
+  <line x1="392" y1="114" x2="392" y2="102" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="400" y="111" font-size="10.5" text-anchor="start" fill="currentColor" opacity=".7">response</text>
   <g class="bx c-router">
     <rect x="166" y="114" width="360" height="42" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
     <path d="M196.1,127.7 A9.5,9.5 0 1 1 186.8,126.1" style="fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round"/>
@@ -1482,7 +1540,7 @@ a third-party toolset. If someone is going to write one, this is the slide to po
     <rect x="166" y="170" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="194" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpSession</text>
   </g>
-  <line x1="346" y1="208" x2="346" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="253" y1="208" x2="253" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
   <g class="bx c-outbox">
     <rect x="166" y="222" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="253" y="246" font-size="14" text-anchor="middle" font-weight="600" fill="currentColor">McpOutbox</text>
@@ -1499,6 +1557,8 @@ a third-party toolset. If someone is going to write one, this is the slide to po
     <rect x="351" y="278" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 3"/>
     <text x="438" y="302" font-size="13.5" text-anchor="middle" font-weight="600" fill="currentColor">signal poller GsProcess</text>
   </g>
+  <line x1="438" y1="278" x2="438" y2="262" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="446" y="270" font-size="11" text-anchor="start" fill="currentColor" opacity=".7">by call id</text>
   <rect x="660" y="24" width="474" height="316" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
   <text x="897" y="50" font-size="17" text-anchor="middle" font-weight="600" fill="currentColor">worker gem &#8212; McpServer:5:978EC559</text>
   <g class="bx c-temps">
@@ -1563,7 +1623,7 @@ warning dressed as a design note; it is in CLAUDE.md for the same reason.
 ## Progress &#8212; a worker cannot write to its own client
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. Every request crosses from McpSession to SessionTemps; progress ticks come back the other way.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -1583,7 +1643,10 @@ warning dressed as a design note; it is in CLAUDE.md for the same reason.
     <rect x="166" y="62" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="86" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpHttpConnection</text>
   </g>
-  <line x1="346" y1="100" x2="346" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="300" y1="100" x2="300" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="292" y="111" font-size="10.5" text-anchor="end" fill="currentColor" opacity=".7">request</text>
+  <line x1="392" y1="114" x2="392" y2="102" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="400" y="111" font-size="10.5" text-anchor="start" fill="currentColor" opacity=".7">response</text>
   <g class="bx c-router">
     <rect x="166" y="114" width="360" height="42" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
     <path d="M196.1,127.7 A9.5,9.5 0 1 1 186.8,126.1" style="fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round"/>
@@ -1595,7 +1658,7 @@ warning dressed as a design note; it is in CLAUDE.md for the same reason.
     <rect x="166" y="170" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="194" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpSession</text>
   </g>
-  <line x1="346" y1="208" x2="346" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="253" y1="208" x2="253" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
   <g class="bx c-outbox">
     <rect x="166" y="222" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="253" y="246" font-size="14" text-anchor="middle" font-weight="600" fill="currentColor">McpOutbox</text>
@@ -1612,6 +1675,8 @@ warning dressed as a design note; it is in CLAUDE.md for the same reason.
     <rect x="351" y="278" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 3"/>
     <text x="438" y="302" font-size="13.5" text-anchor="middle" font-weight="600" fill="currentColor">signal poller GsProcess</text>
   </g>
+  <line x1="438" y1="278" x2="438" y2="262" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="446" y="270" font-size="11" text-anchor="start" fill="currentColor" opacity=".7">by call id</text>
   <rect x="660" y="24" width="474" height="316" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
   <text x="897" y="50" font-size="17" text-anchor="middle" font-weight="600" fill="currentColor">worker gem &#8212; McpServer:5:978EC559</text>
   <g class="bx c-temps">
@@ -1678,7 +1743,7 @@ than one that said nothing.
 ## signal poller GsProcess &#8212; the only gem with a heartbeat
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. Every request crosses from McpSession to SessionTemps; progress ticks come back the other way.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -1698,7 +1763,10 @@ than one that said nothing.
     <rect x="166" y="62" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="86" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpHttpConnection</text>
   </g>
-  <line x1="346" y1="100" x2="346" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="300" y1="100" x2="300" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="292" y="111" font-size="10.5" text-anchor="end" fill="currentColor" opacity=".7">request</text>
+  <line x1="392" y1="114" x2="392" y2="102" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="400" y="111" font-size="10.5" text-anchor="start" fill="currentColor" opacity=".7">response</text>
   <g class="bx c-router">
     <rect x="166" y="114" width="360" height="42" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
     <path d="M196.1,127.7 A9.5,9.5 0 1 1 186.8,126.1" style="fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round"/>
@@ -1710,7 +1778,7 @@ than one that said nothing.
     <rect x="166" y="170" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="194" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpSession</text>
   </g>
-  <line x1="346" y1="208" x2="346" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="253" y1="208" x2="253" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
   <g class="bx c-outbox">
     <rect x="166" y="222" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="253" y="246" font-size="14" text-anchor="middle" font-weight="600" fill="currentColor">McpOutbox</text>
@@ -1727,6 +1795,8 @@ than one that said nothing.
     <rect x="351" y="278" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 3"/>
     <text x="438" y="302" font-size="13.5" text-anchor="middle" font-weight="600" fill="currentColor">signal poller GsProcess</text>
   </g>
+  <line x1="438" y1="278" x2="438" y2="262" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="446" y="270" font-size="11" text-anchor="start" fill="currentColor" opacity=".7">by call id</text>
   <rect x="660" y="24" width="474" height="316" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
   <text x="897" y="50" font-size="17" text-anchor="middle" font-weight="600" fill="currentColor">worker gem &#8212; McpServer:5:978EC559</text>
   <g class="bx c-temps">
@@ -1791,7 +1861,7 @@ party that can act while nothing is happening -- which is also the reaper's whol
 ## McpProgressChannel &#8212; one per streamed call
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. Every request crosses from McpSession to SessionTemps; progress ticks come back the other way.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -1811,7 +1881,10 @@ party that can act while nothing is happening -- which is also the reaper's whol
     <rect x="166" y="62" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="86" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpHttpConnection</text>
   </g>
-  <line x1="346" y1="100" x2="346" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="300" y1="100" x2="300" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="292" y="111" font-size="10.5" text-anchor="end" fill="currentColor" opacity=".7">request</text>
+  <line x1="392" y1="114" x2="392" y2="102" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="400" y="111" font-size="10.5" text-anchor="start" fill="currentColor" opacity=".7">response</text>
   <g class="bx c-router">
     <rect x="166" y="114" width="360" height="42" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
     <path d="M196.1,127.7 A9.5,9.5 0 1 1 186.8,126.1" style="fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round"/>
@@ -1823,7 +1896,7 @@ party that can act while nothing is happening -- which is also the reaper's whol
     <rect x="166" y="170" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="194" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpSession</text>
   </g>
-  <line x1="346" y1="208" x2="346" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="253" y1="208" x2="253" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
   <g class="bx c-outbox">
     <rect x="166" y="222" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="253" y="246" font-size="14" text-anchor="middle" font-weight="600" fill="currentColor">McpOutbox</text>
@@ -1840,6 +1913,8 @@ party that can act while nothing is happening -- which is also the reaper's whol
     <rect x="351" y="278" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 3"/>
     <text x="438" y="302" font-size="13.5" text-anchor="middle" font-weight="600" fill="currentColor">signal poller GsProcess</text>
   </g>
+  <line x1="438" y1="278" x2="438" y2="262" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="446" y="270" font-size="11" text-anchor="start" fill="currentColor" opacity=".7">by call id</text>
   <rect x="660" y="24" width="474" height="316" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
   <text x="897" y="50" font-size="17" text-anchor="middle" font-weight="600" fill="currentColor">worker gem &#8212; McpServer:5:978EC559</text>
   <g class="bx c-temps">
@@ -1890,7 +1965,7 @@ party that can act while nothing is happening -- which is also the reaper's whol
 
 <div class="boxnote">
 
-Registered in the router&#8217;s `callId`&#8594;channel map for the life of one streamed `tools/call`, and drained to the socket after every wait for the worker. Ticks must be **strictly increasing**, and that is refused **twice** &#8212; once at the reporter, again here &#8212; because the reporter runs arbitrary tool code and this end owes the client a conforming stream.
+Registered in the router&#8217;s `callId``callId`&#8594;channel map#8594; channel map for the life of one streamed `tools/call`, and drained to the socket after every wait for the worker. Ticks must be **strictly increasing**, and that is refused **twice** &#8212; once at the reporter, again here &#8212; because the reporter runs arbitrary tool code and this end owes the client a conforming stream.
 
 </div>
 
@@ -1906,7 +1981,7 @@ the unregister. A bug that only exists end to end.
 ## McpOutbox &#8212; one session&#8217;s queue of server-initiated messages
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. Every request crosses from McpSession to SessionTemps; progress ticks come back the other way.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -1926,7 +2001,10 @@ the unregister. A bug that only exists end to end.
     <rect x="166" y="62" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="86" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpHttpConnection</text>
   </g>
-  <line x1="346" y1="100" x2="346" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="300" y1="100" x2="300" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="292" y="111" font-size="10.5" text-anchor="end" fill="currentColor" opacity=".7">request</text>
+  <line x1="392" y1="114" x2="392" y2="102" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="400" y="111" font-size="10.5" text-anchor="start" fill="currentColor" opacity=".7">response</text>
   <g class="bx c-router">
     <rect x="166" y="114" width="360" height="42" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
     <path d="M196.1,127.7 A9.5,9.5 0 1 1 186.8,126.1" style="fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round"/>
@@ -1938,7 +2016,7 @@ the unregister. A bug that only exists end to end.
     <rect x="166" y="170" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="194" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpSession</text>
   </g>
-  <line x1="346" y1="208" x2="346" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="253" y1="208" x2="253" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
   <g class="bx c-outbox hl">
     <rect x="166" y="222" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="253" y="246" font-size="14" text-anchor="middle" font-weight="600" fill="currentColor">McpOutbox</text>
@@ -1955,6 +2033,8 @@ the unregister. A bug that only exists end to end.
     <rect x="351" y="278" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 3"/>
     <text x="438" y="302" font-size="13.5" text-anchor="middle" font-weight="600" fill="currentColor">signal poller GsProcess</text>
   </g>
+  <line x1="438" y1="278" x2="438" y2="262" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="446" y="270" font-size="11" text-anchor="start" fill="currentColor" opacity=".7">by call id</text>
   <rect x="660" y="24" width="474" height="316" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
   <text x="897" y="50" font-size="17" text-anchor="middle" font-weight="600" fill="currentColor">worker gem &#8212; McpServer:5:978EC559</text>
   <g class="bx c-temps">
@@ -2019,7 +2099,7 @@ a commit record. If the front end dies the queue should die with it.
 ## reaper GsProcess &#8212; one pass every 60 seconds
 
 <div style="text-align:center">
-<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. Every request crosses from McpSession to SessionTemps; progress ticks come back the other way.">
+<svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel.">
   <defs>
     <marker id="g1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -2039,7 +2119,10 @@ a commit record. If the front end dies the queue should die with it.
     <rect x="166" y="62" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="86" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpHttpConnection</text>
   </g>
-  <line x1="346" y1="100" x2="346" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="300" y1="100" x2="300" y2="112" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="292" y="111" font-size="10.5" text-anchor="end" fill="currentColor" opacity=".7">request</text>
+  <line x1="392" y1="114" x2="392" y2="102" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="400" y="111" font-size="10.5" text-anchor="start" fill="currentColor" opacity=".7">response</text>
   <g class="bx c-router">
     <rect x="166" y="114" width="360" height="42" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>
     <path d="M196.1,127.7 A9.5,9.5 0 1 1 186.8,126.1" style="fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round"/>
@@ -2051,7 +2134,7 @@ a commit record. If the front end dies the queue should die with it.
     <rect x="166" y="170" width="360" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="346" y="194" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">McpSession</text>
   </g>
-  <line x1="346" y1="208" x2="346" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <line x1="253" y1="208" x2="253" y2="220" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
   <g class="bx c-outbox">
     <rect x="166" y="222" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
     <text x="253" y="246" font-size="14" text-anchor="middle" font-weight="600" fill="currentColor">McpOutbox</text>
@@ -2068,6 +2151,8 @@ a commit record. If the front end dies the queue should die with it.
     <rect x="351" y="278" width="175" height="38" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 3"/>
     <text x="438" y="302" font-size="13.5" text-anchor="middle" font-weight="600" fill="currentColor">signal poller GsProcess</text>
   </g>
+  <line x1="438" y1="278" x2="438" y2="262" stroke="currentColor" stroke-width="1.5" marker-end="url(#g1)"/>
+  <text x="446" y="270" font-size="11" text-anchor="start" fill="currentColor" opacity=".7">by call id</text>
   <rect x="660" y="24" width="474" height="316" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
   <text x="897" y="50" font-size="17" text-anchor="middle" font-weight="600" fill="currentColor">worker gem &#8212; McpServer:5:978EC559</text>
   <g class="bx c-temps">
