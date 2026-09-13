@@ -204,8 +204,8 @@ the same section in full with nothing on screen.
 
 * This exists to replace the **GCI-based Jasper MCP server**, with something **any** MCP client can reach over plain HTTP
 * It runs **inside the image**. No Node process, no GCI bridge, no FFI
-* The socket runs in a *gem.* The tools execute in a session in a *gem* — with a *login,* a *transaction view,* and a *commit record.*
-* This server conforms to MCP protocol specifications [2025-06-18](https://modelcontextprotocol.io/specification/2025-06-18) and [2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25) but not yet to [2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28).
+* The socket runs in a **gem.** The tools execute in a session in a **gem** — with a **login,** a **transaction view,** and a **commit record.**
+* This server conforms to MCP specifications [2025-06-18](https://modelcontextprotocol.io/specification/2025-06-18) and [2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25) but not yet to [2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28).
 * It answers `initialize`, `ping`, `tools/list`, and `tools/call`. Others — resources, prompts, sampling, elicitation — are answered `-32601`.
 
 <!--
