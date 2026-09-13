@@ -171,11 +171,11 @@ does not move.
 
 # mcp_server
 
-### A Model Context Protocol server that *is* a gem
+### A Model Context Protocol server running *in* GemStone
 
 <br>
 
-**For the GemStone developers** — the present state, end to end
+**For the GemStone developers** — a report on the state of the project
 
 <!--
 Say the shape of the hour before the first slide, because it is the thing that stops people
