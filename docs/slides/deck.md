@@ -42,8 +42,8 @@ style: |
 ---
 
 <!--
-FIFTY-NINE SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut
-once; six stretches of them are now set aside. Section 13 is the only one never written.
+FIFTY-EIGHT SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut
+once; seven stretches of them are now set aside. Section 13 is the only one never written.
 
 THE TARGET IS 45 MINUTES as of 2026-09-14, down from an hour, and that is what the current shape is
 for. The running order:
@@ -56,8 +56,8 @@ for. The running order:
   39-43   section 8 -- the router maintenance cycle, then demo F
   44-47   section 9 -- McpAuthRouter, a reachable port, then demo G (FOLDED 2026-09-14)
   48-49   section 11 -- the worker gem's GemStone user (MOVED HERE, THEN FOLDED, 2026-09-14)
-  50-55   section 10 -- a lead, then extending it: a server for YOUR software
-  56-59   THE APPENDIX -- a lead, then the JSON codec. OPTIONAL, run only if the clock allows
+  50-54   section 10 -- a lead, then extending it: a server for YOUR software
+  55-58   THE APPENDIX -- a lead, then the JSON codec. OPTIONAL, run only if the clock allows
 
 RUNNING ORDER IS NOT SECTION-NUMBER ORDER ANY MORE. Section 11 was moved ahead of section 10 on
 2026-09-14, so the deck runs 9, 11, 10. The reason is thematic rather than structural: section 9's
@@ -65,8 +65,10 @@ subject is who a request is allowed to be, section 11's is the only boundary tha
 the GemStone user the worker gem logs in as -- and that argument belongs beside McpAuthRouter's
 while the room is still holding it, carried back to the plain McpRouter. It also puts the seam
 section last, so the talk proper ends on "here is what you build on this" rather than on a boundary.
-ONE REFERENCE FLIPPED DIRECTION AND IS BETTER FOR IT: section 10's surface slide ends "(§11)", which
-was a forward pointer and is now a backward one. Section numbering still belongs to the material,
+ONE REFERENCE FLIPPED DIRECTION AND WAS BETTER FOR IT, then left the deck entirely: section 10's
+toolset slide ended "(§11)", which the reorder turned from a forward pointer into a backward one --
+and that slide was removed later the same day, so no face makes the link now. Its notes do, on
+page 51. Section numbering still belongs to the material,
 not to this cut -- the deck already read 3, 7, 8 -- and this is the same principle applied to order
 rather than to numbering. AND THE LAST STRETCH CARRIES NO SECTION NUMBER AT ALL: as of 2026-09-14
 the codec slides sit behind a lead that calls them THE APPENDIX, so the room is told the talk
@@ -108,8 +110,18 @@ stretch. Page 49's face took the lock exposure as a blockquote -- no privilege a
 System writeLock:, and a single statement can take over two thousand locks -- and the slide that
 had been the section's whole reason for existing came out behind it. Its notes are on page 49 under
 a banner, so the DataCurator measurement, the reverted lock reaper and the question itself all
-survive. THE ASK IS NOW SPOKEN RATHER THAN READ: no face in the deck asks for a privilege that
-withholds writeLock:, and the speaker has to. Thirty-two slides are now set aside in total.
+survive. THE ASK ITSELF IS STILL ON A FACE: later the same day page 49 gained a heading of its own
+asking whether write locks should be privilege-gated, so what the fold cost is the argument under
+the question rather than the question.
+
+AND SECTION 10 LOST ITS MECHANISM SLIDE, the seventh stretch and the last of the day. "To add
+tools, write a toolset" -- registerOn:, toolNames, the schema builders, assertMutableClass:
+forwarding to the server -- was the only place in the deck that said how a toolset is written, and
+it came out when the surface slide beside it was rewritten to name a real customer's toolset and
+server in its bullets. Its notes AND its face are on page 51 under a banner, because no surviving
+face carries any of it. WHAT THIS COSTS IS A POINTER: the "tools/list is unfiltered" blockquote went
+with it, and it was section 10's only face-level link back to section 11. Thirty-three slides are
+now set aside in total.
 
 THE CODEC SLIDES MOVED RATHER THAN LEFT, AND ARE NOW AN APPENDIX. Section 5's other half -- why this
 server owns its JSON writer, the inbound repair, and the five measured kernel defects -- is at the
@@ -118,7 +130,8 @@ END of the file, after section 10, and is the first thing to drop if the clock h
 seam rather than a silent stop: if the clock has gone, end on the lead. Do not start the three and
 abandon them, because the ask is the last of them. It IS the concrete ask of the talk, so dropping
 it is not free; section 11's notes name it as one of the two things being asked for, the other
-being section 11's own lock question -- which since the fold is not on a face either.
+being section 11's own lock question -- which since the fold is a heading at the foot of page 49
+rather than a slide.
 
 Each slice's own header comment sits beside its first slide. Seven of the original eleven slice
 headers are still here; slice 5's, slice 7's and slice 10's went to the archive with their slides,
@@ -4915,10 +4928,13 @@ THE FOLD, 2026-09-14. This slice was three slides. The third -- "System
 writeLock: is gated by no privilege -- and that is my question" -- came out after
 its subject arrived on slide 2's face as a blockquote: no privilege allows or
 prevents writeLock:, and a single statement can walk Globals and take over two
-thousand locks. Fifty-five seconds of slide became three lines of quote. NOTHING
-WAS DROPPED FROM THE ARGUMENT: that slide's notes are on slide 2 under a banner,
-so the DataCurator measurement, the reverted reaper and the question itself are
-all still here -- all of them now SPOKEN rather than read. The archive's header
+thousand locks. That began as a blockquote of fact and became, later the same
+day, a heading of its own -- "Should write locks be privilege-gated?" -- with two
+sentences under it, so the ASK is on a face and the argument for it is not.
+Fifty-five seconds of slide became four lines. NOTHING WAS DROPPED FROM THE
+ARGUMENT: that slide's notes are on slide 2 under a banner, so the DataCurator
+measurement, the reverted reaper and the shape of the answer are all still
+here -- SPOKEN now rather than read. The archive's header
 says what to cut back out of slide 2's notes if the slide is ever put back.
 
 THE OUTLINE SAYS 1 SLIDE, and that entry describes a feature this server does not
@@ -4935,9 +4951,9 @@ an intention. Say the positive version and do not spend time on what it replaces
 this audience is meeting the project for the first time and has no stake in an
 earlier design.
 
-SLIDE 2 CARRIES THE ASK since the fold, and it is what this section exists for --
-but it carries it as a statement of fact, in the blockquote at its foot, where a
-slide of its own used to put the question. System writeLock:
+SLIDE 2 CARRIES THE ASK since the fold, and it is what this section exists for.
+It asks it outright, in a heading of its own at the foot of the slide, where a
+whole slide used to. System writeLock:
 is gated by no privilege, so a browsing-only session has it, and a lock blocks
 OTHER sessions from committing -- including a privileged developer committing
 code, measured. What bounds it today is session lifetime and an operator
@@ -4945,8 +4961,8 @@ noticing. A reaper that ended lock holders WAS built here and taken back out,
 because it can only act once per heartbeat and the holder picks when the window
 falls -- chasing a lock holder is not the same as not being able to take the
 lock. A privilege that withheld writeLock: would bound it at zero. That is a
-GemStone question, not an mcp_server one, and it goes to the room -- OUT LOUD,
-because since the fold nothing on screen asks it.
+GemStone question, not an mcp_server one, and it goes to the room. The slide asks
+it; everything that earns the question is yours to say.
 
 WHAT TO CUT: nothing, and that is new. Slide 2 was the answer to this question
 while its privilege detail was all it carried; now it carries the ask as well, so
@@ -4963,9 +4979,10 @@ The notes reference it once, on slide 1, only because "why is the tool surface n
 the boundary" is a question a toolset author may ask -- and the answer is about
 execute_code, not about history. SINCE THE MOVE THAT QUESTION ARRIVES LATER, not
 earlier: section 10 now follows this section, so the toolset author meets the
-answer before the question and slide 3 of section 10 points back here with a
-(§11). Keep the paragraph on slide 1 anyway -- it is what that pointer resolves
-to. The reverted lock reaper in slide 2's notes
+answer before the question. Slide 2 of section 10 pointed back here with a (§11)
+until the slide carrying it was removed on 2026-09-14, and that pointer is now
+made in speech from that section's notes. Keep the paragraph on slide 1 anyway --
+it is what the pointer resolves to. The reverted lock reaper in slide 2's notes
 is NOT an exception to that rule and should not be tidied away as one: it is a
 different history, it was on a face on purpose until the fold, and it is what
 earns the ask.
@@ -5000,8 +5017,9 @@ cannot be told one.
 
 This is the answer section 10 points back at. It now comes BEFORE that section
 rather than after it, so nobody has asked yet -- but "why is narrowing the tool
-surface not the boundary?" is what a toolset author will ask two slices from now,
-and section 10's surface slide ends with a (§11) aimed here. The answer is about
+surface not the boundary?" is what a toolset author will ask two slices from now.
+That pointer used to be a (§11) on a face; the slide carrying it was removed on
+2026-09-14, so the speaker makes it now. The answer is about
 execute_code and not about history:
 execute_code evaluates arbitrary Smalltalk, run_test_class runs arbitrary test
 bodies, and a tool that compiles can be followed by one that runs. A shorter
@@ -5034,14 +5052,14 @@ docs/ReadOnly_User.md has the probe tables.
 * `CodeModification` is granted so that `execute_code` is available, and so
 that `run_test_class` can be used on classes that compile
 
-**A different user resolves names differently.** `Mcp` is not in a new profile's default list, and a worker that cannot see it **fails its first session**. `setup-read-only-user.sh` copies the front-end user's list.
+## Should write locks be privilege-gated?
 
-> No privilege allows or prevents `System writeLock:`. A single statement can
-> walk `Globals` and take over two thousand locks.
+No privilege allows or prevents `System writeLock:`. A single statement can
+walk `Globals` and take over two thousand locks.
 
 <!--
 Run this one briskly; the full table is in docs/ReadOnly_User.md and this slide
-is the shape of it. Three facts and a hand-off.
+is the shape of it. Three privilege facts, then the ask.
 
 compile_method fails too, without it. CodeModification is the interesting grant
 because it looks wrong and is not. The
@@ -5055,17 +5073,23 @@ read-only-ness does nothing, NoPerformOnServer does nothing, and the two that
 work do so because login is an FFI callout rather than because anyone designed
 them to. Either is enough and the default set has both.
 
-The symbol list is the operational trap. It is not a security property at all --
-adding a dictionary changes nothing about what may be written -- but get it wrong
-and the very first session fails with Toolset not found, which reads like a
-broken install. And re-provision a dictionary later and the snapshot is stale.
+THE SYMBOL LIST CAME OFF THE FACE ON 2026-09-14 and now has to be said, because
+it is the operational trap of the whole section and nothing on screen hints at it
+any more. A different user resolves names differently: Mcp is not in a new
+profile's default symbol list, so a worker that cannot see it FAILS ITS FIRST
+SESSION, and setup-read-only-user.sh copies the front-end user's list to stop
+that happening. It is not a security property at all -- adding a dictionary
+changes nothing about what may be written -- but get it wrong and the very first
+session fails with Toolset not found, which reads like a broken install. And the
+copy is a POINT-IN-TIME SNAPSHOT: re-provision a dictionary later and it is
+stale.
 
-THEN SAY WHAT IS NO LONGER ON THIS SLIDE. A fine line naming reads, resources and
-locks as what stays open came off the face on 2026-09-14, so two of those three
-are now spoken and the third is the blockquote at the foot. They are a sentence
-each and they are worth the fifteen seconds: without them the slide reads as
-though the privilege list were the whole boundary, which is the one thing this
-section must not leave the room believing.
+READS AND RESOURCES ARE SPOKEN TOO. A fine line naming reads, resources and locks
+as what stays open came off the face on 2026-09-14; the lock half became the
+question at the foot, and the other two are yours to say. A sentence each, and
+worth the fifteen seconds: without them the slide reads as though the privilege
+list were the whole boundary, which is the one thing this section must not leave
+the room believing.
 
 READS ARE BROAD, and nothing here narrows them. Anything world-readable comes
 back through a tool result, including other UserProfiles. The answer to that is
@@ -5077,24 +5101,28 @@ RESOURCES ARE NOT BOUNDED BY PRIVILEGES EITHER -- a loop, a full scan, temp obje
 space, a pinned view. What bounds them is section 8's lifetimes, which the room
 has already seen, so this is a pointer backwards rather than a new claim.
 
-THE THIRD IS LOCKS, and it is the blockquote at the foot of this slide rather
-than the slide that used to follow. Everything below is what that slide said.
+THE THIRD IS LOCKS, and since 2026-09-14 it is the question at the foot of this
+slide, under a heading of its own, rather than the slide that used to follow.
+Everything below is what that slide said.
 
 ================================================================================
 THE LOCK ASK -- from "System writeLock: is gated by no privilege -- and that is
 my question", the slide that followed this one until it was folded away on
-2026-09-14. Its subject is the blockquote above; these are its notes, whole, with
-their pointers at its own bullets rewritten to name what those bullets said.
+2026-09-14. Its question is the heading at the foot of this slide; these are its
+notes, whole, with their pointers at its own bullets rewritten to name what those
+bullets said.
 ================================================================================
 
 THE SLIDE THIS SECTION EXISTED FOR. Everything before it earns the right to ask,
-and what is left of it on screen is three lines of quote. THE QUESTION FORM IS ON
-NO FACE IN THE DECK NOW. Its closing line was: "So: should there be a privilege
-that withholds writeLock:? At the source the bound is zero, not one heartbeat --
-and that is the layer to fix it at, not a maintenance cycle." ASK IT OUT LOUD,
-last, and then STOP TALKING. It is the second of the talk's two asks.
+and what is left of it on screen is a heading and two sentences. THE QUESTION
+ITSELF IS ON THE FACE -- "Should write locks be privilege-gated?" -- so you cannot
+forget to ask it. What is NOT there is the shape of the answer, which was the
+removed slide's closing line: "At the source the bound is zero, not one heartbeat
+-- and that is the layer to fix it at, not a maintenance cycle." Say that, last,
+and then STOP TALKING. It is the second of the talk's two asks, and the only one
+that is not in an appendix that may never run.
 
-Build it in three beats over the blockquote. One: a lock needs no privilege, so
+Build it in three beats under that heading. One: a lock needs no privilege, so
 the most confined session you can provision still has it -- that much is on the
 face. Two: a lock does not change anything, it stops OTHER people changing
 things, and that is measured rather than reasoned. THE MEASUREMENT IS NOT ON THE
@@ -5145,14 +5173,24 @@ the room looks unconvinced that this reaches past application data.
 <!--
 ================================================================================
 VERTICAL SLICE 9 -- section 10, extending it: a server for YOUR software, with
-the Grail MCP Server as the worked example. A lead and five slides, no demo. Cut
+the Grail MCP Server as the worked example. A lead and four slides, no demo. Cut
 2026-09-12: ninth in running order, ninth to be cut. IT IS NOW TENTH, AND LAST
 BEFORE THE OPTIONAL CODEC: section 11 was moved ahead of it on 2026-09-14, so
 this section closes the talk proper.
 
-Running order and plans, in seconds -- lead 10, write a toolset 45, pick a
-surface 45, the worked example 40, the collision 55, the upstream ask 40. About
-4 minutes.
+Running order and plans, in seconds -- lead 10, pick a surface 50, the worked
+example 40, the collision 55, the upstream ask 40. About 3 1/4 minutes.
+
+THE TOOLSET SLIDE WAS REMOVED 2026-09-14, which is why the numbers below moved
+down by one. "To add tools, write a toolset" was the section's first content
+slide and the only place in the deck that said how a toolset is WRITTEN --
+registerOn:, toolNames, the schema builders, assertMutableClass: forwarding to
+the server. Its face is reproduced in the archive and its notes are on slide 2
+under a banner, so the mechanism is now SPOKEN over the MCP_TOOLSETS bullet
+rather than shown. TWO THINGS WENT WITH IT THAT NOTHING REPLACES: the "tools/list
+is unfiltered" blockquote, which was this section's only face-level pointer back
+to section 11, and the section's opening move -- slide 2 now has to both open the
+seam and pick a surface. Give it fifty seconds rather than forty-five.
 
 THE LEAD WAS ADDED 2026-09-14 and it names GRAIL rather than the section, on
 instruction: the section title introduces the Grail MCP Server as an example of a
@@ -5162,7 +5200,8 @@ nothing about it is special. Slide numbers below COUNT THE LEAD.
 
 THE OUTLINE SAYS 2 SLIDES. It is the third section where that number predates
 the bullet list under it, and this one is the most lopsided: the list runs to
-nine bullets and two of them are measurements with a story attached. Five.
+nine bullets and two of them are measurements with a story attached. Four, since
+2026-09-14; it was five.
 
 THIS IS THE SECTION THE ROOM CAN ACT ON SECOND-MOST, after the codec's defect
 table -- which is now at the END of the deck and may not run at all, so if it does not, this is
@@ -5170,26 +5209,27 @@ the first. Since 2026-09-14 it is also the LAST thing the room hears if the code
 does not run, which is a second reason to protect it. Everything before it has been "here is what this server does"; this is
 "here is the seam, and here is what happens when you use it". Pitch it that way.
 
-WHAT THE 2026-09-11 MERGE DID FOR THIS SECTION, and why slide 4 exists at all.
+WHAT THE 2026-09-11 MERGE DID FOR THIS SECTION, and why slide 3 exists at all.
 Until McpServer class>>installedDefaultToolsetNames was removed, the only
 optional toolset in the tree was wired by a mechanism nobody else could use --
 so this section could only describe how you WOULD add one. Now McpGrailToolset
 is configured exactly as a third party's is, and the section can say "copy this"
-and mean it literally. Slide 4 is the payoff of the one line section 2 still
+and mean it literally. Slide 3 is the payoff of the one line section 2 still
 spends on this -- toolsetNames nil means the core seven, not "whatever is
 loaded". Section 2's slide arguing it came down on 2026-09-13 and its notes
 moved to the seeds slide, so THIS section now carries the argument outright.
 
-SLIDE 5 IS THE ONE THAT LANDS, and it is not really about Grail. It is the
+SLIDE 4 IS THE ONE THAT LANDS, and it is not really about Grail. It is the
 general shape: your domain has a model, this server has a session model, and
 where they disagree the disagreement is yours to resolve -- with a number
 attached that nobody can argue with (132 defects against 386/386 clean). Every
 vendor in that room who writes a toolset will meet some version of it.
 
-WHAT TO CUT: slide 6 (40s), which is a lovely result and an upstream ask but is
-Grail-specific and section 13 can carry the asks alone. Then slide 4, whose
-argument survives as one sentence on slide 3. Do NOT cut slide 5. The lead is
-10 seconds and is not worth cutting before either of those.
+WHAT TO CUT: slide 5 (40s), which is a lovely result and an upstream ask but is
+Grail-specific and section 13 can carry the asks alone. Then slide 3, whose
+argument survives as one sentence on slide 2. Do NOT cut slide 4. The lead is
+10 seconds and is not worth cutting before either of those. (These read 6, 4 and
+5 while the toolset slide was here.)
 
 NO DEMO, matching the demo inventory and the outline AS IT WAS. THE NEW OUTLINE
 AT THE END OF docs/Presentation.md ASKS FOR ONE -- its section 6 is "Grail MCP
@@ -5204,14 +5244,14 @@ Decide it deliberately; nothing in this slice depends on the answer.
 DEPARTURES from docs/Presentation.md:
   * the outline's Grail bullet names grailDirectory as the options example.
     There are TWO declared options -- grailDirectory and testGemConfig -- and
-    slide 4 says two, because "a toolset declares its options" is the point and
+    slide 3 says two, because "a toolset declares its options" is the point and
     one option makes it look like a special case;
-  * McpGrailToolset's OTHER collision with the model is speaker notes on slide 5,
+  * McpGrailToolset's OTHER collision with the model is speaker notes on slide 4,
     not a bullet: Grail models Python exceptions outside the Smalltalk Error
     hierarchy, so McpDispatcher's `on: Error do:` cannot see them and an uncaught
     one would take the whole worker gem down rather than answer the client. It is
     excellent material and there is no room for it; it is the first thing to say
-    if a hand goes up on slide 5.
+    if a hand goes up on slide 4.
 ================================================================================
 -->
 
@@ -5240,10 +5280,12 @@ gone and nothing joins a tool surface by being loaded. Before that merge this
 section could only describe how you WOULD add a toolset. Now it can say "copy
 this" and mean it literally, and the worked example is not an insider.
 
-Do NOT spend the seam's argument here -- slide 2 is "write a toolset" and it is
-forty-five seconds away. The lead says what the section is FOR, not how it works.
+Do NOT spend the seam's argument here -- slide 2 picks a surface and, since the
+toolset slide was removed on 2026-09-14, carries how a toolset is written in its
+notes as well. It is fifty seconds away. The lead says what the section is FOR,
+not how it works.
 
-Where this ends, and it is worth knowing before you start: slide 5, the collision
+Where this ends, and it is worth knowing before you start: slide 4, the collision
 between a domain model and this server's session model, with a number attached --
 132 defects against 386/386 clean. That is the slide every vendor in the room who
 writes a toolset will recognise, and it is not really about Grail at all.
@@ -5256,39 +5298,91 @@ header has both sides of it.
 SECTION 11 NOW COMES BEFORE THIS, not after, which changes one thing to have
 ready: "why is narrowing the tool surface not the boundary?" is the question a
 toolset author asks during THESE slides, and the room has already been given the
-answer. Slide 3's blockquote points back at it with a (§11). The full answer is
-in section 11's first slide's notes, and it is about execute_code: a tool that
+answer. NOTHING ON A FACE POINTS BACK AT IT ANY MORE: the blockquote that carried
+the (§11) was on the toolset slide, removed 2026-09-14, so this is yours to make
+in speech. The full answer is in section 11's first slide's notes, and it is about execute_code: a tool that
 compiles can be followed by one that runs.
 -->
 
 ---
 
-## To add tools, write a **toolset**
+## How a deployment picks a surface — three shapes
 
-Subclass `McpToolset` and implement two things:
-
-* **`registerOn:`** — one `name:description:inputSchema:do:` per tool, with schemas from the inherited builders (`objectSchema:required:`, `propString:`, `boolProperty:`)
-* **`toolNames`** — what this toolset offers
-
-> **`tools/list` is unfiltered: every tool a session's toolsets registered is offered, and none is refused for being “unsafe”.** What a session may *do* is decided by the GemStone user its worker gem logs in as (§11).
-
-Handlers are instance methods taking the parsed arguments and answering a `String`; `resolveClass:`, `dictNamed:`, `linesFrom:` and `capResult:` cover the usual lookups and output capping.
-
-**A handler that mutates passes through `self assertMutableClass: cls` first** — which forwards to the **server**, because what counts as protected is **one policy per deployment** rather than each toolset's to invent, and a subclass can tighten it for every toolset at once. **A toolset built with no server refuses to mutate at all.**
+* **`MCP_TOOLSETS="BrainFreezeToolset"`** → a server with **its own tools**
+to surface **its own domain operations** in a meaningful way, not developer coding tools
+* **`MCP_WORKER_CLASS=BrainFreezeServer`** → subclass `McpServer` to change **behaviour:** the kernel guards (`isProtectedClass:`, `protectedDictionaryNames`), the server instructions, the identity **defaults** an unconfigured deployment reports
+* **`serverName:` / `serverVersion:` say which *software* this is** — the product's to set. **`serverTitle:` labels *this instance***
 
 <!--
+Three shapes and they are genuinely different decisions, which is why they are
+three bullets rather than a paragraph. What tools; how it behaves; and what it
+calls itself. SINCE 2026-09-14 THIS SLIDE OPENS THE SECTION -- the "write a
+toolset" slide that used to come first was removed and its material is in the
+banner below -- so the first bullet is now the room's first sight of a toolset,
+and it has to be said as well as shown.
+
+Brain Freeze Insurance is named in the bullets themselves now rather than in a
+blockquote under them, which is better: the example arrives with the mechanism
+instead of after it. Say why it is the right example and not just a customer --
+nobody there wants list_classes, they want their own domain operations, over the
+same transport, with the same guardrail underneath. That is the shape of every
+deployment this section is for.
+
+THE EMPTY-LIST CASE CAME OFF THE FACE and is worth half a sentence because it
+sounds like a mistake and is not: an empty MCP_TOOLSETS is legal, and a router
+that offers no tools is a legal, running MCP server. It answers initialize, it
+answers tools/list with nothing, and it is what you get while you are building
+your first toolset.
+
+TWO CAUTIONS ON THE SUBCLASS BULLET, both off the face since 2026-09-14 and both
+things a vendor will otherwise assume the other way. Usually toolsets are the
+right answer: a subclass is for changing behaviour, not for adding tools. And
+nothing auto-detects a subclass -- the router names it, per session, which is why
+it is an environment variable and not something the image discovers.
+
+The name/title split is a small thing that operators feel immediately. Two
+instances of one product need to be told apart by a human, and that is the
+operator's word, not the vendor's. THE RULE UNDER IT IS ALSO OFF THE FACE NOW:
+serverTitle: is omitted entirely rather than sent as null, the same rule the
+archived section 4 met on serverInfo -- an absent key means "none given", and null
+means the word null rendered somewhere. So a title being present means a human
+deliberately labelled that box.
+
+================================================================================
+TO ADD TOOLS, WRITE A TOOLSET -- from the slide of that name, the section's first
+content slide until it was removed 2026-09-14. Its FACE is nowhere else in the
+deck, so this banner carries the mechanism as well as the notes: nothing on any
+remaining slide says how a toolset is written.
+
+WHAT THE SLIDE SAID, and what to say over this one's first bullet. Subclass
+McpToolset and implement two things: registerOn:, which is one
+name:description:inputSchema:do: per tool with schemas from the inherited
+builders (objectSchema:required:, propString:, boolProperty:), and toolNames,
+which is what the toolset offers. Handlers are instance methods taking the parsed
+arguments and answering a String; resolveClass:, dictNamed:, linesFrom: and
+capResult: cover the usual lookups and output capping. A handler that mutates
+passes through self assertMutableClass: cls first, and a toolset built with no
+server refuses to mutate at all.
+
+THE POINTER THAT WENT WITH IT, and it is the one worth replacing out loud, because
+it was the section's only link back to section 11: tools/list is UNFILTERED --
+every tool a session's toolsets registered is offered, and none is refused for
+being "unsafe". What a session may DO is decided by the GemStone user its worker
+gem logs in as, which the room saw two sections ago. No face in this section
+points back there any more.
+
 Open the section by saying what kind of section it is: everything so far has been
-"here is what this server does". This is "here is the seam". Two extension
-points, and the first is the one you almost always want.
+"here is what this server does". This is "here is the seam". Two extension points,
+and the first is the one you almost always want.
 
 Nobody hand-writes JSON Schema -- the builders are there so a tool's schema is
 Smalltalk, and so that the closed-by-default additionalProperties rule of section
 5's slide 33 is applied for you rather than remembered.
 
-There is no per-tool safety classification to write, and the blockquote says why
-in the positive: a toolset declares what it offers, and the boundary is somewhere
-else entirely. Section 11 is where "somewhere else" gets its slide, so do not
-open it here beyond the pointer.
+There is no per-tool safety classification to write, and the pointer above says
+why in the positive: a toolset declares what it offers, and the boundary is
+somewhere else entirely. Section 11 is where "somewhere else" got its slides, and
+they have already run, so this is a reminder rather than an opening.
 
 assertMutableClass: forwarding to the SERVER is the bit that is easy to get
 wrong and it generalises: policy belongs to the deployment, not to the component.
@@ -5297,40 +5391,8 @@ should not have to know. The fail-closed-with-no-server case is not theoretical
 -- it is exactly what a toolset built standalone in a test gets.
 
 If asked how a handler reports failure: raise. The dispatcher classifies Errors
-into the isError envelope with a kind, which the archived section 5 showed. A handler does not
-build error envelopes itself.
--->
-
----
-
-## How a deployment picks a surface — three shapes, all live today
-
-* **`MCP_TOOLSETS="AcmeDbToolset"`** → a server with **only your tools** and none of the Smalltalk-development surface. **An empty list is legal**, and means a server offering no tools at all
-* **`serverName:` / `serverVersion:` say which *software* this is** — the product's to set. **`serverTitle:` labels *this instance*** — the operator's — and is **omitted entirely rather than sent as null**, so a title being present means a human deliberately labelled that box
-* **`MCP_WORKER_CLASS=AcmeDbServer`** → subclass `McpServer` to change **behaviour**: the kernel guards (`isProtectedClass:`, `protectedDictionaryNames`), the identity hooks, the server instructions. **Usually toolsets are the right answer** — nothing auto-detects a subclass, and the router names it per session
-
-> **Brain Freeze Insurance is the example to say out loud:** a database whose useful tool surface is **its own domain operations**, not developer coding tools. Same transport, same session model, same guardrail — and **none of `McpBrowsingToolset`**.
-
-<!--
-Three shapes and they are genuinely different decisions, which is why they are
-three bullets rather than a paragraph. What tools; what this thing calls itself;
-and how it behaves.
-
-The empty-list case is worth half a sentence because it sounds like a mistake and
-is not: a router that offers no tools is a legal, running MCP server. It answers
-initialize, it answers tools/list with nothing, and it is what you get while you
-are building your first toolset.
-
-The name/title split is a small thing that operators feel immediately. Two
-instances of one product need to be told apart by a human, and that is the
-operator's word, not the vendor's. Omitting rather than nulling is the same rule
-the archived section 4 met on serverInfo: an absent key means "none given", and null means the
-word null rendered somewhere.
-
-Brain Freeze Insurance is the one to name because it makes the whole section
-concrete in one breath. Nobody there wants list_classes. They want their domain
-operations, over the same transport, with the same guardrail underneath. That is
-the shape of every deployment this section is for.
+into the isError envelope with a kind, which the archived section 5 showed. A
+handler does not build error envelopes itself.
 -->
 
 ---
@@ -5460,7 +5522,8 @@ archive.md; these three stayed because they are the part THIS ROOM can act on --
 their defects, in their kernel, measured -- and slide 4 is the concrete ask of
 the talk, which section 13 collects and section 11's notes already name as one
 of the two things being asked for. (That read "section 11's slide" until the lock
-slide was folded away on 2026-09-14; the other ask is spoken now.)
+slide was folded away on 2026-09-14; the other ask is a heading on page 49 now,
+rather than a slide of its own.)
 
 Running order and plans, in seconds -- lead 10, why the writer is owned 50,
 inbound 45, the five defects 60. 165s, all of it optional now.

@@ -43,7 +43,7 @@ style: |
 
 <!--
 ================================================================================
-ARCHIVE. THIRTY-TWO SLIDES SET ASIDE FROM deck.md ON 2026-09-14, FOR TIME.
+ARCHIVE. THIRTY-THREE SLIDES SET ASIDE FROM deck.md ON 2026-09-14, FOR TIME.
 This file is not a talk. It is a holding pen, kept renderable so the slides can
 be looked at, and kept in deck.md's own running order so any of them can be put
 back where it came from.
@@ -88,8 +88,18 @@ slide its whole section existed for, and it came out because its subject arrived
 on the face of the slide before it, as a blockquote of two sentences. Its notes
 are transplanted whole onto that slide under one banner, so the measurement, the
 reverted lock reaper and the question itself all survive as things to say. IT IS
-THE ONE SLIDE IN THIS FILE WHOSE REMOVAL TOOK AN ASK OFF THE SCREEN: the deck now
-asks for a writeLock: privilege only out loud. Its header is at the very end.
+THE ONE SLIDE IN THIS FILE WHOSE REMOVAL TOOK AN ASK OFF THE SCREEN, though only
+for a few hours: later the same day page 49 gained a heading of its own asking
+whether write locks should be privilege-gated, so what the fold finally cost is
+the argument under the question rather than the question. Its header is at the
+very end, and it says the rest.
+
+AND ONE FROM SECTION 10, later still, which is not a fold and not a thinning for
+time: "To add tools, write a toolset" came out because the slide beside it was
+rewritten to name a real toolset on its face. It is the only slide in this file
+that was the SOLE face-level account of a mechanism -- after it, no slide in the
+deck shows how a toolset is written. Its face as well as its notes are
+transplanted onto deck.md page 51. It is last in this file.
 
 WHAT STAYED BEHIND IN THE DECK, deliberately:
   * DEMO C -- a session is a gem. Section 4's demo, kept without section 4. It is
@@ -175,6 +185,11 @@ and the section 11 fold, by its page number in the 60-slide deck that followed
 
   50  `System writeLock:` is gated by **no** privilege — and that is my question
 
+and section 10's mechanism slide, by its page number in the 59-slide deck that
+followed (a SIXTH distinct numbering; none of these six groups share one):
+
+  51  To add tools, write a **toolset**
+
 THE SLICE HEADERS CAME WITH THEIR SLIDES. Slice 5 (section 4), slice 7 (section
 6) and slice 10 (section 12) are reproduced whole below, including their running
 orders, their "what to cut if the hour is going" lists and their departures from
@@ -183,8 +198,9 @@ the codec paragraphs went to deck.md with the codec slides. SLICE 8's DID NOT
 COME: section 9 still exists in the deck, so its header stayed there and was
 rewritten around the fold. SLICE 11's DID NOT COME EITHER, for the same reason:
 section 11 still exists in the deck, two slides of it, and its header there was
-rewritten around its own fold. The headers below those groups are the only
-account of them in this file.
+rewritten around its own fold, and SLICE 9's did not come either, for the same
+reason. The headers below those groups are the only account of them in this
+file.
 
 RENDERING is the same as the deck, and the --html flag is just as required here:
   marp --html --pdf --allow-local-files --no-stdin -o out/archive.pdf docs/slides/archive.md
@@ -2038,4 +2054,93 @@ at all. It is still a person noticing.
 
 install.sh would fail the same way as that DataCurator commit -- worth adding if
 the room looks unconvinced that this reaches past application data.
+-->
+
+---
+
+<!--
+================================================================================
+FROM SECTION 10, extending it: a server for YOUR software -- one slide, "To add
+tools, write a toolset", REMOVED 2026-09-14. The last change of the day, and the
+only slide in this file that was the sole face-level account of a mechanism.
+
+WHAT HAPPENED: the slide beside it -- "How a deployment picks a surface" -- was
+rewritten to name a real customer's toolset and server class in its bullets
+(BrainFreezeToolset, BrainFreezeServer, where it had said AcmeDbToolset and
+AcmeDbServer under a blockquote naming Brain Freeze Insurance as the example).
+With a named toolset on the face of that slide, this one's job -- introducing the
+idea of a toolset at all -- was being done a slide later and more concretely.
+Section 10 went from a lead and five slides to a lead and four, and from about 4
+minutes to about 3 1/4.
+
+WHAT THE DECK NO LONGER SAYS ANYWHERE ON A FACE, and this is the part worth
+weighing before this one stays gone. How a toolset is WRITTEN: subclass
+McpToolset, implement registerOn: and toolNames, build schemas with the inherited
+builders, write handlers that answer a String, and pass mutations through
+assertMutableClass:. The deck is a talk to GemStone developers about extending
+this server, and after this cut no slide in it shows a line of that. It is all on
+deck.md page 51 under a banner -- the FACE as well as the notes, which no other
+entry in this file needed -- so a speaker reading their notes still has it. A room
+that only watches does not.
+
+AND ONE POINTER WENT WITH IT: the blockquote reading "tools/list is unfiltered:
+every tool a session's toolsets registered is offered, and none is refused for
+being 'unsafe'. What a session may DO is decided by the GemStone user its worker
+gem logs in as (§11)." That was section 10's ONLY face-level link back to section
+11, which since the 2026-09-14 reorder runs immediately before it. Three places
+in deck.md were repointed to say the link is made in speech now: section 11's
+slice header, the notes of section 11's first slide, and this section's lead. If
+this slide comes back, all three want their (§11) back.
+
+ITS NOTES ARE ON PAGE 51, WHOLE, under a TO ADD TOOLS, WRITE A TOOLSET banner,
+with two additions rather than the usual none -- a WHAT THE SLIDE SAID paragraph
+reconstructing the face in prose, and a THE POINTER THAT WENT WITH IT paragraph.
+So if this slide is put back, CUT THAT WHOLE BANNER out of page 51's notes,
+including both additions, or the mechanism is in the deck twice.
+
+WHERE IT GOES BACK: immediately after section 10's lead and before the surface
+slide, which is where it was. That slide's own notes would want trimming too --
+four paragraphs there begin by saying something came off a face, and two of them
+are only true while this slide is gone.
+
+Running order and plan as it was, in seconds -- write a toolset 45. The surface
+slide was 45 then and is 50 now, for having to open the seam as well.
+================================================================================
+-->
+## To add tools, write a **toolset**
+
+Subclass `McpToolset` and implement two things:
+
+* **`registerOn:`** — one `name:description:inputSchema:do:` per tool, with schemas from the inherited builders (`objectSchema:required:`, `propString:`, `boolProperty:`)
+* **`toolNames`** — what this toolset offers
+
+> **`tools/list` is unfiltered: every tool a session's toolsets registered is offered, and none is refused for being “unsafe”.** What a session may *do* is decided by the GemStone user its worker gem logs in as (§11).
+
+Handlers are instance methods taking the parsed arguments and answering a `String`; `resolveClass:`, `dictNamed:`, `linesFrom:` and `capResult:` cover the usual lookups and output capping.
+
+**A handler that mutates passes through `self assertMutableClass: cls` first** — which forwards to the **server**, because what counts as protected is **one policy per deployment** rather than each toolset's to invent, and a subclass can tighten it for every toolset at once. **A toolset built with no server refuses to mutate at all.**
+
+<!--
+Open the section by saying what kind of section it is: everything so far has been
+"here is what this server does". This is "here is the seam". Two extension
+points, and the first is the one you almost always want.
+
+Nobody hand-writes JSON Schema -- the builders are there so a tool's schema is
+Smalltalk, and so that the closed-by-default additionalProperties rule of section
+5's slide 33 is applied for you rather than remembered.
+
+There is no per-tool safety classification to write, and the blockquote says why
+in the positive: a toolset declares what it offers, and the boundary is somewhere
+else entirely. Section 11 is where "somewhere else" gets its slide, so do not
+open it here beyond the pointer.
+
+assertMutableClass: forwarding to the SERVER is the bit that is easy to get
+wrong and it generalises: policy belongs to the deployment, not to the component.
+Two toolsets must not disagree about what a protected class is, and a vendor
+should not have to know. The fail-closed-with-no-server case is not theoretical
+-- it is exactly what a toolset built standalone in a test gets.
+
+If asked how a handler reports failure: raise. The dispatcher classifies Errors
+into the isError envelope with a kind, which the archived section 5 showed. A handler does not
+build error envelopes itself.
 -->
