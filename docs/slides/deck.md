@@ -42,7 +42,7 @@ style: |
 ---
 
 <!--
-SIXTY-TWO SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut once;
+SIXTY-THREE SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut once;
 four stretches of them are now set aside. Section 13 is the only one never written.
 
 THE TARGET IS 45 MINUTES as of 2026-09-14, down from an hour, and that is what the current shape is
@@ -57,7 +57,7 @@ for. The running order:
   44-50   section 9 -- McpAuthRouter, a reachable port, then demo G
   51-53   section 11 -- the worker gem's GemStone user (MOVED HERE 2026-09-14)
   54-59   section 10 -- a lead, then extending it: a server for YOUR software
-  60-62   the JSON codec -- OPTIONAL, run only if the clock allows
+  60-63   THE APPENDIX -- a lead, then the JSON codec. OPTIONAL, run only if the clock allows
 
 RUNNING ORDER IS NOT SECTION-NUMBER ORDER ANY MORE. Section 11 was moved ahead of section 10 on
 2026-09-14, so the deck runs 9, 11, 10. The reason is thematic rather than structural: section 9's
@@ -68,7 +68,9 @@ section last, so the talk proper ends on "here is what you build on this" rather
 ONE REFERENCE FLIPPED DIRECTION AND IS BETTER FOR IT: section 10's surface slide ends "(§11)", which
 was a forward pointer and is now a backward one. Section numbering still belongs to the material,
 not to this cut -- the deck already read 3, 7, 8 -- and this is the same principle applied to order
-rather than to numbering.
+rather than to numbering. AND THE LAST STRETCH CARRIES NO SECTION NUMBER AT ALL: as of 2026-09-14
+the codec slides sit behind a lead that calls them THE APPENDIX, so the room is told the talk
+proper has ended rather than told which section it is in. The material is still section 5's.
 
 WHAT IS SET ASIDE, and where. docs/slides/archive.md holds twenty-three slides removed on 2026-09-14
 for time: section 4 (trace 1, a brand-new client's first request, ten slides), the trace half of
@@ -92,11 +94,13 @@ sentence when the version numbers come up, and the whole of its case now sits in
 install slide (page 22), under a VERSIONS banner, because that slide's own table is what puts 3.7.5
 in front of the room. Twenty-eight slides are now set aside in total.
 
-THE CODEC SLIDES MOVED RATHER THAN LEFT. Section 5's other half -- why this server owns its JSON
-writer, the inbound repair, and the five measured kernel defects -- is at the END of the file, after
-section 11, and is the first thing to drop if the clock has gone. It is also the concrete ask of the
-talk, so dropping it is not free; section 11's slide names it as one of the two things being asked
-for.
+THE CODEC SLIDES MOVED RATHER THAN LEFT, AND ARE NOW AN APPENDIX. Section 5's other half -- why this
+server owns its JSON writer, the inbound repair, and the five measured kernel defects -- is at the
+END of the file, after section 10, and is the first thing to drop if the clock has gone. On
+2026-09-14 a lead slide went in front of it saying so in the title, which makes the drop a clean
+seam rather than a silent stop: if the clock has gone, end on the lead. Do not start the three and
+abandon them, because the ask is the last of them. It IS the concrete ask of the talk, so dropping
+it is not free; section 11's slide names it as one of the two things being asked for.
 
 Each slice's own header comment sits beside its first slide. Seven of the original eleven slice
 headers are still here; slice 5's, slice 7's and slice 10's went to the archive with their slides,
@@ -5339,18 +5343,31 @@ tracker with a talk mentioning it.
 
 <!--
 ================================================================================
-THE JSON CODEC -- the last three slides of what was VERTICAL SLICE 6, section 5.
+THE JSON CODEC -- a lead and the last three slides of what was VERTICAL SLICE 6,
+section 5.
 MOVED TO THE END OF THE DECK 2026-09-14, after section 10 (after section 12
 until that section went, and after section 11 until sections 10 and 11 swapped,
 all the same day), as material to run
 only if there is time. The four trace slides that used to precede them are in
 archive.md; these three stayed because they are the part THIS ROOM can act on --
-their defects, in their kernel, measured -- and slide 3 is the concrete ask of
+their defects, in their kernel, measured -- and slide 4 is the concrete ask of
 the talk, which section 13 collects and section 11's slide already names as one
 of the two things being asked for.
 
-Running order and plans, in seconds -- why the writer is owned 50, inbound 45,
-the five defects 60. 155s, all of it optional now.
+Running order and plans, in seconds -- lead 10, why the writer is owned 50,
+inbound 45, the five defects 60. 165s, all of it optional now.
+
+THE LEAD WAS ADDED 2026-09-14, and it calls this an APPENDIX on instruction.
+That is a framing decision rather than a cosmetic one: an appendix announces
+that the talk proper has ENDED, so running it is a gift and dropping it costs
+the room nothing it was promised -- which is exactly the contract these slides
+have had since they moved here. It also gives the drop a clean seam. If the
+clock has gone, stop at the lead; do not start the section and abandon it
+halfway, because the ask is the last slide and the first two are what earn it.
+The lead does NOT carry a section number in its last line where every other
+lead does -- the material is still section 5 and the deck does not renumber for
+a cut, but "Appendix" is what the room is being told. SLIDE NUMBERS BELOW COUNT
+THE LEAD.
 
 THEY STAND ALONE, which is why they could be moved at all: nothing in them
 depends on having walked a request, and the argument runs writer -> reader ->
@@ -5379,12 +5396,52 @@ cited from README.md, McpJson's class comment, McpJsonTest and docs/utf8-wire.md
 and it lives outside the repository along with three later variants including the
 filed 3.7.6 report this table quotes. The outline already knows (its "What to fix
 before the talk", item 2) and recommends committing it. THAT HAS TO HAPPEN BEFORE
-THE TALK or slide 3's last line is an offer of something nobody can take: this
+THE TALK or slide 4's last line is an offer of something nobody can take: this
 room will ask for the file by name, and the README they have open cites a path
 that 404s. It is still true even though the slides are now optional -- if they
 run at all, they run with that offer on them.
 ================================================================================
 -->
+
+<!-- _class: lead -->
+
+# Appendix: the JSON codec
+
+### Owning the writer, repairing the reader, and five measured kernel defects
+
+<br>
+
+**Appendix** · the talk proper has ended — this is the one thing here that is an **ask** rather than a report
+
+<!--
+Ten seconds, and only if the clock allows -- this is the one stretch of the deck
+that is PLANNED to be dropped. Say the word appendix out loud. It is not an
+apology for the material; it is a promise that nothing after this point is needed
+to understand anything before it. The three slides stand alone, which is why they
+could be moved here at all: nothing in them depends on having walked a request.
+
+IF THE CLOCK HAS GONE, STOP HERE rather than starting and abandoning it. Slide 4
+is the ask, and slides 2 and 3 are what earn the right to put it up -- the defect
+table on its own, with no account of why the writer is owned, is a list of
+complaints rather than a case.
+
+THE SECTION NUMBER IS STILL 5, and that is why this lead's last line says
+"Appendix" where every other lead says a section. The trace slides that were this
+section's first half are in archive.md; the deck does not renumber for a cut. Do
+not say "section 5" out loud -- say the JSON codec, which is what the slide says.
+
+WHERE IT LANDS, so the shape is in your head before you start: the last slide is
+five measured defects in THEIR kernel, with a copy-pasteable reproduction and a
+suggested fix for each, and a sentence asking for a name. That is the concrete
+ask of the talk and section 13 collects it. Two of the five are silent data
+corruption on a public API.
+
+BEFORE THE TALK, and true whether or not these slides run:
+docs/kernel-json-unicode.md is still not in the tree, and slide 4 offers it by
+name to a room with the README open. The slice header has it in full.
+-->
+
+---
 
 ## Why this server owns its JSON **writer** — and only the writer
 

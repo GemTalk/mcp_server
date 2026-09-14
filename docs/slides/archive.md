@@ -80,9 +80,10 @@ WHAT STAYED BEHIND IN THE DECK, deliberately:
     6, on the same reasoning: the contrast at the end of it (same call, one
     token's difference) is the whole of what the five slides argued.
   * The three JSON codec slides, which were section 5's second half. They moved
-    to the END of deck.md instead -- after section 12, and after section 11 once
-    section 12 followed them here -- as optional material. They are the part the
-    room can act on, and they stand alone.
+    to the END of deck.md instead -- after section 12, then after section 11 once
+    section 12 followed them here, and now after section 10, behind a lead added
+    on 2026-09-14 that calls them THE APPENDIX -- as optional material. They are
+    the part the room can act on, and they stand alone.
 The demos being kept is the plan the deck is now built around: A, B, C and maybe
 D run together as one long stretch of terminal rather than one demo per section.
 
@@ -1459,10 +1460,14 @@ costs least to leave out, because it has not bounded support since 3.7.4.1 --
 it is a hallway story now, and slide 22's notes carry it in full for exactly
 that.
 
-WHERE THEY GO BACK: as section 12, between section 11 (the worker gem's GemStone
-user) and the JSON codec slides at the end of the deck, in this order. The slice
-header below is slice 10's own, whole, including its running order and its
-departures from docs/Presentation.md.
+WHERE THEY GO BACK: as section 12, in this order, at the end of the talk proper --
+which since the 2026-09-14 reorder means after SECTION 10, not after section 11.
+(This paragraph said section 11 until the appendix lead went in; section 11 moved
+ahead of section 10 the same day and this line was not caught then.) The seam to
+put them at is the appendix lead: they go before it, so the codec slides stay the
+last thing in the file and the appendix stays the thing that can be dropped
+whole. The slice header below is slice 10's own, whole, including its running
+order and its departures from docs/Presentation.md.
 ================================================================================
 -->
 
