@@ -53,7 +53,7 @@ Each slice's own header comment sits beside its first slide.
 
 ONE BLOCK IN THIS FILE IS GENERATED. The gem-contents sequence that runs between the "What is
 different" slide and the rest of section 0 -- seventeen slides stepping through one diagram, plus the tool inventory that
-interrupts them after the McpToolset slide -- sits between the MCP-GEM-SEQUENCE:BEGIN and :END marker comments, and
+interrupts them after the McpTool slide -- sits between the MCP-GEM-SEQUENCE:BEGIN and :END marker comments, and
 is produced by docs/slides/gen.py. Do not hand-edit those slides -- edit the generator and run
 `python3 docs/slides/gen.py --apply`, which rewrites the block in place. `--check` exits non-zero
 when the file has drifted, which is the cheap thing to run before a commit. Everything outside the
@@ -374,7 +374,7 @@ picture belongs to section 4 where it is walked line by line.
 
 <div class="boxnote">
 
-Every box is **one object**. The front-end gem owns the socket and knows who the sessions are; the worker gem runs the tools. Nothing is shared between them &#8212; not a variable, not a view, not a transaction. **One string crosses the gap in each direction**, and sixteen more slides walk them in order, one box or one arrow at a time.
+Every box is **one object**. The front-end gem owns the socket and knows who the sessions are; the worker gem runs the tools. Nothing is shared between them &#8212; not a variable, not a view, not a transaction. **One string crosses the gap in each direction**.
 
 </div>
 
@@ -617,12 +617,14 @@ stone fails for topaz too.
 
 <div class="boxnote">
 
-Reads **one** HTTP/1.1 request and writes **one** JSON response, `MCP-Session-Id` header included. It also writes the SSE stream, every frame gated on the socket being writable, plus a non-blocking read-side disconnect check &#8212; which is how a **closed editor tab** is noticed at all. Its gem is released about ten seconds later.
+Reads **one** HTTP/1.1 request and writes **one** JSON response, `MCP-Session-Id` header included. It also writes the SSE stream, every frame gated on the socket being writable, plus a non-blocking read-side disconnect check &#8212; which is how a **closed editor tab** is noticed.
 
 </div>
 
 <!--
-The ten seconds is a grace for a client that might reattach to the same session. A reopened
+Off the slide since 2026-09-13, and worth a sentence if the question comes: the gem is released
+about ten seconds later. The ten seconds is a grace for a client that might reattach to the
+same session. A reopened
 editor tab does not; it re-initializes. Do not spend time here -- the reaper slide is where
 session lifetime actually gets argued.
 -->
@@ -736,11 +738,14 @@ session lifetime actually gets argued.
 
 <div class="boxnote">
 
-The socket, the routes, the `MCP-Session-Id`&#8594;`McpSession` map behind a mutex, the pending-request table. The marked box is where the gem **loops**: `runOnPort:` blocks in its accept loop until `stop`, and that loop is the gem&#8217;s only activity &#8212; a forked GsProcess runs only while the gem is executing Smalltalk, so the reaper and the poller live off it. It **never runs a tool**, and it runs **transactionless**, so it stops pinning the stone&#8217;s oldest commit record. `McpAuthRouter` adds the bearer token, TLS and RFC 9728 metadata, and logs each worker in as **the token&#8217;s own GemStone user**.
+The socket, the routes, the `MCP-Session-Id`&#8594;`McpSession` map behind a mutex, the pending-request table. The gem **loops** in `runOnPort:` until `stop`, and that loop is the gem&#8217;s only activity &#8212; a forked GsProcess runs only while the gem is executing Smalltalk, so the reaper and the poller live off it. The front end runs **transactionless**. `McpAuthRouter` adds the bearer token, TLS and RFC 9728 metadata, and logs each worker in as **the token&#8217;s own GemStone user**.
 
 </div>
 
 <!--
+Two things this slide used to print and now only says: the front end NEVER RUNS A TOOL, and
+transactionless is what stops it pinning the stone's oldest commit record. Section 3's own
+transactionless slide is where the cost gets argued; here they are one clause each.
 Transactionless is the constraint with teeth: front-end code must not read persistent object
 graphs. Stone primitives and lookups by name are fine; walking a committed collection is not.
 If someone asks why the router decides the worker's class and toolsets rather than the worker --
@@ -976,7 +981,7 @@ startup reaches the next client without a restart.
 
 <div class="boxnote">
 
-`worker nbExecute: 'McpServer handleJsonString: ', body printString`. **Non-blocking**, so one client&#8217;s five-minute test run no longer stalls anyone else. Every embedded string is `printString`-quoted, so a request body cannot smuggle anything into the worker&#8217;s compiler. The answer comes back as that same call&#8217;s **`lastResult`**, read once the call is finished &#8212; so nothing may send GCI to this worker in between.
+`worker nbExecute: 'McpServer handleJsonString: ', body printString`. **Non-blocking**, so one client&#8217;s long request will not stall anyone else. Every embedded string is `printString`-quoted, so a request body cannot smuggle anything into the worker&#8217;s compiler. The answer comes back as that same call&#8217;s **`lastResult`**, read once the call is finished &#8212; so nothing may send GCI to this worker in between.
 
 </div>
 
@@ -1113,7 +1118,7 @@ NOT on that arrow: cacheWorkerIds and logout, which are GCI calls on the handle,
 
 <div class="boxnote">
 
-The worker gem&#8217;s own scratch dictionary: **per gem, per login, never committed**. The front end names a **class**, and `McpServer class>>currentServer` is the single place that turns that into the instance. That single place matters: **two** entries reach a worker &#8212; a client request and the front end&#8217;s own maintenance call &#8212; and the blind-write ledgers live on the *instance*.
+The worker gem&#8217;s own scratch dictionary: **per gem, per login, never committed**. The front end names a **class**, and `McpServer class>>currentServer` is the single place that turns that into the instance. That single place matters: **two** entries reach a worker &#8212; a client request and the front end&#8217;s own maintenance call.
 
 </div>
 
@@ -1600,102 +1605,17 @@ assembled per call, so the surface a client sees is fixed for the life of its se
 
 <div class="boxnote">
 
-A tool pack: `registerOn:` contributes its tools and their schemas, and it owns its `tool_*` handlers and the shared schema builders.
+A tool pack: `registerOn:` contributes its tools and their schemas to the tool registry, and it owns its `tool_*` handlers and the shared schema builders.
 
 </div>
 
 <!--
-SAY THE REST, the next slide shows it: seven core toolsets, one per tool family, plus the
+SAY THE REST, and the inventory two slides on shows it: seven core toolsets, one per tool
+family, plus the
 optional McpGrailToolset on a Grail image -- and SUBCLASS THIS TO ADD TOOLS, which is the whole
 point of the box. A deployment picks any subset of them, or none of them alongside its own.
 McpGrailToolset needs nothing from the server, which is why it doubles as the worked example for
 a third-party toolset. If someone is going to write one, this is the slide to point at.
--->
-
----
-
-## The tools themselves &#8212; 31 in seven toolsets, and Grail&#8217;s nine
-
-<div class="tools">
-<div>
-<p class="tset">McpSessionToolset</p>
-<p>abort</p>
-<p>commit</p>
-<p>refresh</p>
-<p>status</p>
-<p class="tset">McpExecutionToolset</p>
-<p>execute_code</p>
-<p class="tset">McpListingToolset</p>
-<p>list_all_classes</p>
-<p>list_classes</p>
-<p>list_dictionaries</p>
-<p>list_dictionary_entries</p>
-</div>
-<div>
-<p class="tset">McpBrowsingToolset</p>
-<p>describe_class</p>
-<p>export_class_source</p>
-<p>get_class_definition</p>
-<p>get_class_hierarchy</p>
-<p>get_method_source</p>
-<p>list_methods</p>
-<p class="tset">McpSearchToolset</p>
-<p>find_implementors</p>
-<p>find_references_to</p>
-<p>find_senders</p>
-<p>search_method_source</p>
-</div>
-<div>
-<p class="tset">McpMutationToolset</p>
-<p>add_dictionary</p>
-<p>compile_class_definition</p>
-<p>compile_method</p>
-<p>delete_class</p>
-<p>delete_method</p>
-<p>remove_dictionary</p>
-<p>set_class_comment</p>
-<p class="tset">McpTestingToolset</p>
-<p>describe_test_failure</p>
-<p>list_failing_tests</p>
-<p>list_test_classes</p>
-<p>run_test_class</p>
-<p>run_test_method</p>
-</div>
-<div class="grail">
-<p class="tset">McpGrailToolset</p>
-<p>compile_python</p>
-<p>eval_python</p>
-<p>describe_python_class</p>
-<p>list_python_methods</p>
-<p>python_module_state</p>
-<p>run_python_tests</p>
-<p>get_python_source</p>
-<p>find_python_senders</p>
-<p>search_python_source</p>
-</div>
-</div>
-
-<!--
-Do not read the list. It is here so nobody has to take the tool surface on faith, and so the
-shape is visible at a glance: the verbs are GemStone's, not a generic file-and-shell set --
-there is no read_file and no bash, because there is no filesystem in the argument.
-
-The column that matters is the first one. FOUR tools drive the transaction, and one of them is
-the only thing in the image that commits. Everything else in the picture -- 36 tools -- leaves
-the transaction exactly where it found it. Section 7 is built on that sentence.
-
-The dashed column is a third party's toolset that happens to live in this tree: nine tools, its
-own options, its own suite, not one line of special handling in core. Section 10 says "copy
-this"; here it is only worth pointing at.
-
-If asked why execute_code sits beside the session tools rather than with the writers -- because
-it is the one tool that can do anything the other 30 can, which is section 7's full-disclosure
-slide, not this one.
-
-Three facts this slide deliberately does NOT print, for whoever asks. The order within a toolset
-is registration order, which is the order tools/list answers in. The seven on the left are
-defaultToolsetNames -- a deployment takes any subset, and section 2 spends that. And of these
-forty, exactly two ever report progress: list_failing_tests, and run_python_tests.
 -->
 
 ---
@@ -1807,13 +1727,103 @@ forty, exactly two ever report progress: list_failing_tests, and run_python_test
 
 <div class="boxnote">
 
-Name, description, JSON Schema, handler block. It **validates arguments against its own schema before the handler runs**, which is why a closed schema turns one stale argument into a cascade of failures rather than one &#8212; and why, when `./test.sh` fails in a heap, you fix the **first** check and re-run.
+Name, description, JSON Schema, handler block. It **validates arguments against its own schema before the handler runs**.
 
 </div>
 
 <!--
-About 31 of these in a default worker, more with Grail. The validation point is a contributor
-warning dressed as a design note; it is in CLAUDE.md for the same reason.
+About 31 of these in a default worker, more with Grail -- and the next slide is the list, so
+this is the moment to say what one of them IS rather than what there are.
+What validating first COSTS, off the slide since 2026-09-13 and still the thing to say if a
+contributor asks: a closed schema turns one stale argument into a cascade of failures rather
+than one, which is why, when ./test.sh fails in a heap, you fix the FIRST check and re-run. A
+contributor warning dressed as a design note; it is in CLAUDE.md for the same reason.
+-->
+
+---
+
+## The tools themselves &#8212; 31 in seven toolsets, and Grail&#8217;s nine
+
+<div class="tools">
+<div>
+<p class="tset">McpSessionToolset</p>
+<p>abort</p>
+<p>commit</p>
+<p>refresh</p>
+<p>status</p>
+<p class="tset">McpExecutionToolset</p>
+<p>execute_code</p>
+<p class="tset">McpListingToolset</p>
+<p>list_all_classes</p>
+<p>list_classes</p>
+<p>list_dictionaries</p>
+<p>list_dictionary_entries</p>
+</div>
+<div>
+<p class="tset">McpBrowsingToolset</p>
+<p>describe_class</p>
+<p>export_class_source</p>
+<p>get_class_definition</p>
+<p>get_class_hierarchy</p>
+<p>get_method_source</p>
+<p>list_methods</p>
+<p class="tset">McpSearchToolset</p>
+<p>find_implementors</p>
+<p>find_references_to</p>
+<p>find_senders</p>
+<p>search_method_source</p>
+</div>
+<div>
+<p class="tset">McpMutationToolset</p>
+<p>add_dictionary</p>
+<p>compile_class_definition</p>
+<p>compile_method</p>
+<p>delete_class</p>
+<p>delete_method</p>
+<p>remove_dictionary</p>
+<p>set_class_comment</p>
+<p class="tset">McpTestingToolset</p>
+<p>describe_test_failure</p>
+<p>list_failing_tests</p>
+<p>list_test_classes</p>
+<p>run_test_class</p>
+<p>run_test_method</p>
+</div>
+<div class="grail">
+<p class="tset">McpGrailToolset</p>
+<p>compile_python</p>
+<p>eval_python</p>
+<p>describe_python_class</p>
+<p>list_python_methods</p>
+<p>python_module_state</p>
+<p>run_python_tests</p>
+<p>get_python_source</p>
+<p>find_python_senders</p>
+<p>search_python_source</p>
+</div>
+</div>
+
+<!--
+Do not read the list. It is here so nobody has to take the tool surface on faith, and so the
+shape is visible at a glance: the verbs are GemStone's, not a generic file-and-shell set --
+there is no read_file and no bash, because there is no filesystem in the argument.
+
+The column that matters is the first one. FOUR tools drive the transaction, and one of them is
+the only thing in the image that commits. Everything else in the picture -- 36 tools -- leaves
+the transaction exactly where it found it. Section 7 is built on that sentence.
+
+The dashed column is a third party's toolset that happens to live in this tree: nine tools, its
+own options, its own suite, not one line of special handling in core. Section 10 says "copy
+this"; here it is only worth pointing at.
+
+If asked why execute_code sits beside the session tools rather than with the writers -- because
+it is the one tool that can do anything the other 30 can, which is section 7's full-disclosure
+slide, not this one.
+
+Three facts this slide deliberately does NOT print, for whoever asks. The order within a toolset
+is registration order, which is the order tools/list answers in. The seven on the left are
+defaultToolsetNames -- a deployment takes any subset, and section 2 spends that. And of these
+forty, exactly two ever report progress: list_failing_tests, and run_python_tests.
 -->
 
 ---

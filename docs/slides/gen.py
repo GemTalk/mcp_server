@@ -22,8 +22,9 @@ The highlight is a class from the SVG (`c-session`, `a-request`, ...) or None
 for no highlight. Order in SLIDES is running order.
 
 ONE SLIDE IN THE RUN IS NOT A DIAGRAM. The tool inventory interrupts the sequence
-after the McpToolset slide, because that is the one moment the audience has just
-been told what a toolset IS and has not yet been shown what is in one. It is not
+after the McpTool slide -- it followed McpToolset until 2026-09-13 -- so that the
+room has been told what a toolset is AND what one tool is before it is shown the
+forty of them. The list then reads as the thing the last two boxes make. It is not
 a SLIDES entry -- it carries no diagram -- so it lives in AFTER, a map from a
 highlight class to raw slide text emitted immediately after that slide. Keying on
 the class rather than an index means reordering SLIDES carries it along. It still
@@ -227,8 +228,7 @@ SLIDES = [
  (None, "Two gems, and what is in each",
   "Every box is **one object**. The front-end gem owns the socket and knows who the sessions are; "
   "the worker gem runs the tools. Nothing is shared between them &#8212; not a variable, not a view, "
-  "not a transaction. **One string crosses the gap in each direction**, and sixteen more slides "
-  "walk them in order, one box or one arrow at a time.",
+  "not a transaction. **One string crosses the gap in each direction**.",
   "The establishing shot. Do not explain anything yet -- name the two gems, say that the boxes are\n"
   "objects rather than classes-in-general, and move. Everything on this slide gets its own slide."),
 
@@ -248,20 +248,23 @@ SLIDES = [
  ("c-http", "McpHttpConnection &#8212; one per request",
   "Reads **one** HTTP/1.1 request and writes **one** JSON response, `MCP-Session-Id` header included. "
   "It also writes the SSE stream, every frame gated on the socket being writable, plus a "
-  "non-blocking read-side disconnect check &#8212; which is how a **closed editor tab** is noticed at all. "
-  "Its gem is released about ten seconds later.",
-  "The ten seconds is a grace for a client that might reattach to the same session. A reopened\n"
+  "non-blocking read-side disconnect check &#8212; which is how a **closed editor tab** is noticed.",
+  "Off the slide since 2026-09-13, and worth a sentence if the question comes: the gem is released\n"
+  "about ten seconds later. The ten seconds is a grace for a client that might reattach to the\n"
+  "same session. A reopened\n"
   "editor tab does not; it re-initializes. Do not spend time here -- the reaper slide is where\n"
   "session lifetime actually gets argued."),
 
  ("c-router", "McpRouter &#8212; the accept loop, and the gem&#8217;s blocking main activity",
   "The socket, the routes, the `MCP-Session-Id`&#8594;`McpSession` map behind a mutex, the pending-request "
-  "table. The marked box is where the gem **loops**: `runOnPort:` blocks in its accept loop until `stop`, "
+  "table. The gem **loops** in `runOnPort:` until `stop`, "
   "and that loop is the gem&#8217;s only activity &#8212; a forked GsProcess runs only while the gem is executing "
-  "Smalltalk, so the reaper and the poller live off it. It **never runs a tool**, and it runs "
-  "**transactionless**, so it stops pinning the stone&#8217;s "
-  "oldest commit record. `McpAuthRouter` adds the bearer token, TLS and RFC 9728 metadata, and logs "
+  "Smalltalk, so the reaper and the poller live off it. The front end runs "
+  "**transactionless**. `McpAuthRouter` adds the bearer token, TLS and RFC 9728 metadata, and logs "
   "each worker in as **the token&#8217;s own GemStone user**.",
+  "Two things this slide used to print and now only says: the front end NEVER RUNS A TOOL, and\n"
+  "transactionless is what stops it pinning the stone's oldest commit record. Section 3's own\n"
+  "transactionless slide is where the cost gets argued; here they are one clause each.\n"
   "Transactionless is the constraint with teeth: front-end code must not read persistent object\n"
   "graphs. Stone primitives and lookups by name are fine; walking a committed collection is not.\n"
   "If someone asks why the router decides the worker's class and toolsets rather than the worker --\n"
@@ -279,7 +282,7 @@ SLIDES = [
 
  ("a-request", "The hop &#8212; one string, non-blocking",
   "`worker nbExecute: 'McpServer handleJsonString: ', body printString`. **Non-blocking**, so one "
-  "client&#8217;s five-minute test run no longer stalls anyone else. Every embedded string is "
+  "client&#8217;s long request will not stall anyone else. Every embedded string is "
   "`printString`-quoted, so a request body cannot smuggle anything into the worker&#8217;s compiler. The "
   "answer comes back as that same call&#8217;s **`lastResult`**, read once the call is finished &#8212; so "
   "nothing may send GCI to this worker in between.",
@@ -309,7 +312,7 @@ SLIDES = [
   "The worker gem&#8217;s own scratch dictionary: **per gem, per login, never committed**. The front end "
   "names a **class**, and `McpServer class>>currentServer` is the single place that turns that into "
   "the instance. That single place matters: **two** entries reach a worker &#8212; a client request and the "
-  "front end&#8217;s own maintenance call &#8212; and the blind-write ledgers live on the *instance*.",
+  "front end&#8217;s own maintenance call.",
   "This is the slide the whole diagram was built around. A second McpServer instance would be a\n"
   "second set of ledgers, licensing writes on the strength of reads it never saw. Say that sentence\n"
   "slowly.\n"
@@ -354,9 +357,10 @@ SLIDES = [
   "assembled per call, so the surface a client sees is fixed for the life of its session."),
 
  ("c-toolset", "Mcp*Toolset &#8212; the unit you add tools in",
-  "A tool pack: `registerOn:` contributes its tools and their schemas, and it owns its `tool_*` "
-  "handlers and the shared schema builders.",
-  "SAY THE REST, the next slide shows it: seven core toolsets, one per tool family, plus the\n"
+  "A tool pack: `registerOn:` contributes its tools and their schemas to the tool registry, and it "
+  "owns its `tool_*` handlers and the shared schema builders.",
+  "SAY THE REST, and the inventory two slides on shows it: seven core toolsets, one per tool\n"
+  "family, plus the\n"
   "optional McpGrailToolset on a Grail image -- and SUBCLASS THIS TO ADD TOOLS, which is the whole\n"
   "point of the box. A deployment picks any subset of them, or none of them alongside its own.\n"
   "McpGrailToolset needs nothing from the server, which is why it doubles as the worked example for\n"
@@ -364,11 +368,13 @@ SLIDES = [
 
  ("c-tool", "McpTool &#8212; one tool, and its schema",
   "Name, description, JSON Schema, handler block. It **validates arguments against its own schema "
-  "before the handler runs**, which is why a closed schema turns one stale argument into a cascade of "
-  "failures rather than one &#8212; and why, when `./test.sh` fails in a heap, you fix the **first** check "
-  "and re-run.",
-  "About 31 of these in a default worker, more with Grail. The validation point is a contributor\n"
-  "warning dressed as a design note; it is in CLAUDE.md for the same reason."),
+  "before the handler runs**.",
+  "About 31 of these in a default worker, more with Grail -- and the next slide is the list, so\n"
+  "this is the moment to say what one of them IS rather than what there are.\n"
+  "What validating first COSTS, off the slide since 2026-09-13 and still the thing to say if a\n"
+  "contributor asks: a closed schema turns one stale argument into a cascade of failures rather\n"
+  "than one, which is why, when ./test.sh fails in a heap, you fix the FIRST check and re-run. A\n"
+  "contributor warning dressed as a design note; it is in CLAUDE.md for the same reason."),
 
  ("a-progress", "Progress &#8212; a worker cannot write to its own client",
   "The socket belongs to the front end, and exactly one process may write to it. So a tick goes to "
@@ -523,7 +529,7 @@ forty, exactly two ever report progress: list_failing_tests, and run_python_test
 -->
 """
 
-AFTER = {"c-toolset": INTERLEAF_TOOLS}
+AFTER = {"c-tool": INTERLEAF_TOOLS}
 
 
 def check_comments(text):
