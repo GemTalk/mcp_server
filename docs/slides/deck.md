@@ -19,8 +19,9 @@ style: |
   pre, code { font-size: 19px; }
   blockquote { border-left: 5px solid #b4451f; padding-left: .7em; font-style: normal; }
   .fine { font-size: 18px; color: #4a5560; }
-  .verbatim { column-count: 2; column-gap: 30px; font-size: 15px; line-height: 1.45; }
-  .verbatim p { margin: 0 0 .75em; }
+  .verbatim { column-count: 2; column-gap: 34px; font-size: 20px; line-height: 1.45; }
+  .verbatim p { margin: 0 0 .8em; }
+  .verbatim .elide { color: #b4451f; opacity: .7; letter-spacing: .22em; margin: 0 0 .8em; }
   .cap { color: #b4451f; font-weight: 600; }
   .ex { font-family: ui-monospace, monospace; font-size: 15px; line-height: 1.45;
         border-left: 3px solid #ccd6da; padding-left: .7em; margin: 0 0 .55em; }
@@ -4218,7 +4219,7 @@ Eleven minutes including the demo. If we run long, the demo is the part to prote
 
 ---
 
-## Everything the model is told, in full
+## The client is told what a transaction view is
 
 <div class="verbatim">
 
@@ -4226,41 +4227,48 @@ Eleven minutes including the demo. If we run long, the demo is the part to prote
 
 <p><span class="cap">YOUR VIEW IS A SNAPSHOT.</span> You see the repository as it was at one instant. It moves when YOU move it -- `commit`, `abort` and `refresh` each take a current view -- and in one other case: if it falls far behind, so that it is holding the repository's commit records open, the server refreshes it for you. That happens only BETWEEN your calls, it keeps your uncommitted changes, and it tells you on your next result. Either way, anything you read before the last view move may since have been changed by somebody else.</p>
 
-<p><span class="cap">THE DATABASE PROTECTS YOU FROM ACTING ON A STALE SNAPSHOT.</span> If you change something that another session has committed a change to since your view was taken, your `commit` FAILS and writes nothing -- it will not silently overwrite their work. This is why the snapshot is worth having, and it is also why a `refresh` in the middle of a plan is not free: refreshing adopts their version as your starting point, so a change you then make on the strength of what you read EARLIER will commit cleanly and erase what they did. If you read something, thought about it, and are only now acting, re-read it first.</p>
+<p class="elide">[ ... ]</p>
 
 <p><span class="cap">WHAT SURVIVES A CALL.</span> Every change you make stays in your session until you commit or abort it -- so you can compile a method, run its tests against what you just compiled, and only then decide to keep it. Nobody else can see any of it until you commit.</p>
 
 <p><span class="cap">NOTHING COMMITS FOR YOU.</span> Only the `commit` tool commits. The tools that change the image (compile_method, compile_class_definition, delete_class, delete_method, set_class_comment, add_dictionary, remove_dictionary) leave their work uncommitted. `abort` discards everything uncommitted; `refresh` takes a current view and keeps your uncommitted changes.</p>
 
-<p><span class="cap">THE [session] LINE.</span> A result may end with one line starting "[session]". It describes your session, not the tool you just called, and it appears only when there is something to do:<br>
-&nbsp;&nbsp;- uncommitted changes pending -> commit them or abort them. The line names what would end this session first and how long that is; if it ends, they are lost. Commit anything you want to keep rather than leaving it staged.<br>
-&nbsp;&nbsp;- your last commit FAILED, or the server refreshed your view and your pending changes now CONFLICT -> either way another session has changed the same objects, nothing of yours was written, and your changes are still here but no commit can succeed until you call `abort`, which discards them. Save anything you need, abort, re-read the current state, and redo the change against it. The line says which of the two happened.<br>
-&nbsp;&nbsp;- the server refreshed your view -> your snapshot moved, and your uncommitted changes were kept. Re-read anything you are about to act on: only what you read through a tool is tracked, so the line can name what it knows went stale and no more.</p>
-
-<p>A failed commit is the one failure here you cannot retry your way out of, and the conflict is reported per CLASS rather than per method -- two sessions compiling different methods on one class still collide. If the work matters, save the source before aborting.</p>
+<p class="elide">[ ... ]</p>
 
 </div>
 
 <!--
-This is the whole of `McpServer class>>defaultServerInstructions`, sent in the initialize result.
-551 words. It is on one slide because the fact that it FITS on one slide is part of the point —
-and because I want to walk the five capitalised headings rather than paraphrase them.
+This is `McpServer class>>defaultServerInstructions`, sent in the initialize result -- not all of
+it. 551 words in the image, a little under half of them here. It was the whole thing on one slide
+until 2026-09-14, on the theory that FITTING was part of the point; it fitted at 15px, which is
+not the same as being readable from the back of a room. The two elision marks are real omissions
+and both are worth naming aloud rather than skipping past.
 
-Be honest about the slide: the body is a prop. The back row can read the orange headings and
-nothing else, and that is fine, because the headings are the argument.
+The body is still a prop, but now it is a prop that can be read. The orange headings are the
+argument.
 
 Point at, in order:
   * "one long-running database transaction, for as long as the connection lasts" — this is the
     sentence that makes a session a gem rather than a request handler.
   * SNAPSHOT: "and in one other case" — that clause is section 8, view hygiene, and it was added
     the day the server started moving a client's view for it.
-  * PROTECTS YOU: this is the paragraph the rest of the section is the argument for. Note what it
-    tells the model to do: "If you read something, thought about it, and are only now acting,
-    RE-READ IT FIRST." That instruction exists because the failure two slides from now is real.
+  * THE FIRST ELISION is the paragraph the rest of this section is the argument for, so restore it
+    from memory in two sentences. The database refuses a commit against a view that has moved and
+    writes nothing, which is what makes the snapshot worth having; and a refresh mid-plan is
+    therefore not free, because it adopts the other session's version as your starting point, so a
+    change made on the strength of what you read EARLIER commits cleanly over their work. Then
+    quote the line it ends on, because it is the one instruction in 551 words that asks the model
+    to do something it would not otherwise do: "If you read something, thought about it, and are
+    only now acting, RE-READ IT FIRST." That exists because the failure two slides from now is
+    real.
   * NOTHING COMMITS FOR YOU: says out loud that the mutation tools leave work uncommitted. Six
     weeks ago every one of them committed inside its own call, which is slide 6.
-  * THE [session] LINE: the terse line the next slide shows. Unintelligible without this paragraph,
-    which is most of why the instructions exist at all.
+  * THE SECOND ELISION is the [session] line -- four paragraphs of it, and the next slide is the
+    line itself. Say only that it is there and that it is unintelligible without its paragraph,
+    which is most of why these instructions exist at all. The last thing cut with it is worth
+    keeping in your pocket for the questions: a failed commit is the one failure here you cannot
+    retry your way out of, and the conflict is reported per CLASS rather than per method, so two
+    sessions compiling different methods on one class still collide.
 
 MCP calls `instructions` a hint to the model rather than documentation for a person, so what goes
 in it is what a model cannot get from tool descriptions read one at a time: what a session IS
