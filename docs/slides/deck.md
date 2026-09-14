@@ -4178,8 +4178,8 @@ bugs are the material anyway.
 <!--
 ================================================================================
 VERTICAL SLICE 1 -- section 7, the transaction model and the blind-write
-guardrail. Nine slides. Re-cut 2026-09-10 to the running order below, then cut
-hard on 2026-09-14 -- five slides came off that day; it diverged from the outline
+guardrail. Eight slides. Re-cut 2026-09-10 to the running order below, then cut
+hard on 2026-09-14 -- six slides came off that day; it diverged from the outline
 on purpose:
 
   * the measured seven-line trace is now speaker notes on the agent diagram, not
@@ -4216,10 +4216,18 @@ what goes wrong, and as a wall of prose before it. The accent colours on the two
 pictures are deliberately the wrong way round: the REFUSED commit is red and the
 SUCCESSFUL one is green, and saying why is the point of the pair.
 
+LAST OFF, 2026-09-14: "keeping the measurements honest". Its two suites and its
+fail-on-good-news blockquote were lifted onto the execute_code slide, which is
+now the section's closing slide and says both things at once -- here is the hole,
+and here is what keeps the rest of it honest. The rest of that slide, including
+the sentence about revisiting the design's scope if the test ever starts failing,
+is speaker notes there.
+
 Budget: 11:10 at the plans in docs/Presentation.md's demo inventory -- 490s of
-slides plus a 180s demo. The five slides cut on 2026-09-14 give back something
-like 250s of that, which puts the slice near 7:00 and makes it the shortest of
-the two GemStone sections rather than the longest. The agent diagram, fourth in
+slides plus a 180s demo. The six slides cut on 2026-09-14 give back something
+like 270s of that, which puts the slice near 6:40 and makes it the shortest of
+the two GemStone sections rather than the longest. execute_code now carries two
+ideas rather than one, so give it 50 rather than the 30 it had. The agent diagram, fourth in
 the slice, carries 90 seconds and is the one to protect; "the rule, the ledgers,
 the stamp" is now the only slide standing between it and execute_code, so it can
 afford 60 rather than the 40 it had.
@@ -4696,13 +4704,24 @@ note, which can only come from checking everything.
 
 ---
 
-## Full disclosure: `execute_code` circumvents the guardrail
+## Full disclosure: Circumventing the guardrail
 
 **`execute_code` is outside the guardrail, and its own description says so.** This cannot be
 closed: it can send `System commitTransaction` itself, and read, write, and abort directly.
 
 The stone still protects against write-write conflicts. But a client using `execute_code` can
 silently overwrite another session's commits.
+
+## Relevant test suites
+
+- **`McpBlindWriteTest`** (41) drives the ledger protocol directly and pins the **rules**.
+- **`McpConcurrentEditTest`** (18) stages genuine conflicts from a **real second gem** and pins
+  that the rules still match the **database**.
+
+One test **fails on good news** in case the stone starts protecting blind writes:
+
+> `testTheStoneAloneWouldAllowThatClobber` asserts that with the guardrail bypassed, GemStone
+> **still accepts** the commit that discards the other session's work.
 
 <!--
 Say this plainly rather than burying it. The guardrail covers the tools that name their subject,
@@ -4733,39 +4752,6 @@ One story if there is time, and it belongs with slide 6: compile_class_definitio
 source string and evaluate it, checking only afterwards that the result was a Behavior — by which
 point any side effect had already happened. It was execute_code with a return-type assertion. It
 now takes structured arguments and builds the definition itself, so it cannot evaluate anything.
--->
-
----
-
-## Keeping the measurements honest
-
-Two suites, **deliberately different in kind**:
-
-- **`McpBlindWriteTest`** (41) drives the ledger protocol directly and pins the **rules**.
-- **`McpConcurrentEditTest`** (18) stages genuine conflicts from a **real second gem** and pins
-  that the rules still match the **database**.
-
-One test is written to **fail on good news**:
-
-> `testTheStoneAloneWouldAllowThatClobber` asserts that with the guardrail bypassed, GemStone
-> **still accepts** the commit that discards the other session's work. If it ever starts failing,
-> the stone has grown protection of its own and this design's scope should be revisited.
-
-<!--
-The reason for two suites is the reason for this whole section: every rule here was derived from
-something measured against a live stone, and a suite that never touches the stone cannot notice if
-a measurement stops holding. A kernel change that made a failed commit move the view, or made a
-refresh stop laundering a stale read, would leave the rules suite green and the guardrail wrong.
-
-The fail-on-good-news test is the one I would point at if asked how this is maintained rather than
-just built. It is also, as of four days ago, doing exactly its job on an unsupported image: on
-3.7.2 it FAILS, and what it is reporting there is not good news — that image refuses the
-same-object case spuriously while still laundering every case where the write lands somewhere other
-than the read. That is section 12.
-
-Both suites commit, so both declare movesTheSessionView, and the run_test_class tool refuses them
-from a session holding uncommitted work. That opt-in is worth a mention: nothing reminds you, and a
-suite that commits without declaring it eats the caller's changes.
 -->
 
 ---
