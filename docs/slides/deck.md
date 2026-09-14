@@ -4396,10 +4396,10 @@ and re-verify per version.
   <text x="140" y="46" font-size="16" text-anchor="middle" fill="currentColor">read X</text>
   <circle cx="330" cy="206" r="6" fill="currentColor"/>
   <text x="330" y="240" font-size="16" text-anchor="middle" fill="currentColor">commit X&#8242;</text>
-  <line x1="470" y1="30" x2="470" y2="250" stroke="#2e6a4f" stroke-width="1.6" stroke-dasharray="6 5"/>
-  <circle cx="470" cy="66" r="6" fill="#2e6a4f"/>
-  <text x="470" y="46" font-size="16" text-anchor="middle" font-weight="600" fill="#2e6a4f">abort</text>
-  <text x="470" y="276" font-size="14" text-anchor="middle" fill="#2e6a4f">S1&#8217;s view moves here</text>
+  <line x1="470" y1="30" x2="470" y2="250" stroke="currentColor" stroke-width="1.4" stroke-dasharray="6 5" opacity=".5"/>
+  <circle cx="470" cy="66" r="6" fill="currentColor"/>
+  <text x="470" y="46" font-size="16" text-anchor="middle" font-weight="600" fill="currentColor">abort</text>
+  <text x="470" y="276" font-size="14" text-anchor="middle" fill="currentColor" opacity=".62">S1&#8217;s view moves here</text>
   <circle cx="640" cy="66" r="6" fill="currentColor"/>
   <text x="640" y="46" font-size="16" text-anchor="middle" fill="currentColor">write X</text>
   <text x="640" y="94" font-size="13.5" text-anchor="middle" fill="currentColor" opacity=".62">from the pre-abort read</text>
