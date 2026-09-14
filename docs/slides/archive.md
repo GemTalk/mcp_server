@@ -43,7 +43,7 @@ style: |
 
 <!--
 ================================================================================
-ARCHIVE. TWENTY-THREE SLIDES SET ASIDE FROM deck.md ON 2026-09-14, FOR TIME.
+ARCHIVE. TWENTY-EIGHT SLIDES SET ASIDE FROM deck.md ON 2026-09-14, FOR TIME.
 This file is not a talk. It is a holding pen, kept renderable so the slides can
 be looked at, and kept in deck.md's own running order so any of them can be put
 back where it came from.
@@ -62,6 +62,15 @@ paragraphs its surviving slides depend on. Read those headers before putting any
 of them back. The most worth putting back is maxSessions, and its header says
 why.
 
+THEN SECTION 12 WENT WHOLE, later still the same day: all five slides of
+"versions: the floor moved, and why", about four minutes. That is a set-aside
+again rather than a thinning -- the section is one argument across five slides
+and half of it does not stand. It is LAST in this file, after the section 8
+pairs, with slice 10's header whole. Its notes were not split but CONDENSED: one
+VERSIONS block at the end of deck.md page 22's notes carries the whole argument
+in shorter form, because page 22's table is where the room first sees "3.7.5".
+Read that header before putting any of these back.
+
 WHAT STAYED BEHIND IN THE DECK, deliberately:
   * DEMO C -- a session is a gem. Section 4's demo, kept without section 4. It is
     the load-bearing demo of the talk and it needs no walk in front of it: the
@@ -71,8 +80,9 @@ WHAT STAYED BEHIND IN THE DECK, deliberately:
     6, on the same reasoning: the contrast at the end of it (same call, one
     token's difference) is the whole of what the five slides argued.
   * The three JSON codec slides, which were section 5's second half. They moved
-    to the END of deck.md instead, after section 12, as optional material -- they
-    are the part the room can act on, and they stand alone.
+    to the END of deck.md instead -- after section 12, and after section 11 once
+    section 12 followed them here -- as optional material. They are the part the
+    room can act on, and they stand alone.
 The demos being kept is the plan the deck is now built around: A, B, C and maybe
 D run together as one long stretch of terminal rather than one demo per section.
 
@@ -123,9 +133,18 @@ and from the second section 8 pass, by their page numbers after the first:
   43  The ending that is *not* in the ladder: a worker gem that has died
   44  `maxSessions` — the one bound here that refuses rather than releases
 
-THE SLICE HEADERS CAME WITH THEIR SLIDES. Slice 5 (section 4) and slice 7
-(section 6) are reproduced whole below, including their running orders, their
-"what to cut if the hour is going" lists and their departures from
+and section 12 whole, by its page numbers in the 66-slide deck that followed
+(a third distinct numbering -- these three groups do not share one):
+
+  59  The floor moved — four days ago, and for one primitive
+  60  `continueTransaction`: identical source, different primitive
+  61  And 3.7.2 is **not** the safer image for having it
+  62  #51438: right length, wrong content
+  63  What the floor moving actually deleted
+
+THE SLICE HEADERS CAME WITH THEIR SLIDES. Slice 5 (section 4), slice 7 (section
+6) and slice 10 (section 12) are reproduced whole below, including their running
+orders, their "what to cut if the hour is going" lists and their departures from
 docs/Presentation.md. Slice 6's header was split: the trace paragraphs are here,
 the codec paragraphs went to deck.md with the codec slides.
 
@@ -1392,4 +1411,316 @@ what a busy server wants but what the smallest plausible stone allows.
 
 Enforcement, if anyone asks where: openSessionCreating:, inside one critical section, so two
 simultaneous initializes cannot both see a free slot.
+-->
+
+---
+
+<!--
+================================================================================
+FROM SECTION 12 -- the whole section, all five slides, removed 2026-09-14 after
+the section 8 thinnings above. They were deck.md pages 59 to 63. "Versions: the
+floor moved, and why", about four minutes, and it is the fourth and last stretch
+set aside that day.
+
+THIS IS A SET-ASIDE, NOT A THINNING. Section 8 was cut slide by slide because
+each of its slides stood alone; this section has ONE argument running through
+five slides and half of it does not stand. Slides 2 and 3 are the argument --
+slide 2 is the evidence and slide 3 is the decision -- and the section's own
+header said "do NOT cut slides 2 and 3". Taking them both is what makes this a
+whole-section cut rather than another trim.
+
+WHAT THE TALK KEEPS. A sentence when the version numbers come up, on the install
+slide -- deck.md page 22, whose table already reads "3.7.5+" against src/auth and
+is therefore where the room's hand goes up. ALL FIVE SLIDES' NOTES WERE
+CONDENSED INTO ONE BLOCK THERE, under a VERSIONS banner at the end of that
+slide's notes: the matrix, the two continueTransaction differences with the
+sentence that decided it, the "3.7.2 is not the safer image" correction, the
+no-optional-methods consequence, #51438 whole, what the floor moving deleted, and
+the housekeeping. Nothing of the argument was lost; what was lost is the tables
+that made it visible at the back of a room.
+
+So this is the one set-aside where the deck's copy is a CONDENSATION rather than
+a transplant of whole paragraphs. If any of these slides comes back, take its
+notes from here -- they are the originals, unabridged -- and cut the matching
+part out of slide 22's VERSIONS block, or the same argument is in the deck twice
+in two different lengths.
+
+WHAT ELSE POINTED HERE, all of it repointed in deck.md the same day rather than
+left dangling: the auth invariants slide carried a visible "§12." at the end of
+its version fine line (removed -- it was the only section pointer on any slide
+face); its notes, the section 9 lead's notes, the slice 4 header's forkOnPort:
+departure, and demo A's "section 12 will come back to it" all said section 12
+owned versions. They now say slide 22's notes do.
+
+WHICH ONE TO PUT BACK FIRST, if a minute appears: slides 2 and 3 together, as a
+pair, or neither. Slide 3 is the decision and slide 2 is the only evidence for
+it. Slide 4 (#51438) is the one this audience would enjoy most and the one it
+costs least to leave out, because it has not bounded support since 3.7.4.1 --
+it is a hallway story now, and slide 22's notes carry it in full for exactly
+that.
+
+WHERE THEY GO BACK: as section 12, between section 11 (the worker gem's GemStone
+user) and the JSON codec slides at the end of the deck, in this order. The slice
+header below is slice 10's own, whole, including its running order and its
+departures from docs/Presentation.md.
+================================================================================
+-->
+
+<!--
+================================================================================
+VERTICAL SLICE 10 -- section 12, versions: the floor moved, and why. Five slides,
+no demo. Cut 2026-09-12: tenth to be cut.
+
+Running order and plans, in seconds -- the floor moved 40, the obstacle (1) 55,
+the obstacle (2) 50, #51438 50, what it deleted 35. About 4 minutes.
+
+THE OUTLINE SAYS 3 SLIDES and structures them as 12.1 / 12.2 / 12.3. This is five,
+and the split that matters is 12.1 into TWO: it carries two independent measured
+differences, each with its own table, plus the argument that 3.7.2 is not the
+safer image for having the first one. One slide would be two tables and a
+paragraph, which is a slide nobody reads.
+
+WHY THIS SECTION IS NOT A FOOTNOTE, and the sentence to open with: the whole of
+section 8 rests on one stone primitive, and the floor moved because that
+primitive is weaker below the image on 3.7.2 in two ways NOTHING IN src/ CAN
+DETECT. That is what makes it a design conclusion rather than a support matrix.
+
+SLIDE 3 CARRIES THE ARGUMENT. The consequence is one sentence and it is the
+reason to drop rather than work around: on 3.7.2 the server cannot see a session
+that its own maintenance refresh has doomed, so the worst state the session layer
+knows how to explain is exactly the one it goes silent for. Land that and the
+section is done.
+
+WHAT TO CUT: slide 5 (35s), then slide 4 (#51438, 50s) -- which hurts, because it
+is the best kernel story in the talk and this is the audience for it, but it no
+longer bounds support and section 13 does not depend on it. Do NOT cut slides 2
+and 3.
+
+12.3 IS REWRITTEN, because the outline describes code that no longer exists. It
+says two expansions are "still written the 3.7.2 way" in forkOnPort: and the
+worker login. They were removed on 2026-09-11 (e3ce652): both now send
+newDefaultForGemHost: and useOnetimePassword directly. So the slide
+is no longer "what the code still carries" -- it is the better slide, "what the
+floor moving actually deleted", four days ago, in the tree. THE OUTLINE'S 12.3
+SHOULD BE BROUGHT INTO LINE; it is the one place in it that now describes the
+wrong code.
+
+One expansion survives and the slide says why, because a reader will find it and
+assume it was missed: McpGrailToolset>>newGrailTestSession keeps newDefault +
+gemNRS:, because it sets an NRS BODY ('gemnetobject -C ...') to pin the test
+gem's memory budget and newDefaultForGemHost: gives no way to pass one. That was
+never the 3.7.2 reason, and the commit removed only the clause that claimed it
+was.
+================================================================================
+-->
+
+## The floor moved — four days ago, and for one primitive
+
+| image | base server | OAuth/OIDC | |
+|---|---|---|---|
+| 3.6.2 | **no** | no | no usable `GsTsExternalSession` on macOS — **no worker gems at all** |
+| 3.7.2 | **no** | no | **dropped 2026-09-10** — `continueTransaction`, and it carries #51438 |
+| 3.7.5 | yes | yes, local IdP | |
+| 3.7.6+ | yes | yes, **external IdP** | |
+| 4.0.0 | untested | untested | |
+
+**3.7.2 was dropped, not deferred**, and the reason is `System continueTransaction` — **which is why this is the closing section rather than a footnote: the whole of §8 rests on that one primitive.**
+
+* **Whether the floor settles at 3.7.5 or 3.7.6 is not yet decided.** Somebody will ask
+* Anything present in **3.7.5** may now be referenced directly, with no existence guard; the live concern is only what is *newer*
+* **GemStone has no notion of an optional method.** Absence shows up only as a `doesNotUnderstand` at runtime — so there is **no list to check against**, and the live suite on the loaded extent is the only test
+
+<!--
+Open with the sentence that makes this a section rather than an appendix: the
+whole of section 8 rests on one stone primitive, and the floor moved because that
+primitive is weaker below the image on 3.7.2 -- in two ways nothing in src/ can
+detect. That is a design conclusion, not a support matrix.
+
+Say "not yet decided" about 3.7.5 versus 3.7.6 plainly and early, because
+somebody is going to ask and an honest "not decided" is a better answer than a
+number invented on stage. What decides it is whether the external-IdP line
+matters to a deployment; sections 9 and 13.
+
+The no-optional-methods point is the one this room will nod at, and it is worth
+naming as a consequence rather than a complaint: there is nothing to feature-test
+against, so the support matrix cannot be derived, only measured. That is why
+McpExternalSessionTest exists at all -- slide 4.
+
+3.6.2 is one line and gets one clause. Nobody is running it and the reason it
+fails is uninteresting compared with what follows.
+-->
+
+---
+
+## `continueTransaction`: identical source, different primitive
+
+`(System class compiledMethodAt: #continueTransaction) sourceString` is **byte-identical on 3.7.2, 3.7.5 and 3.7.6.** The whole difference lives in the `_zeroArgPrim: 9` stone primitive — **below the image, where no `respondsTo:` or any other feature test can reach.**
+
+**(1) A successful refresh does not rebase the conflict baseline.** S1 reads X · S2 commits a change to X · S1 sends `continueTransaction` · S1 writes X · S1 commits:
+
+| | 3.7.2 | 3.7.5 / 3.7.6 |
+|---|---|---|
+| `continueTransaction` answers | `true` | `true` |
+| S1's view of X afterwards | S2's value | S2's value |
+| S1's following commit | **`false`**, `#'Write-Write'` naming X | **`true`** |
+
+The view moves on both. But on 3.7.2 the write-write intersection is still taken **against the commit record the transaction *started* at**, so a write S1 has already adopted **still counts as concurrent**.
+
+<span class="fine">Measured with **two real gems** — topaz plus a `GsTsExternalSession` — reducing to a **one-slot `Array`**. **Substituting `abortTransaction` makes 3.7.2 behave exactly like 3.7.5**, which isolates it to the primitive.</span>
+
+<!--
+"Identical source, different primitive" is the whole slide and it is the fact
+that makes the decision unavoidable. There is nothing to test for: the selector
+exists on every version, it answers a plausible Boolean, and it differs only in
+what it leaves behind.
+
+Read the table row by row. The first two rows agreeing is what makes the third
+surprising -- the refresh worked, the view moved, the session is looking at S2's
+value, and the commit is still refused as concurrent with a change it has already
+adopted.
+
+The fine line is the methodology and it matters for this audience: two real gems,
+a one-slot Array, and the abortTransaction substitution as the control. That last
+one is what rules out everything except the primitive.
+
+Do NOT let this become a discussion of whether 3.7.2's behaviour is defensible.
+The next slide is the one that decides it, and this is only half the evidence.
+-->
+
+---
+
+## And 3.7.2 is **not** the safer image for having it
+
+That table looks like read protection. **It is not.**
+
+* Writing an object the other session did **not** touch commits **just as cleanly** on 3.7.2 — so **the laundering §7 exists to prevent still happens there**, which is the shape the guardrail was written for
+* 3.7.2 refuses only the **same-object** case, and refuses it **spuriously**: the session had legitimately adopted the newer version before writing
+
+**(2) A failed refresh does not record its failure** — 3.7.2 never writes `#commitResult` **at all**:
+
+| `#commitResult` after… | 3.7.2 | 3.7.5 / 3.7.6 |
+|---|---|---|
+| a **successful** `continueTransaction` | `#success` | `#readOnly` |
+| a **failed** one (S1 wrote X, S2 committed over it) | **`#success`** | **`#failure`** |
+
+> The `false` answer still arrives, so the tool layer sees the refusal **in the moment**; what 3.7.2 loses is the **durable trace**. `commitConflictPending` then answers **false for a session that is genuinely stuck**, and everything gated on it **goes quiet**. *The worst state the session layer knows how to explain is exactly the one it goes silent for.*
+
+<!--
+This is the slide the section exists for. Two moves, and the second is the
+decision.
+
+First, dismantle the reading everyone takes from the previous table. 3.7.2
+refusing that commit looks like it is protecting you. It is not: the laundering
+still happens in every case where the write lands somewhere other than the read.
+It refuses only when the write lands on the SAME object as the read, and the guardrail of section
+7 was written for exactly the case where it does NOT -- read a method, write a
+different one, and 3.7.2 launders it as happily as anything else. So the
+guardrail keeps its full scope there, and gains a spurious refusal on top.
+
+What goes quiet, concretely: no [session] line, no named collision, no "abort is
+the only way out". Section 7's whole reporting channel, silent.
+
+Then the consequence, and say the last sentence slowly because it is the whole
+argument: on 3.7.2 the server cannot see a session that its OWN maintenance
+refresh has doomed. No [session] line, no named collision, nothing. The one state
+this project spent a section learning how to explain is the one it cannot detect.
+
+Contrast with #51438 explicitly if there is time, because it is what makes the
+decision principled rather than a shrug: the buffer corruption could at least be
+DETECTED from inside the image, and was covered on a branch of its own for
+months. Here there is nothing to test for.
+
+Two housekeeping facts to have ready. 3.7.2 additionally fails
+testTheStoneAloneWouldAllowThatClobber -- the test written to fail on good news,
+here reporting something that is NOT good news -- and
+testRefreshAdoptsTheOtherVersionAsTheStartingPoint, plus three more from the
+second difference. And main372 is archived as the annotated tag archive/main372
+rather than kept as a branch: the tag holds every commit and the reason the line
+existed, without implying it is still maintained. NO .gs FILE CHANGED for any of
+this -- it is a documentation and support decision, and an older image may well
+still load.
+-->
+
+---
+
+## #51438: right length, wrong content
+
+No longer a support boundary — **and still the best kernel story in the talk.** A **Smalltalk** bug, so it hits **gem-to-gem** sessions and not C clients: `resolveResult:` fetches the first 1024 bytes into a **shared, per-session buffer that never shrinks**, then **nests the refetch of the full object inside the “is the buffer big enough?” test** — conflating *big enough* with *already full*:
+
+| result size | what you get |
+|---|---|
+| ≤ 1024 | always correct |
+| 1024 < n ≤ grown buffer | **exactly 1024 correct bytes**, the rest **stale** from an earlier result |
+| > grown buffer | correct again — and it **re-grows the buffer, raising the ceiling** |
+
+* **The length is freshly fetched, so it is always right** — so JSON fails as *“Unterminated string”*, never as a short read. **Sticky for the session's life**; fixed in **3.7.4.1**
+
+<span class="fine">**mcp_server would meet this on its main path** — every MCP response is a String of JSON pulled out of a worker gem, and `McpExternalSessionTest` pins it: **three controls that pass on every version, two that fail on an affected one.** **And the lesson: a green `test.sh` on an older commit was not evidence of absence** — it passed because a smaller class happened to put the method being checked inside the good first kilobyte.</span>
+
+<!--
+Keep this one even though it no longer bounds support, because it is the best
+kernel story in the talk and this is the only room that will enjoy it properly.
+Fifty seconds.
+
+The shape to land: the bug is not "sometimes you get less data". It is "you
+always get the right LENGTH and sometimes the wrong BYTES". That is the worst
+possible failure mode, because every length check downstream passes and the
+damage surfaces as a parse error in the middle of a document, which reads like a
+bug in whatever built the document.
+
+A fresh login clears the poisoned buffer; a small result in between does not.
+Sticky for the session's life is the part that makes it vicious. One large result
+poisons that session's buffer, logout does not clear it, and a small result in
+between does not either. So a worker gem that has once returned a big tools/list
+is compromised for every medium-sized response afterwards.
+
+The same shared-buffer aliasing breaks resolveResult:toLevel: for Arrays
+(#51563), so returning an Array of small chunks is NOT a workaround -- repeated
+calls each returning at most 1024 bytes is. Worth having ready, because it is the
+first workaround anybody proposes.
+
+The closing lesson is the one worth carrying out of the section: test.sh was
+green on an older commit, and that was not evidence of absence. It passed because
+a smaller class happened to put the method being checked inside the good first
+kilobyte. A test that passes for a reason you did not choose is not a test.
+
+If asked why the suite is written to FAIL rather than to skip: because the suite
+is how the image reports itself. A skip says nothing; two red against three green
+says #51438, precisely, and any other split says the netldi or the harness.
+-->
+
+---
+
+## What the floor moving actually deleted
+
+**2026-09-11, in the tree.** Every `GsTsExternalSession` here was built through hand-expanded equivalents of two kernel selectors 3.7.2 lacks. **They are gone** — `forkOnPort:` and `McpSession>>newWorkerSession` now send `newDefaultForGemHost:` and `useOnetimePassword` directly.
+
+> **The expansions bought nothing and cost a reader two comments explaining an image nobody runs.** Moving a floor is not an abstraction: it is permission to delete.
+
+* **One `newDefault` + `gemNRS:` survives, and not for compatibility.** `McpGrailToolset>>newGrailTestSession` sets an **NRS body** — `gemnetobject -C …` — to pin the forked test gem's memory budget (§10), and `newDefaultForGemHost:` gives no way to pass one. The commit removed only the clause that had *claimed* 3.7.2 as the reason
+* `jwtPassword:` **never had an expansion at all** — which was the second reason auth could not run before 3.7.5 (§9)
+
+<span class="fine">`docs/GemStone_Notes.md` keeps the 3.7.2 selector table — the expansions are still the substitution to make if anyone *has* to run there — but no longer tells you to use them unconditionally.</span>
+
+<!--
+Thirty-five seconds, and the first thing to cut. It is here because a decision
+that changes no code is easy to disbelieve, and this one changed code four days
+after it was taken.
+
+The blockquote is the line to say: moving a floor is permission to delete.
+Everything else in this section has been about why the floor moved; this is what
+it bought.
+
+The surviving newDefault + gemNRS: is on the slide for one reason -- a reader
+will find it in the file-outs and assume it was missed. It was not: an NRS body
+is the only way to pass a gem configuration parameter, gemnetobject -C is how the
+test gem gets Grail's memory budget, and newDefaultForGemHost: has nowhere to put
+one. That was always the real reason; the 3.7.2 clause beside it was the thing
+that was wrong, and it went.
+
+If anyone asks whether an older image can still load the tree: probably, and
+nothing stops them trying. No .gs file changed for the support decision itself --
+this deletion came after, and separately. It is a documentation and support
+decision, not a compilation barrier, right up until src/auth, which genuinely
+cannot compile before 3.7.5.
 -->
