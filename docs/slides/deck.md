@@ -3891,7 +3891,7 @@ now takes structured arguments and builds the definition itself, so it cannot ev
 
 <!-- _class: demo -->
 
-# DEMO — two clients, six calls
+# DEMO E — two clients, six calls
 
 1. **A:** `get_method_source` on the fixture, then `compile_method` a change — uncommitted
 2. **B** (topaz, second gem): commit a *different* change to the same class
@@ -5764,14 +5764,12 @@ name to a room with the README open. The slice header has it in full.
 
 ## Why this server owns its JSON **writer** — and only the writer
 
-`McpJson class>>write:` replaces `Object>>asJson` on every production path, and answers **a byte `String` of UTF-8**.
+`McpJson class>>write:` replaces `Object>>asJson` and answers **a byte `String` of UTF-8**.
 
 > **The one defect an application cannot route around.** `printJsonOn:` keeps only **bits 12–15** of a codepoint above U+FFFF instead of emitting a surrogate pair: U+1F600 goes out as `"\uF600"`, and some codepoints as a **lone surrogate**, which is not well-formed JSON. **By the time `asJson` has answered, the codepoint is gone** — no post-pass can recover it.
 
 * Writing UTF-8 **does not fix that arithmetic so much as never reach it**: a surrogate pair is an artefact of `\u` escapes and UTF-16, and UTF-8 spells an astral codepoint directly in four bytes. Only RFC 8259 §7's mandatory escapes are emitted
 * **Bytes rather than characters is load-bearing**, and three unrelated things downstream depend on it: `Content-Length` is written as `body size` · the worker→front-end hop is measured in bytes by the kernel's result fetch, **whose buffer is sized in bytes** · `MCP_TRACE` writes bodies through `GsFile`, where a 16-bit string comes out garbled
-
-<span class="fine">A byte `String`'s `#size` **is** its byte count whatever the bytes are, so all three hold **by construction**.</span>
 
 <!--
 The shape of the argument, said once: exactly one of the kernel's JSON defects is
@@ -5788,6 +5786,18 @@ three unrelated mechanisms that all happen to need the same property, and they
 all held under the OLD ASCII-only policy for an incidental reason -- nothing was
 ever above 0x7E. Under this one they hold structurally. That is the difference
 between a thing that works and a thing that is true.
+
+WHY THEY HOLD, which came off the face on 2026-09-14 and is the sentence that
+closes that bullet: a byte String's #size IS its byte count whatever the bytes
+are. Not "is checked to be", not "is usually" -- the two cannot disagree, so all
+three dependencies hold BY CONSTRUCTION rather than by anybody maintaining them.
+Say it after the third item, not before the first.
+
+"ON EVERY PRODUCTION PATH" ALSO CAME OFF THE FACE, and the qualifier is worth
+keeping in speech because a GemStone developer will wonder about it: asJson is
+not removed from the image and is not forbidden -- it is that no path that
+answers a client goes through it. The distinction matters if anyone asks whether
+this is a patch. It is not; nothing kernel is touched.
 
 The alternative to owning a writer, if anyone asks why not just patch it: a
 kernel method patched in an image is lost on an extent reload, and it changes
@@ -5814,8 +5824,6 @@ JsonParser parse: (self combineSurrogateEscapesIn: aString asString decodeFromUT
 * **The trailing one** narrows `Unicode7`/`16`/`32` back into the byte-string family: a `Unicode7` compared to a `String` **raises** on a stock image rather than answering false
 * **`combineSurrogateEscapesIn:`** — the one repair made *before* the parser sees the text. Kernel `JsonParser` sends `Character codePoint:` to each `\uXXXX` separately and 3.7.x refuses to build a surrogate, so an emoji written as the **pair RFC 8259 prescribes** failed the whole request with `-32700`. **Python's `json.dumps` escapes by default** — that is a real client, not a hypothetical
 
-<span class="fine">**Forty lines at the edge, where the outbound defect needed a whole writer** — because inbound the information is still there in the escapes. An unpaired half becomes U+FFFD; a malformed *byte* sequence refuses the whole body with a `-32700` naming the offset, because a bad encoder means nothing it sent can be trusted.</span>
-
 <!--
 The leading asString is the best bug in this section for this audience, because
 nothing about it is a JSON problem. The body is wire bytes by origin and
@@ -5834,6 +5842,21 @@ How it was found and confirmed, if asked: read out of the worker's gem log with
 parseBody: instrumented, then confirmed causally -- revert the single asString
 in the image, restart the front end, and a non-ASCII initialize is a -32700
 while an ASCII one succeeds. Restore it and both succeed.
+
+THE ASYMMETRY CAME OFF THE FACE ON 2026-09-14 and it is what this slide is for,
+so say it at the end rather than losing it: FORTY LINES AT THE EDGE, where the
+outbound defect needed a whole writer. The reason is not that inbound was easier
+to write -- it is that inbound THE INFORMATION IS STILL THERE, in the escapes,
+where outbound it had already been destroyed by the time asJson answered. Repair
+is possible exactly when nothing has been thrown away yet.
+
+The two error behaviours went with it, and both are worth having ready because
+they are the obvious follow-up question. An unpaired half becomes U+FFFD -- a
+replacement character, because half a pair is a client's mistake and not a reason
+to refuse the request. A malformed BYTE sequence refuses the whole body with a
+-32700 naming the offset, because a bad encoder means nothing it sent can be
+trusted. Lenient about one, strict about the other, and the line between them is
+whether the damage is local.
 
 Performance footnote for anyone who worries about a scan per request: the repair
 gates its scan behind one primitive findString: and answers the receiver itself
@@ -5855,15 +5878,25 @@ a 63KB body.
 
 **Two of the five are silent data corruption on a public API** (2, 4). One raises three layers from its cause (1). Two accept what is invalid (3, 5).
 
-<span class="fine">Measured against **3.7.6**, stock `extent0.dbf`, every result a live measurement, with a copy-pasteable reproduction and a suggested fix per defect. **I would like to hand this to someone.**</span>
-
 <!--
 THE CONCRETE ASK OF THE TALK, and the slide section 13 collects. Everything
 before it in this section exists to earn the right to put it up.
 
-Say the ask plainly and then STOP TALKING. The room fixes these. Do not soften
-it, do not apologise for it, and do not fill the silence -- a pause here is the
-whole point, and somebody in that room will say a name.
+SAY THE ASK, BECAUSE IT IS NO LONGER ON THE SLIDE. It was the last line of the
+fine print until 2026-09-14 and it is seven words: "I WOULD LIKE TO HAND THIS TO
+SOMEONE." Nothing on the face asks for anything now -- the table states five
+defects and stops -- so if you do not say that sentence, the slide the whole
+appendix exists for makes no request at all. Say it plainly and then STOP
+TALKING. The room fixes these. Do not soften it, do not apologise for it, and do
+not fill the silence -- a pause here is the whole point, and somebody in that
+room will say a name.
+
+THE PROVENANCE CAME OFF THE FACE WITH IT, and it is what makes the ask credible
+rather than a complaint, so it goes in the same breath: measured against 3.7.6,
+on a stock extent0.dbf, every result a live measurement rather than a reading of
+the source -- with a copy-pasteable reproduction and a suggested fix per defect.
+That last clause is the one that turns "here are five bugs" into "here is work
+already done for you", and this room knows the difference.
 
 Rank them out loud, because five defects read as a list and two of them are not
 in the same league: 2 and 4 are SILENT. No exception, no log line, a wrong
