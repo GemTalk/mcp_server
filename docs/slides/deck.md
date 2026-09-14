@@ -42,7 +42,7 @@ style: |
 ---
 
 <!--
-FIFTY-FIVE SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut
+FIFTY-SIX SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut
 once; eight stretches of them are now set aside. Section 13 is the only one never written.
 
 THE TARGET IS 45 MINUTES as of 2026-09-14, down from an hour, and that is what the current shape is
@@ -56,8 +56,8 @@ for. The running order:
   39-43   section 8 -- the router maintenance cycle, then demo F
   44-47   section 9 -- McpAuthRouter, a reachable port, then demo G (FOLDED 2026-09-14)
   48-49   section 11 -- the worker gem's GemStone user (MOVED HERE, THEN FOLDED, 2026-09-14)
-  50-51   section 10 -- a lead, then ONE slide: extending it, a server for YOUR software
-  52-55   THE APPENDIX -- a lead, then the JSON codec. OPTIONAL, run only if the clock allows
+  50-52   section 10 -- a lead, ONE slide, and demo H: extending it, a server for YOUR software
+  53-56   THE APPENDIX -- a lead, then the JSON codec. OPTIONAL, run only if the clock allows
 
 RUNNING ORDER IS NOT SECTION-NUMBER ORDER ANY MORE. Section 11 was moved ahead of section 10 on
 2026-09-14, so the deck runs 9, 11, 10. The reason is thematic rather than structural: section 9's
@@ -132,8 +132,15 @@ on page 51 under two banners, anchored to the two words that survive on that fac
 shapes and the worked example fitted one face with the Grail half as a subheading. The section is a
 lead and ONE slide now, about 90 seconds, carrying three banners' worth of notes, and it is THE
 SHAPE WITHOUT THE EVIDENCE: it says what extending this server looks like and no longer shows
-anybody having done it. It is the first place to spend a minute if one appears. Thirty-five slides
-are now set aside in total.
+anybody having done it. Thirty-five slides are now set aside in total.
+
+THEN DEMO H WENT IN, the same day, and it is the answer to that last sentence. The section had been
+the only one in the deck with no demo, against an outline that asked for one; what settled the
+argument was that a demo could put the EVIDENCE back on a screen without putting a slide back. It
+runs the Grail sender search against the stock one, on the same name in the same session: empty
+arrays from the stock tool, twelve senders and an env 1 attribution from the Grail one, and a
+not searched: block that prints the upstream issue number itself. 90 seconds, no second gem and no
+clock, which makes it the safest demo in the deck.
 
 THE CODEC SLIDES MOVED RATHER THAN LEFT, AND ARE NOW AN APPENDIX. Section 5's other half -- why this
 server owns its JSON writer, the inbound repair, and the five measured kernel defects -- is at the
@@ -307,7 +314,8 @@ You know GemStone. You do not necessarily know MCP, and -- more to the point -- 
 know why a thing that looks like a web server is built out of gems. That second question is the
 whole talk.
 
-Six demos, each with a hard stop rehearsed into it. If we run long the demos are what I will
+Eight demos, each with a hard stop rehearsed into it. (This read six while there
+were seven, and demo H made it eight.) If we run long the demos are what I will
 protect, because a section summarised in two sentences beside a live worker gem lands better than
 the same section in full with nothing on screen.
 -->
@@ -5175,13 +5183,13 @@ the room looks unconvinced that this reaches past application data.
 <!--
 ================================================================================
 VERTICAL SLICE 9 -- section 10, extending it: a server for YOUR software, with
-the Grail MCP Server as the worked example. A lead and ONE slide, no demo. Cut
+the Grail MCP Server as the worked example. A lead, ONE slide and a demo. Cut
 2026-09-12: ninth in running order, ninth to be cut. IT IS NOW TENTH, AND LAST
 BEFORE THE OPTIONAL CODEC: section 11 was moved ahead of it on 2026-09-14, so
 this section closes the talk proper.
 
-Running order and plans, in seconds -- lead 10, the one content slide 80. About
-1 1/2 minutes.
+Running order and plans, in seconds -- lead 10, the one content slide 80, demo H
+90. About 3 minutes.
 
 CUT TO THE BONE 2026-09-14, in four passes on one day: the toolset slide went
 first, then the collision and the upstream ask together, and finally the two that
@@ -5255,25 +5263,35 @@ if the clock gives anything back.
 
 WHAT TO CUT: nothing is left to cut but the section. Both of the slides this list
 used to nominate have gone, and so has the one it said not to cut -- the upstream
-ask first, the collision with it. What remains is a lead and one slide carrying
-both the surface shapes and the worked example, which is the minimum that makes
-the section an argument rather than a mention. If more time has to come out of
-this talk, take the whole section and keep the appendix. There is no half of this
+ask first, the collision with it. What remains is a lead, one slide carrying
+both the surface shapes and the worked example, and demo H. That is the minimum
+that makes the section an argument rather than a mention. CUT THE DEMO LAST, not
+first: without it this section is back to asserting that extending the server
+works and showing nobody having done it, which is the state it was in for about
+an hour and the reason the demo exists. If more time has to come out of this
+talk, take the whole section and keep the appendix. There is no half of this
 slide worth keeping without the other: the shapes without the worked example show
 nothing a third party has done, and the worked example without the shapes is a
 Grail slide in a talk that is not about Grail.
 
-NO DEMO, matching the demo inventory and the outline AS IT WAS. THE NEW OUTLINE
-AT THE END OF docs/Presentation.md ASKS FOR ONE -- its section 6 is "Grail MCP
-Server / a. A custom toolset / Demo" -- and that is a real disagreement, not an
-oversight to tidy away here. The argument against is still the one below: demo C
-already showed a tool surface being chosen, and a sixth demo showing a different
-one is the same screen with different words in it. The argument for is that this
-is now the last section before the optional codec, so it ends the talk, and
-ending on a live Grail server is a better close than ending on the one slide the
-section has left -- which is where the section now stops, the upstream ask having been set
-aside on 2026-09-14. The case for a demo is stronger than it was.
-Decide it deliberately; nothing in this slice depends on the answer.
+THERE IS A DEMO NOW, added 2026-09-14, and this paragraph records what settled a
+disagreement that stood for days. The outline at the end of docs/Presentation.md
+had always asked for one -- its section 6 is "Grail MCP Server / a. A custom
+toolset / Demo" -- and the standing argument against was that demo C already
+showed a tool surface being chosen, so a second one is the same screen with
+different words in it. THAT ARGUMENT STILL HOLDS and demo H does not contradict
+it: it shows a RESULT, not a surface. What made the demo necessary was the
+cutting. By the end of 2026-09-14 this section was the shape without the
+evidence, and a demo was the only way to put a measurement back on a screen
+without putting a slide back.
+
+WHY THE SENDER SEARCH AND NOT THE TEST FORK. The collision is the better
+argument -- it always was, and it is why it is the first banner in slide 2's
+notes -- but it cannot be shown live: one class is 262 seconds. The sender search
+is the same kind of result in a few seconds, it is a GEMSTONE result rather than
+a Grail one (environment 0 against environment 1), and its not searched: block
+puts Grail #885 on the screen, which is the nearest thing the deck has left to
+the upstream-ask slide that was set aside that morning.
 
 DEPARTURES from docs/Presentation.md:
   * the outline's Grail bullet names grailDirectory as the options example.
@@ -5319,8 +5337,8 @@ and carries the surface shapes, the worked example, and in its notes how a
 toolset is written. It is ten seconds away. The lead says what the section is
 FOR, not how it works.
 
-Where this ends, and it is worth knowing before you start: slide 2, which is the
-only slide. It used to end three slides further on, with the collision between a
+Where this ends: demo H, the sender search, which is ninety seconds and the only
+evidence this section has left. Before it, slide 2, which is the only slide. It used to end three slides further on, with the collision between a
 domain model and this server's session model -- 132 defects against 386/386
 clean, the thing every vendor in the room who writes a toolset would have
 recognised. That slide and the upstream ask were set aside on 2026-09-14 and both
@@ -5329,11 +5347,10 @@ after the last bullet rather than something the room reads, and this lead should
 promise the shape rather than the number.
 
 THIS IS NOW THE LAST SECTION OF THE TALK PROPER. The codec slides after it are
-optional and go first if the clock has gone, so plan to land on the worked
-example and whatever of the collision you have time to say over it -- or on a
-Grail demo, if that argument is settled the other way; the slice header has both
-sides of it, and the case for one is stronger now that the section ends where it
-does.
+optional and go first if the clock has gone, so THE TALK PROPER NOW LANDS ON A
+LIVE TERMINAL: demo H, with whatever of the collision you have time to say over
+slide 2 on the way there. That argument is settled and the slice header records
+how.
 
 SECTION 11 NOW COMES BEFORE THIS, not after, which changes one thing to have
 ready: "why is narrowing the tool surface not the boundary?" is the question a
@@ -5422,7 +5439,8 @@ The narrowing rule at the end is the one a vendor will hit: configure options fo
 a toolset, then change the surface and forget, and the router tells you at
 startup instead of silently dropping them. Section 2's validateWorkerConfig.
 
-THIS SLIDE NOW ENDS THE TALK PROPER. The two slides that followed it were set
+DEMO H FOLLOWS THIS SLIDE, so it is no longer the last thing before the
+appendix -- that was true for part of 2026-09-14 and is not now. The two slides that followed it were set
 aside on 2026-09-14 and their notes are below, so the last words before the
 optional appendix are yours rather than the screen's. TWO WORDS IN THE FIRST
 BULLET ARE ALL THAT IS LEFT OF THEM -- "tests" and "two search tools" -- and each
@@ -5571,6 +5589,71 @@ them down. If they matter to the room, say them twice or offer them afterwards.
 Section 13 collects the asks; this one is already lodged, which is the point --
 it is not a request made from a stage, it is a request made in the tracker with a
 talk mentioning it.
+-->
+
+---
+
+<!-- _class: demo -->
+
+# DEMO H — the sender search, and what it says it did **not** search
+
+```bash
+MCP_TOOLSETS="McpGrailToolset" ./run-server.sh        # a Grail stone, one client, fresh session
+```
+
+1. **`find_python_senders _dict`** → `compiled 0, references 0, .py text 15`, and a **`not searched:`** block saying why: nothing has imported that module **in this session**
+2. **The stock search, same name, same session** — `ClassOrganizer new sendersOf: #'_dict'` → **`anArray( anArray( ), anArray( ))`**. Empty, *confidently*: **no indication that it could not look**
+3. **`import _grail_session`, then run it again** → **`compiled 12`**, every hit printing **`env 1`** beside it. The stock search scans **environment 0**
+4. Step 3 also raises the **`[session]`** line — because **a cold Grail import is a database write**
+
+<span class="fine">**90 seconds.** No second gem, no IdP, no timing window. The `not searched:` block prints **Grail #885** on screen, so the ask reads itself out.</span>
+
+<!--
+THIS DEMO IS THE SECTION'S EVIDENCE, put back on a screen without putting a slide
+back. Section 10 was cut on 2026-09-14 from a lead and five slides to a lead and
+one, and what went was everything it could prove. This is the one measurement of
+those that runs in seconds rather than in 262 of them, which is why it is the
+demo and the test-fork result is not.
+
+WHAT LANDS IS BEAT 2, not beat 3. A search that says it could not look is useful.
+A search that answers an empty array is indistinguishable from one that looked
+everywhere and found nothing -- and a model reading that answer concludes the
+name is unused and deletes something. Say that sentence over the empty arrays and
+then move.
+
+Beat 3 is the GemStone half and it is why this belongs in front of THIS room:
+environment 0 against environment 1, printed on every line of the output, with 12
+senders where the stock tool answered none. Nobody has to take the attribution on
+trust -- env 1 is on the screen.
+
+Beat 4 is free and worth five seconds if the room is with you: the import dirties
+the session, so section 7's [session] line turns up unprompted in section 10. A
+cold Grail import is a database write -- 31 modified objects for a 7-test class,
+measured -- which is one of the two reasons run_python_tests forks a gem. The
+other is on page 51, in the collision banner. DO NOT open the collision here
+unless a hand goes up; it is fifty-five seconds and this demo is ninety.
+
+STAGING, and beat 1 depends on it entirely: the session must be FRESH. If
+anything has already imported _grail_session, beat 1 answers compiled 12 straight
+away and the demo has no shape. Reconnect the client immediately before starting,
+and do not rehearse beat 3 on the session you are about to present from. Abort
+afterwards -- the import leaves uncommitted work, and the next demo's [session]
+line will otherwise be about this one.
+
+MEASURED 2026-09-14 on gs375c, 3.7.5, and the outputs above are verbatim from
+that run rather than reconstructed. The counts are stable but not guaranteed:
+.py text was 15 and compiled was 12, against the 12 that section 10's removed
+upstream-ask slide quoted. If the numbers differ on the day, the argument does
+not -- it is empty against not-empty, not 12 against anything.
+
+FALLBACK: a screenshot of the two answers side by side. This is the safest demo
+in the deck -- one client, one stone, no second gem and no clock -- so the
+fallback is unlikely to be needed, but the screenshot is also what to use if the
+projector cannot show a terminal legibly at this size.
+
+WHAT THIS DEMO DOES NOT DO, said plainly because the slice header argued against
+a Grail demo for two days: it does not show a tool surface being chosen. That was
+demo C and this is not a second one. It shows a RESULT.
 -->
 
 ---
