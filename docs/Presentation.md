@@ -1749,3 +1749,30 @@ audience will have the README open.
    labelled: whether Claude Code resets its `timeoutMs: 60000` on a progress notification (§6), and
    the overnight soak of the view-hygiene arms, which wants a teststone and a night rather than the
    development stone (§8).
+
+# Outline for the re-write
+
+1. Introduction and overview
+  a. Introduction
+  b. Walk-through the architecture diagram
+2. Installing and starting a server
+  a. Versions (why not 3.6.2 or 3.7.2)
+  b. Configuration via instance (multiple concurrent routers)
+  Demo
+3. Transactions and the blind-write guardrail
+  a. Ledgers (Q)
+  Demo
+4. The maintentance cycle
+  a. Timers (via counting, not the clock)
+  b. View hygiene (notifications, server-initiated refreshing)
+  c. Reaping stuck gems
+  Demo
+5. McpAuthRouter
+  a. Configuration, with offline_access deviation
+  Demo (with no allowed commits)
+  b. McpRouter's read-only user
+  c. Vulnerability: write locks (Q)
+6. Grail MCP Server
+  a. A custom toolset
+  Demo
+(7. JSON bugs)
