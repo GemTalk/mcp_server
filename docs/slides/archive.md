@@ -43,7 +43,7 @@ style: |
 
 <!--
 ================================================================================
-ARCHIVE. NINETEEN SLIDES SET ASIDE FROM deck.md ON 2026-09-14, FOR TIME.
+ARCHIVE. TWENTY-ONE SLIDES SET ASIDE FROM deck.md ON 2026-09-14, FOR TIME.
 This file is not a talk. It is a holding pen, kept renderable so the slides can
 be looked at, and kept in deck.md's own running order so any of them can be put
 back where it came from.
@@ -53,6 +53,12 @@ section 4 (trace 1, a brand-new client's first request), the trace half of
 section 5 (a follow-up request), and section 6 (progress notifications). Together
 they are about 14 minutes of slides, which is most of what the new target needed.
 Nothing here was cut for being wrong.
+
+TWO MORE CAME LATER THE SAME DAY, from section 8, and they are a different kind
+of cut -- the section was thinned slide by slide rather than set aside whole.
+They are at the END of this file, under their own header, and their notes are
+SPLIT: the deck kept the paragraphs its surviving slides depend on. Read that
+header before putting either one back.
 
 WHAT STAYED BEHIND IN THE DECK, deliberately:
   * DEMO C -- a session is a gem. Section 4's demo, kept without section 4. It is
@@ -103,6 +109,12 @@ THE MAP -- original deck.md page, and title:
   49  Three pieces of judgement the reporter carries, so tools need not
   50  Two bugs that only exist end to end
   51  The other stream, in one slide — because §8 rides it
+
+AND, from the later section 8 thinning, by their page numbers on 2026-09-14
+AFTER the cut above (so these two do not belong to the same numbering):
+
+  42  An answered ping proves the client is there — and still counts against it
+  43  How the front end can see any of this
 
 THE SLICE HEADERS CAME WITH THEIR SLIDES. Slice 5 (section 4) and slice 7
 (section 6) are reproduced whole below, including their running orders, their
@@ -1082,4 +1094,129 @@ next tick, and nothing interleaves.
 No event ids and no Last-Event-ID replay, deliberately, if asked: ids are only
 useful with a replay buffer behind them, and offering them without one invites a
 client to ask for a resume this server cannot honour.
+-->
+
+---
+
+<!--
+================================================================================
+FROM SECTION 8 -- two slides removed from the maintenance cycle on 2026-09-14,
+after the first archive cut. They were deck.md pages 42 and 43 at the time, the
+fourth and fifth slides of vertical slice 2.
+
+These are NOT part of the sections-4-to-6 cut above and did not come out for the
+same reason. Section 8 survived the 45-minute target whole; it is being thinned
+slide by slide. What went is the two slides that explain a MECHANISM the section
+uses, leaving the slides that state the POLICY:
+
+  * "An answered ping proves the client is there" -- the ping's two properties
+    (any answer proves liveness; an answer does not stamp the activity clock)
+    and the stream-generation rule that makes an unanswered ping admissible.
+  * "How the front end can see any of this" -- System descriptionOfSession:,
+    primitive 334, and the three fields the section reads.
+
+WHAT WENT BACK INTO deck.md RATHER THAN COMING HERE. Both slides were load-
+bearing for slides that stayed, so their notes were split rather than moved
+whole. The deck now carries, in notes:
+  * the ping-does-not-reset-the-clock decision and the supersession rule, on the
+    maintenance-pass slide, because its bullets assert both;
+  * the stream-generation failure story and the 6-of-14 measurement, on the
+    reapReasonFor: slide, because row 3 is the row that needs them;
+  * descriptionOfSession: and its three fields, plus the StnCrBacklogThreshold
+    finding, on the view-hygiene slide, which is what spends the measurement;
+  * the zero-filled description of a dead gem, on the dead-gem slide.
+The copies below are the originals, unsplit. If either slide comes back, take
+its notes from here and delete the transplanted copy in deck.md -- otherwise the
+same paragraph is in the deck twice.
+
+WHERE THEY GO BACK: immediately after the reapReasonFor: slide, in this order,
+the ping slide first. Neither depends on the other.
+================================================================================
+-->
+
+## An answered ping proves the client is there — and still counts against it
+
+* **Any** answer proves liveness — result *or* error (`noteAlive`)
+* It deliberately **does not stamp the activity clock**. Only real MCP traffic (`touch`) restarts the idle cycle
+* Otherwise every well-behaved client — and they all answer `ping` — would hold a gem **and a transaction view** for as long as it stayed open
+
+**An unanswered ping is evidence of death only if it went down the stream the client is still on.** Both shipping clients reopen a dropped GET on their own, and a write into the superseded stream *succeeds* — into a buffer nobody will read. So every probe records its **stream generation**.
+
+<span class="fine">Measured against real clients, 2026-08-23: **6 of 14 pings** were retired as inadmissible rather than counted unanswered.</span>
+
+<!--
+The first three bullets are one deliberate decision and the audience may well push on it, so have the
+reason ready rather than the mechanism: the ping is how idleness is MEASURED, so an answer cannot
+also reset what it is measuring. If it did, the idle deadline would be unreachable for every
+conformant client, and "idle" would come to mean "disconnected" -- which the streamless rung already
+covers. Unanswered is the other direction and is a gain, not a cost: proven gone, released early
+rather than waited out for the full thirty minutes.
+
+The bottom half is the subtlest thing in the section and worth the words. The failure it prevents is
+specific: a handover is likeliest on exactly the quiet sessions the reaper probes, so the population
+being judged is enriched for the thing that breaks the judgement. And a write to the superseded
+socket does not fail -- it succeeds into a buffer nobody will read -- so there is no error to notice.
+Three pings like that and a perfectly healthy client loses its gem.
+
+6 of 14 is the number to give if anyone asks whether this is theoretical. It is not a rare
+correction; it is nearly half.
+
+Also note what replaced the timeout here, because it is the same idea as slide 3: probeSession:
+retires the previous ping BEFORE sending the next one. A ping is not declared late by a clock, it is
+superseded and judged at that moment -- unanswered if its generation is still current, discarded if
+the transport had moved on under it.
+
+If asked about the ping cadence: one cadence for every session, every probePassInterval passes from
+the last touch -- 120 seconds at the defaults -- whether or not that session has an idle deadline,
+because the ping is how idleness gets measured either way. A client making calls is never pinged at
+all, since touch resets the count.
+-->
+
+---
+
+## How the front end can see any of this
+
+**`System descriptionOfSession:`** — primitive 334. A **stone query**, made from the front-end gem, *about another session*.
+
+| field | meaning |
+|---|---|
+| 7 | `-1` / `0` / `1` — transactionless / out of transaction / in transaction |
+| 8 | whether this session references the **oldest** commit record |
+| 16 | commits that have occurred **since the session obtained its view** |
+
+* It never touches the worker's GCI channel, so **a busy worker can be measured perfectly well** — even though it must not be *acted* on
+* Reading **another** session needs the `SessionAccess` privilege; a worker reading its **own** field 16 needs none, which is what makes the every-result `[session]` note self-measured
+
+<!--
+This is the slide this audience will want and no other audience would, so let them look at it.
+
+The important structural point is the first bullet, because it is what makes the busy case tractable
+at all: the MEASUREMENT is a stone query and cares nothing for what the worker is doing; the ACTION
+would have to travel the worker's GCI channel, which allows one call at a time. So a session with a
+call in flight is measured every pass and acted on never. That asymmetry is not a workaround, it is
+the reason the arm can exist. It was checked explicitly because it was the obvious thing to worry
+about.
+
+#workerStoneSession is cached at the worker's login (McpSession>>cacheWorkerIds) precisely so nothing
+on this path has to ask the worker anything.
+
+THE Q&A MAGNET, and it is worth having ready because somebody here will ask what happens to a dead
+gem's measurement. descriptionOfSession: does not refuse a session id nobody holds -- measured on
+3.7.5 it answers a ZERO-FILLED description, 29 fields, the first nil and the rest 0. So field 16 is
+0, the session reads as perfectly current, the arm sends it nothing and writes nothing. And that is
+the TRUTHFUL answer rather than a lucky one: a gem that has exited pins no commit record, because its
+view went with the process. What it left behind is a maxSessions slot and nothing else -- which is
+slide 9.
+
+The one exception, if pressed, is id recycling: the cached number can be handed to another gem, and
+then the figure read belongs to a stranger. Worst case is one confusing log line per pass -- it names
+the right session, quotes a different gem's number, and reports an error about a gem that is gone,
+and none of the three is wrong on its own terms. Nothing is corrupted and nothing reaches the
+stranger, because the refresh only ever travels the dead worker's own closed channel.
+
+STnCrBacklogThreshold, if the stone settings come up: it comes back from the runtime ALREADY
+RESOLVED, and that mattered. system.conf documents -1 as twice STN_MAX_SESSIONS; on the development
+stone, which sets neither, the runtime read answers 80 against a StnMaxSessions of 10. Resolving -1
+ourselves would have computed 20 and been wrong about the number the stone actually uses. Trust the
+stone's number; map only 0 (disabled) and negative (unknown).
 -->

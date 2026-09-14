@@ -42,7 +42,7 @@ style: |
 ---
 
 <!--
-SEVENTY SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut once;
+SIXTY-EIGHT SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut once;
 three stretches of them are now set aside. Section 13 is the only one never written.
 
 THE TARGET IS 45 MINUTES as of 2026-09-14, down from an hour, and that is what the current shape is
@@ -53,14 +53,14 @@ for. The running order:
   21-26   sections 1 to 3 -- installing, and starting a server
   27-30   THE DEMO RUN -- A, B, C and D, back to back, about 6 minutes of terminal
   31-38   section 7 -- the transaction model and the blind-write guardrail, then demo E
-  39-48   section 8 -- the router maintenance cycle, then demo F
-  49-54   section 9 -- McpAuthRouter, a reachable port, then demo G
-  55-59   section 10 -- extending it: a server for YOUR software
-  60-62   section 11 -- the worker gem's GemStone user
-  63-67   section 12 -- versions: the floor moved, and why
-  68-70   the JSON codec -- OPTIONAL, run only if the clock allows
+  39-46   section 8 -- the router maintenance cycle, then demo F
+  47-52   section 9 -- McpAuthRouter, a reachable port, then demo G
+  53-57   section 10 -- extending it: a server for YOUR software
+  58-60   section 11 -- the worker gem's GemStone user
+  61-65   section 12 -- versions: the floor moved, and why
+  66-68   the JSON codec -- OPTIONAL, run only if the clock allows
 
-WHAT IS SET ASIDE, and where. docs/slides/archive.md holds nineteen slides removed on 2026-09-14
+WHAT IS SET ASIDE, and where. docs/slides/archive.md holds twenty-one slides removed on 2026-09-14
 for time: section 4 (trace 1, a brand-new client's first request, ten slides), the trace half of
 section 5 (a follow-up request, four), and section 6 (progress notifications, five). About fourteen
 minutes of slides. THEIR DEMOS STAYED -- demo C came out of section 4 and demo D out of section 6,
@@ -68,6 +68,10 @@ and they now sit together with demos A and B as one continuous stretch of termin
 renderable and carries its own map back; read its header before putting anything back, because two
 of those slides cannot return alone. THE SECTION NUMBERS WERE NOT RENUMBERED: the deck goes 3, 7,
 8, and the gap is the archive. Section numbering is a property of the material, not of this cut.
+LATER THE SAME DAY, two more went to the archive from section 8 -- the answered-ping slide and the
+descriptionOfSession: slide. That is a different kind of cut: section 8 is being thinned slide by
+slide rather than set aside, and those two slides' notes were split across the slides that stayed
+rather than travelling whole. The archive's own header is the authority on which paragraph is where.
 
 THE CODEC SLIDES MOVED RATHER THAN LEFT. Section 5's other half -- why this server owns its JSON
 writer, the inbound repair, and the five measured kernel defects -- is at the END of the file, after
@@ -3745,9 +3749,9 @@ view when the client will not move it.
 
 <!--
 ================================================================================
-VERTICAL SLICE 2 — section 8, the router maintenance cycle. Nine slides, cut
-2026-09-10 against docs/Presentation.md section 8, and folded from ten to nine
-on 2026-09-14 -- see THE FOLD below.
+VERTICAL SLICE 2 — section 8, the router maintenance cycle. Seven slides, cut
+2026-09-10 against docs/Presentation.md section 8, and thinned from ten to seven
+on 2026-09-14 -- see THE FOLD and THE REMOVALS below.
 
 The thesis, and every slide serves it: the front end is the only part of this
 server with a heartbeat, so every judgement about time is made there -- and it is
@@ -3760,9 +3764,17 @@ THE FOLD, 2026-09-14. The counting rule was slide 3 and is now the second half o
 slide 2, under the maintenance-pass diagram: one slide that shows the pass and
 then says what the pass is counting. The "Per session, inside the pass" lines
 came off the diagram to make the room, and are spoken over it instead. Slide
-numbers below are POST-fold; the running order is 1 lead, 2 the pass and the
-counting rule, 3 reapReasonFor:, 4 the answered ping, 5 how the front end sees
-it, 6 view hygiene, 7 the conjunct, 8 the dead gem, 9 maxSessions, then demo F.
+THE REMOVALS, 2026-09-14, later the same day. The two MECHANISM slides came out
+and the POLICY slides stayed: "An answered ping proves the client is there" and
+"How the front end can see any of this" are in docs/slides/archive.md, at the
+end, under their own header. Their notes were SPLIT rather than moved -- four
+surviving slides here carry the paragraphs they depend on, each under a marked
+block saying where it came from. The archive header lists the split; keep the two
+in step if either slide comes back.
+
+Slide numbers below are POST-fold and POST-removal; the running order is 1 lead,
+2 the pass and the counting rule, 3 reapReasonFor:, 4 view hygiene, 5 the
+conjunct, 6 the dead gem, 7 maxSessions, then demo F.
 
 What the outline had as slides and this does not, all now speaker notes, on the
 same principle slice 1 settled -- a MEASUREMENT is evidence for a claim, not the
@@ -3770,21 +3782,22 @@ claim, and notes are where evidence belongs:
 
   * the 96%-over-one-night suspend-detector result -> notes on slide 2;
   * the four-way commits-behind measurement (9 -> 18 -> 161 -> 202, and the
-    489-behind front-end gem) -> notes on slide 6;
+    489-behind front-end gem) -> notes on slide 4;
   * the StnCrBacklogThreshold "-1 comes back resolved as 80" finding -> notes on
-    slide 5;
-  * the zero-filled descriptionOfSession: of a dead gem -> notes on slide 5,
+    slide 4;
+  * the zero-filled descriptionOfSession: of a dead gem -> notes on slide 6,
     which is where a Q&A magnet belongs;
-  * the endedCall*/isEndedCallKind: defect story -> notes on slide 7;
-  * request deadlines and cancellation IN FULL -> notes on slide 7. The outline
+  * the endedCall*/isEndedCallKind: defect story -> notes on slide 5;
+  * request deadlines and cancellation IN FULL -> notes on slide 5. The outline
     put them in this section because they share the escalation; at this budget
     they are the first thing that cannot be slides. If section 8 is ever given
     another minute, this is what to spend it on.
 
-Budget: 7:10 -- 340s of slides plus the 90s demo F, against the 6.5 minutes the
-outline's table allowed. Unchanged by the fold: slide 2 now carries both its own
-25s and the counting rule's 45s, so it is a 70s slide and the longest here. With
-slide 6's 45s, those two are the section. See the note in docs/Presentation.md on where the extra 0.7
+Budget: about 5:45 -- roughly 255s of slides plus the 90s demo F, down from the
+7:10 this slice was cut at. The fold moved time rather than saving it: slide 2
+carries both its own 25s and the counting rule's 45s, so it is a 70s slide and
+the longest here. The removals gave back about 85s. With slide 4's 45s, slides 2
+and 4 are now most of the section, and the 45s on slide 2 is the part to protect. See the note in docs/Presentation.md on where the extra 0.7
 talk minutes come from.
 ================================================================================
 -->
@@ -3809,9 +3822,6 @@ front end observed. Promise that and they will spend the section checking it.
 -->
 
 ---
-
-## One `GsProcess`, one pass every 60 seconds
-
 <div style="text-align:center">
 <svg viewBox="0 0 960 232" width="760" role="img" aria-label="The maintenance pass as it runs by default: refresh the front end's own view, then measure each worker's view hygiene, then probe quiet sessions, then reap. Step one comes first so everything after it reasons about the repository as it is now; reaping comes last so a session found gone while probing is freed in the same pass.">
   <defs>
@@ -3843,13 +3853,13 @@ front end observed. Promise that and they will spend the section checking it.
 </svg>
 </div>
 
-## Almost nothing here is measured in elapsed time
+Almost nothing here is measured in elapsed time
 
 * **Idleness** is a count of **pings the client answered with no work in between** — `sessionIdleTimeoutSeconds` &#247; the *realized* ping cadence, **fifteen** at the defaults
 * **Unreachability** is a count of **passes with no stream**
 * **A ping is never declared late by a clock.** It is superseded by the next one and judged then — admissible, or discarded because the transport moved under it
 
-Every count advances only while the front end runs, so **a suspended host simply stops the count where it was**: no suspend to detect, nothing to forgive, no threshold to get wrong.
+The count advances only while the front end runs. **A suspended host simply stops the count where it was.**
 
 > Two mechanisms were **removed** by this rule, not fixed: the suspend detector, and the pass that timed out server-initiated requests.
 
@@ -3939,18 +3949,41 @@ fifteen pings where twenty minutes of them had gone by.
 
 Expect the question "what if the front end itself is wedged?" Answer: then nothing is reaped, which
 is the safe direction -- no client loses a gem because the server stopped watching.
+
+================================================================================
+AN ANSWERED PING PROVES THE CLIENT IS THERE -- slide removed 2026-09-14. These
+two paragraphs stayed because this slide's own bullets assert what they explain:
+"idleness is a count of pings the client answered with no work in between", and
+"a ping is never declared late by a clock".
+================================================================================
+
+The first three bullets are one deliberate decision and the audience may well push on it, so have the
+reason ready rather than the mechanism: the ping is how idleness is MEASURED, so an answer cannot
+also reset what it is measuring. If it did, the idle deadline would be unreachable for every
+conformant client, and "idle" would come to mean "disconnected" -- which the streamless rung already
+covers. Unanswered is the other direction and is a gain, not a cost: proven gone, released early
+rather than waited out for the full thirty minutes.
+
+Also note what replaced the timeout here, because it is the same idea as the counting rule above: probeSession:
+retires the previous ping BEFORE sending the next one. A ping is not declared late by a clock, it is
+superseded and judged at that moment -- unanswered if its generation is still current, discarded if
+the transport had moved on under it.
+
+If asked about the ping cadence: one cadence for every session, every probePassInterval passes from
+the last touch -- 120 seconds at the defaults -- whether or not that session has an idle deadline,
+because the ping is how idleness gets measured either way. A client making calls is never pinged at
+all, since touch resets the count.
 -->
 
 ---
-
-## `reapReasonFor:` — the whole policy, ordered by *kind of evidence*
+## `reapReasonFor:` — ordered by *kind of evidence*
 
 | | ground | what kind of thing it is |
 |---|---|---|
 | — | **a call is in flight** | **never reaped, on any ground, however long it has run** |
-| 1 | `isExpired` | **wall clock** — a credential is, and no amount of sleeping makes an expired token valid |
+| 1 | `isExpired` | **wall clock** — no amount of sleeping makes an expired token valid |
 | 2 | stream closed by client **and** none open now | one **observed fact**; needs no repetition to be believed |
-| 3 | `unansweredProbes >= 3` | **evidence**, not absent traffic — it went down a stream the client itself opened |
+| 3 | `unansweredProbes >= 3` | **evidence**, not absent traffic |
 | 4 | `quietProbes >=` confirmations | **counted confirmations**; only where a deadline is configured |
 | 5 | stuck view — **four** conjuncts | the only ground about the **repository** rather than the client |
 | 6 | `streamlessPasses >=` limit | the **give-up** rule: liveness cannot speak for a client it cannot reach |
@@ -3988,27 +4021,12 @@ What the client is told: nothing, before or at either deadline. It was told, unt
 notifications/message -- which the draft revision deprecates and, for anything unsolicited,
 prohibits, and which measurement said no client surfaced to its model anyway. What it gets instead is
 the 404. The ping stays because what it buys is the EVIDENCE, not the message.
--->
 
----
-
-## An answered ping proves the client is there — and still counts against it
-
-* **Any** answer proves liveness — result *or* error (`noteAlive`)
-* It deliberately **does not stamp the activity clock**. Only real MCP traffic (`touch`) restarts the idle cycle
-* Otherwise every well-behaved client — and they all answer `ping` — would hold a gem **and a transaction view** for as long as it stayed open
-
-**An unanswered ping is evidence of death only if it went down the stream the client is still on.** Both shipping clients reopen a dropped GET on their own, and a write into the superseded stream *succeeds* — into a buffer nobody will read. So every probe records its **stream generation**.
-
-<span class="fine">Measured against real clients, 2026-08-23: **6 of 14 pings** were retired as inadmissible rather than counted unanswered.</span>
-
-<!--
-The first three bullets are one deliberate decision and the audience may well push on it, so have the
-reason ready rather than the mechanism: the ping is how idleness is MEASURED, so an answer cannot
-also reset what it is measuring. If it did, the idle deadline would be unreachable for every
-conformant client, and "idle" would come to mean "disconnected" -- which the streamless rung already
-covers. Unanswered is the other direction and is a gain, not a cost: proven gone, released early
-rather than waited out for the full thirty minutes.
+================================================================================
+WHY ROW 3 SAYS "EVIDENCE" -- from the answered-ping slide, removed 2026-09-14.
+Row 3 is the only row whose ground is a COUNT of things that did not happen, so
+it is the row that has to earn the word, and this is how it earns it.
+================================================================================
 
 The bottom half is the subtlest thing in the section and worth the words. The failure it prevents is
 specific: a handover is likeliest on exactly the quiet sessions the reaper probes, so the population
@@ -4019,68 +4037,12 @@ Three pings like that and a perfectly healthy client loses its gem.
 6 of 14 is the number to give if anyone asks whether this is theoretical. It is not a rare
 correction; it is nearly half.
 
-Also note what replaced the timeout here, because it is the same idea as slide 3: probeSession:
-retires the previous ping BEFORE sending the next one. A ping is not declared late by a clock, it is
-superseded and judged at that moment -- unanswered if its generation is still current, discarded if
-the transport had moved on under it.
-
-If asked about the ping cadence: one cadence for every session, every probePassInterval passes from
-the last touch -- 120 seconds at the defaults -- whether or not that session has an idle deadline,
-because the ping is how idleness gets measured either way. A client making calls is never pinged at
-all, since touch resets the count.
+The measured figure, if anyone asks whether the correction is theoretical: against
+real clients on 2026-08-23, SIX OF FOURTEEN pings were retired as inadmissible
+rather than counted unanswered. Not a rare correction -- nearly half.
 -->
 
 ---
-
-## How the front end can see any of this
-
-**`System descriptionOfSession:`** — primitive 334. A **stone query**, made from the front-end gem, *about another session*.
-
-| field | meaning |
-|---|---|
-| 7 | `-1` / `0` / `1` — transactionless / out of transaction / in transaction |
-| 8 | whether this session references the **oldest** commit record |
-| 16 | commits that have occurred **since the session obtained its view** |
-
-* It never touches the worker's GCI channel, so **a busy worker can be measured perfectly well** — even though it must not be *acted* on
-* Reading **another** session needs the `SessionAccess` privilege; a worker reading its **own** field 16 needs none, which is what makes the every-result `[session]` note self-measured
-
-<!--
-This is the slide this audience will want and no other audience would, so let them look at it.
-
-The important structural point is the first bullet, because it is what makes the busy case tractable
-at all: the MEASUREMENT is a stone query and cares nothing for what the worker is doing; the ACTION
-would have to travel the worker's GCI channel, which allows one call at a time. So a session with a
-call in flight is measured every pass and acted on never. That asymmetry is not a workaround, it is
-the reason the arm can exist. It was checked explicitly because it was the obvious thing to worry
-about.
-
-#workerStoneSession is cached at the worker's login (McpSession>>cacheWorkerIds) precisely so nothing
-on this path has to ask the worker anything.
-
-THE Q&A MAGNET, and it is worth having ready because somebody here will ask what happens to a dead
-gem's measurement. descriptionOfSession: does not refuse a session id nobody holds -- measured on
-3.7.5 it answers a ZERO-FILLED description, 29 fields, the first nil and the rest 0. So field 16 is
-0, the session reads as perfectly current, the arm sends it nothing and writes nothing. And that is
-the TRUTHFUL answer rather than a lucky one: a gem that has exited pins no commit record, because its
-view went with the process. What it left behind is a maxSessions slot and nothing else -- which is
-slide 9.
-
-The one exception, if pressed, is id recycling: the cached number can be handed to another gem, and
-then the figure read belongs to a stranger. Worst case is one confusing log line per pass -- it names
-the right session, quotes a different gem's number, and reports an error about a gem that is gone,
-and none of the three is wrong on its own terms. Nothing is corrupted and nothing reaches the
-stranger, because the refresh only ever travels the dead worker's own closed channel.
-
-STnCrBacklogThreshold, if the stone settings come up: it comes back from the runtime ALREADY
-RESOLVED, and that mattered. system.conf documents -1 as twice STN_MAX_SESSIONS; on the development
-stone, which sets neither, the runtime read answers 80 against a StnMaxSessions of 10. Resolving -1
-ourselves would have computed 20 and been wrong about the number the stone actually uses. Trust the
-stone's number; map only 0 (disabled) and negative (unknown).
--->
-
----
-
 ## View hygiene: **one** ground, and it is this session's own distance from *now*
 
 A worker at least `maxCommitsBehind` (20) behind is sent one `System continueTransaction` — a current view with its uncommitted work **kept**. Three answers come back:
@@ -4129,6 +4091,34 @@ stone's backlog at 490, and was the sole entry in sessionsReferencingOldestCr.
 commitsBehindLimit is the LOWER of what the router tolerates and StnSignalAbortCrBacklog, so either
 one firing is enough; when the stone cannot be read the configured number stands alone, because an
 unreadable setting must not silently raise the bar.
+
+================================================================================
+HOW THE FRONT END CAN SEE ANY OF THIS -- slide removed 2026-09-14. This slide is
+the one that spends the measurement, so the measurement moved here. If the room
+asks HOW the front end knows a worker is 20 commits behind, this is the answer,
+and it is worth giving: System descriptionOfSession:, primitive 334, a stone
+query about another session -- field 7 transactionless/out/in transaction, field
+8 whether this session holds the OLDEST commit record, field 16 commits since
+the session took its view. Field 16 is the number on this slide.
+================================================================================
+
+This is the slide this audience will want and no other audience would, so let them look at it.
+
+The important structural point is the first bullet, because it is what makes the busy case tractable
+at all: the MEASUREMENT is a stone query and cares nothing for what the worker is doing; the ACTION
+would have to travel the worker's GCI channel, which allows one call at a time. So a session with a
+call in flight is measured every pass and acted on never. That asymmetry is not a workaround, it is
+the reason the arm can exist. It was checked explicitly because it was the obvious thing to worry
+about.
+
+#workerStoneSession is cached at the worker's login (McpSession>>cacheWorkerIds) precisely so nothing
+on this path has to ask the worker anything.
+
+STnCrBacklogThreshold, if the stone settings come up: it comes back from the runtime ALREADY
+RESOLVED, and that mattered. system.conf documents -1 as twice STN_MAX_SESSIONS; on the development
+stone, which sets neither, the runtime read answers 80 against a StnMaxSessions of 10. Resolving -1
+ourselves would have computed 20 and been wrong about the number the stone actually uses. Trust the
+stone's number; map only 0 (disabled) and negative (unknown).
 -->
 
 ---
@@ -4201,7 +4191,6 @@ one-minute pass -- and a stuck session writes one per pass for the whole of its 
 -->
 
 ---
-
 ## The ending that is *not* in the ladder: a worker gem that has **died**
 
 <div style="text-align:center">
@@ -4269,6 +4258,25 @@ sessionGone with GCI 4067, the next request 404s, and a fresh initialize succeed
 at ONE session -- so the slot really came back. 4 new tests in McpTransportTest and 9 wire checks in
 test.sh, which is the only place the first failure's number can be pinned: a mock can raise 4100, but
 it cannot die.
+
+================================================================================
+THE DEAD GEM'S OWN MEASUREMENT -- from the descriptionOfSession: slide, removed
+2026-09-14. This is the Q&A magnet and it belongs on the dead-gem slide now.
+================================================================================
+
+THE Q&A MAGNET, and it is worth having ready because somebody here will ask what happens to a dead
+gem's measurement. descriptionOfSession: does not refuse a session id nobody holds -- measured on
+3.7.5 it answers a ZERO-FILLED description, 29 fields, the first nil and the rest 0. So field 16 is
+0, the session reads as perfectly current, the arm sends it nothing and writes nothing. And that is
+the TRUTHFUL answer rather than a lucky one: a gem that has exited pins no commit record, because its
+view went with the process. What it left behind is a maxSessions slot and nothing else -- which is
+slide 9.
+
+The one exception, if pressed, is id recycling: the cached number can be handed to another gem, and
+then the figure read belongs to a stranger. Worst case is one confusing log line per pass -- it names
+the right session, quotes a different gem's number, and reports an error about a gem that is gone,
+and none of the three is wrong on its own terms. Nothing is corrupted and nothing reaches the
+stranger, because the refresh only ever travels the dead worker's own closed channel.
 -->
 
 ---
