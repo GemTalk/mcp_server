@@ -268,7 +268,22 @@ SLIDES = [
   "Transactionless is the constraint with teeth: front-end code must not read persistent object\n"
   "graphs. Stone primitives and lookups by name are fine; walking a committed collection is not.\n"
   "If someone asks why the router decides the worker's class and toolsets rather than the worker --\n"
-  "because only this side can see the token."),
+  "because only this side can see the token.\n"
+  "THE KERNEL FACT IN THE PROSE IS THE ONE THIS ROOM KNOWS, and section 3's slide for it came down\n"
+  "on 2026-09-13, so this is where it gets said. A forked GsProcess runs only while its gem is\n"
+  "ACTIVELY EXECUTING Smalltalk; a GCI-driven session is parked in the C client between commands, so\n"
+  "an accept loop forked THERE is frozen and never serves a request. Therefore the accept loop has\n"
+  "to be a dedicated gem's blocking main activity. It is worth slowing down for: they know the fact\n"
+  "is true, what they have not necessarily done is follow it to three separate conclusions. The\n"
+  "other two are section 6's and section 8's -- the front end must own the client's STREAM, and the\n"
+  "front end must own VIEW HYGIENE, because only the front end has a heartbeat. Promise both rather\n"
+  "than spending them here; section 5's nbExecute: slide meets the same fact from the other\n"
+  "direction and says so.\n"
+  "Have the third argument ready anyway, because somebody always jumps ahead. On every OTHER count\n"
+  "the worker is the better-informed party: it can read its own commits-behind, the stone's backlog,\n"
+  "whether it holds the oldest commit record, and needsCommit, none of which the front end can see.\n"
+  "The action still belongs to the front end because the problem case is precisely the IDLE worker\n"
+  "holding a stale view -- the one moment that worker cannot run a line of code."),
 
  ("c-session", "McpSession &#8212; one per client, and the only thing that drives a worker",
   "The `GsTsExternalSession` handle, the session id, last activity, the worker class and toolset list "

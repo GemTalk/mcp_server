@@ -42,7 +42,7 @@ style: |
 
 <!--
 ELEVEN VERTICAL SLICES. Sections 0-12 are cut, and THIS FILE IS IN RUNNING ORDER THROUGHOUT.
-Section 13 is the only one left. Sections 0 and 1 (two slides), then sections 1 to 3 (twelve), then
+Section 13 is the only one left. Sections 0 and 1 (two slides), then sections 1 to 3 (ten), then
 section 4 (ten), then section 5 (seven), then section 6 (six), then section 7 (fourteen), then
 section 8 (ten), then section 9 (six), then section 10 (five), then section 11 (three), then
 section 12 (five). In the order they were CUT that is slice 3, slice 4, slice 5, slice 6, slice 7,
@@ -754,6 +754,21 @@ Transactionless is the constraint with teeth: front-end code must not read persi
 graphs. Stone primitives and lookups by name are fine; walking a committed collection is not.
 If someone asks why the router decides the worker's class and toolsets rather than the worker --
 because only this side can see the token.
+THE KERNEL FACT IN THE PROSE IS THE ONE THIS ROOM KNOWS, and section 3's slide for it came down
+on 2026-09-13, so this is where it gets said. A forked GsProcess runs only while its gem is
+ACTIVELY EXECUTING Smalltalk; a GCI-driven session is parked in the C client between commands, so
+an accept loop forked THERE is frozen and never serves a request. Therefore the accept loop has
+to be a dedicated gem's blocking main activity. It is worth slowing down for: they know the fact
+is true, what they have not necessarily done is follow it to three separate conclusions. The
+other two are section 6's and section 8's -- the front end must own the client's STREAM, and the
+front end must own VIEW HYGIENE, because only the front end has a heartbeat. Promise both rather
+than spending them here; section 5's nbExecute: slide meets the same fact from the other
+direction and says so.
+Have the third argument ready anyway, because somebody always jumps ahead. On every OTHER count
+the worker is the better-informed party: it can read its own commits-behind, the stone's backlog,
+whether it holds the oldest commit record, and needsCommit, none of which the front end can see.
+The action still belongs to the front end because the problem case is precisely the IDLE worker
+holding a stale view -- the one moment that worker cannot run a line of code.
 -->
 
 ---
@@ -2452,17 +2467,17 @@ IDLE worker holding a stale view, the one moment that worker cannot run a line o
 
 <!--
 ================================================================================
-VERTICAL SLICE 4 -- installing, and starting a server. Twelve slides -- a lead,
-the file-out table that is all that is left of section 1, three for section 2,
-five for section 3, then demo A and demo B back to back at the end. Cut
-2026-09-11: second in running order, fourth to be cut. It took the install slide
-and demo A on 2026-09-13, when section 1 stopped being a section of its own.
+VERTICAL SLICE 4 -- installing, and starting a server. Ten slides -- a lead, the
+file-out table that is all that is left of section 1, two for section 2, four for
+section 3, then demo A and demo B back to back at the end. Cut 2026-09-11: second
+in running order, fourth to be cut. It took the install slide and demo A on
+2026-09-13, when section 1 stopped being a section of its own, and lost two
+slides the same day.
 
 Running order and plans, in seconds -- lead 10; nothing to install 35 (section 1);
-config on an instance 30, what initialize seeds 35, the tool surface 45 (110s,
-section 2); the one fact + the deployment picture 50, forkOnPort: 45, in the child
-40, the banner 30, transactionless 50 (215s, section 3); demo A 60, demo B 90.
-370s of slides plus 150s of demo -- 8:40.
+config on an instance 30, what initialize seeds 35 (65s, section 2); forkOnPort:
+45, in the child 40, the banner 30, transactionless 50 (165s, section 3); demo A
+60, demo B 90. 275s of slides plus 150s of demo -- 7:05.
 
 THE TWO DEMOS ARE ADJACENT ON PURPOSE and they are provisional: demo A installs
 from nothing and demo B starts a server from a here-doc, which is one story told
@@ -2477,22 +2492,22 @@ stone at once, and is also why there is no file on disk to read afterwards (henc
 the banner slide).
 
 Section 2 is the cheap half and should be run fast. Section 3 is where this
-audience is, and the slide that lands is "a gem executes no Smalltalk while it is
-idle" -- it is the reason the architecture is shaped this way rather than a
-preference, and the room knows it is true before you say it. It is a CALLBACK
-slide: section 6 and section 8 each come back to it, and section 8's own notes
-already point here.
+audience is, and it now opens on forkOnPort: rather than on the kernel fact --
+"a gem executes no Smalltalk while it is idle" came down on 2026-09-13 because
+the gem-contents sequence already puts that fact in front of the room, in the
+McpRouter box, fourteen slides earlier. Say it there, not here. What it earned
+survives in two places: its three conclusions are in that box's notes (the front
+end owns the stream, and owns view hygiene, because only the front end has a
+heartbeat -- sections 6 and 8 each come back for one), and its deployment half is
+in forkOnPort:'s notes, where the seven steps ARE the picture it used to draw.
 
-THE DEPLOYMENT DIAGRAM LIVES HERE, on purpose, and it is the first picture in the
-deck. Slice 3 deliberately drew nothing so this one would land: sections 0 and 1
-described three kinds of gem in a table, and this is that table as a picture, at
-the moment the reader first needs to hold all three at once. The request picture
-is section 4's and stays there.
+NOTHING IN THIS SLICE DRAWS ANY MORE. The deployment diagram went with that
+slide, and the loss is smaller than it looks: the gem-contents sequence spends
+seventeen slides on the same three kinds of gem, one box at a time, and the
+request picture is section 4's. If this run ever feels too verbal, the diagram is
+in git -- 3441ade and earlier.
 
 DEPARTURES from docs/Presentation.md:
-  * the outline gives section 2 two slides; it gets three. The extra one is the
-    tool surface, which the merge of 2026-09-11 (33974ec) turned from a bullet
-    into an argument -- see the next paragraph.
   * the outline gives section 3 "2-3 slides"; it gets four plus the demo. The
     banner is a slide of its own because it is the only artefact that records
     what a running router was told, and because DEMO B is nothing but that banner
@@ -2509,14 +2524,15 @@ DefaultToolsetNames is GONE: the default surface no longer probes the symbol lis
 for McpGrailToolset, so nothing joins a server's tool surface by being loaded.
 The outline still describes the probe in section 2 and MUST be corrected. Two
 consequences the slides take:
-  * section 2 gains slide 3, whose argument is that configuring a toolset now
-    looks the same whoever wrote it;
   * section 10 ("a server for YOUR software") gets a worked example it did not
     have -- McpGrailToolset is now wired exactly as a third party's would be, so
     section 10 can say "copy this" and mean it literally. Slide 3's last line is
     the forward reference; do not spend section 10's argument here.
 Breaking, pre-release, and called out rather than shimmed: a Grail server's
 run-server.sh line needs MCP_TOOLSETS or it comes up with 31 tools instead of 40.
+As of 2026-09-13 section 2 makes this claim in ONE LINE on the seeds slide and
+spends nothing on it; the argument moved whole to section 10, which is the
+section that needed it. The seeds slide's notes carry what to say if asked.
 ================================================================================
 -->
 
@@ -2628,8 +2644,6 @@ r forkOnPort: 8000
 * So **several differently-configured routers can serve one stone at once** — a browsing-only one on 8001, an authenticated one on 8443 — and none of them is a fact about the image
 * What travels in that string is **paths and identifiers only, never key material**
 
-<span class="fine">The other ~200 lines of the script are environment handling, a port-in-use check, and turning `MCP_*` into setter lines. The five above are the program.</span>
-
 <!--
 Run this slide fast. It exists so that nobody spends the rest of the hour looking
 for the config file, and it is worth exactly that much.
@@ -2653,13 +2667,12 @@ running. Two routers on one stone would need two files and a way to say which.
 | what it bounds | seeded defaults |
 |---|---|
 | concurrency | `maxSessions` **3** — `nil` would mean *no cap*, which is a setting in itself |
-| session lifetime | `sessionIdleTimeoutSeconds` 1800 · `livenessProbeIntervalSeconds` 120 · `reaperIntervalSeconds` 60 · two stream deadlines, 60 and 10 (§8) |
-| view hygiene (§8) | `maxCommitsBehind` 20 · `stuckViewGraceSeconds` 60 · `pinnedViewGraceSeconds` 300 |
-| this gem (§3) | `frontEndTransactionMode` `transactionless` |
+| session lifetime | `sessionIdleTimeoutSeconds` 1800 · `livenessProbeIntervalSeconds` 120 · `reaperIntervalSeconds` 60 · two stream deadlines, 60 and 10 · `requestTimeoutSeconds` `nil` · `maxSessionLifetimeSeconds` `nil` |
+| view hygiene | `maxCommitsBehind` 20 · `stuckViewGraceSeconds` 60 · `pinnedViewGraceSeconds` 300 |
+| this gem | `frontEndTransactionMode` `transactionless` |
 | security | `allowedOriginHosts` loopback · `messageTrace` **false** |
-| **left `nil`** = off | `requestTimeoutSeconds` — **no request deadline by default**, and §8 is why · `maxSessionLifetimeSeconds` · `toolsetOptions` · the TLS files |
 
-<span class="fine">`validateTimerConfig` refuses any interval whose *count* would round to something other than what was written. §8: why all of this is counted rather than timed.</span>
+Where `nil` becomes a default: `workerClassName` → `McpServer`; `toolsetNames` → `defaultToolsetNames` — **the core seven, and nothing else.**
 
 <!--
 Do not read the table. Say the rule, let them scan, and move on -- the numbers
@@ -2668,11 +2681,6 @@ does not have to stop and explain where 20 came from. maintenanceCallTimeoutSeco
 (5), streamlessIdleTimeoutSeconds (60) and streamLossGraceSeconds (10) are the
 three seeded values not spelled out, for room; section 8 introduces all three
 where they are used.
-
-The awkward cases are the ones where nil is MEANINGFUL, and they are worth the
-extra sentence if there is time. maxSessions nil is "no cap at all". maxCommits
-Behind nil is "view hygiene off". Neither could double as "use the default", so
-both are seeded, and the class comment says so at each one.
 
 The rule is the slide, and it is worth one extra sentence if there is time: the
 awkward cases are the ones where nil is MEANINGFUL. maxSessions nil is "no cap at
@@ -2688,128 +2696,45 @@ requestTimeoutSeconds nil is the one that draws a question. The honest answer is
 section 8's and it is one sentence: a deadline on the front end cannot stop the
 work, it can only stop waiting for it, which left the gem running and the client
 told it had failed. Promise section 8 and move on.
--->
 
----
+THE TOOL SURFACE, absorbed 2026-09-13 from the slide that used to follow this
+one. The last line of the slide is all that is left of it, and the argument
+itself is section 10's now -- these are the things worth having ready if a hand
+goes up.
 
-## The tool surface is **named**, never discovered
+Say the change out loud if this room read the README before it. Until 2026-09-11
+the default PROBED the symbol list and appended McpGrailToolset whenever
+src/grail/ had been filed in, so INSTALLING the group configured every server in
+the image. Breaking, pre-release, and called out rather than shimmed: a Grail
+server's run-server.sh line now needs MCP_TOOLSETS or it comes up with 31 tools
+instead of 40.
 
-`workerClassName` `nil` → `McpServer`; `toolsetNames` `nil` → `defaultToolsetNames` — **the core seven, and nothing else.**
+Two reasons it had to go, and the second is the one that matters for the rest of
+the hour. An optional toolset can carry a dependency the image knows nothing
+about -- Grail's tools read the .py checkout MCP_GRAIL_DIR names, so such a server
+was answering for a directory nobody chose. And turning a toolset on should look
+the same whoever wrote it: with the probe gone, McpGrailToolset is wired exactly
+as a third party's would be, which is what lets section 10 say "copy this". Do
+NOT spend that argument here; it is section 10's whole opening.
 
-> **Changed this week.** The default used to probe the symbol list and append `McpGrailToolset` whenever `src/grail/` had been filed in. So *installing* the group configured every server in the image.
+Nothing silently degrades, which is what makes it a safe break: the tools are
+ABSENT from tools/list rather than present and failing, and a client cannot call
+what it was never offered. The sharpest version of the old behaviour, if you want
+it: on an image where MCP_GRAIL_DIR had never been set, every server in the image
+advertised nine tools that could not work.
 
-* An optional toolset can carry a dependency the image knows nothing about — Grail's tools read the `.py` checkout that `grailDirectory` names, so such a server was **answering for a directory nobody chose**
-* And **turning a toolset on should look the same whoever wrote it.** With the probe gone, `McpGrailToolset` is wired exactly as a third party's would be — which makes it the worked example §10 can tell you to copy
-
-`MCP_TOOLSETS` names the surface — the core seven **plus** yours. `MCP_GRAIL_DIR` only *configures* it; `validateWorkerConfig` refuses to start a router holding options for a toolset it does not serve.
-
-<span class="fine">Resolved **per session, in the front end**: a toolset filed in after startup reaches the next client, and (§9) an authenticated router can narrow the list per principal — only possible on the side that holds the token. **31 tools by default, 40 when Grail is named.**</span>
-
-<!--
-This slide is four days old and it replaced a bullet. Say the change out loud --
-this room may have read the README before the probe came out -- and say which way
-it broke: a Grail server's launch line now needs MCP_TOOLSETS or it comes up with
-31 tools instead of 40. Pre-release, so it is called out rather than shimmed.
-
-Nothing silently degrades, which is the part that makes it a safe break: the
-tools are ABSENT from tools/list rather than present and failing. A client cannot
-call what it was never offered. The sharpest version of the old behaviour, if you
-want it: on an image where MCP_GRAIL_DIR had never been set, every server in the
-image advertised nine tools that could not work.
-
-The second bullet is the one that matters for the rest of the hour, and it is why
-this is a slide rather than a footnote. Before the merge, the only optional
-toolset in the tree was wired by a mechanism nobody else could use -- so section
-10 had to describe how you WOULD add a toolset. Now McpGrailToolset is the worked
-example: nine tools, its own options, its own suite, and not one line of special
-handling anywhere in core. Section 10 can say "copy this". Do NOT spend that
-argument here; one sentence and the forward reference.
-
-If asked why the probe existed at all: convenience, and it was wrong for a
-reason worth naming -- installing something and running it are different
-decisions, and conflating them meant an operator who had never heard of Grail was
-serving its tools.
+MCP_TOOLSETS names the surface -- the core seven PLUS yours. MCP_GRAIL_DIR only
+CONFIGURES it, and validateWorkerConfig refuses to start a router holding options
+for a toolset it does not serve (section 10 again). The list is resolved per
+session, in the front end, so a toolset filed in after startup reaches the next
+client, and section 9's authenticated router can narrow it per principal -- only
+possible on the side that holds the token. 31 tools by default, 40 when Grail is
+named.
 
 McpContractTest pins this in the CORE suite rather than the Grail one, which is
 the right place for it: the property is that an unconfigured router's surface
 does not depend on which optional groups the image happens to carry, so it has to
 be asserted on an image that carries them.
--->
-
----
-
-## A gem executes no Smalltalk while it is idle
-
-<div style="text-align:center">
-<svg viewBox="0 0 960 212" width="900" role="img" aria-label="Deployment: a launching topaz session forks and detaches a front-end gem, which owns the listen socket, the reaper and the signal poller, and runs transactionless; that gem logs in one worker gem per client session over GCI. The launching session then logs out and the child keeps serving.">
-  <defs>
-    <marker id="m2" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
-      <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
-    </marker>
-  </defs>
-  <!-- the launching session -->
-  <rect x="10" y="65" width="160" height="64" rx="4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="6 4" opacity=".75"/>
-  <text x="90" y="92" font-size="16" text-anchor="middle" font-weight="600" fill="currentColor">topaz -l</text>
-  <text x="90" y="113" font-size="13" text-anchor="middle" fill="currentColor" opacity=".7">run-server.sh</text>
-  <text x="90" y="152" font-size="13" text-anchor="middle" fill="currentColor" opacity=".62">logs out, and the</text>
-  <text x="90" y="170" font-size="13" text-anchor="middle" fill="currentColor" opacity=".62">child keeps serving</text>
-  <!-- fork arrow -->
-  <line x1="172" y1="97" x2="294" y2="97" stroke="currentColor" stroke-width="1.5" marker-end="url(#m2)"/>
-  <text x="233" y="76" font-size="13" text-anchor="middle" fill="currentColor" opacity=".8">fork + detach</text>
-  <text x="233" y="118" font-size="13" text-anchor="middle" fill="currentColor" opacity=".8">config as JSON</text>
-  <!-- the front end -->
-  <rect x="298" y="42" width="322" height="110" rx="4" fill="none" stroke="currentColor" stroke-width="1.9"/>
-  <text x="459" y="66" font-size="16" text-anchor="middle" font-weight="600" fill="currentColor">detached gem &#8212; McpRouter:8000</text>
-  <text x="459" y="92" font-size="14" text-anchor="middle" fill="currentColor">accept loop &#8212; the gem&#8217;s <tspan font-style="italic">blocking main activity</tspan></text>
-  <text x="459" y="114" font-size="14" text-anchor="middle" fill="currentColor">reaper (&#167;8) &#183; signal poller (&#167;6)</text>
-  <text x="459" y="136" font-size="14" text-anchor="middle" fill="#b4451f" font-weight="600">transactionless</text>
-  <!-- workers -->
-  <line x1="622" y1="97" x2="694" y2="66" stroke="currentColor" stroke-width="1.4" marker-end="url(#m2)"/>
-  <line x1="622" y1="97" x2="694" y2="97" stroke="currentColor" stroke-width="1.4" marker-end="url(#m2)"/>
-  <line x1="622" y1="97" x2="694" y2="128" stroke="currentColor" stroke-width="1.4" marker-end="url(#m2)"/>
-  <rect x="698" y="50" width="248" height="32" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
-  <rect x="698" y="82" width="248" height="32" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
-  <rect x="698" y="114" width="248" height="32" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
-  <text x="822" y="71" font-size="14" text-anchor="middle" fill="currentColor">worker gem &#8212; McpServer</text>
-  <text x="822" y="103" font-size="14" text-anchor="middle" fill="currentColor">worker gem &#8212; McpServer</text>
-  <text x="822" y="135" font-size="14" text-anchor="middle" fill="currentColor">worker gem &#8212; McpServer</text>
-  <text x="822" y="166" font-size="13" text-anchor="middle" fill="currentColor" opacity=".7">one per client session: a login, a view,</text>
-  <text x="822" y="184" font-size="13" text-anchor="middle" fill="currentColor" opacity=".7">a commit record the stone cannot dispose of</text>
-  <text x="659" y="90" font-size="12" text-anchor="middle" fill="currentColor" opacity=".6">GCI</text>
-</svg>
-</div>
-
-> A forked `GsProcess` runs only while its gem is **actively executing Smalltalk**. A GCI-driven session is parked in the C client between commands, so an accept loop forked there is frozen and never serves a request.
-
-**Therefore the accept loop must be a dedicated gem's blocking main activity.** The same fact decides two more things later: the front end must own the client's stream (§6), and the front end must own view hygiene (§8) — because **only the front end has a heartbeat.**
-
-<!--
-This is the slide that lands with this audience, and the only one in the pair
-worth slowing down for. They know the fact is true; what they have not
-necessarily done is follow it to three separate conclusions. Say it once, put the
-picture up, and promise the other two.
-
-The third conclusion is the interesting one and section 8 spends it properly, so
-do not do it here -- but have the sentence ready if somebody jumps ahead, because
-somebody will. On every OTHER count the worker is the better-informed party: it
-can read its own commits-behind, the stone's backlog, whether it holds the oldest
-commit record, and needsCommit, none of which the front end can see. The action
-still belongs to the front end because the problem case is precisely the IDLE
-worker holding a stale view -- the one moment that worker cannot run a line of
-code.
-
-This is the gem-contents diagram's other half: that one says what is INSIDE each
-gem, this one says where the gems come from. The room has already seen the boxes,
-so point at the three parts in order -- one gem owning the socket, three
-GsProcesses inside it, one worker gem per client -- and spend the time on the
-fork and the detach instead. Then point at "transactionless" and say it is the
-last slide of this section.
-
-The dashed box is the launching session and the dash is the point -- it is gone
-by the time anything is served. If someone asks what happens to the workers when
-the front end dies: every attached worker dies with the process owning its GCI
-connection, which is also why ./stop-server.sh leaks nothing. That is section 8's
-material; one sentence here at most.
 -->
 
 ---
@@ -2848,6 +2773,22 @@ If asked about the one-time password: the child logs in as the same GemStone use
 as the launching session, with a credential valid for 300 seconds and usable once.
 No password is written into the fork string, which is the whole point -- the fork
 string is visible to anything that can read the session's arguments.
+
+THE DEPLOYMENT HALF, absorbed 2026-09-13 from the picture slide that used to sit
+two slides back ("a gem executes no Smalltalk while it is idle"). The kernel fact
+it argued now lives in section 1's McpRouter box, where the room meets it first;
+what follows is what the picture showed, and these seven steps ARE that picture.
+
+The launching session is gone by the time anything is served, and that is the
+part worth saying out loud: topaz forks the child, hands it the config as JSON,
+and logs out. Nothing is left behind -- no pid file, no service manager, no server
+object in the repository. Step 6 is that moment; say "the child is independent"
+and mean it literally.
+
+If someone asks what happens to the workers when the front end dies: every
+attached worker dies with the process owning its GCI connection, which is also
+why ./stop-server.sh leaks nothing. That is section 8's material; one sentence
+here at most.
 -->
 
 ---
@@ -3465,9 +3406,9 @@ than a design preference.
 
 Lead with the failure, not the fix: a blocking executeString: blocks in the C
 client, and a gem parked in the C client executes no Smalltalk -- so every
-GsProcess in the front end stops. That is the SAME fact as section 3's "a gem
-executes no Smalltalk while it is idle", arriving from the other direction, and
-it is worth saying so out loud. The front end has three kinds of work in flight
+GsProcess in the front end stops. That is the SAME fact as section 1's McpRouter
+box -- a forked GsProcess runs only while the gem is executing Smalltalk --
+arriving from the other direction, and it is worth saying so out loud. The front end has three kinds of work in flight
 at any moment (connections, the reaper, open streams) and all three used to stop
 for the length of the longest tool call.
 
@@ -5611,7 +5552,7 @@ who a user is -- and that second check is against the USER's JwtSecurityData,
 which is a fact about the account rather than about the request.
 
 The derived scope set is a small design point that generalises, and it is the
-same move as section 2's "the tool surface is named": the wrong state is not
+same move as section 2's named tool surface: the wrong state is not
 detected, it is made impossible to express. A required scope that no client is
 ever told to request is unrepresentable, so requireResourceServerConfig has no
 subset rule to check and no caller has one to maintain.
@@ -5785,7 +5726,10 @@ Until McpServer class>>installedDefaultToolsetNames was removed, the only
 optional toolset in the tree was wired by a mechanism nobody else could use --
 so this section could only describe how you WOULD add one. Now McpGrailToolset
 is configured exactly as a third party's is, and the section can say "copy this"
-and mean it literally. Slide 3 is the payoff of section 2's slide 13; say so.
+and mean it literally. Slide 3 is the payoff of the one line section 2 still
+spends on this -- toolsetNames nil means the core seven, not "whatever is
+loaded". Section 2's slide arguing it came down on 2026-09-13 and its notes
+moved to the seeds slide, so THIS section now carries the argument outright.
 
 SLIDE 4 IS THE ONE THAT LANDS, and it is not really about Grail. It is the
 general shape: your domain has a model, this server has a session model, and
@@ -5898,10 +5842,15 @@ the shape of every deployment this section is for.
 * Options are **narrowed to the toolsets actually in the surface**, so a worker is never handed configuration for a toolset it does not have — and a router holding options for a toolset it does not serve **refuses to start**
 
 <!--
-This slide is the payoff of section 2's slide 13 and it is worth pointing back
-explicitly. Before that merge, the only optional toolset in the tree was wired by
-a mechanism nobody else could use, so this section could only describe how you
-WOULD add one. Now it can say copy this.
+This slide is the payoff of section 2's one line on the named tool surface, and
+it is worth pointing back explicitly. Before that merge, the only optional
+toolset in the tree was wired by a mechanism nobody else could use, so this
+section could only describe how you WOULD add one. Now it can say copy this.
+Since 2026-09-13 section 2 makes the claim and this section makes the case, so
+expect the "why did the probe exist at all?" question HERE: convenience, and it
+was wrong for a reason worth naming -- installing something and running it are
+different decisions, and conflating them meant an operator who had never heard of
+Grail was serving its tools.
 
 "It needs nothing from the server" is the claim to make deliberately. Grail's
 toolset gets no hook, no special case, no entry in core -- it resolves by name
