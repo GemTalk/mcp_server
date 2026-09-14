@@ -42,8 +42,8 @@ style: |
 ---
 
 <!--
-SIXTY SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut once;
-five stretches of them are now set aside. Section 13 is the only one never written.
+FIFTY-NINE SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut
+once; six stretches of them are now set aside. Section 13 is the only one never written.
 
 THE TARGET IS 45 MINUTES as of 2026-09-14, down from an hour, and that is what the current shape is
 for. The running order:
@@ -55,9 +55,9 @@ for. The running order:
   31-38   section 7 -- the transaction model and the blind-write guardrail, then demo E
   39-43   section 8 -- the router maintenance cycle, then demo F
   44-47   section 9 -- McpAuthRouter, a reachable port, then demo G (FOLDED 2026-09-14)
-  48-50   section 11 -- the worker gem's GemStone user (MOVED HERE 2026-09-14)
-  51-56   section 10 -- a lead, then extending it: a server for YOUR software
-  57-60   THE APPENDIX -- a lead, then the JSON codec. OPTIONAL, run only if the clock allows
+  48-49   section 11 -- the worker gem's GemStone user (MOVED HERE, THEN FOLDED, 2026-09-14)
+  50-55   section 10 -- a lead, then extending it: a server for YOUR software
+  56-59   THE APPENDIX -- a lead, then the JSON codec. OPTIONAL, run only if the clock allows
 
 RUNNING ORDER IS NOT SECTION-NUMBER ORDER ANY MORE. Section 11 was moved ahead of section 10 on
 2026-09-14, so the deck runs 9, 11, 10. The reason is thematic rather than structural: section 9's
@@ -101,8 +101,15 @@ four-sentence summary of the whole mechanism, and the three slides behind it -- 
 carries the token; the login; the token is the real bound -- came out. 190 seconds of slides became
 90 seconds of one. THE ARGUMENT DID NOT GO ANYWHERE: all three slides' notes are on page 45 under
 banners naming where each came from, so that slide is now spoken rather than read, and the renewal
-bug -- the best story in the section -- is a paragraph of them rather than a blockquote. Thirty-one
-slides are now set aside in total.
+bug -- the best story in the section -- is a paragraph of them rather than a blockquote.
+
+AND SECTION 11 WAS FOLDED TOO, last of all on the same day and by the same move, which is the sixth
+stretch. Page 49's face took the lock exposure as a blockquote -- no privilege allows or prevents
+System writeLock:, and a single statement can take over two thousand locks -- and the slide that
+had been the section's whole reason for existing came out behind it. Its notes are on page 49 under
+a banner, so the DataCurator measurement, the reverted lock reaper and the question itself all
+survive. THE ASK IS NOW SPOKEN RATHER THAN READ: no face in the deck asks for a privilege that
+withholds writeLock:, and the speaker has to. Thirty-two slides are now set aside in total.
 
 THE CODEC SLIDES MOVED RATHER THAN LEFT, AND ARE NOW AN APPENDIX. Section 5's other half -- why this
 server owns its JSON writer, the inbound repair, and the five measured kernel defects -- is at the
@@ -110,7 +117,8 @@ END of the file, after section 10, and is the first thing to drop if the clock h
 2026-09-14 a lead slide went in front of it saying so in the title, which makes the drop a clean
 seam rather than a silent stop: if the clock has gone, end on the lead. Do not start the three and
 abandon them, because the ask is the last of them. It IS the concrete ask of the talk, so dropping
-it is not free; section 11's slide names it as one of the two things being asked for.
+it is not free; section 11's notes name it as one of the two things being asked for, the other
+being section 11's own lock question -- which since the fold is not on a face either.
 
 Each slice's own header comment sits beside its first slide. Seven of the original eleven slice
 headers are still here; slice 5's, slice 7's and slice 10's went to the archive with their slides,
@@ -4890,8 +4898,8 @@ air rather than answering.
 
 <!--
 ================================================================================
-VERTICAL SLICE 11 -- section 11, the worker gem's GemStone user. Three slides,
-no demo. Cut 2026-09-13, and it closed the running-order gap at the time: every
+VERTICAL SLICE 11 -- section 11, the worker gem's GemStone user. Two slides,
+no demo, having been three until the fold recorded below. Cut 2026-09-13, and it closed the running-order gap at the time: every
 cut section, 0-12, was then in section-number order. THAT IS NO LONGER THE SHAPE.
 On 2026-09-14 this slice was MOVED AHEAD OF SECTION 10, to sit immediately after
 demo G, so the deck runs 9, 11, 10. The reason is thematic: section 9 has just
@@ -4900,11 +4908,21 @@ is the one that says what actually bounds it -- carried back from McpAuthRouter
 to the plain McpRouter, which is where most of the room's servers will be.
 Section 13 is still the only section never written.
 
-Running order and plans, in seconds -- the boundary 55, what it costs 50, the
-lock and the ask 55. About 2 1/2 minutes.
+Running order and plans, in seconds -- the boundary 55, the privileges and the
+lock 65. About 2 minutes.
+
+THE FOLD, 2026-09-14. This slice was three slides. The third -- "System
+writeLock: is gated by no privilege -- and that is my question" -- came out after
+its subject arrived on slide 2's face as a blockquote: no privilege allows or
+prevents writeLock:, and a single statement can walk Globals and take over two
+thousand locks. Fifty-five seconds of slide became three lines of quote. NOTHING
+WAS DROPPED FROM THE ARGUMENT: that slide's notes are on slide 2 under a banner,
+so the DataCurator measurement, the reverted reaper and the question itself are
+all still here -- all of them now SPOKEN rather than read. The archive's header
+says what to cut back out of slide 2's notes if the slide is ever put back.
 
 THE OUTLINE SAYS 1 SLIDE, and that entry describes a feature this server does not
-have. Rewrite it. What section 11 is now is a real boundary with a real open
+have. Rewrite it. This is now two slides, having been three. What section 11 is now is a real boundary with a real open
 question attached, and the question is one of the two things this talk is
 actually asking the room for -- the other being the defect table, now the last slide of the
 deck and the first thing to go if the clock has gone.
@@ -4917,7 +4935,9 @@ an intention. Say the positive version and do not spend time on what it replaces
 this audience is meeting the project for the first time and has no stake in an
 earlier design.
 
-SLIDE 3 IS THE ASK, and it is the slide this section exists for. System writeLock:
+SLIDE 2 CARRIES THE ASK since the fold, and it is what this section exists for --
+but it carries it as a statement of fact, in the blockquote at its foot, where a
+slide of its own used to put the question. System writeLock:
 is gated by no privilege, so a browsing-only session has it, and a lock blocks
 OTHER sessions from committing -- including a privileged developer committing
 code, measured. What bounds it today is session lifetime and an operator
@@ -4925,10 +4945,13 @@ noticing. A reaper that ended lock holders WAS built here and taken back out,
 because it can only act once per heartbeat and the holder picks when the window
 falls -- chasing a lock holder is not the same as not being able to take the
 lock. A privilege that withheld writeLock: would bound it at zero. That is a
-GemStone question, not an mcp_server one, and it goes to the room.
+GemStone question, not an mcp_server one, and it goes to the room -- OUT LOUD,
+because since the fold nothing on screen asks it.
 
-WHAT TO CUT: slide 2 (50s), whose privilege detail is in docs/ReadOnly_User.md and
-whose symbol-list consequence is an operational footnote. Do NOT cut slide 3.
+WHAT TO CUT: nothing, and that is new. Slide 2 was the answer to this question
+while its privilege detail was all it carried; now it carries the ask as well, so
+cutting it cuts the ask. Two slides and two minutes is already the floor. If the
+clock has genuinely gone, what goes is the whole section rather than half of it.
 
 NO DEMO. The convincing demonstration here is a negative -- a commit that raises
 2249 -- and demo E already puts a failing commit on screen for a better reason.
@@ -4942,9 +4965,10 @@ execute_code, not about history. SINCE THE MOVE THAT QUESTION ARRIVES LATER, not
 earlier: section 10 now follows this section, so the toolset author meets the
 answer before the question and slide 3 of section 10 points back here with a
 (§11). Keep the paragraph on slide 1 anyway -- it is what that pointer resolves
-to. Slide 3's reverted lock reaper
+to. The reverted lock reaper in slide 2's notes
 is NOT an exception to that rule and should not be tidied away as one: it is a
-different history, it is on the slide on purpose, and it is what earns the ask.
+different history, it was on a face on purpose until the fold, and it is what
+earns the ask.
 ================================================================================
 -->
 
@@ -5000,7 +5024,7 @@ docs/ReadOnly_User.md has the probe tables.
 
 ---
 
-## What privileges are needed or withheld
+## What privileges are needed
 
 > Putting a commit lock on a gem does not prevent a user from **logging in
 > another gem** via `GsTsExternalSession>>login` through which to execute code.
@@ -5012,7 +5036,8 @@ that `run_test_class` can be used on classes that compile
 
 **A different user resolves names differently.** `Mcp` is not in a new profile's default list, and a worker that cannot see it **fails its first session**. `setup-read-only-user.sh` copies the front-end user's list.
 
-<span class="fine">**What stays open:** reads (object security policies are the answer to *that*, not this), resources, and **locks**.</span>
+> No privilege allows or prevents `System writeLock:`. A single statement can
+> walk `Globals` and take over two thousand locks.
 
 <!--
 Run this one briskly; the full table is in docs/ReadOnly_User.md and this slide
@@ -5035,59 +5060,74 @@ adding a dictionary changes nothing about what may be written -- but get it wron
 and the very first session fails with Toolset not found, which reads like a
 broken install. And re-provision a dictionary later and the snapshot is stale.
 
-Then hand off: reads, resources, locks. Reads are broad -- anything world-readable
-comes back through a tool result, including other UserProfiles, and the answer to
-that is object security policies rather than anything here. Resources -- a loop, a
-full scan, temp object space, a pinned view -- are bounded by section 8's
-lifetimes, not by privileges. The third is the next slide and the reason this
-section is three slides.
--->
+THEN SAY WHAT IS NO LONGER ON THIS SLIDE. A fine line naming reads, resources and
+locks as what stays open came off the face on 2026-09-14, so two of those three
+are now spoken and the third is the blockquote at the foot. They are a sentence
+each and they are worth the fifteen seconds: without them the slide reads as
+though the privilege list were the whole boundary, which is the one thing this
+section must not leave the room believing.
 
----
+READS ARE BROAD, and nothing here narrows them. Anything world-readable comes
+back through a tool result, including other UserProfiles. The answer to that is
+object security policies rather than anything on this slide -- say it as a limit
+of the approach and not as a gap, because it is the honest half of the bullets
+above.
 
-## `System writeLock:` is gated by **no** privilege — and that is my question
+RESOURCES ARE NOT BOUNDED BY PRIVILEGES EITHER -- a loop, a full scan, temp object
+space, a pinned view. What bounds them is section 8's lifetimes, which the room
+has already seen, so this is a pointer backwards rather than a new claim.
 
-A browsing-only session has it. A lock **stops other sessions committing** the locked object — and **not only application data**.
+THE THIRD IS LOCKS, and it is the blockquote at the foot of this slide rather
+than the slide that used to follow. Everything below is what that slide said.
 
-> **Measured.** The restricted gem locked *only* `McpServer`'s method dictionary; a `DataCurator` compile-and-commit then failed — **conflict `#'Write-WriteLock'` n=1.** One `execute_code` walking `Globals` took **2,291 locks in a single statement**.
+================================================================================
+THE LOCK ASK -- from "System writeLock: is gated by no privilege -- and that is
+my question", the slide that followed this one until it was folded away on
+2026-09-14. Its subject is the blockquote above; these are its notes, whole, with
+their pointers at its own bullets rewritten to name what those bullets said.
+================================================================================
 
-* **The reassuring half:** `McpRouter` and `McpServer` are **transient** — never committed, so locking one excludes nobody
-* **All that bounds it today is session lifetime.** Locks die with the gem — measured, all 2,291 went when §8's reaper took the holder. On demand, `stopSession:`: a person noticing
-* **A reaper is the wrong layer, and I built one to find that out.** It acts only **once per maintenance pass**: the lock is held for up to an interval, **the holder picks when that window falls**, and a session taking fresh locks is **chased, not stopped.** Reverted
+THE SLIDE THIS SECTION EXISTED FOR. Everything before it earns the right to ask,
+and what is left of it on screen is three lines of quote. THE QUESTION FORM IS ON
+NO FACE IN THE DECK NOW. Its closing line was: "So: should there be a privilege
+that withholds writeLock:? At the source the bound is zero, not one heartbeat --
+and that is the layer to fix it at, not a maintenance cycle." ASK IT OUT LOUD,
+last, and then STOP TALKING. It is the second of the talk's two asks.
 
-> **So: should there be a privilege that withholds `writeLock:`?** At the source the bound is **zero**, not one heartbeat — and that is the layer to fix it at, not a maintenance cycle.
+Build it in three beats over the blockquote. One: a lock needs no privilege, so
+the most confined session you can provision still has it -- that much is on the
+face. Two: a lock does not change anything, it stops OTHER people changing
+things, and that is measured rather than reasoned. THE MEASUREMENT IS NOT ON THE
+FACE EITHER, and it is the half that lands: the restricted gem locked ONLY
+McpServer's method dictionary, and a DataCurator compile-and-commit then failed --
+conflict #'Write-WriteLock', n=1. Say the consequence plainly: locking a class's
+method dictionary stops a PRIVILEGED DEVELOPER committing code to that class. The
+other measurement survives on the face as "over two thousand": it was 2,291
+locks, taken by one execute_code walking Globals, in a single statement. Three:
+everything available today is either a gem eventually going away or a person
+noticing.
 
-<!--
-THE SLIDE THIS SECTION EXISTS FOR. Everything before it earns the right to ask.
-
-Build it in three beats. One: a lock needs no privilege, so the most confined
-session you can provision still has it. Two: a lock does not change anything --
-it stops OTHER people changing things, and that is measured rather than reasoned.
-SAY THE LINE THAT IS NOT ON THE SLIDE, because it is the one that lands: locking
-a class's method dictionary stops a PRIVILEGED DEVELOPER committing code to that
-class. Three: everything available today is either a gem eventually going away or
-a person noticing.
-
-Then ask, and STOP TALKING. This is the second of the talk's two asks and it is a
-GemStone question rather than an mcp_server one: writeLock: is ungated, the
-confined user has it by construction, and no arrangement of UserProfile
-privileges takes it away.
+THE REASSURING HALF, if the room looks worried about the running server:
+McpRouter and McpServer are transient -- never committed, so locking one excludes
+nobody.
 
 LEAD WITH THE REVERT RATHER THAN BEING CAUGHT BY IT -- it is the strongest part of
-the argument, which is why bullet 3 says "I built one to find that out". Commit
-b0a5180 added an MCP_REAP_LOCK_HOLDERS setting: an idle holder reaped, a busy one
-answered mid-call so the client was told. It worked, measured, and it was taken
-back out. The reason is a design argument and not a bug: policing a lock once per
-heartbeat works around a gap in the privilege model instead of closing it, the
-holder chooses when the unguarded interval falls, and a session that keeps taking
-fresh locks is chased forever. docs/ReadOnly_User.md records the whole thing,
-revert included, because the exposure is real and should be arguable from.
+the argument, and it was the removed slide's third bullet: "A reaper is the wrong
+layer, and I built one to find that out." Commit b0a5180 added an
+MCP_REAP_LOCK_HOLDERS setting: an idle holder reaped, a busy one answered mid-call
+so the client was told. It worked, measured, and it was taken back out. The
+reason is a design argument and not a bug: policing a lock once per heartbeat
+works around a gap in the privilege model instead of closing it, the holder
+chooses when the unguarded interval falls, and a session that keeps taking fresh
+locks is chased forever. docs/ReadOnly_User.md records the whole thing, revert
+included, because the exposure is real and should be arguable from.
 
 The session-lifetime bound is worth saying plainly so the room does not hear
 "unbounded": locks are released when the holding gem logs out, and section 8's
-reaper logs idle workers out on a schedule. That is exactly why the idle and
-lifetime settings are worth configuring deliberately on a deployment that hands
-execute_code to anyone less than trusted.
+reaper logs idle workers out on a schedule -- measured, all 2,291 went when that
+reaper took the holder. That is exactly why the idle and lifetime settings are
+worth configuring deliberately on a deployment that hands execute_code to anyone
+less than trusted.
 
 Anticipate the obvious answer, which is "stop the session": that already works
 and needs nothing from this project. System systemLocksDetailedReport names the
@@ -5418,8 +5458,9 @@ all the same day), as material to run
 only if there is time. The four trace slides that used to precede them are in
 archive.md; these three stayed because they are the part THIS ROOM can act on --
 their defects, in their kernel, measured -- and slide 4 is the concrete ask of
-the talk, which section 13 collects and section 11's slide already names as one
-of the two things being asked for.
+the talk, which section 13 collects and section 11's notes already name as one
+of the two things being asked for. (That read "section 11's slide" until the lock
+slide was folded away on 2026-09-14; the other ask is spoken now.)
 
 Running order and plans, in seconds -- lead 10, why the writer is owned 50,
 inbound 45, the five defects 60. 165s, all of it optional now.

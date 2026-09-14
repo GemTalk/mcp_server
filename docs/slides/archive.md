@@ -43,7 +43,7 @@ style: |
 
 <!--
 ================================================================================
-ARCHIVE. THIRTY-ONE SLIDES SET ASIDE FROM deck.md ON 2026-09-14, FOR TIME.
+ARCHIVE. THIRTY-TWO SLIDES SET ASIDE FROM deck.md ON 2026-09-14, FOR TIME.
 This file is not a talk. It is a holding pen, kept renderable so the slides can
 be looked at, and kept in deck.md's own running order so any of them can be put
 back where it came from.
@@ -81,6 +81,15 @@ transplanted WHOLE onto that one deck slide, under three banners, rather than
 split across several or condensed: read that header before putting any of them
 back, because putting one back means cutting its banner out of the deck slide's
 notes or the same thing gets said twice.
+
+AND ONE FROM SECTION 11, last of all, folded the same way and on the same day.
+"System writeLock: is gated by no privilege -- and that is my question" was the
+slide its whole section existed for, and it came out because its subject arrived
+on the face of the slide before it, as a blockquote of two sentences. Its notes
+are transplanted whole onto that slide under one banner, so the measurement, the
+reverted lock reaper and the question itself all survive as things to say. IT IS
+THE ONE SLIDE IN THIS FILE WHOSE REMOVAL TOOK AN ASK OFF THE SCREEN: the deck now
+asks for a writeLock: privilege only out loud. Its header is at the very end.
 
 WHAT STAYED BEHIND IN THE DECK, deliberately:
   * DEMO C -- a session is a gem. Section 4's demo, kept without section 4. It is
@@ -161,13 +170,20 @@ and the section 9 fold, by its page numbers in the 63-slide deck that followed
   47  The login: the worker gem is **the user's**, not the server's
   48  The token is the real bound — and the cap is on the **grant**
 
+and the section 11 fold, by its page number in the 60-slide deck that followed
+(a FIFTH distinct numbering; none of these five groups share one):
+
+  50  `System writeLock:` is gated by **no** privilege — and that is my question
+
 THE SLICE HEADERS CAME WITH THEIR SLIDES. Slice 5 (section 4), slice 7 (section
 6) and slice 10 (section 12) are reproduced whole below, including their running
 orders, their "what to cut if the hour is going" lists and their departures from
 docs/Presentation.md. Slice 6's header was split: the trace paragraphs are here,
 the codec paragraphs went to deck.md with the codec slides. SLICE 8's DID NOT
 COME: section 9 still exists in the deck, so its header stayed there and was
-rewritten around the fold. The header below these three slides is the only
+rewritten around the fold. SLICE 11's DID NOT COME EITHER, for the same reason:
+section 11 still exists in the deck, two slides of it, and its header there was
+rewritten around its own fold. The headers below those groups are the only
 account of them in this file.
 
 RENDERING is the same as the deck, and the --html flag is just as required here:
@@ -1919,4 +1935,107 @@ The renewable-past-deadline case, if anyone spots it: a session past its deadlin
 but not yet reaped IS renewable, on purpose. The reaper runs on an interval, so
 that window is scheduling, not policy, and a client presenting a valid token
 inside it is exactly the client that should keep its gem.
+-->
+
+---
+
+<!--
+================================================================================
+FROM SECTION 11, the worker gem's GemStone user -- one slide, FOLDED AWAY
+2026-09-14 rather than cut for time. The second fold in this file and the last
+change of the day. It is also the only slide here whose removal took an ASK off
+the screen rather than an argument.
+
+WHAT HAPPENED: deck.md page 49's face -- the privileges slide -- ended in a fine
+line reading "What stays open: reads (object security policies are the answer to
+that, not this), resources (§8's lifetimes), and locks." That line was replaced
+by a blockquote saying the lock part outright: "No privilege allows or prevents
+System writeLock:. A single statement can walk Globals and take over two thousand
+locks." Once the exposure was stated on that face, this slide's first beat was
+already made and the rest of it was elaboration. Section 11 went from three
+slides to two, and from about 2 1/2 minutes to about 2.
+
+WHAT THE FOLD ACTUALLY COST, and it is worth being plain about because it is not
+nothing. This slide asked a question -- "So: should there be a privilege that
+withholds writeLock:?" -- and the blockquote that replaced it states a fact. The
+deck now contains no face that asks the room for anything except the codec's
+defect table, which is in an appendix that may not run at all. Both of the talk's
+two asks are therefore at risk in different ways: this one from being spoken only,
+that one from being optional. If the talk is ever given to a room that matters
+more than the clock does, THIS IS THE FIRST SLIDE TO PUT BACK.
+
+ITS NOTES WENT WHOLE, NOT SPLIT AND NOT CONDENSED. They are on deck.md page 49
+under a banner reading THE LOCK ASK, and they carry what the face no longer does:
+the DataCurator measurement (a restricted gem locked only McpServer's method
+dictionary, and a privileged developer's compile-and-commit then failed with
+conflict #'Write-WriteLock', n=1), the 2,291 locks in one statement, the transient
+reassurance about McpRouter and McpServer, the session-lifetime bound, the
+stopSession: escape hatch, and the reverted MCP_REAP_LOCK_HOLDERS reaper of commit
+b0a5180. Three of that banner's pointers were rewritten on the way across, where
+they had named this slide's own bullets; nothing else was changed. SO IF THIS
+SLIDE COMES BACK, CUT THAT BANNER OUT OF PAGE 49's NOTES -- otherwise every one of
+those facts is in the deck twice, once as a slide and once as something to say
+over the slide before it. Page 49 would also want its fine line back in place of
+the blockquote, or the lock claim is made twice on two consecutive faces.
+
+WHERE IT GOES BACK: immediately after the privileges slide, which is the last
+slide of section 11, and immediately before section 10's lead. That is where it
+was, and it is why section 11 ended the way it did.
+
+Running order and plan as it was, in seconds -- the lock and the ask 55.
+================================================================================
+-->
+## `System writeLock:` is gated by **no** privilege — and that is my question
+
+A browsing-only session has it. A lock **stops other sessions committing** the locked object — and **not only application data**.
+
+> **Measured.** The restricted gem locked *only* `McpServer`'s method dictionary; a `DataCurator` compile-and-commit then failed — **conflict `#'Write-WriteLock'` n=1.** One `execute_code` walking `Globals` took **2,291 locks in a single statement**.
+
+* **The reassuring half:** `McpRouter` and `McpServer` are **transient** — never committed, so locking one excludes nobody
+* **All that bounds it today is session lifetime.** Locks die with the gem — measured, all 2,291 went when §8's reaper took the holder. On demand, `stopSession:`: a person noticing
+* **A reaper is the wrong layer, and I built one to find that out.** It acts only **once per maintenance pass**: the lock is held for up to an interval, **the holder picks when that window falls**, and a session taking fresh locks is **chased, not stopped.** Reverted
+
+> **So: should there be a privilege that withholds `writeLock:`?** At the source the bound is **zero**, not one heartbeat — and that is the layer to fix it at, not a maintenance cycle.
+
+<!--
+THE SLIDE THIS SECTION EXISTS FOR. Everything before it earns the right to ask.
+
+Build it in three beats. One: a lock needs no privilege, so the most confined
+session you can provision still has it. Two: a lock does not change anything --
+it stops OTHER people changing things, and that is measured rather than reasoned.
+SAY THE LINE THAT IS NOT ON THE SLIDE, because it is the one that lands: locking
+a class's method dictionary stops a PRIVILEGED DEVELOPER committing code to that
+class. Three: everything available today is either a gem eventually going away or
+a person noticing.
+
+Then ask, and STOP TALKING. This is the second of the talk's two asks and it is a
+GemStone question rather than an mcp_server one: writeLock: is ungated, the
+confined user has it by construction, and no arrangement of UserProfile
+privileges takes it away.
+
+LEAD WITH THE REVERT RATHER THAN BEING CAUGHT BY IT -- it is the strongest part of
+the argument, which is why bullet 3 says "I built one to find that out". Commit
+b0a5180 added an MCP_REAP_LOCK_HOLDERS setting: an idle holder reaped, a busy one
+answered mid-call so the client was told. It worked, measured, and it was taken
+back out. The reason is a design argument and not a bug: policing a lock once per
+heartbeat works around a gap in the privilege model instead of closing it, the
+holder chooses when the unguarded interval falls, and a session that keeps taking
+fresh locks is chased forever. docs/ReadOnly_User.md records the whole thing,
+revert included, because the exposure is real and should be arguable from.
+
+The session-lifetime bound is worth saying plainly so the room does not hear
+"unbounded": locks are released when the holding gem logs out, and section 8's
+reaper logs idle workers out on a schedule. That is exactly why the idle and
+lifetime settings are worth configuring deliberately on a deployment that hands
+execute_code to anyone less than trusted.
+
+Anticipate the obvious answer, which is "stop the session": that already works
+and needs nothing from this project. System systemLocksDetailedReport names the
+holding stone session, descriptionOfSession: gives its UserProfile and pid, and
+stopSession: ends it and releases the locks -- DataCurator has SessionAccess
+already. That is the escape hatch, including when the holder is not an MCP session
+at all. It is still a person noticing.
+
+install.sh would fail the same way as that DataCurator commit -- worth adding if
+the room looks unconvinced that this reaches past application data.
 -->
