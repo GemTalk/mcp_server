@@ -43,7 +43,7 @@ style: |
 
 <!--
 ================================================================================
-ARCHIVE. TWENTY-ONE SLIDES SET ASIDE FROM deck.md ON 2026-09-14, FOR TIME.
+ARCHIVE. TWENTY-THREE SLIDES SET ASIDE FROM deck.md ON 2026-09-14, FOR TIME.
 This file is not a talk. It is a holding pen, kept renderable so the slides can
 be looked at, and kept in deck.md's own running order so any of them can be put
 back where it came from.
@@ -54,11 +54,13 @@ section 5 (a follow-up request), and section 6 (progress notifications). Togethe
 they are about 14 minutes of slides, which is most of what the new target needed.
 Nothing here was cut for being wrong.
 
-TWO MORE CAME LATER THE SAME DAY, from section 8, and they are a different kind
-of cut -- the section was thinned slide by slide rather than set aside whole.
-They are at the END of this file, under their own header, and their notes are
-SPLIT: the deck kept the paragraphs its surviving slides depend on. Read that
-header before putting either one back.
+FOUR MORE CAME LATER THE SAME DAY, from section 8, in two passes, and they are a
+different kind of cut -- the section was thinned slide by slide rather than set
+aside whole. It went from ten slides to four. They are at the END of this file,
+under two headers of their own, and their notes are SPLIT: the deck kept the
+paragraphs its surviving slides depend on. Read those headers before putting any
+of them back. The most worth putting back is maxSessions, and its header says
+why.
 
 WHAT STAYED BEHIND IN THE DECK, deliberately:
   * DEMO C -- a session is a gem. Section 4's demo, kept without section 4. It is
@@ -115,6 +117,11 @@ AFTER the cut above (so these two do not belong to the same numbering):
 
   42  An answered ping proves the client is there — and still counts against it
   43  How the front end can see any of this
+
+and from the second section 8 pass, by their page numbers after the first:
+
+  43  The ending that is *not* in the ladder: a worker gem that has died
+  44  `maxSessions` — the one bound here that refuses rather than releases
 
 THE SLICE HEADERS CAME WITH THEIR SLIDES. Slice 5 (section 4) and slice 7
 (section 6) are reproduced whole below, including their running orders, their
@@ -1219,4 +1226,170 @@ RESOLVED, and that mattered. system.conf documents -1 as twice STN_MAX_SESSIONS;
 stone, which sets neither, the runtime read answers 80 against a StnMaxSessions of 10. Resolving -1
 ourselves would have computed 20 and been wrong about the number the stone actually uses. Trust the
 stone's number; map only 0 (disabled) and negative (unknown).
+-->
+
+---
+
+<!--
+================================================================================
+FROM SECTION 8, SECOND THINNING -- two more slides, removed 2026-09-14 after the
+pair above. They were deck.md pages 43 and 44 at the time. Section 8 is now four
+slides and demo F, down from ten.
+
+What went this time is not mechanism, as it was above -- it is the section's two
+ENDINGS. Both are self-contained and both can come back alone:
+
+  * "The ending that is not in the ladder: a worker gem that has died" -- the
+    case reapReasonFor: gets right and still cannot help with. Its notes carry
+    the wedge the old behaviour caused, the GCI fatal-band argument, and the
+    3.7.5 end-to-end verification.
+  * "maxSessions -- the one bound here that refuses rather than releases" -- the
+    section's closing slide, and THE ONE MOST WORTH PUTTING BACK. It is the only
+    slide in the section where the answer is "we refuse", and the lockout it
+    describes is the failure most likely to bite the room.
+
+WHAT WENT BACK INTO deck.md. As with the pair above, notes were transplanted
+rather than moved whole:
+  * the dead gem's whole argument, onto the reapReasonFor: slide, because that
+    table is what raises the question;
+  * the maxSessions lockout in one paragraph, onto the SECTION LEAD's notes,
+    flagged as the thing to spend a spare minute on.
+The copies below are the originals. If either slide comes back, delete the
+transplanted copy in deck.md so the paragraph is not in the deck twice.
+
+ONE REFERENCE WAS EDITED rather than copied: the dead gem's Q&A magnet ended
+"what it left behind is a maxSessions slot and nothing else -- which is slide 9".
+Slide 9 was the maxSessions slide. The copy below still says it, and it is still
+true of THIS file, where both slides sit together.
+
+WHERE THEY GO BACK: at the end of section 8, in this order, immediately before
+demo F.
+================================================================================
+-->
+
+## The ending that is *not* in the ladder: a worker gem that has **died**
+
+<div style="text-align:center">
+<svg viewBox="0 0 900 250" width="850" role="img" aria-label="A live client answers every liveness ping from the front end, so no reaping ground trips, while the worker gem behind it is dead. Only the front end can see that its own worker is gone.">
+  <defs>
+    <marker id="m9" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <rect x="20" y="58" width="176" height="70" rx="4" fill="none" stroke="currentColor" stroke-width="1.6"/>
+  <text x="108" y="90" font-size="16" text-anchor="middle" font-weight="600" fill="currentColor">client</text>
+  <text x="108" y="112" font-size="14" text-anchor="middle" fill="#2e6a4f">alive, retrying</text>
+  <rect x="352" y="58" width="176" height="70" rx="4" fill="none" stroke="currentColor" stroke-width="1.6"/>
+  <text x="440" y="90" font-size="16" text-anchor="middle" font-weight="600" fill="currentColor">front end</text>
+  <text x="440" y="112" font-size="14" text-anchor="middle" fill="currentColor" opacity=".62">the reaper</text>
+  <rect x="684" y="58" width="176" height="70" rx="4" fill="none" stroke="#b4451f" stroke-width="1.6" stroke-dasharray="6 4"/>
+  <text x="772" y="90" font-size="16" text-anchor="middle" font-weight="600" fill="#b4451f">worker gem</text>
+  <text x="772" y="112" font-size="14" text-anchor="middle" fill="#b4451f">dead</text>
+  <line x1="348" y1="80" x2="204" y2="80" stroke="#2e6a4f" stroke-width="1.6" marker-end="url(#m9)"/>
+  <text x="276" y="70" font-size="14" text-anchor="middle" fill="#2e6a4f">ping</text>
+  <line x1="204" y1="106" x2="348" y2="106" stroke="#2e6a4f" stroke-width="1.6" marker-end="url(#m9)"/>
+  <text x="276" y="126" font-size="14" text-anchor="middle" fill="#2e6a4f">answered &#10003;</text>
+  <line x1="532" y1="93" x2="676" y2="93" stroke="#b4451f" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#m9)"/>
+  <text x="604" y="83" font-size="14" text-anchor="middle" fill="#b4451f">GCI 4067</text>
+  <text x="276" y="172" font-size="15" text-anchor="middle" fill="currentColor" font-weight="600">every ground in reapReasonFor: says &#8220;keep&#8221;</text>
+  <text x="276" y="194" font-size="14" text-anchor="middle" fill="currentColor" opacity=".62">and it is right: the client really is there</text>
+  <text x="604" y="172" font-size="15" text-anchor="middle" fill="currentColor" font-weight="600">only this gem knows</text>
+</svg>
+</div>
+
+**Recognized by the GCI *fatal* band, `originalNumber` 4000–4999** — the kernel's own verdict, not a guess about which failures are serious. Answered **`-32001` / `data.kind: sessionGone`**, *and* the session is unmapped as part of answering, so the next request gets the **404**.
+
+<!--
+Why this could not be a rung, which is the instructive part and what the drawing is for: the reaper's
+probe asks whether the CLIENT is still there, down a stream that client keeps answering. A dead gem
+behind a live client answers every ping and trips no ground at all -- and the ladder is not wrong, it
+is answering a different question correctly. Only the front end knows the state of its own workers,
+which is why both halves of the fix are in McpRouter.
+
+The old behaviour was a WEDGE, and say what it cost: a dead worker left its session registered, and
+every later call answered a generic -32603 "Internal error" with no data.kind, inside a healthy HTTP
+200 -- which means "something went wrong at our end", not "your session is finished". So a
+WELL-BEHAVED client retried, got the same answer forever, never re-initialized, and the session held
+its maxSessions slot for as long as the front end ran. Being well behaved was the thing that trapped
+it.
+
+Why the BAND rather than either number: GsTsExternalSession>>_signalError: CLOSES the external
+session's connection when it sees one, which is why the SECOND such request fails with 4100 "invalid
+session" however the first one failed. Matching the band also keeps it from being a list to maintain
+-- out of memory, killed from the stone side, netldi gone, the process segfaulting, all arrive as
+some number in it, and none leaves a worker that can serve another request.
+
+Both halves are for two different clients: -32001 with data.kind sessionGone, bearing its own id
+(as a FRAME where the call was already being streamed), lets a client recover on THIS request; the
+unmapping lets a client that branches on nothing recover anyway, via the 404.
+
+What the client is told and what it is not: the GCI NUMBER, never the GciError's text. Measured on
+3.7.5, the kernel appends the gem's whole NRS to a fatal error -- host, stone, GemStone user, extent
+and log paths -- which is not a thing to hand an MCP client, least of all on the network-facing front
+end. The failure in full goes to the gem log beside the session id: the same split a reap makes.
+
+Verified end to end on 3.7.5 with the reported reproduction, an execute_code that exhausts the
+worker's temporary object memory. The gem dies in about three seconds, the call is answered
+sessionGone with GCI 4067, the next request 404s, and a fresh initialize succeeds on a router capped
+at ONE session -- so the slot really came back. 4 new tests in McpTransportTest and 9 wire checks in
+test.sh, which is the only place the first failure's number can be pinned: a mock can raise 4100, but
+it cannot die.
+
+================================================================================
+THE DEAD GEM'S OWN MEASUREMENT -- from the descriptionOfSession: slide, removed
+2026-09-14. This is the Q&A magnet and it belongs on the dead-gem slide now.
+================================================================================
+
+THE Q&A MAGNET, and it is worth having ready because somebody here will ask what happens to a dead
+gem's measurement. descriptionOfSession: does not refuse a session id nobody holds -- measured on
+3.7.5 it answers a ZERO-FILLED description, 29 fields, the first nil and the rest 0. So field 16 is
+0, the session reads as perfectly current, the arm sends it nothing and writes nothing. And that is
+the TRUTHFUL answer rather than a lucky one: a gem that has exited pins no commit record, because its
+view went with the process. What it left behind is a maxSessions slot and nothing else -- which is
+slide 9.
+
+The one exception, if pressed, is id recycling: the cached number can be handed to another gem, and
+then the figure read belongs to a stranger. Worst case is one confusing log line per pass -- it names
+the right session, quotes a different gem's number, and reports an error about a gem that is gone,
+and none of the three is wrong on its own terms. Nothing is corrupted and nothing reaches the
+stranger, because the refresh only ever travels the dead worker's own closed channel.
+-->
+
+---
+
+## `maxSessions` — the one bound here that **refuses** rather than releases
+
+* A session **is** a GemStone login, and a repository has a finite number — **ten** on Community Edition
+* **The login that exhausts them fails for every gem on the stone, not just the client that asked**
+
+<span class="fine">Measured on 3.7.5: nine one-shot clients took nine worker gems; the tenth login *of any kind* failed with **4039**; and the **owner of the database was locked out of their own extent, including from plain topaz**, until the router was killed.</span>
+
+* And it takes no carelessness — **reconnecting counts as a new client.** Reloading a tab, restarting an agent, a client that crashes and retries
+* **Three** is deliberately low: one agent, one editor, one spare for a reconnect not yet reaped
+
+The idle rules make that self-correcting. **The cap makes it impossible.**
+
+<!--
+End the section here because this is the failure most likely to bite somebody in this room, and it is
+the one slide where the answer is "we refuse" rather than "we measure".
+
+The lockout is the part to land. It is not that the tenth MCP client fails -- it is that the tenth
+login of ANY kind fails, so the person who owns the extent cannot get in with topaz to find out why.
+That is why the cap is in the server rather than left to the stone: the stone's limit is shared, and
+exhausting it is not a local failure.
+
+If asked about recovery: killing the router released all nine in about four seconds, each worker
+being an RPC gem whose client process is the router. But that is a recovery for somebody who already
+knows what happened, which is exactly the person who cannot log in.
+
+Eight reconnects inside one idle period is nobody being reckless -- it is a morning of reloading a
+tab. Both halves are needed: the idle rules mean a stranded gem goes away on its own, and the cap
+means the stranding cannot pile up faster than they go.
+
+How to raise it: SessionsCurrent against StnMaxSessions -- remembering that the unit suite, test.sh
+and every other server on the stone spend from the same budget. The number to be safe against is not
+what a busy server wants but what the smallest plausible stone allows.
+
+Enforcement, if anyone asks where: openSessionCreating:, inside one critical section, so two
+simultaneous initializes cannot both see a free slot.
 -->

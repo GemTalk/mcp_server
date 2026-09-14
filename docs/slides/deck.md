@@ -42,7 +42,7 @@ style: |
 ---
 
 <!--
-SIXTY-EIGHT SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut once;
+SIXTY-FIVE SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut once;
 three stretches of them are now set aside. Section 13 is the only one never written.
 
 THE TARGET IS 45 MINUTES as of 2026-09-14, down from an hour, and that is what the current shape is
@@ -53,14 +53,14 @@ for. The running order:
   21-26   sections 1 to 3 -- installing, and starting a server
   27-30   THE DEMO RUN -- A, B, C and D, back to back, about 6 minutes of terminal
   31-38   section 7 -- the transaction model and the blind-write guardrail, then demo E
-  39-46   section 8 -- the router maintenance cycle, then demo F
-  47-52   section 9 -- McpAuthRouter, a reachable port, then demo G
-  53-57   section 10 -- extending it: a server for YOUR software
-  58-60   section 11 -- the worker gem's GemStone user
-  61-65   section 12 -- versions: the floor moved, and why
-  66-68   the JSON codec -- OPTIONAL, run only if the clock allows
+  39-43   section 8 -- the router maintenance cycle, then demo F
+  44-49   section 9 -- McpAuthRouter, a reachable port, then demo G
+  50-54   section 10 -- extending it: a server for YOUR software
+  55-57   section 11 -- the worker gem's GemStone user
+  58-62   section 12 -- versions: the floor moved, and why
+  63-65   the JSON codec -- OPTIONAL, run only if the clock allows
 
-WHAT IS SET ASIDE, and where. docs/slides/archive.md holds twenty-one slides removed on 2026-09-14
+WHAT IS SET ASIDE, and where. docs/slides/archive.md holds twenty-three slides removed on 2026-09-14
 for time: section 4 (trace 1, a brand-new client's first request, ten slides), the trace half of
 section 5 (a follow-up request, four), and section 6 (progress notifications, five). About fourteen
 minutes of slides. THEIR DEMOS STAYED -- demo C came out of section 4 and demo D out of section 6,
@@ -68,10 +68,12 @@ and they now sit together with demos A and B as one continuous stretch of termin
 renderable and carries its own map back; read its header before putting anything back, because two
 of those slides cannot return alone. THE SECTION NUMBERS WERE NOT RENUMBERED: the deck goes 3, 7,
 8, and the gap is the archive. Section numbering is a property of the material, not of this cut.
-LATER THE SAME DAY, two more went to the archive from section 8 -- the answered-ping slide and the
-descriptionOfSession: slide. That is a different kind of cut: section 8 is being thinned slide by
-slide rather than set aside, and those two slides' notes were split across the slides that stayed
-rather than travelling whole. The archive's own header is the authority on which paragraph is where.
+LATER THE SAME DAY, four more went to the archive from section 8, in two passes, taking it from ten
+slides to four: the answered-ping and descriptionOfSession: slides, then the dead-gem and maxSessions
+slides. That is a different kind of cut -- section 8 is being thinned slide by slide rather than set
+aside -- and those slides' notes were split across the slides that stayed rather than travelling
+whole. The archive's own headers are the authority on which paragraph is where. Of everything now
+set aside, maxSessions is the one to put back first if the clock allows.
 
 THE CODEC SLIDES MOVED RATHER THAN LEFT. Section 5's other half -- why this server owns its JSON
 writer, the inbound repair, and the five measured kernel defects -- is at the END of the file, after
@@ -3747,10 +3749,11 @@ view when the client will not move it.
 
 ---
 
+
 <!--
 ================================================================================
-VERTICAL SLICE 2 — section 8, the router maintenance cycle. Seven slides, cut
-2026-09-10 against docs/Presentation.md section 8, and thinned from ten to seven
+VERTICAL SLICE 2 — section 8, the router maintenance cycle. Four slides, cut
+2026-09-10 against docs/Presentation.md section 8, and thinned from ten to four
 on 2026-09-14 -- see THE FOLD and THE REMOVALS below.
 
 The thesis, and every slide serves it: the front end is the only part of this
@@ -3764,17 +3767,30 @@ THE FOLD, 2026-09-14. The counting rule was slide 3 and is now the second half o
 slide 2, under the maintenance-pass diagram: one slide that shows the pass and
 then says what the pass is counting. The "Per session, inside the pass" lines
 came off the diagram to make the room, and are spoken over it instead. Slide
-THE REMOVALS, 2026-09-14, later the same day. The two MECHANISM slides came out
-and the POLICY slides stayed: "An answered ping proves the client is there" and
-"How the front end can see any of this" are in docs/slides/archive.md, at the
-end, under their own header. Their notes were SPLIT rather than moved -- four
-surviving slides here carry the paragraphs they depend on, each under a marked
-block saying where it came from. The archive header lists the split; keep the two
-in step if either slide comes back.
+THE REMOVALS, 2026-09-14, later the same day, in two passes. Four slides went to
+docs/slides/archive.md, each under its own header there.
+
+First the two MECHANISM slides, leaving the POLICY slides: "An answered ping
+proves the client is there" and "How the front end can see any of this". Then
+the section's two ENDINGS: "The ending that is not in the ladder" and
+"maxSessions". A second fold went with them -- the conjunct slide is now the
+bottom half of the view-hygiene slide.
+
+None of their notes were simply dropped. Every surviving slide here carries the
+paragraphs it depends on, each under a marked block naming the slide it came
+from, and the archive's headers list the split both ways. Keep the two files in
+step if anything comes back, or the same paragraph will be in the deck twice.
+
+WHAT THE SECTION LOST BY IT, stated plainly so it can be reversed on purpose:
+the section no longer has an ending. It used to close on maxSessions -- the one
+slide whose answer is "we refuse" rather than "we measure", and the failure most
+likely to bite this room. It now ends on demo F. If section 8 is ever given a
+minute back, maxSessions is what to spend it on, ahead of everything in the list
+below. Its whole argument is in the notes on slide 1.
 
 Slide numbers below are POST-fold and POST-removal; the running order is 1 lead,
-2 the pass and the counting rule, 3 reapReasonFor:, 4 view hygiene, 5 the
-conjunct, 6 the dead gem, 7 maxSessions, then demo F.
+2 the pass and the counting rule, 3 reapReasonFor: and the dead gem, 4 view
+hygiene and the conjunct, then demo F.
 
 What the outline had as slides and this does not, all now speaker notes, on the
 same principle slice 1 settled -- a MEASUREMENT is evidence for a claim, not the
@@ -3785,21 +3801,66 @@ claim, and notes are where evidence belongs:
     489-behind front-end gem) -> notes on slide 4;
   * the StnCrBacklogThreshold "-1 comes back resolved as 80" finding -> notes on
     slide 4;
-  * the zero-filled descriptionOfSession: of a dead gem -> notes on slide 6,
+  * the zero-filled descriptionOfSession: of a dead gem -> notes on slide 3,
     which is where a Q&A magnet belongs;
-  * the endedCall*/isEndedCallKind: defect story -> notes on slide 5;
-  * request deadlines and cancellation IN FULL -> notes on slide 5. The outline
+  * the endedCall*/isEndedCallKind: defect story -> notes on slide 4;
+  * request deadlines and cancellation IN FULL -> notes on slide 4. The outline
     put them in this section because they share the escalation; at this budget
     they are the first thing that cannot be slides. If section 8 is ever given
     another minute, this is what to spend it on.
 
-Budget: about 5:45 -- roughly 255s of slides plus the 90s demo F, down from the
-7:10 this slice was cut at. The fold moved time rather than saving it: slide 2
-carries both its own 25s and the counting rule's 45s, so it is a 70s slide and
-the longest here. The removals gave back about 85s. With slide 4's 45s, slides 2
-and 4 are now most of the section, and the 45s on slide 2 is the part to protect. See the note in docs/Presentation.md on where the extra 0.7
+Budget: about 4:00 -- roughly 150s of slides plus the 90s demo F, down from the
+7:10 this slice was cut at. Slide 2 is still the long one and still the part to
+protect: it carries both its own 25s and the counting rule's 45s. Slides 3 and 4
+are about 40s each, having been trimmed on the slide as well as thinned in
+number. Section 8 was the largest overspend against the outline's table when this
+slice was cut; it is now the largest underspend, which is where the minute for
+maxSessions would come from if the rest of the deck does not need it. See the note in docs/Presentation.md on where the extra 0.7
 talk minutes come from.
 ================================================================================
+
+================================================================================
+MAXSESSIONS -- slide removed 2026-09-14, and it is the one removal in this
+section worth regretting. It was the section's closing slide and the only one
+where the answer is "we REFUSE" rather than "we measure". It is also the failure
+most likely to bite somebody in this room, so if section 8 runs short, or if
+anybody asks what happens when clients pile up, this is the material to spend it
+on. The section now ends on demo F instead.
+
+THE ONE THING TO SAY, in a sentence: a session IS a GemStone login, Community
+Edition has ten, and the login that exhausts them fails for EVERY gem on the
+stone -- measured on 3.7.5, nine one-shot clients took nine workers, the tenth
+login of any kind failed with 4039, and the owner of the database was locked out
+of their own extent, including from plain topaz, until the router was killed.
+That is why the cap is in the server rather than left to the stone: the stone's
+limit is shared, so exhausting it is not a local failure. maxSessions defaults to
+THREE -- one agent, one editor, one spare for a reconnect not yet reaped -- and
+it takes no carelessness to reach, because reconnecting counts as a new client.
+Reloading a tab does it.
+================================================================================
+
+End the section here because this is the failure most likely to bite somebody in this room, and it is
+the one slide where the answer is "we refuse" rather than "we measure".
+
+The lockout is the part to land. It is not that the tenth MCP client fails -- it is that the tenth
+login of ANY kind fails, so the person who owns the extent cannot get in with topaz to find out why.
+That is why the cap is in the server rather than left to the stone: the stone's limit is shared, and
+exhausting it is not a local failure.
+
+If asked about recovery: killing the router released all nine in about four seconds, each worker
+being an RPC gem whose client process is the router. But that is a recovery for somebody who already
+knows what happened, which is exactly the person who cannot log in.
+
+Eight reconnects inside one idle period is nobody being reckless -- it is a morning of reloading a
+tab. Both halves are needed: the idle rules mean a stranded gem goes away on its own, and the cap
+means the stranding cannot pile up faster than they go.
+
+How to raise it: SessionsCurrent against StnMaxSessions -- remembering that the unit suite, test.sh
+and every other server on the stone spend from the same budget. The number to be safe against is not
+what a busy server wants but what the smallest plausible stone allows.
+
+Enforcement, if anyone asks where: openSessionCreating:, inside one critical section, so two
+simultaneous initializes cannot both see a free slot.
 -->
 
 <!-- _class: lead -->
@@ -3860,8 +3921,6 @@ Almost nothing here is measured in elapsed time
 * **A ping is never declared late by a clock.** It is superseded by the next one and judged then — admissible, or discarded because the transport moved under it
 
 The count advances only while the front end runs. **A suspended host simply stops the count where it was.**
-
-> Two mechanisms were **removed** by this rule, not fixed: the suspend detector, and the pass that timed out server-initiated requests.
 
 <!--
 The order is the point, and the class comment says so. Take the two brackets in turn.
@@ -4040,6 +4099,72 @@ correction; it is nearly half.
 The measured figure, if anyone asks whether the correction is theoretical: against
 real clients on 2026-08-23, SIX OF FOURTEEN pings were retired as inadmissible
 rather than counted unanswered. Not a rare correction -- nearly half.
+
+================================================================================
+THE ENDING THAT IS NOT IN THE LADDER -- slide removed 2026-09-14. It belongs
+against this table, because its whole point is a case the table gets RIGHT and
+still cannot help with: a worker gem that has DIED behind a client that is still
+answering. Every ground here says keep, and every ground here is correct -- the
+probe asks whether the CLIENT is there, and it is. Only the front end can see
+that its own worker is gone, which is why both halves of the fix are in
+McpRouter rather than anywhere in this policy. Worth one sentence out loud if
+the table draws the question "what if the gem dies?", which it often will.
+================================================================================
+
+Why this could not be a rung, which is the instructive part and what the drawing is for: the reaper's
+probe asks whether the CLIENT is still there, down a stream that client keeps answering. A dead gem
+behind a live client answers every ping and trips no ground at all -- and the ladder is not wrong, it
+is answering a different question correctly. Only the front end knows the state of its own workers,
+which is why both halves of the fix are in McpRouter.
+
+The old behaviour was a WEDGE, and say what it cost: a dead worker left its session registered, and
+every later call answered a generic -32603 "Internal error" with no data.kind, inside a healthy HTTP
+200 -- which means "something went wrong at our end", not "your session is finished". So a
+WELL-BEHAVED client retried, got the same answer forever, never re-initialized, and the session held
+its maxSessions slot for as long as the front end ran. Being well behaved was the thing that trapped
+it.
+
+Why the BAND rather than either number: GsTsExternalSession>>_signalError: CLOSES the external
+session's connection when it sees one, which is why the SECOND such request fails with 4100 "invalid
+session" however the first one failed. Matching the band also keeps it from being a list to maintain
+-- out of memory, killed from the stone side, netldi gone, the process segfaulting, all arrive as
+some number in it, and none leaves a worker that can serve another request.
+
+Both halves are for two different clients: -32001 with data.kind sessionGone, bearing its own id
+(as a FRAME where the call was already being streamed), lets a client recover on THIS request; the
+unmapping lets a client that branches on nothing recover anyway, via the 404.
+
+What the client is told and what it is not: the GCI NUMBER, never the GciError's text. Measured on
+3.7.5, the kernel appends the gem's whole NRS to a fatal error -- host, stone, GemStone user, extent
+and log paths -- which is not a thing to hand an MCP client, least of all on the network-facing front
+end. The failure in full goes to the gem log beside the session id: the same split a reap makes.
+
+Verified end to end on 3.7.5 with the reported reproduction, an execute_code that exhausts the
+worker's temporary object memory. The gem dies in about three seconds, the call is answered
+sessionGone with GCI 4067, the next request 404s, and a fresh initialize succeeds on a router capped
+at ONE session -- so the slot really came back. 4 new tests in McpTransportTest and 9 wire checks in
+test.sh, which is the only place the first failure's number can be pinned: a mock can raise 4100, but
+it cannot die.
+
+================================================================================
+THE DEAD GEM'S OWN MEASUREMENT -- from the descriptionOfSession: slide, removed
+2026-09-14. This is the Q&A magnet and it belongs on the dead-gem slide now.
+================================================================================
+
+THE Q&A MAGNET, and it is worth having ready because somebody here will ask what happens to a dead
+gem's measurement. descriptionOfSession: does not refuse a session id nobody holds -- measured on
+3.7.5 it answers a ZERO-FILLED description, 29 fields, the first nil and the rest 0. So field 16 is
+0, the session reads as perfectly current, the arm sends it nothing and writes nothing. And that is
+the TRUTHFUL answer rather than a lucky one: a gem that has exited pins no commit record, because its
+view went with the process. What it left behind is a maxSessions slot and nothing else --
+and the slide that made that matter went with it on 2026-09-14, so the maxSessions
+story now lives in the notes on this section's lead slide.
+
+The one exception, if pressed, is id recycling: the cached number can be handed to another gem, and
+then the figure read belongs to a stranger. Worst case is one confusing log line per pass -- it names
+the right session, quotes a different gem's number, and reports an error about a gem that is gone,
+and none of the three is wrong on its own terms. Nothing is corrupted and nothing reaches the
+stranger, because the refresh only ever travels the dead worker's own closed channel.
 -->
 
 ---
@@ -4047,14 +4172,17 @@ rather than counted unanswered. Not a rare correction -- nearly half.
 
 A worker at least `maxCommitsBehind` (20) behind is sent one `System continueTransaction` — a current view with its uncommitted work **kept**. Three answers come back:
 
-| `kept` | the ordinary success |
+| | |
 |---|---|
+| `kept` | the ordinary success |
 | `doomed` | the pending work now **conflicts** — and the *worker* tells its client so on every later call |
 | `stuck` | the view did not move at all; `continueTransaction` was illegal there |
 
-**Nothing about the state of the stone can put a worker over the line.** An earlier version had a second route — stone over `StnCrBacklogThreshold` **and** this session holding the oldest record — and it was wrong twice over.
+**On a quiet repository, a long call is never ended however long it runs.**
 
-<span class="fine">It happens **between** calls, never with one in flight. A pending write is **validated, not laundered** — the kernel carries the write set forward, so a refusal that was owed is still owed. And the client is **told**, with the stale reads named.</span>
+* **A stuck view is reaped.** All **four** of: configured at all; stuck on *more* passes than the grace; far enough behind to matter; **and** the stone over its own threshold.
+
+* **A *running* call pinning the oldest record is ended.** Those three **plus** holding the oldest record.
 
 <!--
 Two things to get across, and the second is the one they will argue with.
@@ -4119,22 +4247,15 @@ RESOLVED, and that mattered. system.conf documents -1 as twice STN_MAX_SESSIONS;
 stone, which sets neither, the runtime read answers 80 against a StnMaxSessions of 10. Resolving -1
 ourselves would have computed 20 and been wrong about the number the stone actually uses. Trust the
 stone's number; map only 0 (disabled) and negative (unknown).
--->
 
----
+================================================================================
+THE TWO DISRUPTIVE ARMS TAKE PRESSURE AS A CONJUNCT -- folded onto this slide
+2026-09-14 from what was the next slide. Its notes follow whole. The conjunct is
+now the bottom half of the view-hygiene slide: one ground, then the two arms
+that act on pressure, then the promise that a quiet repository never ends a long
+call.
+================================================================================
 
-## The two disruptive arms take pressure as a **conjunct**, never an alternative
-
-**On a quiet repository a long call is never ended, however long it runs.** This is not a request deadline in disguise.
-
-**3(a) — a stuck view is reaped.** All **four** of: configured at all; stuck on *more* passes than the grace; far enough behind to matter; **and** the stone over its own threshold.
-
-**3(b) — a *running* call pinning the oldest record is ended.** Those three **plus** holding the oldest record, sustained for the whole grace.
-
-* The reaper only ever **sets a flag** — the ending is done by the process that owns the worker mutex, on its next wait
-* `tryLock`, not `critical:`. And **no `touch`**: `touch` would be an immortality potion
-
-<!--
 Lead with the last line, not the mechanism -- it is the objection this slide exists to answer. Say it
 before anyone raises it.
 
@@ -4188,134 +4309,6 @@ always. A view that has just BECOME stuck, once -- the transition is news, the s
 Any pass on which the number changed. Both silences were measured rather than guessed: before the arm
 acted at all, an idle session over the line wrote three identical lines in a row -- 1440 a day at a
 one-minute pass -- and a stuck session writes one per pass for the whole of its grace.
--->
-
----
-## The ending that is *not* in the ladder: a worker gem that has **died**
-
-<div style="text-align:center">
-<svg viewBox="0 0 900 250" width="850" role="img" aria-label="A live client answers every liveness ping from the front end, so no reaping ground trips, while the worker gem behind it is dead. Only the front end can see that its own worker is gone.">
-  <defs>
-    <marker id="m9" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
-      <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
-    </marker>
-  </defs>
-  <rect x="20" y="58" width="176" height="70" rx="4" fill="none" stroke="currentColor" stroke-width="1.6"/>
-  <text x="108" y="90" font-size="16" text-anchor="middle" font-weight="600" fill="currentColor">client</text>
-  <text x="108" y="112" font-size="14" text-anchor="middle" fill="#2e6a4f">alive, retrying</text>
-  <rect x="352" y="58" width="176" height="70" rx="4" fill="none" stroke="currentColor" stroke-width="1.6"/>
-  <text x="440" y="90" font-size="16" text-anchor="middle" font-weight="600" fill="currentColor">front end</text>
-  <text x="440" y="112" font-size="14" text-anchor="middle" fill="currentColor" opacity=".62">the reaper</text>
-  <rect x="684" y="58" width="176" height="70" rx="4" fill="none" stroke="#b4451f" stroke-width="1.6" stroke-dasharray="6 4"/>
-  <text x="772" y="90" font-size="16" text-anchor="middle" font-weight="600" fill="#b4451f">worker gem</text>
-  <text x="772" y="112" font-size="14" text-anchor="middle" fill="#b4451f">dead</text>
-  <line x1="348" y1="80" x2="204" y2="80" stroke="#2e6a4f" stroke-width="1.6" marker-end="url(#m9)"/>
-  <text x="276" y="70" font-size="14" text-anchor="middle" fill="#2e6a4f">ping</text>
-  <line x1="204" y1="106" x2="348" y2="106" stroke="#2e6a4f" stroke-width="1.6" marker-end="url(#m9)"/>
-  <text x="276" y="126" font-size="14" text-anchor="middle" fill="#2e6a4f">answered &#10003;</text>
-  <line x1="532" y1="93" x2="676" y2="93" stroke="#b4451f" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#m9)"/>
-  <text x="604" y="83" font-size="14" text-anchor="middle" fill="#b4451f">GCI 4067</text>
-  <text x="276" y="172" font-size="15" text-anchor="middle" fill="currentColor" font-weight="600">every ground in reapReasonFor: says &#8220;keep&#8221;</text>
-  <text x="276" y="194" font-size="14" text-anchor="middle" fill="currentColor" opacity=".62">and it is right: the client really is there</text>
-  <text x="604" y="172" font-size="15" text-anchor="middle" fill="currentColor" font-weight="600">only this gem knows</text>
-</svg>
-</div>
-
-**Recognized by the GCI *fatal* band, `originalNumber` 4000–4999** — the kernel's own verdict, not a guess about which failures are serious. Answered **`-32001` / `data.kind: sessionGone`**, *and* the session is unmapped as part of answering, so the next request gets the **404**.
-
-<!--
-Why this could not be a rung, which is the instructive part and what the drawing is for: the reaper's
-probe asks whether the CLIENT is still there, down a stream that client keeps answering. A dead gem
-behind a live client answers every ping and trips no ground at all -- and the ladder is not wrong, it
-is answering a different question correctly. Only the front end knows the state of its own workers,
-which is why both halves of the fix are in McpRouter.
-
-The old behaviour was a WEDGE, and say what it cost: a dead worker left its session registered, and
-every later call answered a generic -32603 "Internal error" with no data.kind, inside a healthy HTTP
-200 -- which means "something went wrong at our end", not "your session is finished". So a
-WELL-BEHAVED client retried, got the same answer forever, never re-initialized, and the session held
-its maxSessions slot for as long as the front end ran. Being well behaved was the thing that trapped
-it.
-
-Why the BAND rather than either number: GsTsExternalSession>>_signalError: CLOSES the external
-session's connection when it sees one, which is why the SECOND such request fails with 4100 "invalid
-session" however the first one failed. Matching the band also keeps it from being a list to maintain
--- out of memory, killed from the stone side, netldi gone, the process segfaulting, all arrive as
-some number in it, and none leaves a worker that can serve another request.
-
-Both halves are for two different clients: -32001 with data.kind sessionGone, bearing its own id
-(as a FRAME where the call was already being streamed), lets a client recover on THIS request; the
-unmapping lets a client that branches on nothing recover anyway, via the 404.
-
-What the client is told and what it is not: the GCI NUMBER, never the GciError's text. Measured on
-3.7.5, the kernel appends the gem's whole NRS to a fatal error -- host, stone, GemStone user, extent
-and log paths -- which is not a thing to hand an MCP client, least of all on the network-facing front
-end. The failure in full goes to the gem log beside the session id: the same split a reap makes.
-
-Verified end to end on 3.7.5 with the reported reproduction, an execute_code that exhausts the
-worker's temporary object memory. The gem dies in about three seconds, the call is answered
-sessionGone with GCI 4067, the next request 404s, and a fresh initialize succeeds on a router capped
-at ONE session -- so the slot really came back. 4 new tests in McpTransportTest and 9 wire checks in
-test.sh, which is the only place the first failure's number can be pinned: a mock can raise 4100, but
-it cannot die.
-
-================================================================================
-THE DEAD GEM'S OWN MEASUREMENT -- from the descriptionOfSession: slide, removed
-2026-09-14. This is the Q&A magnet and it belongs on the dead-gem slide now.
-================================================================================
-
-THE Q&A MAGNET, and it is worth having ready because somebody here will ask what happens to a dead
-gem's measurement. descriptionOfSession: does not refuse a session id nobody holds -- measured on
-3.7.5 it answers a ZERO-FILLED description, 29 fields, the first nil and the rest 0. So field 16 is
-0, the session reads as perfectly current, the arm sends it nothing and writes nothing. And that is
-the TRUTHFUL answer rather than a lucky one: a gem that has exited pins no commit record, because its
-view went with the process. What it left behind is a maxSessions slot and nothing else -- which is
-slide 9.
-
-The one exception, if pressed, is id recycling: the cached number can be handed to another gem, and
-then the figure read belongs to a stranger. Worst case is one confusing log line per pass -- it names
-the right session, quotes a different gem's number, and reports an error about a gem that is gone,
-and none of the three is wrong on its own terms. Nothing is corrupted and nothing reaches the
-stranger, because the refresh only ever travels the dead worker's own closed channel.
--->
-
----
-
-## `maxSessions` — the one bound here that **refuses** rather than releases
-
-* A session **is** a GemStone login, and a repository has a finite number — **ten** on Community Edition
-* **The login that exhausts them fails for every gem on the stone, not just the client that asked**
-
-<span class="fine">Measured on 3.7.5: nine one-shot clients took nine worker gems; the tenth login *of any kind* failed with **4039**; and the **owner of the database was locked out of their own extent, including from plain topaz**, until the router was killed.</span>
-
-* And it takes no carelessness — **reconnecting counts as a new client.** Reloading a tab, restarting an agent, a client that crashes and retries
-* **Three** is deliberately low: one agent, one editor, one spare for a reconnect not yet reaped
-
-The idle rules make that self-correcting. **The cap makes it impossible.**
-
-<!--
-End the section here because this is the failure most likely to bite somebody in this room, and it is
-the one slide where the answer is "we refuse" rather than "we measure".
-
-The lockout is the part to land. It is not that the tenth MCP client fails -- it is that the tenth
-login of ANY kind fails, so the person who owns the extent cannot get in with topaz to find out why.
-That is why the cap is in the server rather than left to the stone: the stone's limit is shared, and
-exhausting it is not a local failure.
-
-If asked about recovery: killing the router released all nine in about four seconds, each worker
-being an RPC gem whose client process is the router. But that is a recovery for somebody who already
-knows what happened, which is exactly the person who cannot log in.
-
-Eight reconnects inside one idle period is nobody being reckless -- it is a morning of reloading a
-tab. Both halves are needed: the idle rules mean a stranded gem goes away on its own, and the cap
-means the stranding cannot pile up faster than they go.
-
-How to raise it: SessionsCurrent against StnMaxSessions -- remembering that the unit suite, test.sh
-and every other server on the stone spend from the same budget. The number to be safe against is not
-what a busy server wants but what the smallest plausible stone allows.
-
-Enforcement, if anyone asks where: openSessionCreating:, inside one critical section, so two
-simultaneous initializes cannot both see a free slot.
 -->
 
 ---
