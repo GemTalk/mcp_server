@@ -42,7 +42,7 @@ style: |
 
 <!--
 ELEVEN VERTICAL SLICES. Sections 0-12 are cut, and THIS FILE IS IN RUNNING ORDER THROUGHOUT.
-Section 13 is the only one left. Sections 0 and 1 (six slides), then sections 2 and 3 (nine), then
+Section 13 is the only one left. Sections 0 and 1 (two slides), then sections 1 to 3 (twelve), then
 section 4 (ten), then section 5 (seven), then section 6 (six), then section 7 (fourteen), then
 section 8 (ten), then section 9 (six), then section 10 (five), then section 11 (three), then
 section 12 (five). In the order they were CUT that is slice 3, slice 4, slice 5, slice 6, slice 7,
@@ -97,18 +97,21 @@ command with a quoted argument in it (found 2026-09-12).
 
 <!--
 ================================================================================
-VERTICAL SLICE 3 -- sections 0 and 1: framing, and the repository. Six slides --
-two for section 0, four for section 1, the last of them demo A. Cut 2026-09-11:
-first in running order, third to be cut.
+VERTICAL SLICE 3 -- section 0: framing. Two slides -- the title and "What is
+different". Cut 2026-09-11: first in running order, third to be cut.
 
-Running order and plans, in seconds -- title 10, what is different 40 (50s,
-section 0); nothing to install 35, load.gs 35, how it is verified 40 (110s,
-section 1); demo A 60.
+Running order and plans, in seconds -- title 10, what is different 40 (50s).
 
-Section 0 is now the title and one slide, and they are not adjacent to anything
-else of their own: the gem-contents sequence runs between "What is different" and
-section 1. That is deliberate -- the room gets the reason for gems before it is
-shown what is in them.
+SECTION 1 IS NO LONGER A SECTION, as of 2026-09-13. It was four slides; the
+load.gs loader and "How it is verified" were deleted and are now speaker notes on
+the one slide that remains, the file-out table, and that slide has moved into
+slice 4's run behind a lead retitled "Installing and starting a server". Demo A
+went with it, to sit immediately before demo B. So this slice is the title and
+one slide, and everything after them is slice 4's until section 4 begins.
+
+The gem-contents sequence runs between "What is different" and that run, which is
+deliberate: the room gets the reason for gems before it is shown what is in
+them.
 
 Section 0's thesis is one sentence and slide 2 is the whole of it: it runs inside
 the image, so a session is a login, a session is a transaction view, and a view is
@@ -172,12 +175,13 @@ unaffected because the suite runs either way -- but section 2 does assert it
 (docs/Presentation.md, "Resolved per session, not at boot") and section 10 will.
 Re-read both when that merge lands.
 
-Budget: 4:10 -- 190s of slides plus the 60s demo, against the 5.0 minutes the
-outline's table allows for 0 and 1 together. Two cuts on 2026-09-13 gave 55s back:
-consolidating "MCP, in one slide" with "What is different here" (20s), and
-deleting "Status, honestly" (35s). Section 0 is now 40s under its 1.5 and section
-1 stays 10s under its 3.5, so the pair has real slack -- which is the first place
-to look when a later section overruns, rather than a reason to put a slide back.
+Budget: 0:50, against the 1.5 minutes the outline's table allows section 0 -- 40s
+under. The 3.5 minutes it allows section 1 now belongs to slice 4, which carries
+what is left of that section; on the pair's own 5.0 minutes the two slices
+together run 2:20 under, which is the first place to look when a later section
+overruns rather than a reason to put a slide back. Four slides came out on
+2026-09-13 -- "MCP, in one slide" folded into "What is different" (20s), "Status,
+honestly" (35s), load.gs (35s) and "How it is verified" (40s).
 ================================================================================
 -->
 
@@ -1742,7 +1746,7 @@ contributor warning dressed as a design note; it is in CLAUDE.md for the same re
 
 ---
 
-## The tools themselves &#8212; 31 in seven toolsets, and Grail&#8217;s nine
+## The tools themselves &#8212; 31 in seven core toolsets, and Grail&#8217;s nine
 
 <div class="tools">
 <div>
@@ -1953,7 +1957,7 @@ McpTool holds only a name, a description, a schema and that block.
 
 ---
 
-## signal poller GsProcess &#8212; the only gem with a heartbeat
+## signal poller GsProcess &#8212; the collector of progress ticks
 
 <div style="text-align:center">
 <svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel. A tick starts at a toolset, which reaches the McpProgressReporter held in SessionTemps under #McpProgress.">
@@ -2446,146 +2450,24 @@ IDLE worker holding a stale view, the one moment that worker cannot run a line o
 <!-- MCP-GEM-SEQUENCE:END -->
 ---
 
-## There is nothing to install but topaz file-outs
-
-| group | classes | what | when |
-|---|---|---|---|
-| `src/core/` | 21 | protocol, transport, dispatch, the seven toolsets | always |
-| `src/tests/` | 26 | the SUnit suites and their fixtures | always |
-| `src/auth/` | 3 | `McpAuthRouter` + its two suites | 3.7.5+ |
-| `src/grail/` | 2 | the optional Python toolset + its suite | `--grail` |
-
-* **One `.gs` file per class, canonical `fileOutClass` output.** No Rowan, no Tonel, no package manager
-* It files into any image topaz can log into — and the tree **round-trips byte-exact**, so a regenerated-vs-repo diff is a trustworthy signal
-* **`Mcp` is the home dictionary**, not `Published`. A user provisioned for MCP needs it in their symbol list
-
-<span class="fine">`install.sh` picks the groups by **probing the image rather than asking**: `src/auth` needs `JsonWebToken` and `JwtSecurityData`, neither of which exists before 3.7.5.</span>
-
-<!--
-Spend no time defending the absence of a package manager; state it and move on. The audience this
-matters to is the one that has to file it into an image on a customer machine.
-
-The byte-exact round trip is the part worth one extra sentence, because it is what makes the
-rule enforceable: file the class out canonically, diff against the repo, and a difference means a
-real difference. Hand-editing a method block into a .gs file is how that property gets lost, and
-it is the first thing in the contributor guide.
-
-The counts are classes, not files -- each group also carries its own load.gs, which is the next
-slide.
--->
-
----
-
-## Each `load.gs` pre-declares its class names, bound to `nil`
-
-The classes reference each other **in both directions** — `McpDispatcher` asks `McpServer` for its name, `McpServer` builds an `McpDispatcher` — so **no file order puts every class ahead of its first mention**.
-
-```smalltalk
-names := #( #McpError #McpTool #McpToolRegistry ... #McpSession #McpRouter ).
-names do: [:s | (d includesKey: s) ifFalse: [ d at: s put: nil ] ].
-```
-
-**Why a nil binding is enough:** the compiler binds a global by its **association**, and each class definition fills *that same association* in. A method compiled before its referent exists still ends up pointing at the real class.
-
-<span class="fine">Existing keys are left alone, so re-installing over a loaded image changes nothing.</span>
-
-<!--
-A slide of its own for this audience, and only for this audience. It is four lines of loader code,
-but it is the one place where the file-in depends on something about the compiler rather than
-about the project -- and the people in this room are the ones who would otherwise ask why the
-loader does not simply topologically sort the files. It cannot: the graph has cycles.
-
-Without the pre-declaration the compiler reports `undefined symbol` and the file-in STOPS, which is
-at least loud. The quiet version of this failure is the one in the contributor guide: a lost `%`
-after a merge drops a method with errorcount still reading 0.
-
-The dictionary itself is created self-referenced if absent -- a SymbolDictionary's name IS the key
-inside it whose value is itself -- and appended to the symbol list. install.sh does that too; the
-loader repeats it so a run by hand on a fresh image still works.
--->
-
----
-
-## How it is verified
-
-* **`./run-unit-tests.sh`** — the in-image suites, **each in its own topaz session**, so one that blows up is reported by name rather than silencing the run. **466** base · **522** with auth · **about 570** with Grail
-* **`./test.sh`** — the only check that drives the tools **over the wire**. Nothing in the unit suites covers the transport, so a break there is otherwise silent
-* **`./test-tls.sh`** — the same transport over HTTPS, with a throwaway cert set **only in the forked gem's session, never committed**
-* **GitHub Actions** installs **3.7.5 from scratch** on `ubuntu-latest` — fresh extent, stone, netldi, **with and without Grail** — and runs all three
-
-> For a project with no package manager the question is *what proves it still files in.* That is the workflow's job, not mine.
-
-<span class="fine">**Seven suites need a netldi**, because they spawn real worker gems — no new burden, since this server cannot serve one request without one.</span>
-
-<!--
-Give the exact numbers from the morning's run, not these. The Grail figure moved TWICE on
-2026-09-10 alone -- 39 to 44 to 51 tests -- while the base and auth numbers did not budge, so
-"about 570" is the honest thing to have on a slide and the live run is the precise answer if
-anyone asks.
-
-Per-suite topaz sessions are worth the extra sentence if there is time: it is the difference
-between a broken suite being reported by name and a broken suite taking the report down with it.
-Failures are named individually and the output is coloured for CI.
-
-Two suites are written to fail on purpose, and both belong to later sections rather than here:
-McpExternalSessionTest fails on an unsupported image BECAUSE that is how the suite reports the
-image (section 12), and McpConcurrentEditTest>>testTheStoneAloneWouldAllowThatClobber is written
-to fail on GOOD news (section 7). Mention that they exist; do not spend them here.
-
-The netldi seven: McpAuthTest, McpAuthConformanceTest, McpExternalSessionTest, McpTransactionTest,
-McpWorkerDeadlineTest, McpConcurrentEditTest, and -- since the merge of 2026-09-10 -- McpGrail
-ToolsetTest, because run_python_tests now forks the gem it runs Grail's classes in. They also need
-spare LOGIN SLOTS, which is the likeliest cause of a failure that has nothing to do with the code.
-
-The lint job over the workflows themselves (actionlint, zizmor) is not worth a sentence unless
-somebody asks what else CI does.
--->
-
----
-
-<!-- _class: demo -->
-
-# DEMO A — install, from nothing
-
-```bash
-./install.sh --check
-./install.sh
-```
-
-1. The **environment report** — `GEMSTONE`, the stone, the netldi, and `GEMSTONE_GLOBAL_DIR`
-2. The **group selection deciding itself**: auth in or out by probing the image for `JsonWebToken`
-3. File-in, group by group, and one commit
-
-<span class="fine">**`GEMSTONE_GLOBAL_DIR` is the variable that decides whether anything works.** Get it wrong and you get `getaddrinfo failed, EAI error 8 ... Number: 4065`, which reads like DNS and is not. `--check` is the first thing to run on a new machine.</span>
-
-<span class="fine">**60 seconds, hard stop.**</span>
-
-<!--
-The demo is here rather than after section 2 because it is the only one that costs nothing to
-stage: no server, no second gem, no timing. If the room is still settling, this is the demo to
-stretch; if we are already behind, it is the one to cut to a single `--check`.
-
-What to point at while it scrolls: the line where it decides about auth. That is the whole version
-story in one line of output, and section 12 will come back to it.
-
-Do NOT get drawn into GEMSTONE_GLOBAL_DIR here beyond the one sentence. The full version is in the
-README and it is a ten-minute conversation: netldi and stone each bind an ephemeral port and record
-it under that directory, /etc/services is a trap rather than a fix, and install.sh logs in linked
-(-l) specifically so it needs no netldi at all.
--->
-
----
-
 <!--
 ================================================================================
-VERTICAL SLICE 4 -- sections 2 and 3: starting a server, and the fork. Nine
-slides -- a lead, three for section 2, four for section 3, the last of them demo
-B. Cut 2026-09-11: second in running order, fourth to be cut.
+VERTICAL SLICE 4 -- installing, and starting a server. Twelve slides -- a lead,
+the file-out table that is all that is left of section 1, three for section 2,
+five for section 3, then demo A and demo B back to back at the end. Cut
+2026-09-11: second in running order, fourth to be cut. It took the install slide
+and demo A on 2026-09-13, when section 1 stopped being a section of its own.
 
-Running order and plans, in seconds -- lead 10; config on an instance 30, what
-initialize seeds 35, the tool surface 45 (110s, section 2); the one fact + the
-deployment picture 50, forkOnPort: 45, in the child 40, the banner 30,
-transactionless 50 (215s, section 3); demo B 90. About 7 minutes.
+Running order and plans, in seconds -- lead 10; nothing to install 35 (section 1);
+config on an instance 30, what initialize seeds 35, the tool surface 45 (110s,
+section 2); the one fact + the deployment picture 50, forkOnPort: 45, in the child
+40, the banner 30, transactionless 50 (215s, section 3); demo A 60, demo B 90.
+370s of slides plus 150s of demo -- 8:40.
+
+THE TWO DEMOS ARE ADJACENT ON PURPOSE and they are provisional: demo A installs
+from nothing and demo B starts a server from a here-doc, which is one story told
+twice on the same machine. Dropping A, or folding its --check into the head of B,
+is the cheapest 60 seconds in the deck and is expected rather than feared.
 
 THE THESIS OF THE PAIR is one sentence and the lead says it: a server is a gem,
 started by evaluating an expression, configured entirely on an instance, and
@@ -2640,17 +2522,22 @@ run-server.sh line needs MCP_TOOLSETS or it comes up with 31 tools instead of 40
 
 <!-- _class: lead -->
 
-# Starting a server
+# Installing and starting a server
 
 ### A gem, forked and detached, whose main activity is the accept loop
 
 <br>
 
-**§2–3** · nothing here is committed, and nothing here is a fact about the image
+**§1–3** · nothing here is committed, and nothing here is a fact about the image
 
 <!--
-Where we are: section 1 said there are three kinds of gem and showed the table.
-This pair is the first of them being born. Sections 4 and 5 are the second.
+Where we are: the gem-contents sequence has just shown what is in a front end
+and what is in a worker. This run is the first of them being born -- installed on
+the next slide, forked four slides later. Sections 4 and 5 are the second.
+
+The title took "Installing" on 2026-09-13, when section 1 came down to a single
+slide -- the file-out table -- and it made no sense to lead a one-slide section of
+its own. That slide now opens this run, and the two demos close it.
 
 Say the thesis before the first slide, because it makes the rest of the pair
 coherent and it is the part this audience will test: a server is an EXPRESSION
@@ -2661,6 +2548,67 @@ Seven minutes for the pair including the demo. Section 2 is the half to run fast
 section 3 is the half this room came for.
 
 If we are behind: this lead slide is the first thing to cut in the whole deck.
+-->
+
+---
+
+## There is nothing to install but topaz file-outs
+
+| group | classes | what | when |
+|---|---|---|---|
+| `src/core/` | 21 | protocol, transport, dispatch, the seven toolsets | always |
+| `src/tests/` | 26 | the SUnit suites and their fixtures | always |
+| `src/auth/` | 3 | `McpAuthRouter` + its two suites | 3.7.5+ |
+| `src/grail/` | 2 | the optional Python toolset + its suite | `--grail` |
+
+* **One `.gs` file per class, canonical `fileOutClass` output**
+* It files into any image topaz can log into
+* **`Mcp` is the home dictionary**, not `Published`. A user provisioned for MCP needs it in their symbol list
+
+<span class="fine">`install.sh` picks the groups by **probing the image rather than asking**: `src/auth` needs `JsonWebToken` and `JwtSecurityData`, neither of which exists before 3.7.5.</span>
+
+<!--
+Spend no time defending the absence of a package manager; state it and move on. The audience this
+matters to is the one that has to file it into an image on a customer machine.
+
+The byte-exact round trip is the part worth one extra sentence, because it is what makes the
+rule enforceable: file the class out canonically, diff against the repo, and a difference means a
+real difference. Hand-editing a method block into a .gs file is how that property gets lost, and
+it is the first thing in the contributor guide.
+
+The counts are classes, not files -- each group also carries its own load.gs. That loader had a
+slide of its own until 2026-09-13 and is now this paragraph, because it is four lines of code and
+one fact about the compiler: the classes reference each other in BOTH directions -- McpDispatcher
+asks McpServer for its name, McpServer builds an McpDispatcher -- so no file order puts every
+class ahead of its first mention, and the graph cannot be topologically sorted because it has
+cycles. Each load.gs therefore pre-declares its class names bound to nil. That is enough because
+the compiler binds a global by its ASSOCIATION and each class definition fills that same
+association in, so a method compiled before its referent exists still points at the real class.
+Existing keys are left alone, so re-installing over a loaded image changes nothing. Without the
+pre-declaration the file-in stops on `undefined symbol`, which is at least loud -- the quiet
+version is the lost % after a merge that drops a method with errorcount still reading 0. This is
+the one place the file-in depends on the compiler rather than on the project, which is why it is
+worth saying to THIS room, and why it is worth saying only if there is time.
+
+HOW IT IS VERIFIED had a slide too, deleted the same day, and this is where its claims live now.
+./run-unit-tests.sh runs the in-image suites, EACH IN ITS OWN TOPAZ SESSION, so a suite that blows
+up is reported by name rather than silencing the run: 466 base, 522 with auth, about 570 with
+Grail -- give the morning's numbers rather than these, since the Grail figure moved twice on
+2026-09-10 alone. ./test.sh is the only check that drives the tools OVER THE WIRE, and nothing in
+the unit suites covers the transport, so a break there is otherwise silent; ./test-tls.sh is the
+same transport over HTTPS with a throwaway cert set only in the forked gem's session, never
+committed. GitHub Actions installs 3.7.5 from scratch on ubuntu-latest -- fresh extent, stone,
+netldi, with and without Grail -- and runs all three. The sentence that made it a slide, if it is
+worth saying at all: for a project with no package manager the question is what proves it still
+files in, and that is the workflow's job.
+
+Two suites fail ON PURPOSE and both belong to later sections: McpExternalSessionTest fails on an
+unsupported image because that is how it reports the image (section 12), and McpConcurrentEdit
+Test>>testTheStoneAloneWouldAllowThatClobber is written to fail on GOOD news (section 7). Seven
+suites need a netldi because they spawn real worker gems -- McpAuthTest, McpAuthConformanceTest,
+McpExternalSessionTest, McpTransactionTest, McpWorkerDeadlineTest, McpConcurrentEditTest and, since
+2026-09-10, McpGrailToolsetTest -- and they need spare LOGIN SLOTS, which is the likeliest cause of
+a failure that has nothing to do with the code.
 -->
 
 ---
@@ -3027,6 +2975,41 @@ a commit record; refusing to serve for that reason would be the worse trade. The
 failure that actually happens is transactionless in a SOLO session -- the
 repository open by this gem alone -- which is no way to run a server but is
 exactly how someone tries one out.
+-->
+
+---
+
+<!-- _class: demo -->
+
+# DEMO A — install, from nothing
+
+```bash
+./install.sh --check
+./install.sh
+```
+
+1. The **environment report** — `GEMSTONE`, the stone, the netldi, and `GEMSTONE_GLOBAL_DIR`
+2. The **group selection deciding itself**: auth in or out by probing the image for `JsonWebToken`
+3. File-in, group by group, and one commit
+
+<span class="fine">**`GEMSTONE_GLOBAL_DIR` is the variable that decides whether anything works.** Get it wrong and you get `getaddrinfo failed, EAI error 8 ... Number: 4065`, which reads like DNS and is not. `--check` is the first thing to run on a new machine.</span>
+
+<span class="fine">**60 seconds, hard stop.**</span>
+
+<!--
+This demo moved on 2026-09-13 to sit immediately before demo B, and the two are now one stretch of
+terminal: install from nothing, then start a server from a here-doc. It costs nothing to stage --
+no server, no second gem, no timing -- so it is still the one to stretch if the room is settling,
+and it is the FIRST thing to cut if we are behind. Cutting it to a single `--check`, or folding
+that `--check` into the head of demo B, loses nothing but the scroll.
+
+What to point at while it scrolls: the line where it decides about auth. That is the whole version
+story in one line of output, and section 12 will come back to it.
+
+Do NOT get drawn into GEMSTONE_GLOBAL_DIR here beyond the one sentence. The full version is in the
+README and it is a ten-minute conversation: netldi and stone each bind an ephemeral port and record
+it under that directory, /etc/services is a trap rather than a fix, and install.sh logs in linked
+(-l) specifically so it needs no netldi at all.
 -->
 
 ---

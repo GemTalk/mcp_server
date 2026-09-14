@@ -391,7 +391,7 @@ SLIDES = [
   "because progress:of:message: is an McpToolset method and a handler block's self is its toolset;\n"
   "McpTool holds only a name, a description, a schema and that block."),
 
- ("c-poller", "signal poller GsProcess &#8212; the only gem with a heartbeat",
+ ("c-poller", "signal poller GsProcess &#8212; the collector of progress ticks",
   "`InterSessionSignal poll`, in a loop until empty, every **100 ms**, in the front-end gem. It parses "
   "each payload and routes it **by call id** to that call&#8217;s channel. It has to live here: a forked "
   "`GsProcess` runs only while its gem is actively executing Smalltalk, and an idle worker is not.",
@@ -444,7 +444,7 @@ SLIDES = [
 ]
 
 INTERLEAF_TOOLS = """
-## The tools themselves &#8212; 31 in seven toolsets, and Grail&#8217;s nine
+## The tools themselves &#8212; 31 in seven core toolsets, and Grail&#8217;s nine
 
 <div class="tools">
 <div>
