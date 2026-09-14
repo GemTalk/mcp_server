@@ -42,7 +42,7 @@ style: |
 ---
 
 <!--
-SEVENTY-ONE SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut once;
+SEVENTY SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut once;
 three stretches of them are now set aside. Section 13 is the only one never written.
 
 THE TARGET IS 45 MINUTES as of 2026-09-14, down from an hour, and that is what the current shape is
@@ -53,12 +53,12 @@ for. The running order:
   21-26   sections 1 to 3 -- installing, and starting a server
   27-30   THE DEMO RUN -- A, B, C and D, back to back, about 6 minutes of terminal
   31-38   section 7 -- the transaction model and the blind-write guardrail, then demo E
-  39-49   section 8 -- the router maintenance cycle, then demo F
-  50-55   section 9 -- McpAuthRouter, a reachable port, then demo G
-  56-60   section 10 -- extending it: a server for YOUR software
-  61-63   section 11 -- the worker gem's GemStone user
-  64-68   section 12 -- versions: the floor moved, and why
-  69-71   the JSON codec -- OPTIONAL, run only if the clock allows
+  39-48   section 8 -- the router maintenance cycle, then demo F
+  49-54   section 9 -- McpAuthRouter, a reachable port, then demo G
+  55-59   section 10 -- extending it: a server for YOUR software
+  60-62   section 11 -- the worker gem's GemStone user
+  63-67   section 12 -- versions: the floor moved, and why
+  68-70   the JSON codec -- OPTIONAL, run only if the clock allows
 
 WHAT IS SET ASIDE, and where. docs/slides/archive.md holds nineteen slides removed on 2026-09-14
 for time: section 4 (trace 1, a brand-new client's first request, ten slides), the trace half of
@@ -3745,35 +3745,46 @@ view when the client will not move it.
 
 <!--
 ================================================================================
-VERTICAL SLICE 2 — section 8, the router maintenance cycle. Ten slides, cut
-2026-09-10 against docs/Presentation.md section 8.
+VERTICAL SLICE 2 — section 8, the router maintenance cycle. Nine slides, cut
+2026-09-10 against docs/Presentation.md section 8, and folded from ten to nine
+on 2026-09-14 -- see THE FOLD below.
 
 The thesis, and every slide serves it: the front end is the only part of this
 server with a heartbeat, so every judgement about time is made there -- and it is
 made by COUNTING EVIDENCE THIS FRONT END OBSERVED rather than by measuring
 elapsed time. Two mechanisms were deleted by adopting that rule, which is the
-strongest thing the section has to say and why slide 3 is the one to protect.
+strongest thing the section has to say and why the counting rule is the part to
+protect.
+
+THE FOLD, 2026-09-14. The counting rule was slide 3 and is now the second half of
+slide 2, under the maintenance-pass diagram: one slide that shows the pass and
+then says what the pass is counting. The "Per session, inside the pass" lines
+came off the diagram to make the room, and are spoken over it instead. Slide
+numbers below are POST-fold; the running order is 1 lead, 2 the pass and the
+counting rule, 3 reapReasonFor:, 4 the answered ping, 5 how the front end sees
+it, 6 view hygiene, 7 the conjunct, 8 the dead gem, 9 maxSessions, then demo F.
 
 What the outline had as slides and this does not, all now speaker notes, on the
 same principle slice 1 settled -- a MEASUREMENT is evidence for a claim, not the
 claim, and notes are where evidence belongs:
 
-  * the 96%-over-one-night suspend-detector result -> notes on slide 3;
+  * the 96%-over-one-night suspend-detector result -> notes on slide 2;
   * the four-way commits-behind measurement (9 -> 18 -> 161 -> 202, and the
-    489-behind front-end gem) -> notes on slide 7;
+    489-behind front-end gem) -> notes on slide 6;
   * the StnCrBacklogThreshold "-1 comes back resolved as 80" finding -> notes on
-    slide 6;
-  * the zero-filled descriptionOfSession: of a dead gem -> notes on slide 6,
+    slide 5;
+  * the zero-filled descriptionOfSession: of a dead gem -> notes on slide 5,
     which is where a Q&A magnet belongs;
-  * the endedCall*/isEndedCallKind: defect story -> notes on slide 8;
-  * request deadlines and cancellation IN FULL -> notes on slide 8. The outline
+  * the endedCall*/isEndedCallKind: defect story -> notes on slide 7;
+  * request deadlines and cancellation IN FULL -> notes on slide 7. The outline
     put them in this section because they share the escalation; at this budget
     they are the first thing that cannot be slides. If section 8 is ever given
     another minute, this is what to spend it on.
 
 Budget: 7:10 -- 340s of slides plus the 90s demo F, against the 6.5 minutes the
-outline's table allowed. Slide 3 carries 45s and slide 7 another 45; those two
-are the section. See the note in docs/Presentation.md on where the extra 0.7
+outline's table allowed. Unchanged by the fold: slide 2 now carries both its own
+25s and the counting rule's 45s, so it is a 70s slide and the longest here. With
+slide 6's 45s, those two are the section. See the note in docs/Presentation.md on where the extra 0.7
 talk minutes come from.
 ================================================================================
 -->
@@ -3782,7 +3793,7 @@ talk minutes come from.
 
 # The maintenance cycle
 
-### One gem with a heartbeat, counting what it saw
+### One front-end process, monitoring the sessions
 
 <!--
 Frame the section in one sentence before the first slide: everything in here is
@@ -3802,7 +3813,7 @@ front end observed. Promise that and they will spend the section checking it.
 ## One `GsProcess`, one pass every 60 seconds
 
 <div style="text-align:center">
-<svg viewBox="0 0 960 330" width="900" role="img" aria-label="The maintenance pass as it runs by default: refresh the front end's own view, then measure each worker's view hygiene, then probe quiet sessions, then reap. Step one comes first so everything after it reasons about the repository as it is now; reaping comes last so a session found gone while probing is freed in the same pass.">
+<svg viewBox="0 0 960 232" width="760" role="img" aria-label="The maintenance pass as it runs by default: refresh the front end's own view, then measure each worker's view hygiene, then probe quiet sessions, then reap. Step one comes first so everything after it reasons about the repository as it is now; reaping comes last so a session found gone while probing is freed in the same pass.">
   <defs>
     <marker id="m8" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
@@ -3829,11 +3840,18 @@ front end observed. Promise that and they will spend the section checking it.
   <text x="120" y="34" font-size="14" text-anchor="middle" fill="#b4451f" font-weight="600">first: so all of the above sees <tspan font-style="italic">now</tspan></text>
   <path d="M724 62 L724 44 L896 44 L896 62" fill="none" stroke="#b4451f" stroke-width="1.6"/>
   <text x="810" y="34" font-size="14" text-anchor="middle" fill="#b4451f" font-weight="600">last: found gone, freed this pass</text>
-  <text x="26" y="250" font-size="15" fill="currentColor" font-weight="600">Per session, inside the pass:</text>
-  <text x="26" y="275" font-size="15" fill="currentColor">notePassWithStream: &#8212; <tspan font-style="italic">first and unconditionally.</tspan> The pass <tspan font-style="italic">is</tspan> the observation.</text>
-  <text x="26" y="300" font-size="15" fill="currentColor">Then: busy &#8594; skip &#183; no stream &#8594; skip the ping, keep counting &#183; probe due &#8594; ping</text>
 </svg>
 </div>
+
+## Almost nothing here is measured in elapsed time
+
+* **Idleness** is a count of **pings the client answered with no work in between** — `sessionIdleTimeoutSeconds` &#247; the *realized* ping cadence, **fifteen** at the defaults
+* **Unreachability** is a count of **passes with no stream**
+* **A ping is never declared late by a clock.** It is superseded by the next one and judged then — admissible, or discarded because the transport moved under it
+
+Every count advances only while the front end runs, so **a suspended host simply stops the count where it was**: no suspend to detect, nothing to forgive, no threshold to get wrong.
+
+> Two mechanisms were **removed** by this rule, not fixed: the suspend detector, and the pass that timed out server-initiated requests.
 
 <!--
 The order is the point, and the class comment says so. Take the two brackets in turn.
@@ -3871,9 +3889,11 @@ a server but is exactly how someone tries one out.
 Reaping last: a session found gone while probing is freed in the SAME pass rather than the next one.
 At a 60-second interval that is a minute of a login slot, every time.
 
-The per-session line at the bottom is the whole clock, and it is worth saying slowly.
+PER SESSION, INSIDE THE PASS -- off the slide 2026-09-14, to make room for the counting rule that
+follows it. The line is the whole clock and is now spoken over the diagram, slowly.
 notePassWithStream: runs first and unconditionally, before any reason to return early -- before the
-busy test, before the no-stream test. So the counts advance for every session on every pass this
+busy test, before the no-stream test. Then: busy -> skip; no stream -> skip the ping but keep
+counting; probe due -> ping. So the counts advance for every session on every pass this
 front end runs, and for no other reason. A busy session still gets counted; it just gets nothing
 sent to it.
 
@@ -3885,21 +3905,13 @@ and the front end owning the client stream.
 Four sends, and the diagram is all four -- if somebody reads #maintainSessions along with you, the
 count matches. An arm that ended sessions holding write locks was built and taken back out; section
 11 says why, and it is that section's argument rather than this one's.
--->
 
----
+================================================================================
+ALMOST NOTHING HERE IS MEASURED IN ELAPSED TIME -- folded onto this slide
+2026-09-14 from what was slide 41. Its notes follow whole; it is still the
+section's thesis and still the part to protect.
+================================================================================
 
-## Almost nothing here is measured in elapsed time
-
-* **Idleness** is a count of **pings the client answered with no work in between** — `sessionIdleTimeoutSeconds` &#247; the *realized* ping cadence, **fifteen** at the defaults
-* **Unreachability** is a count of **passes with no stream**
-* **A ping is never declared late by a clock.** It is superseded by the next one and judged then — admissible, or discarded because the transport moved under it
-
-Every count advances only while the front end runs, so **a suspended host simply stops the count where it was**: no suspend to detect, nothing to forgive, no threshold to get wrong.
-
-> Two mechanisms were **removed** by this rule, not fixed: the suspend detector, and the pass that timed out server-initiated requests.
-
-<!--
 This is the slide to spend time on. It is the section's thesis and the only idea here that transfers
 to anything else in the room.
 
