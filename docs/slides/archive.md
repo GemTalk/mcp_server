@@ -1845,7 +1845,10 @@ the two-validations point and the error vocabulary, both of which answer a
 question rather than raise one.
 
 WHERE THEY GO BACK: after page 45 and before the offline_access deviation, in
-this order, which is where they were. Page 45's face would want its fine line
+this order, which is where they were -- but the deviation is no longer a slide.
+It was merged onto the bottom of page 45 later on 2026-09-14, so restoring any of
+these three means splitting that page back into two first, and page 45's notes
+name the two halves and the four banners to take apart. Page 45's face would want its fine line
 back too -- "src/auth needs JsonWebToken, JwtSecurityData, jwtPassword: -- 3.7.5.
 An external OIDC IdP -- 3.7.6." -- because the fold took it and the version fact
 is now nowhere on a face in that section except demo G's "needs the 3.7.6 stone".

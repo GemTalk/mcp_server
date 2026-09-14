@@ -42,7 +42,7 @@ style: |
 ---
 
 <!--
-FIFTY-SIX SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut
+FIFTY-FIVE SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut
 once; eight stretches of them are now set aside. Section 13 is the only one never written.
 
 THE TARGET IS 45 MINUTES as of 2026-09-14, down from an hour, and that is what the current shape is
@@ -54,10 +54,10 @@ for. The running order:
   27-30   THE DEMO RUN -- A, B, C and D, back to back, about 6 minutes of terminal
   31-38   section 7 -- the transaction model and the blind-write guardrail, then demo E
   39-43   section 8 -- the router maintenance cycle, then demo F
-  44-47   section 9 -- McpAuthRouter, a reachable port, then demo G (FOLDED 2026-09-14)
-  48-49   section 11 -- the worker gem's GemStone user (MOVED HERE, THEN FOLDED, 2026-09-14)
-  50-52   section 10 -- a lead, ONE slide, and demo H: extending it, a server for YOUR software
-  53-56   THE APPENDIX -- a lead, then the JSON codec. OPTIONAL, run only if the clock allows
+  44-46   section 9 -- McpAuthRouter, a reachable port, then demo G (FOLDED, THEN MERGED, 2026-09-14)
+  47-48   section 11 -- the worker gem's GemStone user (MOVED HERE, THEN FOLDED, 2026-09-14)
+  49-51   section 10 -- a lead, ONE slide, and demo H: extending it, a server for YOUR software
+  52-55   THE APPENDIX -- a lead, then the JSON codec. OPTIONAL, run only if the clock allows
 
 RUNNING ORDER IS NOT SECTION-NUMBER ORDER ANY MORE. Section 11 was moved ahead of section 10 on
 2026-09-14, so the deck runs 9, 11, 10. The reason is thematic rather than structural: section 9's
@@ -4517,13 +4517,22 @@ saying so takes ten seconds you will want back.
 
 <!--
 ================================================================================
-VERTICAL SLICE 8 -- section 9, McpAuthRouter: a reachable port. A lead, two
-slides and demo G. Cut 2026-09-12: eighth in running order, eighth to be cut. The
-lead slide was added 2026-09-14, so every slide number below counts from it and
-the two content slides are 2 and 3.
+VERTICAL SLICE 8 -- section 9, McpAuthRouter: a reachable port. A lead, ONE
+slide and demo G. Cut 2026-09-12: eighth in running order, eighth to be cut. The
+lead slide was added 2026-09-14, so every slide number below counts from it: the
+single content slide is 2 and demo G is 3.
 
-Running order and plans, in seconds -- lead 10; the secure router 90; the
-offline_access deviation 60 (160s of slides); demo G 120. About 4:40.
+Running order and plans, in seconds -- lead 10; the one content slide 150, being
+90 for the secure router and 60 for the deviation; demo G 120. About 4:40.
+
+THE MERGE, 2026-09-14, after the fold below and on the same day. The secure
+router and the offline_access deviation were tightened until the pair fitted one
+face, and the deviation became a ### half way down it. NO TIME WAS SAVED and none
+was meant to be -- the section still runs 4:40 -- so this is a change of shape and
+not of budget: one slide now carries the whole of what this section asserts, and
+the room sees the mechanism and the departure from the spec at the same time,
+which is the honest arrangement. What it costs is that slide 2 is now a long slide
+with two subjects on it, and the pacing is entirely on the speaker.
 
 THE FOLD, 2026-09-14, and it is the biggest single saving in the deck. Slide 2's
 face was rewritten from "a reachable port, and the three invariants that pay for
@@ -4538,7 +4547,7 @@ DELIVERED, which is the thing to rehearse: it is a quiet slide with ninety
 seconds of talking over it, and the temptation is to read the four sentences and
 move on in twenty.
 
-THE OUTLINE SAYS 3 SLIDES AND THIS IS NOW TWO, having been five. The outline's
+THE OUTLINE SAYS 3 SLIDES AND THIS IS NOW ONE, having been five. The outline's
 number was written before the bullet list under it, and that list contains three
 things that were each a slide on their own -- the invariants, the renewal bug and
 the deviation -- so it was too small when this slice was cut and is too large
@@ -4546,13 +4555,14 @@ now. Its bullets are still the right inventory of what gets SAID; they are simpl
 not slides any more.
 
 WHAT TO CUT: nothing here, and that is the point of the fold -- the cutting was
-done on 2026-09-14 and what is left is a lead, two slides and a demo. If this
+done on 2026-09-14 and what is left is a lead, ONE slide and a demo. If this
 section still has to give time back, demo G is the only candidate, and it is
-already the riskiest demo in the deck. Do NOT cut slide 3: it is the one place in
+already the riskiest demo in the deck. Slide 2 cannot be cut at all -- it is the
+section. NOR CAN ITS LOWER HALF BE DROPPED IN DELIVERY, which is the new way to
+lose it now that it is not a slide of its own: the deviation is the one place in
 the talk where this project knowingly departs from a normative SHOULD NOT, and
 saying so out loud in front of the people who will read the conformance suite is
-the whole point of having it. Slide 2 cannot be cut at all now -- it is the
-section.
+the whole point of having it. Sixty of slide 2's 150 seconds belong to it.
 
 THE SECTION'S THESIS is not "we added OAuth". It is that authorization here is
 not a gate in front of the server, it is the thing that decides WHOSE GEM RUNS
@@ -4560,8 +4570,9 @@ THE CODE. Everything in it is a consequence of that: the token is checked on
 every request because the session id is not a credential; the session is bound to
 the token's exp because the gem is logged in as that token's user; and the
 deviation exists because without it a real client cannot log in at all. The first
-two of those three are speaker notes on slide 2 since the fold; only the third is
-still a slide.
+two of those three are speaker notes on slide 2 since the fold; the third is the
+lower half of that same slide since the merge, and none of the three is a slide
+of its own any more.
 
 NO DIAGRAM, deliberately. The shape here is the base router's shape with one hook
 filled in (requestAuthorized:on:, which the archived section 4 spent a slide on), and drawing it again
@@ -4586,7 +4597,7 @@ repository before the talk" (items 7 and 8) and both affecting THIS section:
   * docs/MCP_Client_Notes.md says the offline_access SHOULD NOT is "draft-only,
     and so not a gap in either supported revision". McpAuthConformanceTest says
     SEP-2207 is "status Final, so it binds independently of which revision we
-    claim". Those are opposite claims about whether slide 3's deviation is a
+    claim". Those are opposite claims about whether slide 2's deviation is a
     deviation at all. THE SLIDE FOLLOWS THE CONFORMANCE SUITE, because that is
     the reading the code actually enforces -- but somebody in that room may have
     MCP_Client_Notes.md open, so resolve it before the talk rather than on stage;
@@ -4644,7 +4655,24 @@ are going to run it.
 
 `McpAuthRouter` is the class for a configurable `bindAddress`. **TLS is mandatory,** even on loopback. Requires a resource server to issue JWTs with the auth router in its audience. Logs into the worker gem as that user.
 
+### The `offline_access` deviation
+
+**The rule.** MCP **SHOULD NOT** advertise `offline_access` in `WWW-Authenticate` or `scopes_supported`. However:
+* The Claude Code client appends `offline_access` to its authorization request **on its own**
+* Some authorization servers **reject a request naming a scope that client was never assigned**. Keycloak and Authelia reject **before any login page**
+
+**Keycloak compounds it.** An RFC 7591 dynamic registration carrying a `scope` field **replaces** the realm's defaults — so the resource *advertising* the scope is the only way such a client ever holds it.
+
+> Our conformance suite asserts the rule against a **`conformantRouter` fixture** — so a router is spec-clean *unless an operator opts out* via `MCP_EXTRA_SCOPES`.
+
 <!--
+THIS SLIDE IS TWO SLIDES MERGED, 2026-09-14. "A secure router on a reachable
+port" and "The offline_access deviation" were each tightened until the pair
+fitted one face, and the deviation is the ### half way down. IT IS THE ONLY
+CONTENT SLIDE SECTION 9 HAS, between the lead and demo G, and it carries about
+150 seconds of talking -- 90 for the mechanism, 60 for the deviation. The
+temptation is to read seven lines and move on in thirty. Do not.
+
 THIS SLIDE WAS FOUR SLIDES UNTIL 2026-09-14. Its face was rewritten to state the
 whole mechanism at headline level, and the three that followed it -- every
 request carries the token, the login, and the token is the real bound -- came
@@ -4688,6 +4716,57 @@ which is why install.sh probes the image rather than asking, and leaves the grou
 out; the 3.7.6 line is unrelated to compilation and is a bug connecting to an
 external IdP. Section 12 went whole on 2026-09-14, so nothing later picks this
 up, and slide 22's notes are where the argument went.
+
+This is the slide this section exists to be able to give. A deliberate departure
+from a normative SHOULD NOT, stated in front of the people most likely to check,
+with the reasoning rather than an apology.
+
+Authorization servers that gate scopes per client behave this way; others
+silently narrow the grant and need none of this, which is why the deviation looks
+unnecessary until you meet one that does not.
+
+THE RULE'S NAME CAME OFF THE FACE 2026-09-14 and is worth having, because this
+room will want to look it up: it is MCP SEP-2207, and its status is FINAL. That
+matters more than it sounds -- Final is why the conformance suite treats it as
+binding whichever protocol revision we claim, rather than as advice attached to
+one. It is also what the last paragraph of these notes is about.
+
+THE TWO EXITS CAME OFF THE FACE THE SAME DAY, and they are the answer to the
+first question anybody asks, which is "why not just fix it?". Both were tried.
+Pinning the scopes CLIENT-SIDE failed on 2026-08-20 -- the client went on
+appending offline_access regardless. And nothing SERVER-SIDE substitutes: a
+Keycloak policy only VALIDATES a request, a mapper only EMITS claims, and neither
+of them can ASSIGN a scope to a client. CIMD is the one route left and it is
+untested. Say this as two failures with dates and mechanisms rather than as "we
+looked into it", because the difference between those two sentences is the whole
+credibility of the deviation.
+
+The structure to hold on to: the rule is right, and this project cannot follow it
+because of two behaviours that belong to a client and an authorization server.
+Neither is ours, neither is a bug we can fix, and between them they mean that a
+spec-clean router cannot complete a browser login against Keycloak at all. That
+is a strictly worse outcome than the deviation.
+
+The reason behind the rule, if it is asked: refresh tokens are not a RESOURCE
+requirement. Whether a client gets one is between it and the authorization
+server, and a resource has no business asking for it on the client's behalf.
+
+Say what the deviation is NOT: it is not the server handing out refresh tokens,
+and it is not the server deciding sessions should be longer. It is one string in a
+metadata document, and the reason it has to be there is that Keycloak replaced
+the client's scopes at registration time.
+
+The fixture point is the part to be proud of and it is a technique worth naming:
+the test constrains the FIXTURE, not every deployment. A router is conformant
+unless an operator deliberately opts out, the opt-out is one environment variable,
+and the deviation is recorded in the suite's own class comment rather than in
+somebody's memory.
+
+The known gap in the same breath, if asked what else is untested: the draft's
+scope-hierarchies MUST. The router compares scopes by exact string, which
+satisfies it only while all configured scopes are flat and unrelated -- true of
+mcp:use and mcp:write today. No test, because there is no hierarchy API to test
+yet, and introducing one needs a design decision first.
 
 ================================================================================
 EVERY REQUEST CARRIES THE TOKEN -- from the slide of that name, removed
@@ -4761,7 +4840,7 @@ and no caller has one to maintain. Small, and it generalises.
 If asked about userIdClaim: sub is the default because it is the one claim OIDC
 guarantees, but it is usually a UUID. preferred_username is what a Keycloak
 deployment actually wants, and that is why profile is advertised -- it is the
-scope that emits it. That thread comes back on the deviation slide.
+scope that emits it. That thread comes back on the lower half of this slide.
 
 ================================================================================
 THE TOKEN IS THE REAL BOUND -- from "and the cap is on the grant", removed
@@ -4804,68 +4883,22 @@ gem.
 
 WHAT BOUNDS WHAT AN AUTHENTICATED SESSION MAY DO is not a scope -- it is the
 GemStone user the bearer token names, whose UserProfile an administrator
-restricts. That is section 11, three slides away. A scope decides whether a
+restricts. That is section 11, two slides away. A scope decides whether a
 client gets in at all.
--->
-
----
-
-### The `offline_access` deviation
-
-**The rule.** MCP **SHOULD NOT** advertise `offline_access` in `WWW-Authenticate` or `scopes_supported`. However:
-* The Claude Code client appends `offline_access` to its authorization request **on its own**
-* Some authorization servers **reject a request naming a scope that client was never assigned**. Keycloak and Authelia reject **before any login page**
-**Keycloak compounds it.** An RFC 7591 dynamic registration carrying a `scope` field **replaces** the realm's defaults — so the resource *advertising* the scope is the only way such a client ever holds it.
-* **Two exits tried, neither available.** Pinning the scopes **client-side** failed (2026-08-20) — the client kept appending it. Nothing **server-side** substitutes: policies only *validate*, mappers only *emit claims*; neither can **assign** a scope. **CIMD** remains, untested
-
-> Our conformance suite asserts the rule against a **`conformantRouter` fixture** — so a router is spec-clean *unless an operator opts out* via `MCP_EXTRA_SCOPES`.
-
-<!--
-This is the slide this section exists to be able to give. A deliberate departure
-from a normative SHOULD NOT, stated in front of the people most likely to check,
-with the reasoning rather than an apology.
-
-Authorization servers that gate scopes per client behave this way; others
-silently narrow the grant and need none of this, which is why the deviation looks
-unnecessary until you meet one that does not.
-
-The structure to hold on to: the rule is right, and this project cannot follow it
-because of two behaviours that belong to a client and an authorization server.
-Neither is ours, neither is a bug we can fix, and between them they mean that a
-spec-clean router cannot complete a browser login against Keycloak at all. That
-is a strictly worse outcome than the deviation.
-
-The reason behind the rule, if it is asked: refresh tokens are not a RESOURCE
-requirement. Whether a client gets one is between it and the authorization
-server, and a resource has no business asking for it on the client's behalf.
-
-Say what the deviation is NOT: it is not the server handing out refresh tokens,
-and it is not the server deciding sessions should be longer. It is one string in a
-metadata document, and the reason it has to be there is that Keycloak replaced
-the client's scopes at registration time.
-
-The fixture point is the part to be proud of and it is a technique worth naming:
-the test constrains the FIXTURE, not every deployment. A router is conformant
-unless an operator deliberately opts out, the opt-out is one environment variable,
-and the deviation is recorded in the suite's own class comment rather than in
-somebody's memory.
-
-The known gap in the same breath, if asked what else is untested: the draft's
-scope-hierarchies MUST. The router compares scopes by exact string, which
-satisfies it only while all configured scopes are flat and unrelated -- true of
-mcp:use and mcp:write today. No test, because there is no hierarchy API to test
-yet, and introducing one needs a design decision first.
 
 ================================================================================
-TWO THREADS ARRIVE HERE FROM SLIDE 2, now that the three slides between were
-folded into it on 2026-09-14. Both are one sentence if a hand goes up.
+TWO THREADS RUN FROM THE TOP OF THIS SLIDE TO THE BOTTOM OF IT. They came out of
+the three slides folded away on 2026-09-14, and since the two halves were merged
+onto one face later that day they no longer travel between slides at all -- they
+are the mechanism half arriving at the deviation half. Both are one sentence if a
+hand goes up.
 ================================================================================
-WHY profile IS ADVERTISED AT ALL, which slide 2's notes hand forward: userIdClaim
+WHY profile IS ADVERTISED AT ALL, which the mechanism half's notes hand forward: userIdClaim
 is preferred_username on a Keycloak deployment, and profile is the scope that
 emits it. It is in scopes_supported for THAT reason, not this one.
 
 AND SESSION LIFETIME, which is what offline_access is about -- refresh tokens.
-Slide 2's notes carry the whole of it now: a session is capped at its access
+The banners above carry the whole of it now: a session is capped at its access
 token's own exp, and a request bearing a refreshed token for the same user moves
 that cap. Nothing in this deviation changes either, which is the point of saying
 what it is NOT.
