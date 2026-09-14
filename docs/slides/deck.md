@@ -31,6 +31,9 @@ style: |
   svg .hl text { fill: #b4451f; }
   svg .hl path { stroke: #b4451f; stroke-width: 3; }
   svg .hl { color: #b4451f; }
+  section.dense { font-size: 20px; }
+  section.dense table { font-size: 17px; }
+  section.dense blockquote { margin: .6em 0; }
   .boxnote { font-size: 21px; line-height: 1.5; max-width: 1010px; margin: 16px auto 0; text-align: left; }
   .tools { display: flex; gap: 24px; margin-top: 18px; font-size: 18px; line-height: 1.62; }
   .tools > div { flex: 1 1 0; }
@@ -4178,8 +4181,9 @@ bugs are the material anyway.
 <!--
 ================================================================================
 VERTICAL SLICE 1 -- section 7, the transaction model and the blind-write
-guardrail. Twelve slides. Re-cut 2026-09-10 to the running order below, then cut
-again on 2026-09-14; it diverged from the outline on purpose:
+guardrail. Nine slides. Re-cut 2026-09-10 to the running order below, then cut
+hard on 2026-09-14 -- five slides came off that day; it diverged from the outline
+on purpose:
 
   * the measured seven-line trace is now speaker notes on the agent diagram, not
     a slide;
@@ -4188,7 +4192,19 @@ again on 2026-09-14; it diverged from the outline on purpose:
   * one new slide: the human-in-a-browser diagram, the guard working. It is the
     setup for the agent diagram and the two are read as a pair.
 
-WHAT CAME OFF ON 2026-09-14, and where it went. "One pass" -- the design that
+THE GUARDRAIL IS ONE SLIDE NOW, "the rule, the ledgers, the stamp", and that was
+the second cut of 2026-09-14. It absorbed the re-validation paragraph and the
+granularity problem into its own prose, so "two consequences that shape
+everything after" and "re-validation: what the client is told when the view
+moves" were both saying what the slide already says. "What licenses what" -- the
+six-row table of which read licenses which write -- came off for TIME rather than
+for being wrong; it is the most detailed slide in the section and the room does
+not need the table to believe the rule. All three are speaker notes on the
+surviving slide, the licensing table explicitly marked as question-time material,
+and the two invariants under it (creation is never blind; a write implies a read,
+so writeLedger is a subset of readLedger) are worth saying aloud even without it.
+
+WHAT CAME OFF EARLIER ON 2026-09-14, and where it went. "One pass" -- the design that
 makes every tool succeed by making commit meaningless -- is now speaker notes on
 the agent diagram, told as four beats, because it is that picture's consequence
 rather than a claim of its own; the four-way refresh measurement went with it, as
@@ -4204,9 +4220,12 @@ pictures are deliberately the wrong way round: the REFUSED commit is red and the
 SUCCESSFUL one is green, and saying why is the point of the pair.
 
 Budget: 11:10 at the plans in docs/Presentation.md's demo inventory -- 490s of
-slides plus a 180s demo, and the two cut slides give about 110s of that back.
-The agent diagram, fourth in the slice, carries 90 seconds and is the one to
-protect.
+slides plus a 180s demo. The five slides cut on 2026-09-14 give back something
+like 250s of that, which puts the slice near 7:00 and makes it the shortest of
+the two GemStone sections rather than the longest. The agent diagram, fourth in
+the slice, carries 90 seconds and is the one to protect; "the rule, the ledgers,
+the stamp" is now the only slide standing between it and execute_code, so it can
+afford 60 rather than the 40 it had.
 ================================================================================
 -->
 
@@ -4558,39 +4577,20 @@ dictionary's printString, which holds the conflicting OBJECTS and can be enormou
 
 ---
 
-## Two consequences that shape everything after
-
-**The grain is the class, not the method.** Compiling a method writes the class's
-`GsMethodDictionary` and a per-class `SymbolSet` — so two sessions editing *different* selectors
-on one class conflict, and two sessions editing different classes never do, not even when each
-introduces a brand-new symbol.
-
-**A view move launders a stale *read*, but never a stale *write*.** Once an object is in your
-write set the conflict follows it through any number of refreshes. An object you have only *read*
-has no such protection.
-
-<!--
-Measurements E, I and J for the first; M and N for the second.
-
-The consequence of the first that I have to own: the guardrail I built works at METHOD grain, and
-it sits on a repository whose conflicts are per class. So a client can still be refused a commit
-over a method it never touched. That is coarse in the safe direction, which is the right way
-round, but it means the recovery path has to be good, because clients will meet it.
-
-The second is the sentence the design turns on, and it is row four of the four-way measurement in
-the agent diagram's notes: if you have already written the object, refreshing does not save you. It is the READ
-that goes unprotected.
--->
-
----
+<!-- _class: dense -->
 
 ## The rule, the ledgers, the stamp
 
-> A mutating tool may not touch a method, class or dictionary that has not been read in the
-> **current view window** — and a window opens whenever the view moves.
+> A mutating tool may not touch a method, class, or dictionary if the last recorded read does not
+> match the **current view.**
 
-Two instance variables on `McpServer`. **Nothing touches `GsBitmap`, hidden sets, or any
-repository state; the stone's own guardrail ships untouched.**
+The `readLedger` instance variable on `McpServer` is a *dictionary* storing **SHA-256*** stamps of
+every browsing tool result sent to the client. Its entries are *revalidated* at every `commit`,
+`abort`, and `refresh`. The client is notified of dropped entries (stale reads).
+
+The `writeLedger` is a *set* of keys of anything written by a mutation tool. It is for resolving
+the stone's identity-based conflict report back into class names the client can understand. It is
+*wiped* at every successful `commit` or `abort`.
 
 | grain | key | stamped over |
 |---|---|---|
@@ -4599,7 +4599,8 @@ repository state; the stone's own guardrail ships untouched.**
 | class comment | `Foo:comment` | the comment |
 | dictionary | `#UserGlobals` | entry **names and kinds**, sorted — never the values |
 
-Stamp = **SHA-256 of the canonical text in the current view** (`asSha256String`).
+**Granularity** was the challenge: Reading one method shouldn't let the client write to a different
+method of the same class.
 
 <!--
 readLedger is a Dictionary of key to stamp: what this session has seen in the current window, and
@@ -4617,92 +4618,87 @@ destroys the bindings rather than the objects. Hashing what the tool does not sh
 licence stricter than the harm.
 
 requireRead: never looks at a stamp. Membership is the whole test. The stamp exists for exactly one
-moment, which is the slide after next.
--->
+moment -- re-validation, which is the second paragraph of the slide and is spelled out below.
 
----
+THE GRAIN, absorbed 2026-09-14 from "two consequences that shape everything after". Measurements E,
+I and J. Compiling a method writes the class's GsMethodDictionary and a per-class SymbolSet, so the
+REPOSITORY conflicts per class: two sessions editing different selectors of one class collide, two
+sessions editing different classes never do, not even when each introduces a brand-new symbol. The
+guardrail on this slide works at METHOD grain and sits on top of that, which is the mismatch the
+"granularity was the challenge" line is about, and the half I have to own is that a client can still
+be refused a commit over a method it never touched. Coarse in the safe direction, which is the right
+way round -- but it is why the recovery path has to be good, because clients will meet it.
 
-## What licenses what
+Measurements M and N, same slide, and it is the sentence the whole design turns on: a view move
+launders a stale READ but never a stale WRITE. Once an object is in your write set the conflict
+follows it through any number of refreshes; an object you have only read has no such protection.
+That is row four of the four-way measurement in the agent diagram's notes.
 
-| a read of… | registers | a write of… | requires |
-|---|---|---|---|
-| `get_method_source(Foo, bar:)` | `Foo>>bar:` | `compile_method`, `delete_method` | `Foo>>bar:` |
-| `get_class_definition(Foo)` | `Foo:shape` | `compile_class_definition` (recompiling) | `Foo:shape` |
-| `describe_class(Foo)` | `+ Foo:comment` | `set_class_comment` | `Foo:comment` |
-| `export_class_source(Foo)` | shape, comment, **every selector** | `delete_class` | shape **+ every selector** |
-| `list_dictionary_entries(D)` | `#D` | `remove_dictionary` | `#D` |
-| the search tools | **nothing** | `add_dictionary` | **nothing** |
+WHAT LICENSES WHAT, absorbed 2026-09-14 from the table that used to follow this slide. It came off
+for time rather than for being wrong, so this is question-time material -- but the two invariants at
+the foot of it are worth saying aloud even now, because they are what the whole thing rests on:
+CREATION IS NEVER BLIND, and A WRITE IMPLIES A READ. Therefore writeLedger is a subset of readLedger
+at every instant.
 
-**Creation is never blind.** **A write implies a read.** So `writeLedger ⊆ readLedger` at every
-instant — which is the property the whole thing rests on.
+The pairs, if they are asked for: get_method_source(Foo, bar:) registers Foo>>bar: and licenses
+compile_method and delete_method on it; get_class_definition(Foo) registers Foo:shape and licenses
+recompiling the definition; describe_class adds Foo:comment and licenses set_class_comment;
+export_class_source registers shape, comment and EVERY selector, which is what delete_class
+requires; list_dictionary_entries(D) registers #D and licenses remove_dictionary; the search tools
+register nothing, deliberately, and add_dictionary requires nothing.
 
-<!--
-The split is per TOOL, not per toolset, and the test is: does this call name one subject and show
-its current contents? list_classes(D) names a dictionary but shows only the classes in it — a
+The split is per TOOL rather than per toolset, and the test is: does this call name one subject and
+show its current contents? list_classes(D) names a dictionary but shows only the classes in it -- a
 partial view, not enough to license destroying it. list_methods and get_class_hierarchy show names,
-not sources. The search tools are exploratory and register nothing, deliberately.
+not sources. Creation is never blind because if the subject does not exist in the current view there
+was nothing to read and nothing can be discarded; a concurrent creation collides write-write in the
+ordinary way. A write implies a read because having just written something is knowing its content --
+better than having read it -- so compiling licenses recompiling and creating a dictionary licenses
+removing it.
 
-Creation is never blind because if the selector, class or dictionary does not exist in the current
-view there was nothing to read, so nothing can be discarded; a concurrent creation by another
-session collides write-write in the ordinary way.
+Two details from that slide that are load-bearing rather than fastidious, and worth having if
+somebody reads the implementation. writeLedger is written on the branch that ACTUALLY performed the
+write, never on entry to the tool: a phantom entry would license a change on the strength of nothing
+shown to the client, and conflictingSubjects decodes the stone's conflict report through that
+ledger, so a phantom could misname a conflict. And compile_method takes source rather than a
+selector, so the guardrail has to name the method before it can decide -- it asks the kernel's own
+compiler with the intoMethodDict: variant against a throwaway dictionary, which answers the real
+selector for unary, binary and keyword patterns alike while leaving the class's selectors unchanged
+and needsCommit false.
 
-A write implies a read because having just written something is knowing its content — better than
-having read it. So compiling licenses recompiling, and creating a dictionary licenses removing it.
+RE-VALIDATION, absorbed 2026-09-14 from the slide that used to follow the licensing table. The
+second paragraph of this slide is now the whole of it on screen, so this is what to say over it.
+At EVERY move -- commit, abort, refresh either way -- revalidateReadLedger re-stamps each key in the
+new view. Equal, and the read keeps its licence; different, and it is dropped and named, in the
+session line on the slide just before this one: "2 of 7 earlier reads are stale". THE COUNT IS THE
+POINT.
+It says the other five still stand, so the client re-reads two subjects rather than all seven, or
+worse, discovers each stale one as a refusal.
 
-Two details that are load-bearing rather than fastidious. writeLedger is written on the branch that
-ACTUALLY performed the write, never on entry to the tool — a phantom entry would license a change
-on the strength of nothing shown to the client, and conflictingSubjects decodes the stone's
-conflict report through that ledger, so a phantom could misname a conflict. And compile_method
-takes source rather than a selector, so the guardrail has to name the method before it can decide:
-it asks the kernel's own compiler with the intoMethodDict: variant against a throwaway dictionary,
-which answers the real selector for unary, binary and keyword patterns alike while leaving the
-class's selectors unchanged and needsCommit false.
--->
-
----
-
-## Re-validation: what the client is told when the view moves
-
-At **every** move — commit, abort, `refresh` either way — `revalidateReadLedger` re-stamps each key
-in the new view. Equal, and the read keeps its licence. Different, and it is dropped and named:
-
-```
-[session] The view moved: 2 of 7 earlier reads are stale and must be re-read
-before writing to them: Foo>>bar:, Baz:shape.
-```
-
-**The count is the point.** It says the other five still stand — so the client re-reads two
-subjects instead of all seven, or worse, discovers each stale one as a refusal.
-
-<span class="fine">A byte-identical recompile by another session leaves the read good. An aborted
-write needs a fresh read. One `sourceCodeAt:` + one SHA-256 per entry per move.</span>
-
-<!--
 Until 2026-09-02 this was decided by rule instead of by looking: a successful commit kept the write
-set plus "the widening", an abort dropped everything unexamined. So an abort after browsing twenty
-methods cost twenty re-reads even when nobody else had committed a thing.
-
-A read is a statement about content — "Foo>>bar: says this" — and moving the view does not make it
-false; another session having committed a different Foo>>bar: does. So now every move looks. Both
-old rules are subsumed, because a proof that the content did not change is weaker than looking at
-it.
+set plus "the widening", an abort dropped everything unexamined, so an abort after browsing twenty
+methods cost twenty re-reads even when nobody else had committed a thing. A read is a statement
+about CONTENT -- "Foo>>bar: says this" -- and moving the view does not make it false; another
+session having committed a different Foo>>bar: does. So now every move looks, and both old rules are
+subsumed, because a proof that the content did not change is weaker than looking at it.
 
 The names are summarised BY CLASS so the line stays one line whatever was browsed: up to three
 methods of a class in full, more counted as "5 methods from Foo", a definition or comment as
 "Foo (definition)", and past four classes the whole list gives way to "changes to 7 classes;
 re-check what you depend on before writing".
 
-Three consequences, if asked. Byte-identical recompile: the stamp is of the TEXT, not the method
-object, and a recompile does install a new GsNMethod — so the client's read is still true and
-nothing it writes discards anything. An aborted write needs a fresh read even if nobody else
-touched it, because the write recorded the stamp as written and the abort restored the previous
-content: the client's last knowledge is a version that no longer exists, and it is told so. And a
-false refresh leaves this session's own uncommitted writes in place, so such a read survives the
-refresh and is dropped by the abort that is the only way out.
+Three consequences, if asked. A byte-identical recompile by another session leaves the read GOOD --
+the stamp is of the text, not the method object, and a recompile does install a new GsNMethod, so
+the client's read is still true and nothing it writes discards anything. An aborted write needs a
+FRESH read even if nobody else touched it, because the write recorded the stamp as written and the
+abort restored the previous content: the client's last knowledge is a version that no longer exists,
+and it is told so. And a false refresh leaves this session's own uncommitted writes in place, so
+such a read survives the refresh and is dropped by the abort that is the only way out.
 
-Cost: tens of microseconds per entry, so a few hundred reads cost milliseconds against a commit
-that costs more. If it ever shows, the fallback is a lazy check in requireRead: against a recorded
-view generation — at the price of this one-time note, which can only come from checking everything.
+Cost: one sourceCodeAt: and one SHA-256 per entry per move, tens of microseconds each, so a few
+hundred reads cost milliseconds against a commit that costs more. If it ever shows, the fallback is
+a lazy check in requireRead: against a recorded view generation -- at the price of that one-time
+note, which can only come from checking everything.
 -->
 
 ---
