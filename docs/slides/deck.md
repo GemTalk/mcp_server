@@ -42,8 +42,8 @@ style: |
 ---
 
 <!--
-FIFTY-EIGHT SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut
-once; seven stretches of them are now set aside. Section 13 is the only one never written.
+FIFTY-SIX SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut
+once; eight stretches of them are now set aside. Section 13 is the only one never written.
 
 THE TARGET IS 45 MINUTES as of 2026-09-14, down from an hour, and that is what the current shape is
 for. The running order:
@@ -56,8 +56,8 @@ for. The running order:
   39-43   section 8 -- the router maintenance cycle, then demo F
   44-47   section 9 -- McpAuthRouter, a reachable port, then demo G (FOLDED 2026-09-14)
   48-49   section 11 -- the worker gem's GemStone user (MOVED HERE, THEN FOLDED, 2026-09-14)
-  50-54   section 10 -- a lead, then extending it: a server for YOUR software
-  55-58   THE APPENDIX -- a lead, then the JSON codec. OPTIONAL, run only if the clock allows
+  50-52   section 10 -- a lead, then extending it: a server for YOUR software (CUT TO THE BONE)
+  53-56   THE APPENDIX -- a lead, then the JSON codec. OPTIONAL, run only if the clock allows
 
 RUNNING ORDER IS NOT SECTION-NUMBER ORDER ANY MORE. Section 11 was moved ahead of section 10 on
 2026-09-14, so the deck runs 9, 11, 10. The reason is thematic rather than structural: section 9's
@@ -120,8 +120,18 @@ forwarding to the server -- was the only place in the deck that said how a tools
 it came out when the surface slide beside it was rewritten to name a real customer's toolset and
 server in its bullets. Its notes AND its face are on page 51 under a banner, because no surviving
 face carries any of it. WHAT THIS COSTS IS A POINTER: the "tools/list is unfiltered" blockquote went
-with it, and it was section 10's only face-level link back to section 11. Thirty-three slides are
-now set aside in total.
+with it, and it was section 10's only face-level link back to section 11.
+
+THEN SECTION 10 LOST ITS EVIDENCE TOO, the eighth stretch and the last cut of the day. "When a
+domain toolset collides with the session model" and "A GemStone result, and three asks already
+filed" both went, taking every measurement the section had: 132 defects against 386/386 clean, the
+31 modified objects of a cold Grail import, the 262-second test class, the sender search that
+answers an empty array where twelve senders exist, and the three filed Grail issues. All of it is
+on page 52 under two banners, anchored to the two words that survive on that face -- "tests" and
+"two search tools". The section is a lead and two slides now, about 100 seconds, and it is THE
+SHAPE WITHOUT THE EVIDENCE: it says what extending this server looks like and no longer shows
+anybody having done it. It is the first place to spend a minute if one appears. Thirty-five slides
+are now set aside in total.
 
 THE CODEC SLIDES MOVED RATHER THAN LEFT, AND ARE NOW AN APPENDIX. Section 5's other half -- why this
 server owns its JSON writer, the inbound repair, and the five measured kernel defects -- is at the
@@ -5173,13 +5183,24 @@ the room looks unconvinced that this reaches past application data.
 <!--
 ================================================================================
 VERTICAL SLICE 9 -- section 10, extending it: a server for YOUR software, with
-the Grail MCP Server as the worked example. A lead and four slides, no demo. Cut
+the Grail MCP Server as the worked example. A lead and two slides, no demo. Cut
 2026-09-12: ninth in running order, ninth to be cut. IT IS NOW TENTH, AND LAST
 BEFORE THE OPTIONAL CODEC: section 11 was moved ahead of it on 2026-09-14, so
 this section closes the talk proper.
 
 Running order and plans, in seconds -- lead 10, pick a surface 50, the worked
-example 40, the collision 55, the upstream ask 40. About 3 1/4 minutes.
+example 40. About 1 2/3 minutes.
+
+CUT TO THE BONE 2026-09-14, in three passes on one day: the toolset slide went
+first, then the collision and the upstream ask together. A lead and five slides
+and 4 minutes became a lead and two slides and 100 seconds. WHAT IS LEFT IS THE
+SHAPE AND NOT THE EVIDENCE -- how a deployment picks a surface, and Grail as the
+worked example of one. Everything measured that this section used to put on a
+screen is now in slide 3's notes under two banners: the 132-against-386/386 test
+result, the 31 modified objects of a cold import, the 262-second class, the
+empty-array sender search, and Grail #883/#884/#885. THAT IS A LOT OF ARGUMENT
+BEHIND TWO SLIDES, and it is the section most likely to want a minute back if one
+appears. See the archive's headers before restoring either.
 
 THE TOOLSET SLIDE WAS REMOVED 2026-09-14, which is why the numbers below moved
 down by one. "To add tools, write a toolset" was the section's first content
@@ -5200,12 +5221,15 @@ nothing about it is special. Slide numbers below COUNT THE LEAD.
 
 THE OUTLINE SAYS 2 SLIDES. It is the third section where that number predates
 the bullet list under it, and this one is the most lopsided: the list runs to
-nine bullets and two of them are measurements with a story attached. Four, since
-2026-09-14; it was five.
+nine bullets and two of them are measurements with a story attached. It ran to
+five slides; it is two, since 2026-09-14, and the outline's number is now nearly
+right for the wrong reason.
 
 THIS IS THE SECTION THE ROOM CAN ACT ON SECOND-MOST, after the codec's defect
 table -- which is now at the END of the deck and may not run at all, so if it does not, this is
-the first. Since 2026-09-14 it is also the LAST thing the room hears if the codec
+the first. That was easier to claim while the Grail result and its three filed issues were on a
+face; since 2026-09-14 they are in slide 3's notes, so acting on this section now depends on the
+speaker saying so. Since 2026-09-14 it is also the LAST thing the room hears if the codec
 does not run, which is a second reason to protect it. Everything before it has been "here is what this server does"; this is
 "here is the seam, and here is what happens when you use it". Pitch it that way.
 
@@ -5219,17 +5243,22 @@ spends on this -- toolsetNames nil means the core seven, not "whatever is
 loaded". Section 2's slide arguing it came down on 2026-09-13 and its notes
 moved to the seeds slide, so THIS section now carries the argument outright.
 
-SLIDE 4 IS THE ONE THAT LANDS, and it is not really about Grail. It is the
-general shape: your domain has a model, this server has a session model, and
-where they disagree the disagreement is yours to resolve -- with a number
-attached that nobody can argue with (132 defects against 386/386 clean). Every
-vendor in that room who writes a toolset will meet some version of it.
+THE SLIDE THAT LANDED WAS THE COLLISION, and it is not really about Grail: your
+domain has a model, this server has a session model, and where they disagree the
+disagreement is yours to resolve -- with a number attached that nobody can argue
+with, 132 defects against 386/386 clean. Every vendor in that room who writes a
+toolset will meet some version of it. IT IS NOT A SLIDE ANY MORE, as of
+2026-09-14, and this paragraph stays because it is still the best thirty seconds
+in the section: it is the first banner in slide 3's notes, and it is what to say
+if the clock gives anything back.
 
-WHAT TO CUT: slide 5 (40s), which is a lovely result and an upstream ask but is
-Grail-specific and section 13 can carry the asks alone. Then slide 3, whose
-argument survives as one sentence on slide 2. Do NOT cut slide 4. The lead is
-10 seconds and is not worth cutting before either of those. (These read 6, 4 and
-5 while the toolset slide was here.)
+WHAT TO CUT: nothing is left to cut but the section. Both of the slides this list
+used to nominate have gone, and so has the one it said not to cut -- the upstream
+ask first, the collision with it. What remains is a lead, the surface shapes and
+the worked example, which is the minimum that makes the section an argument
+rather than a mention. If more time has to come out of this talk, take the whole
+section and keep the appendix; do not take the worked example and leave the
+shapes, because then nothing shows that a third party has actually done it.
 
 NO DEMO, matching the demo inventory and the outline AS IT WAS. THE NEW OUTLINE
 AT THE END OF docs/Presentation.md ASKS FOR ONE -- its section 6 is "Grail MCP
@@ -5238,7 +5267,9 @@ oversight to tidy away here. The argument against is still the one below: demo C
 already showed a tool surface being chosen, and a sixth demo showing a different
 one is the same screen with different words in it. The argument for is that this
 is now the last section before the optional codec, so it ends the talk, and
-ending on a live Grail server is a better close than ending on an upstream ask.
+ending on a live Grail server is a better close than ending on the worked
+example -- which is where the section now stops, the upstream ask having been set
+aside on 2026-09-14. The case for a demo is stronger than it was.
 Decide it deliberately; nothing in this slice depends on the answer.
 
 DEPARTURES from docs/Presentation.md:
@@ -5246,12 +5277,12 @@ DEPARTURES from docs/Presentation.md:
     There are TWO declared options -- grailDirectory and testGemConfig -- and
     slide 3 says two, because "a toolset declares its options" is the point and
     one option makes it look like a special case;
-  * McpGrailToolset's OTHER collision with the model is speaker notes on slide 4,
-    not a bullet: Grail models Python exceptions outside the Smalltalk Error
+  * McpGrailToolset's OTHER collision with the model is speaker notes on slide 3,
+    inside the collision banner rather than on a face: Grail models Python exceptions outside the Smalltalk Error
     hierarchy, so McpDispatcher's `on: Error do:` cannot see them and an uncaught
     one would take the whole worker gem down rather than answer the client. It is
     excellent material and there is no room for it; it is the first thing to say
-    if a hand goes up on slide 4.
+    if a hand goes up on slide 3.
 ================================================================================
 -->
 
@@ -5285,15 +5316,21 @@ toolset slide was removed on 2026-09-14, carries how a toolset is written in its
 notes as well. It is fifty seconds away. The lead says what the section is FOR,
 not how it works.
 
-Where this ends, and it is worth knowing before you start: slide 4, the collision
-between a domain model and this server's session model, with a number attached --
-132 defects against 386/386 clean. That is the slide every vendor in the room who
-writes a toolset will recognise, and it is not really about Grail at all.
+Where this ends, and it is worth knowing before you start: slide 3, the worked
+example. It used to end two slides further on, with the collision between a domain
+model and this server's session model -- 132 defects against 386/386 clean, the
+thing every vendor in the room who writes a toolset would have recognised. Both
+of those slides were set aside on 2026-09-14 and both are in slide 3's notes. So
+the section's best material is now something you say after the last bullet rather
+than something the room reads, and this lead should promise the shape rather than
+the number.
 
 THIS IS NOW THE LAST SECTION OF THE TALK PROPER. The codec slides after it are
-optional and go first if the clock has gone, so plan to land on the upstream ask
--- or on a Grail demo, if that argument is settled the other way; the slice
-header has both sides of it.
+optional and go first if the clock has gone, so plan to land on the worked
+example and whatever of the collision you have time to say over it -- or on a
+Grail demo, if that argument is settled the other way; the slice header has both
+sides of it, and the case for one is stronger now that the section ends where it
+does.
 
 SECTION 11 NOW COMES BEFORE THIS, not after, which changes one thing to have
 ready: "why is narrowing the tool surface not the boundary?" is the question a
@@ -5310,7 +5347,7 @@ compiles can be followed by one that runs.
 
 * **`MCP_TOOLSETS="BrainFreezeToolset"`** → a server with **its own tools**
 to surface **its own domain operations** in a meaningful way, not developer coding tools
-* **`MCP_WORKER_CLASS=BrainFreezeServer`** → subclass `McpServer` to change **behaviour:** the kernel guards (`isProtectedClass:`, `protectedDictionaryNames`), the server instructions, the identity **defaults** an unconfigured deployment reports
+* **`MCP_WORKER_CLASS=AcmeDbServer`** → subclass `McpServer` to change **behaviour:** the kernel guards (`isProtectedClass:`, `protectedDictionaryNames`), the server instructions, the identity **defaults** an unconfigured deployment reports
 * **`serverName:` / `serverVersion:` say which *software* this is** — the product's to set. **`serverTitle:` labels *this instance***
 
 <!--
@@ -5397,15 +5434,14 @@ handler does not build error envelopes itself.
 
 ---
 
-## `McpGrailToolset` is the worked example — and it is not a privileged one
+## `McpGrailToolset` is the worked example
 
-**Nine tools** — eval, transpile, source, class and method browsing, module state, tests, and two search tools — in **its own source group**, and it **needs nothing from the server**.
-
-> **That is what makes it a genuine third-party example rather than an insider.** Since 2026-09-11 it is turned on exactly as yours would be: **named in `MCP_TOOLSETS`**, and nothing joins a surface by being loaded (§2).
-
-* It is also the example of **toolset options**. `McpGrailToolset class>>declaredOptionNames` declares **two** — `grailDirectory` and `testGemConfig` — and they travel as **JSON in the fork string**, then again as one `printString`-quoted JSON string in the worker bootstrap, parsed there
-* **JSON rather than a Smalltalk literal**, because the options are a nested map **whose shape the core does not know**. Encoding them as JSON keeps that shape out of the core entirely, and gives them the same one-quoted-literal safety every other bootstrap argument has
-* Options are **narrowed to the toolsets actually in the surface**, so a worker is never handed configuration for a toolset it does not have — and a router holding options for a toolset it does not serve **refuses to start**
+* **Nine tools** — eval, transpile, source, class and method browsing, module
+state, tests, and two search tools — in **its own source group** — turned on by
+naming it in `MCP_TOOLSETS`
+* It also uses **toolset options**. `McpGrailToolset class>>declaredOptionNames`
+declares **two** — `grailDirectory` and `testGemConfig` — and they travel as
+**JSON in the fork string**
 
 <!--
 This slide is the payoff of section 2's one line on the named tool surface, and
@@ -5429,68 +5465,93 @@ special case, two looks like a mechanism.
 The narrowing rule at the end is the one a vendor will hit: configure options for
 a toolset, then change the surface and forget, and the router tells you at
 startup instead of silently dropping them. Section 2's validateWorkerConfig.
--->
 
----
+THIS SLIDE NOW ENDS THE TALK PROPER. The two slides that followed it were set
+aside on 2026-09-14 and their notes are below, so the last words before the
+optional appendix are yours rather than the screen's. TWO WORDS IN THE FIRST
+BULLET ARE ALL THAT IS LEFT OF THEM -- "tests" and "two search tools" -- and each
+had a slide of its own with a measurement on it. If the clock is holding, spend
+thirty seconds on either; if a hand goes up about Grail, it is almost certainly
+about one of these two.
 
-## When a domain toolset collides with the session model
+================================================================================
+WHEN A DOMAIN TOOLSET COLLIDES WITH THE SESSION MODEL -- from the slide of that
+name, set aside for time 2026-09-14. This is the "tests" in the first bullet. It
+was the slide the slice header called the one that lands, and it was set aside
+because the section had to fit, not because it stopped being true.
+================================================================================
 
-**`run_python_tests` forks a fresh gem. That is the design, not a precaution.**
+WHAT THE SLIDE SAID: run_python_tests forks a fresh gem, and that is the design
+rather than a precaution. Measured 2026-09-01, the same three test classes gave
+132 DEFECTS run in a long-lived worker session and 386 run / 386 passed / 0
+failed / 0 errors run fresh. Every one of those defects was an artifact of the
+session.
 
-> **Measured 2026-09-01:** the same three test classes gave **132 defects** run in a long-lived worker session, and **386 run / 386 passed / 0 failed / 0 errors** run fresh. **Every one of those defects was an artifact of the session.**
-
-* A real disagreement between two models. Grail's rule: **a module is a compiled artifact in the database, bound — never rebuilt — by every import afterwards.** Its SUnit isolates tests by **evicting framework modules from `sys.modules`** — and where those modules are *committed*, re-importing **raises**. **A long-lived MCP worker is exactly the session that accumulates that state**
-* Forking settles three more things at once: the caller's transaction is **untouched**, where an in-session run dirties it *silently* — **a cold Grail import is a database write**, measured at **31 modified objects for a 7-test class**; and the child's writes are **never committed**, so a run leaves the repository exactly as it found it
-* **The cost is honest and stated in the tool.** Every run is fully cold — `FlaskScaffoldingTestCase` alone is **262 seconds**. Hence the `classNames` argument, and why this is the flagship consumer of progress: **an unbounded wait with no word is worse than a slow one that says so**
-
-<!--
-The slide that lands, and it is not really about Grail. The general shape is:
-your domain has a model, this server has a session model, and where they disagree
-the disagreement is yours to resolve. Every vendor in that room who writes a
-toolset will meet some version of it.
+The general shape, and it is not really about Grail: your domain has a model,
+this server has a session model, and where they disagree the disagreement is
+yours to resolve. Every vendor in that room who writes a toolset will meet some
+version of it.
 
 Lead with the number. 132 against 386/386 is not a tuning difference, it is the
 session inventing every single defect -- and it is the kind of result that would
 have been reported as a Grail bug by anybody who did not know where to look.
 
 Then the mechanism, slowly, because it is a genuine standoff rather than a bug in
-either party. Grail is right that a committed module is canonical. Its SUnit is
-right to isolate by eviction. Put them in a session with history and they
-contradict each other, and the MCP worker is the session with the most history
-anybody has.
+either party. Grail's rule is that a module is a compiled artifact in the
+database, bound and never rebuilt by every import afterwards; its SUnit isolates
+tests by evicting framework modules from sys.modules, and where those modules are
+committed, re-importing raises. A long-lived MCP worker is exactly the session
+that accumulates that state. Grail is right that a committed module is canonical.
+Its SUnit is right to isolate by eviction. Put them in a session with history and
+they contradict each other, and the MCP worker is the session with the most
+history anybody has.
 
-THE OTHER COLLISION, which is the first thing to say if a hand goes up, and which
-there was no room for on the slide: Grail models Python exceptions OUTSIDE the
-Smalltalk Error hierarchy -- NameError inheritsFrom: Error is FALSE -- so
-McpDispatcher's on: Error do: cannot see one. Uncaught, a python-tool error would
-escape the dispatcher and take the whole worker gem down instead of answering the
-client. The toolset catches them itself and converts them to an McpError kinded
-#pythonError. That is the same lesson in a different register: a domain's error
-model is part of the collision surface too.
+Forking settles three more things at once: the caller's transaction is untouched,
+where an in-session run dirties it silently -- a cold Grail import is a database
+write, measured at 31 modified objects for a 7-test class -- and the child's
+writes are never committed, so a run leaves the repository exactly as it found
+it.
+
+The cost is honest and stated in the tool. Every run is fully cold;
+FlaskScaffoldingTestCase alone is 262 seconds. Hence the classNames argument, and
+why this is the flagship consumer of progress: an unbounded wait with no word is
+worse than a slow one that says so.
+
+THE OTHER COLLISION, which is the first thing to say if a hand goes up: Grail
+models Python exceptions OUTSIDE the Smalltalk Error hierarchy -- NameError
+inheritsFrom: Error is FALSE -- so McpDispatcher's on: Error do: cannot see one.
+Uncaught, a python-tool error would escape the dispatcher and take the whole
+worker gem down instead of answering the client. The toolset catches them itself
+and converts them to an McpError kinded #pythonError. That is the same lesson in
+a different register: a domain's error model is part of the collision surface
+too.
 
 If asked about the forked gem's memory: it is driven ONE CLASS PER SEND and
 forked with Grail's own budget, because a netldi's default 50MB is not enough for
 a single Grail test class -- and the run bounds memory as well as raising it,
 stopping near the ceiling, because a Grail run that ends full does not crash, it
 reports AlmostOutOfMemory against an innocent test.
--->
 
----
+================================================================================
+A GEMSTONE RESULT, AND THREE ASKS ALREADY FILED -- from the slide of that name,
+set aside for time 2026-09-14. This is the "two search tools" in the first
+bullet. It was the section's closing slide and the only place the deck named the
+Grail issue numbers.
+================================================================================
 
-## A GemStone result, and three asks already filed
+WHAT THE SLIDE SAID: the stock sender search answers NOTHING for Python,
+confidently. It scans environment 0; Grail compiles into environment 1. Measured
+on 3.7.5 with _grail_session imported, ClassOrganizer new sendersOf: #'_dict'
+answers an empty pair of arrays where 12 senders exist -- not under-reporting,
+but reporting nothing with no indication that it could not look. find_python_
+senders searches all three shapes a Python reference compiles into: resolvable
+calls in compiled methods, first-class references and unresolved attribute calls,
+and the .py text on disk. Every answer ends with a searched: and a not searched:
+block. And three interfaces that would let it stop reading Grail's internals are
+filed upstream as Grail #883, #884 and #885.
 
-**The stock sender search answers *nothing* for Python, confidently.** It scans **environment 0**; Grail compiles into **environment 1**.
-
-> Measured on 3.7.5 with `_grail_session` imported: `ClassOrganizer new sendersOf: #'_dict'` answers **an empty pair of arrays** where **12** senders exist. Not under-reporting — **reporting nothing, with no indication that it could not look.**
-
-* `find_python_senders` searches **all three shapes** a Python reference compiles into: resolvable calls in compiled methods, first-class references and unresolved attribute calls, and the `.py` text on disk
-* **Every answer ends with a `searched:` and a `not searched:` block** — because *“no senders”* is only worth reading if it can be told from *“I could not look there”*
-* Three interfaces that would let it stop reading Grail's internals are **filed upstream**: **Grail #883, #884, #885**
-
-<!--
-Thirty seconds, and it is here for this audience specifically: it is a GemStone
-result, it is measured, and the asks are already filed rather than being made
-from a stage.
+It is here for this audience specifically: it is a GemStone result, it is
+measured, and the asks are already filed rather than being made from a stage.
 
 The phrasing to get right is "confidently". A search that says it could not look
 is useful. A search that answers an empty array is indistinguishable from a
@@ -5502,10 +5563,12 @@ Python: any tool whose coverage is partial owes the caller its own boundaries.
 That is worth ten seconds on its own, because every vendor writing a search tool
 over their own domain has the same obligation.
 
-The three issue numbers are on the slide so that nobody has to write them down
-from speech. Section 13 collects the asks; this one is already lodged, which is
-the point -- it is not a request made from a stage, it is a request made in the
-tracker with a talk mentioning it.
+THE THREE ISSUE NUMBERS ARE NOW IN SPEECH ONLY, which is the one thing this
+set-aside genuinely costs: they were on the slide so that nobody had to write
+them down. If they matter to the room, say them twice or offer them afterwards.
+Section 13 collects the asks; this one is already lodged, which is the point --
+it is not a request made from a stage, it is a request made in the tracker with a
+talk mentioning it.
 -->
 
 ---

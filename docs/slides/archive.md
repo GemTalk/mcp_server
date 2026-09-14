@@ -43,7 +43,7 @@ style: |
 
 <!--
 ================================================================================
-ARCHIVE. THIRTY-THREE SLIDES SET ASIDE FROM deck.md ON 2026-09-14, FOR TIME.
+ARCHIVE. THIRTY-FIVE SLIDES SET ASIDE FROM deck.md ON 2026-09-14, FOR TIME.
 This file is not a talk. It is a holding pen, kept renderable so the slides can
 be looked at, and kept in deck.md's own running order so any of them can be put
 back where it came from.
@@ -99,7 +99,16 @@ time: "To add tools, write a toolset" came out because the slide beside it was
 rewritten to name a real toolset on its face. It is the only slide in this file
 that was the SOLE face-level account of a mechanism -- after it, no slide in the
 deck shows how a toolset is written. Its face as well as its notes are
-transplanted onto deck.md page 51. It is last in this file.
+transplanted onto deck.md page 51.
+
+AND TWO MORE FROM SECTION 10, the last cut of the day and a plain set-aside for
+time: the collision slide and the upstream-ask slide, which between them held
+EVERY MEASUREMENT THAT SECTION HAD. Section 10 is now a lead and two slides, and
+what it has left is the shape without the evidence -- it says what extending this
+server looks like and no longer shows anybody having done it. Their notes, and
+their faces in prose, are on deck.md page 52 under two banners anchored to the
+two words that survive there: "tests" and "two search tools". These three section
+10 slides are last in this file, under two headers.
 
 WHAT STAYED BEHIND IN THE DECK, deliberately:
   * DEMO C -- a session is a gem. Section 4's demo, kept without section 4. It is
@@ -189,6 +198,13 @@ and section 10's mechanism slide, by its page number in the 59-slide deck that
 followed (a SIXTH distinct numbering; none of these six groups share one):
 
   51  To add tools, write a **toolset**
+
+and the two that followed it out of section 10, by their page numbers in the
+58-slide deck after that (a SEVENTH distinct numbering; none of these seven
+groups share one):
+
+  53  When a domain toolset collides with the session model
+  54  A GemStone result, and three asks already filed
 
 THE SLICE HEADERS CAME WITH THEIR SLIDES. Slice 5 (section 4), slice 7 (section
 6) and slice 10 (section 12) are reproduced whole below, including their running
@@ -2065,9 +2081,11 @@ tools, write a toolset", REMOVED 2026-09-14. The last change of the day, and the
 only slide in this file that was the sole face-level account of a mechanism.
 
 WHAT HAPPENED: the slide beside it -- "How a deployment picks a surface" -- was
-rewritten to name a real customer's toolset and server class in its bullets
-(BrainFreezeToolset, BrainFreezeServer, where it had said AcmeDbToolset and
-AcmeDbServer under a blockquote naming Brain Freeze Insurance as the example).
+rewritten to name a real customer's toolset in its bullets -- BrainFreezeToolset,
+where it had said AcmeDbToolset under a blockquote naming Brain Freeze Insurance
+as the example. (The server-class bullet was BrainFreezeServer for part of that
+day and went back to AcmeDbServer, so the face now names the real customer for
+the toolset and a fictional one for the subclass.)
 With a named toolset on the face of that slide, this one's job -- introducing the
 idea of a toolset at all -- was being done a slide later and more concretely.
 Section 10 went from a lead and five slides to a lead and four, and from about 4
@@ -2143,4 +2161,130 @@ should not have to know. The fail-closed-with-no-server case is not theoretical
 If asked how a handler reports failure: raise. The dispatcher classifies Errors
 into the isError envelope with a kind, which the archived section 5 showed. A handler does not
 build error envelopes itself.
+-->
+
+---
+
+<!--
+================================================================================
+FROM SECTION 10 AGAIN -- two slides, "When a domain toolset collides with the
+session model" and "A GemStone result, and three asks already filed", SET ASIDE
+FOR TIME 2026-09-14. Not a fold: no surviving face says any of this. They are the
+last two slides of the talk proper as it stood that morning, and they are the
+LAST TWO SLIDES TO LEAVE THE DECK ON THE DAY IT WAS CUT FROM AN HOUR TO 45
+MINUTES.
+
+WHAT WENT WITH THEM, and it is worth listing because it is everything section 10
+could prove: 132 defects against 386 run / 386 passed / 0 failed / 0 errors, the
+same three test classes in a long-lived worker and in a fresh gem; 31 modified
+objects for a 7-test class, which is what makes a cold Grail import a database
+write; FlaskScaffoldingTestCase at 262 seconds, which is what makes progress
+reporting the flagship case rather than a nicety; a stock sender search answering
+an empty pair of arrays where 12 senders exist; and Grail #883, #884 and #885,
+the three interfaces already filed upstream. Section 10 now asserts that
+extending this server works and shows nobody having done it.
+
+THE COLLISION SLIDE IS THE ONE TO PUT BACK FIRST, and it is not close. The slice
+header called it the one that lands, and its argument is general where the rest
+of the section is Grail-specific: your domain has a model, this server has a
+session model, and where they disagree the disagreement is yours to resolve.
+Every vendor in that room who writes a toolset meets some version of it. Fifty-
+five seconds.
+
+THE UPSTREAM-ASK SLIDE COSTS LESS TO LEAVE OUT, but it costs something specific:
+it was the only place in the deck that showed the three Grail issue numbers, so
+that nobody had to write them down from speech. Its other half -- that a tool
+whose coverage is partial owes the caller its own boundaries, which is what the
+searched:/not searched: block is for -- generalises past Python and is worth ten
+seconds even without the slide.
+
+THEIR NOTES ARE ON DECK.MD PAGE 52, whole, under two banners named for them, each
+opening with a WHAT THE SLIDE SAID paragraph reconstructing the face in prose --
+the same treatment the toolset slide got, and for the same reason: nothing else
+in the deck carries any of it. SO IF EITHER COMES BACK, CUT ITS BANNER OUT OF
+PAGE 52's NOTES, and trim the paragraph above them that says this slide now ends
+the talk proper.
+
+WHERE THEY GO BACK: after the worked example, in this order, which is where they
+were. Section 10's lead and slice header would both want reverting too -- the
+lead's notes now promise that the section ends on the worked example, and the
+slice header's WHAT TO CUT list has been rewritten around their absence.
+
+Running order and plans as they were, in seconds -- the collision 55, the
+upstream ask 40.
+================================================================================
+-->
+## When a domain toolset collides with the session model
+
+**`run_python_tests` forks a fresh gem. That is the design, not a precaution.**
+
+> **Measured 2026-09-01:** the same three test classes gave **132 defects** run in a long-lived worker session, and **386 run / 386 passed / 0 failed / 0 errors** run fresh. **Every one of those defects was an artifact of the session.**
+
+* A real disagreement between two models. Grail's rule: **a module is a compiled artifact in the database, bound — never rebuilt — by every import afterwards.** Its SUnit isolates tests by **evicting framework modules from `sys.modules`** — and where those modules are *committed*, re-importing **raises**. **A long-lived MCP worker is exactly the session that accumulates that state**
+* Forking settles three more things at once: the caller's transaction is **untouched**, where an in-session run dirties it *silently* — **a cold Grail import is a database write**, measured at **31 modified objects for a 7-test class**; and the child's writes are **never committed**, so a run leaves the repository exactly as it found it
+* **The cost is honest and stated in the tool.** Every run is fully cold — `FlaskScaffoldingTestCase` alone is **262 seconds**. Hence the `classNames` argument, and why this is the flagship consumer of progress: **an unbounded wait with no word is worse than a slow one that says so**
+
+<!--
+The slide that lands, and it is not really about Grail. The general shape is:
+your domain has a model, this server has a session model, and where they disagree
+the disagreement is yours to resolve. Every vendor in that room who writes a
+toolset will meet some version of it.
+
+Lead with the number. 132 against 386/386 is not a tuning difference, it is the
+session inventing every single defect -- and it is the kind of result that would
+have been reported as a Grail bug by anybody who did not know where to look.
+
+Then the mechanism, slowly, because it is a genuine standoff rather than a bug in
+either party. Grail is right that a committed module is canonical. Its SUnit is
+right to isolate by eviction. Put them in a session with history and they
+contradict each other, and the MCP worker is the session with the most history
+anybody has.
+
+THE OTHER COLLISION, which is the first thing to say if a hand goes up, and which
+there was no room for on the slide: Grail models Python exceptions OUTSIDE the
+Smalltalk Error hierarchy -- NameError inheritsFrom: Error is FALSE -- so
+McpDispatcher's on: Error do: cannot see one. Uncaught, a python-tool error would
+escape the dispatcher and take the whole worker gem down instead of answering the
+client. The toolset catches them itself and converts them to an McpError kinded
+#pythonError. That is the same lesson in a different register: a domain's error
+model is part of the collision surface too.
+
+If asked about the forked gem's memory: it is driven ONE CLASS PER SEND and
+forked with Grail's own budget, because a netldi's default 50MB is not enough for
+a single Grail test class -- and the run bounds memory as well as raising it,
+stopping near the ceiling, because a Grail run that ends full does not crash, it
+reports AlmostOutOfMemory against an innocent test.
+-->
+
+---
+
+## A GemStone result, and three asks already filed
+
+**The stock sender search answers *nothing* for Python, confidently.** It scans **environment 0**; Grail compiles into **environment 1**.
+
+> Measured on 3.7.5 with `_grail_session` imported: `ClassOrganizer new sendersOf: #'_dict'` answers **an empty pair of arrays** where **12** senders exist. Not under-reporting — **reporting nothing, with no indication that it could not look.**
+
+* `find_python_senders` searches **all three shapes** a Python reference compiles into: resolvable calls in compiled methods, first-class references and unresolved attribute calls, and the `.py` text on disk
+* **Every answer ends with a `searched:` and a `not searched:` block** — because *“no senders”* is only worth reading if it can be told from *“I could not look there”*
+* Three interfaces that would let it stop reading Grail's internals are **filed upstream**: **Grail #883, #884, #885**
+
+<!--
+Thirty seconds, and it is here for this audience specifically: it is a GemStone
+result, it is measured, and the asks are already filed rather than being made
+from a stage.
+
+The phrasing to get right is "confidently". A search that says it could not look
+is useful. A search that answers an empty array is indistinguishable from a
+search that looked everywhere and found nothing, and a model reading that answer
+will conclude the name is unused and delete something.
+
+The searched:/not searched: block is the design response and it generalises past
+Python: any tool whose coverage is partial owes the caller its own boundaries.
+That is worth ten seconds on its own, because every vendor writing a search tool
+over their own domain has the same obligation.
+
+The three issue numbers are on the slide so that nobody has to write them down
+from speech. Section 13 collects the asks; this one is already lodged, which is
+the point -- it is not a request made from a stage, it is a request made in the
+tracker with a talk mentioning it.
 -->
