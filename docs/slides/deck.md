@@ -31,9 +31,6 @@ style: |
   svg .hl text { fill: #b4451f; }
   svg .hl path { stroke: #b4451f; stroke-width: 3; }
   svg .hl { color: #b4451f; }
-  section.dense { font-size: 20px; }
-  section.dense table { font-size: 17px; }
-  section.dense blockquote { margin: .6em 0; }
   .boxnote { font-size: 21px; line-height: 1.5; max-width: 1010px; margin: 16px auto 0; text-align: left; }
   .tools { display: flex; gap: 24px; margin-top: 18px; font-size: 18px; line-height: 1.62; }
   .tools > div { flex: 1 1 0; }
@@ -4577,16 +4574,13 @@ dictionary's printString, which holds the conflicting OBJECTS and can be enormou
 
 ---
 
-<!-- _class: dense -->
-
 ## The rule, the ledgers, the stamp
 
 > A mutating tool may not touch a method, class, or dictionary if the last recorded read does not
 > match the **current view.**
 
-The `readLedger` instance variable on `McpServer` is a *dictionary* storing **SHA-256*** stamps of
-every browsing tool result sent to the client. Its entries are *revalidated* at every `commit`,
-`abort`, and `refresh`. The client is notified of dropped entries (stale reads).
+The `readLedger` is a *dictionary* storing **SHA-256** stamps of each browsing tool result. It is
+*revalidated* at every `commit`, `abort`, and `refresh`. The client is told of dropped entries.
 
 The `writeLedger` is a *set* of keys of anything written by a mutation tool. It is for resolving
 the stone's identity-based conflict report back into class names the client can understand. It is
@@ -4599,8 +4593,7 @@ the stone's identity-based conflict report back into class names the client can 
 | class comment | `Foo:comment` | the comment |
 | dictionary | `#UserGlobals` | entry **names and kinds**, sorted — never the values |
 
-**Granularity** was the challenge: Reading one method shouldn't let the client write to a different
-method of the same class.
+**Granularity:** Reading one method shouldn't allow writing to a different method of the same class.
 
 <!--
 readLedger is a Dictionary of key to stamp: what this session has seen in the current window, and
