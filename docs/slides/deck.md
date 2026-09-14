@@ -42,8 +42,8 @@ style: |
 ---
 
 <!--
-SIXTY-THREE SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut once;
-four stretches of them are now set aside. Section 13 is the only one never written.
+SIXTY SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut once;
+five stretches of them are now set aside. Section 13 is the only one never written.
 
 THE TARGET IS 45 MINUTES as of 2026-09-14, down from an hour, and that is what the current shape is
 for. The running order:
@@ -54,10 +54,10 @@ for. The running order:
   27-30   THE DEMO RUN -- A, B, C and D, back to back, about 6 minutes of terminal
   31-38   section 7 -- the transaction model and the blind-write guardrail, then demo E
   39-43   section 8 -- the router maintenance cycle, then demo F
-  44-50   section 9 -- McpAuthRouter, a reachable port, then demo G
-  51-53   section 11 -- the worker gem's GemStone user (MOVED HERE 2026-09-14)
-  54-59   section 10 -- a lead, then extending it: a server for YOUR software
-  60-63   THE APPENDIX -- a lead, then the JSON codec. OPTIONAL, run only if the clock allows
+  44-47   section 9 -- McpAuthRouter, a reachable port, then demo G (FOLDED 2026-09-14)
+  48-50   section 11 -- the worker gem's GemStone user (MOVED HERE 2026-09-14)
+  51-56   section 10 -- a lead, then extending it: a server for YOUR software
+  57-60   THE APPENDIX -- a lead, then the JSON codec. OPTIONAL, run only if the clock allows
 
 RUNNING ORDER IS NOT SECTION-NUMBER ORDER ANY MORE. Section 11 was moved ahead of section 10 on
 2026-09-14, so the deck runs 9, 11, 10. The reason is thematic rather than structural: section 9's
@@ -92,7 +92,17 @@ about four minutes. That is the fourth stretch and it is a set-aside rather than
 section had one argument and half a slide of it does not stand. What the talk keeps of it is a
 sentence when the version numbers come up, and the whole of its case now sits in the notes of the
 install slide (page 22), under a VERSIONS banner, because that slide's own table is what puts 3.7.5
-in front of the room. Twenty-eight slides are now set aside in total.
+in front of the room. That took the total to twenty-eight.
+
+AND SECTION 9 WAS FOLDED, the same day, which is the fifth stretch and a third kind of cut again --
+neither a set-aside nor a slide-by-slide thinning, but a REWRITE that made three slides redundant.
+Page 45's face went from "a reachable port, and the three invariants that pay for it" to a
+four-sentence summary of the whole mechanism, and the three slides behind it -- every request
+carries the token; the login; the token is the real bound -- came out. 190 seconds of slides became
+90 seconds of one. THE ARGUMENT DID NOT GO ANYWHERE: all three slides' notes are on page 45 under
+banners naming where each came from, so that slide is now spoken rather than read, and the renewal
+bug -- the best story in the section -- is a paragraph of them rather than a blockquote. Thirty-one
+slides are now set aside in total.
 
 THE CODEC SLIDES MOVED RATHER THAN LEFT, AND ARE NOW AN APPENDIX. Section 5's other half -- why this
 server owns its JSON writer, the inbound repair, and the five measured kernel defects -- is at the
@@ -4473,46 +4483,66 @@ saying so takes ten seconds you will want back.
 
 <!--
 ================================================================================
-VERTICAL SLICE 8 -- section 9, McpAuthRouter: a reachable port. A lead, five
+VERTICAL SLICE 8 -- section 9, McpAuthRouter: a reachable port. A lead, two
 slides and demo G. Cut 2026-09-12: eighth in running order, eighth to be cut. The
 lead slide was added 2026-09-14, so every slide number below counts from it and
-the five content slides are 2 to 6.
+the two content slides are 2 and 3.
 
-Running order and plans, in seconds -- lead 10; three invariants 45; every
-request carries the token 45; the login 45; the token is the real bound 55; the
-offline_access deviation 60 (260s of slides); demo G 120. About 6:20.
+Running order and plans, in seconds -- lead 10; the secure router 90; the
+offline_access deviation 60 (160s of slides); demo G 120. About 4:40.
 
-THE OUTLINE SAYS 3 SLIDES AND THIS IS FIVE, which is the same arithmetic as
-section 6's was: the budget line was written before the bullet list under it, and that
-list contains three things that are each a slide on their own -- the invariants,
-the renewal bug, and the deviation the outline itself says deserves "a slide of
-its own".
+THE FOLD, 2026-09-14, and it is the biggest single saving in the deck. Slide 2's
+face was rewritten from "a reachable port, and the three invariants that pay for
+it" to a four-sentence summary of the WHOLE mechanism, and the three slides that
+followed it -- every request carries the token; the login; the token is the real
+bound -- came out behind it. 190 seconds of slides became 90 seconds of one, and
+the section went from 6:20 to 4:40. NOTHING WAS DROPPED FROM THE ARGUMENT: all
+three slides' notes are transplanted onto slide 2 under banners naming where each
+came from, and slide 2 is now spoken rather than read. The slides themselves are
+in archive.md with a header of their own. THIS CHANGES HOW THE SLIDE IS
+DELIVERED, which is the thing to rehearse: it is a quiet slide with ninety
+seconds of talking over it, and the temptation is to read the four sentences and
+move on in twenty.
 
-WHAT TO CUT, in order: slide 4 (the login) folds into slide 3 as one sentence if
-it has to, and demo G is already the riskiest demo in the deck. Do NOT cut slide
-5 or slide 6. Slide 5 is a silent-data-loss bug with a fix that reads as obvious
-only afterwards; slide 6 is the one place in the talk where this project
-knowingly departs from a normative SHOULD NOT, and saying so out loud in front of
-the people who will read the conformance suite is the whole point of having it.
+THE OUTLINE SAYS 3 SLIDES AND THIS IS NOW TWO, having been five. The outline's
+number was written before the bullet list under it, and that list contains three
+things that were each a slide on their own -- the invariants, the renewal bug and
+the deviation -- so it was too small when this slice was cut and is too large
+now. Its bullets are still the right inventory of what gets SAID; they are simply
+not slides any more.
+
+WHAT TO CUT: nothing here, and that is the point of the fold -- the cutting was
+done on 2026-09-14 and what is left is a lead, two slides and a demo. If this
+section still has to give time back, demo G is the only candidate, and it is
+already the riskiest demo in the deck. Do NOT cut slide 3: it is the one place in
+the talk where this project knowingly departs from a normative SHOULD NOT, and
+saying so out loud in front of the people who will read the conformance suite is
+the whole point of having it. Slide 2 cannot be cut at all now -- it is the
+section.
 
 THE SECTION'S THESIS is not "we added OAuth". It is that authorization here is
 not a gate in front of the server, it is the thing that decides WHOSE GEM RUNS
-THE CODE. Every slide is a consequence of that: the token is checked on every
-request because the session id is not a credential; the session is bound to the
-token's exp because the gem is logged in as that token's user; and the deviation
-exists because without it a real client cannot log in at all.
+THE CODE. Everything in it is a consequence of that: the token is checked on
+every request because the session id is not a credential; the session is bound to
+the token's exp because the gem is logged in as that token's user; and the
+deviation exists because without it a real client cannot log in at all. The first
+two of those three are speaker notes on slide 2 since the fold; only the third is
+still a slide.
 
 NO DIAGRAM, deliberately. The shape here is the base router's shape with one hook
 filled in (requestAuthorized:on:, which the archived section 4 spent a slide on), and drawing it again
-with a padlock on it would say less than the sentence already on slide 3. The
+with a padlock on it would say less than the sentence already on slide 2. The
 lead slide says the same thing in words, which is the other reason not to draw
 it.
 
-THE VERSION DEPENDENCY is one fine line on slide 2, echoed in a sentence of the
-lead's notes, and nothing more. It used to be nothing more BECAUSE section 12
-owned versions; section 12 went whole on 2026-09-14, and it is still nothing more
-here -- the argument moved to slide 22's notes, beside the install table that
-first says 3.7.5, and that is where an interested room gets taken. The outline
+THE VERSION DEPENDENCY IS NO LONGER ON A FACE IN THIS SECTION AT ALL. It was one
+fine line on slide 2, and the fold took the fine line with the rest of that
+slide's body on 2026-09-14; what is left on screen is demo G's "needs the 3.7.6
+stone". It survives as a sentence in the lead's notes and a paragraph in slide
+2's, which is enough -- it used to be nothing more BECAUSE section 12 owned
+versions, and section 12 went whole the same day, so the argument is in slide
+22's notes beside the install table that first says 3.7.5, and that is where an
+interested room gets taken. The outline
 calls 3.7.6 "the one thing in this talk that is a straight ask of the room" --
 that framing belongs to section 13, which collects the asks; here it is a fact
 about what runs where.
@@ -4522,7 +4552,7 @@ repository before the talk" (items 7 and 8) and both affecting THIS section:
   * docs/MCP_Client_Notes.md says the offline_access SHOULD NOT is "draft-only,
     and so not a gap in either supported revision". McpAuthConformanceTest says
     SEP-2207 is "status Final, so it binds independently of which revision we
-    claim". Those are opposite claims about whether slide 6's deviation is a
+    claim". Those are opposite claims about whether slide 3's deviation is a
     deviation at all. THE SLIDE FOLLOWS THE CONFORMANCE SUITE, because that is
     the reading the code actually enforces -- but somebody in that room may have
     MCP_Client_Notes.md open, so resolve it before the talk rather than on stage;
@@ -4548,7 +4578,13 @@ a consequence of: this is not "we added OAuth". Every request arrives with a
 token, the token names a GemStone user, and the worker gem that runs the code is
 LOGGED IN AS THAT USER. Authorization here does not stand in front of the server
 deciding whether to let a request through; it decides whose gem runs it. Say that
-and the five slides that follow each read as a consequence rather than a feature.
+and everything that follows reads as a consequence rather than a feature.
+
+WHAT FOLLOWS IS NOW ONE SLIDE AND A DEVIATION, since 2026-09-14: the mechanism
+slide was rewritten to carry the whole of it at headline level and three slides
+came out behind it. So slide 2 is spoken rather than read -- its notes are three
+slides' worth and are the section now. Know before you start that you are talking
+for about ninety seconds over one quiet slide.
 
 Name the class, because the shape matters to this room: McpAuthRouter is a
 SUBCLASS of the router they have already seen, with one hook filled in. Nothing
@@ -4556,10 +4592,12 @@ in the base class changed to make authorization possible. That is why there is n
 new diagram here -- it is the same picture with one method overridden.
 
 The version line, briefly and once: src/auth needs 3.7.5; an external OIDC IdP
-needs 3.7.6. Nothing later in the deck picks that up -- section 12 went whole on
-2026-09-14 -- so resist relitigating it here all the same: it is a fact about
-what runs where, not the ask. If the room wants the argument, it is in slide 22's
-notes and it belongs in the hallway.
+needs 3.7.6. NOTHING IN THIS SECTION SHOWS IT ANY MORE except demo G's "needs the
+3.7.6 stone" -- the fine line went when slide 2 was rewritten on 2026-09-14 -- and
+nothing later in the deck picks it up either, section 12 having gone whole the
+same day. So say it here or not at all, and resist relitigating it: it is a fact
+about what runs where, not the ask. If the room wants the argument, it is in
+slide 22's notes and it belongs in the hallway.
 
 Where this ends: demo G, Alice running code as Alice. It is the riskiest demo in
 the deck because it needs the IdP reachable, so know before you start whether you
@@ -4568,163 +4606,174 @@ are going to run it.
 
 ---
 
-## A reachable port, and the three invariants that pay for it
+## A secure router on a reachable port
 
-`McpAuthRouter` is the class you instantiate to get a port reachable beyond loopback. All three invariants are **enforced in code, not by a launch script** — because `runOnPort:` and `forkOnPort:` can be called directly.
+`McpAuthRouter` is the class you instantiate to get a port reachable beyond loopback. `bindAddress` is configurable. **TLS is mandatory,** even on loopback. Requires a resource server to issue JWTs naming the auth router in its audience.
 
-1. **`bindAddress` is configurable here**, where the base class answers loopback and offers no setter — because every request must present a valid bearer token. Still **seeded to loopback**: reachability is something the caller *asks for*
-2. **TLS is mandatory** — both start methods **signal** unless a certificate and an unencrypted key are set. A bearer token is a password travelling in a header on **every** request, so cleartext is never appropriate — **not even on loopback**: a router that is safe today becomes unsafe the moment its bind address is widened
-3. **The resource-server config is mandatory** — an `expectedAudience` and at least one **https** authorization server, or it refuses to start. Both are **MUSTs**: an unconfigured router would accept a token minted for **any** resource and publish a metadata document naming **nowhere** to get one
-
-<span class="fine">`src/auth` needs `JsonWebToken`, `JwtSecurityData`, `jwtPassword:` — **3.7.5**. An **external** OIDC IdP — **3.7.6**.</span>
+The JWT logs in the worker gem as that user, subject to that user's privileges.
 
 <!--
-Open the section with its thesis, because none of the five slides makes sense
-without it: authorization here is not a gate in front of the server. It is the
-thing that decides WHOSE GEM RUNS THE CODE. Everything else follows.
+THIS SLIDE WAS FOUR SLIDES UNTIL 2026-09-14. Its face was rewritten to state the
+whole mechanism at headline level, and the three that followed it -- every
+request carries the token, the login, and the token is the real bound -- came
+out. So THESE NOTES ARE THE SECTION NOW: the slide is a summary and the argument
+is spoken. Pace it accordingly, about 90 seconds rather than the 45 the old slide
+had, and do not try to say all of what is below. Each transplanted block names
+the slide it came from; take the first paragraph of each and keep the rest for
+hands.
 
-Then the three invariants, and the phrase to land is "enforced in code rather
-than by a launch script". A launch script is advice. These signal, from the two
-methods that start a server, so there is no way to get a reachable port without
-TLS and a resource config -- not by calling runOnPort: in topaz, not by writing
-your own script, not by copying the example and deleting a line.
+Open with the thesis, because nothing here makes sense without it: authorization
+is not a gate in front of the server. It is the thing that decides WHOSE GEM RUNS
+THE CODE. Everything else follows.
 
-Invariant 2 is the one worth defending, because somebody will say "it is only
-loopback". The answer is on the slide: a router that is safe today becomes unsafe
-the moment its bind address is widened, and the bind address is a one-line change
-in somebody else's script six months from now. The property has to hold for the
-class, not for the deployment.
+ENFORCED IN CODE RATHER THAN BY A LAUNCH SCRIPT is the phrase to land on the
+middle sentence, and it is what the old slide spent a line on. A launch script is
+advice. TLS and the resource config SIGNAL from the two methods that start a
+server -- runOnPort: and forkOnPort: -- so there is no way to get a reachable
+port without them: not by calling runOnPort: in topaz, not by writing your own
+script, not by copying the example and deleting a line. bindAddress is the one
+that is configurable HERE and has no setter on the base class, and it is still
+seeded to loopback: reachability is something the caller asks for.
 
-Invariant 3 is the subtle one. An unconfigured router is not merely useless, it
-is actively wrong in two directions at once: it accepts tokens minted for any
-resource, and it publishes a discovery document that names nowhere to get one.
-Neither failure is loud.
+"NOT EVEN ON LOOPBACK" is the one somebody will push back on. The answer: a
+bearer token is a password travelling in a header on every request, and a router
+that is safe today becomes unsafe the moment its bind address is widened -- which
+is a one-line change in somebody else's script six months from now. The property
+has to hold for the class, not for the deployment.
 
-The version line: state it and move on. It no longer points anywhere -- section
-12 went on 2026-09-14 -- so nothing later in the deck picks it up, and slide 22's
-notes are where the argument went. The fuller version, if asked -- on an image
-older than 3.7.5 those three methods CANNOT COMPILE AT ALL, which is why install.sh probes the image rather than asking, and leaves the
-group out. The 3.7.6 line is unrelated to compilation: earlier releases have a
-bug connecting to an external OIDC IdP.
--->
+THE RESOURCE-SERVER CONFIG is the subtle one -- an expectedAudience and at least
+one https authorization server, or it refuses to start. An unconfigured router is
+not merely useless, it is actively wrong in two directions at once: it accepts
+tokens minted for ANY resource, and it publishes a discovery document naming
+NOWHERE to get one. Neither failure is loud.
 
----
+THE VERSION LINE IS NO LONGER ON A SLIDE FACE IN THIS SECTION. The fine line went
+when this slide was rewritten, and demo G's "needs the 3.7.6 stone" is all that
+is left of it on screen. Say it in a sentence if it is wanted: src/auth needs
+JsonWebToken, JwtSecurityData and jwtPassword:, so 3.7.5; an EXTERNAL OIDC IdP
+needs 3.7.6. On an image older than 3.7.5 those methods CANNOT COMPILE AT ALL,
+which is why install.sh probes the image rather than asking, and leaves the group
+out; the 3.7.6 line is unrelated to compilation and is a bug connecting to an
+external IdP. Section 12 went whole on 2026-09-14, so nothing later picks this
+up, and slide 22's notes are where the argument went.
 
-## Every request carries the token — the session id is **not** a credential
+================================================================================
+EVERY REQUEST CARRIES THE TOKEN -- from the slide of that name, removed
+2026-09-14. What is left of it on screen is this slide's "requires a resource
+server to issue JWTs naming the auth router in its audience".
+================================================================================
+requestAuthorized:on: is the base-class hook on McpRouter and this is the class
+that fills it in: verify the SIGNATURE against the stone's trusted JWT keys, then
+the resource-server claim checks -- exp always, and where configured issuer,
+audience (RFC 8707) and required scopes. A request naming an existing session
+must also present a token belonging to THAT SESSION's user. The spec is explicit
+that authorization "MUST be included in every HTTP request from client to server,
+even if they are part of the same logical session".
 
-`requestAuthorized:on:` is the base-class hook on `McpRouter`, and this is the class that fills it in. Verify the **signature** against the stone's trusted JWT keys, then the resource-server claim checks: **`exp`** (required), and where configured **issuer**, **audience** (RFC 8707) and **required scopes**.
+THE CONFESSION, and it is worth telling as one if there is a spare thirty seconds
+-- it was a blockquote on its own slide. The MCP-Session-Id once WAS a
+credential: initialize alone was authenticated and the session id admitted every
+later request, so an expired or revoked token kept working for as long as the
+session was kept alive. The failure mode is the one that matters -- revocation
+did nothing. Revoke a user's access and their session kept working until the idle
+reaper happened to get to it. And the two endpoints nobody thought about, which
+is the usual shape of this bug: the GET stream and DELETE were not "initialize",
+so they took no credential whatsoever, and anyone holding a session id could read
+that session's stream. The session id is a routing key, it is 128 bits of
+randomness, and it looked exactly like a credential; that is how this kind of
+mistake survives review.
 
-* A request naming an existing session must also present a token belonging to **that session's user**
-* **One exception, by design:** the Protected Resource Metadata endpoint is unauthenticated — it is what a client reads *in order to learn how to authenticate*
+ONE EXCEPTION, BY DESIGN, and it sounds like a hole until the sentence is
+finished: the Protected Resource Metadata endpoint is unauthenticated, because it
+is what a client reads IN ORDER TO LEARN HOW TO AUTHENTICATE. Refusing it without
+a token would be a bootstrap that cannot start. RFC 9728 metadata is served at
+BOTH the root and the path-scoped form, because a conforming client probes the
+path-scoped one first.
 
-> **It once was a credential.** `initialize` alone was authenticated and the `MCP-Session-Id` admitted every later request — so an **expired or revoked token kept working** for as long as the session was kept alive, and the **GET stream and DELETE needed no credential at all**.
+If asked what it costs: every request now pays a signature verification. It is
+cheap against the stone's trusted keys and nobody has measured it as a problem,
+but it is an honest cost to name rather than deny.
 
-<span class="fine">The spec is explicit: authorization *"MUST be included in every HTTP request from client to server, even if they are part of the same logical session"*, and the server MUST validate on each protected-resource request. RFC 9728 metadata is served at **both** the root and the path-scoped form, because a conforming client probes the path-scoped one **first**.</span>
+================================================================================
+THE LOGIN -- from "the worker gem is the user's, not the server's", removed
+2026-09-14. This slide's last sentence IS that slide's headline, which is why the
+block sits here.
+================================================================================
+The payoff of the whole section, and it is what demo G shows: the gem is Alice's.
+Her code runs as her GemStone user, her privileges apply, her name is in the
+session list. The server is not impersonating anybody. Mechanically: on
+initialize the router derives the GemStone userId from a configurable claim --
+userIdClaim, default sub, typically preferred_username on Keycloak -- and
+McpSession startWithId:user:jwt: opens the worker with username: and
+jwtPassword: and logs it in.
 
-<!--
-The blockquote is a confession and lands better delivered as one. The session id
-was doing a job it was never designed for: it is a routing key, it is 128 bits of
-randomness, and it looked exactly like a credential -- which is how this kind of
-mistake survives review. The failure mode is the one that matters: revocation did
-nothing. Revoke a user's access and their session kept working until the idle
-reaper happened to get to it.
+TWO VALIDATIONS, AND THEY ARE NOT REDUNDANT. The router checks the token because
+it is the resource server and that is its job. GEMSTONE RE-VALIDATES THE JWT AT
+LOGIN -- signature against its trusted keys, plus that user's JwtSecurityData --
+because it is not going to take this server's word for who a user is, and that
+second check is against a fact about the ACCOUNT rather than about the request.
+So a bad or expired token fails the LOGIN, not merely the gate.
 
-And the two endpoints nobody thought about, which is the usual shape of this bug:
-the GET stream and DELETE were not "initialize", so they took no credential
-whatsoever. Anyone holding a session id could read that session's stream.
+The failure vocabulary, if it is asked for: missing, malformed, forged, expired
+or wrong-audience gives 401 invalid_token; a missing required scope gives 403
+insufficient_scope; both carry WWW-Authenticate: Bearer with error,
+error_description, scope and resource_metadata -- everything a client needs to fix
+itself.
 
-The metadata exception is the one thing that MUST stay open, and it is worth one
-sentence because it sounds like a hole and is not: it is a discovery document
-whose entire purpose is to tell an unauthenticated client where to go and get
-authenticated. Refusing it without a token would be a bootstrap that cannot
-start.
-
-If asked what changed in practice: every request now pays a signature
-verification. It is cheap against the stone's trusted keys, and nobody has
-measured it as a problem -- but it is an honest cost to name rather than deny.
--->
-
----
-
-## The login: the worker gem is **the user's**, not the server's
-
-On `initialize` the router derives the GemStone userId from a configurable claim — **`userIdClaim`, default `sub`**, typically `preferred_username` on Keycloak — then opens the worker:
-
-```smalltalk
-McpSession startWithId: newId user: aUserId jwt: aJwtString
-  → worker username: … ; jwtPassword: … ; login
-```
-
-* **GemStone re-validates the JWT at login** — signature against its trusted keys, plus that user's `JwtSecurityData` — so a bad or expired token **fails the login**, not merely the gate
-* Missing · malformed · forged · expired · wrong-audience → **401 `invalid_token`**. Missing a required scope → **403 `insufficient_scope`**
-* Both carry `WWW-Authenticate: Bearer` with `error`, `error_description`, `scope` and `resource_metadata` — everything a client needs to fix itself
-
-<span class="fine">**`supportedScopes` is derived, never configured** — the union of `requiredScopes` and `extraScopes` — so a required scope is *always* advertised. The way to get it wrong is made **unrepresentable** rather than checked for.</span>
-
-<!--
-The headline is the payoff of the whole section and it is what demo G shows: the
-gem is Alice's. Her code runs as her GemStone user, her privileges apply, her
-name is in the session list. The server is not impersonating anybody.
-
-Two validations, and it is worth being clear they are not redundant. The router
-checks the token because it is the resource server and that is its job. GemStone
-checks it again at login because it is not going to take this server's word for
-who a user is -- and that second check is against the USER's JwtSecurityData,
-which is a fact about the account rather than about the request.
-
-The derived scope set is a small design point that generalises, and it is the
-same move as section 2's named tool surface: the wrong state is not
-detected, it is made impossible to express. A required scope that no client is
-ever told to request is unrepresentable, so requireResourceServerConfig has no
-subset rule to check and no caller has one to maintain.
+supportedScopes IS DERIVED, NEVER CONFIGURED -- the union of requiredScopes and
+extraScopes -- so a required scope is ALWAYS advertised. That is the same move as
+section 2's named tool surface: the wrong state is not detected, it is made
+impossible to express, so requireResourceServerConfig has no subset rule to check
+and no caller has one to maintain. Small, and it generalises.
 
 If asked about userIdClaim: sub is the default because it is the one claim OIDC
 guarantees, but it is usually a UUID. preferred_username is what a Keycloak
 deployment actually wants, and that is why profile is advertised -- it is the
-scope that emits it. That thread continues on the next slide.
--->
+scope that emits it. That thread comes back on the deviation slide.
 
----
+================================================================================
+THE TOKEN IS THE REAL BOUND -- from "and the cap is on the grant", removed
+2026-09-14. It hangs off this slide's last sentence too: if the worker gem is
+logged in as that token's user, the session cannot outlive the token.
+================================================================================
+The policy in one sentence: every session is capped at its access token's own
+exp, WHATEVER THE IDLE POLICY SAYS, because a session outliving its token would
+leave the authorization it was opened with in force after the grant expired. An
+expiry is never probed around and never forgiven. It is also one of only two
+wall-clock grounds in the whole reaper -- section 8 -- which is worth saying,
+since that section has already run by the time this one does.
 
-## The token is the real bound — and the cap is on the **grant**
+AND THEN THE BUG, which is the best story in this section and the first thing to
+spend a spare minute on. A client working steadily had its worker gem torn down
+and its uncommitted transaction lost one access-token lifetime after opening --
+however recently it had called. Say it as the user experienced it: you are
+working, you are calling every few seconds, and an hour after you started your
+gem is gone and your uncommitted work with it. Nothing errored. Your client got a
+fresh token, opened a fresh session and carried on. You would find out when you
+went looking for the changes you had made. THAT IS SILENT DATA LOSS.
 
-Every session is capped at its access token's own `exp`, **whatever the idle policy says** — the worker gem *is* logged in as that token's user, so a session outliving its token would leave the authorization it was opened with in force after the grant expired. **An expiry is never probed around and never forgiven.**
+The diagnosis is the interesting half: activity was feeding the IDLE clock, and
+the idle clock was never what was going to end this session. The absolute
+deadline was, and nothing was moving it -- the client had been presenting a
+renewed grant on every single request and the server was not reading its exp. So
+the fix is to read the credential in front of you: a request bearing a refreshed
+token for the same user extends the session to the NEW token's exp
+(renewSessionExpiry:from:). Refreshing sooner would not have helped.
 
-> **And then the bug.** A client working steadily had its worker gem torn down and **its uncommitted transaction lost** one access-token lifetime after opening — however recently it had called. Activity feeds the *idle* clock, and the idle clock is not what ends an authenticated session. **That is silent data loss**: the client gets a new token, opens a new session, and nothing looks broken.
+TWO BOUNDARIES KEPT, which is why it is a separate selector and not a relaxed
+ratchet: a nil exp moves nothing, because a token whose expiry cannot be read
+must not be able to turn a bounded session unbounded; and a session with NO
+deadline is left alone, because renewal extends a deadline rather than
+introducing one. The renewable-past-deadline case, if anyone spots it: a session
+past its deadline but not yet reaped IS renewable, on purpose -- the reaper runs
+on an interval, so that window is scheduling rather than policy, and a client
+presenting a valid token inside it is exactly the client that should keep its
+gem.
 
-* The fix is to read the credential in front of you: a request bearing a **refreshed** token for the same user extends the session to the **new** token's `exp` (`renewSessionExpiry:from:`). Refreshing sooner would not have helped — **the renewed token was never consulted about lifetime**
-* **Two boundaries kept**, which is why it is a separate selector and not a relaxed ratchet: a **nil `exp` moves nothing**, and a session with **no** deadline is left alone — renewal extends a deadline, it never introduces one
-
-<!--
-Spend the time here. The first paragraph is policy and the rest is a bug worth
-telling properly.
-
-Say the failure as the user experienced it, not as the code did: you are working,
-you are calling every few seconds, and one hour after you started -- an access
-token lifetime -- your gem is gone and your uncommitted work with it. Nothing
-errored. Your client got a fresh token, opened a fresh session, and carried on.
-You would find out when you went looking for the changes you had made.
-
-Then the diagnosis, which is the interesting half: activity was feeding the idle
-clock, and the idle clock was never what was going to end this session. The
-absolute deadline was, and nothing was moving it. The client had been presenting
-a renewed grant on every single request and the server was not reading its exp.
-
-What bounds what an authenticated session may DO is not a scope -- it is the
+WHAT BOUNDS WHAT AN AUTHENTICATED SESSION MAY DO is not a scope -- it is the
 GemStone user the bearer token names, whose UserProfile an administrator
-restricts. Section 11. A scope decides whether a client gets in at all.
-
-One of only two wall-clock grounds in the whole reaper -- section 8 -- which is
-worth saying if that section has already run.
-
-A nil exp moves nothing because a token whose expiry cannot be read must not be
-able to turn a bounded session unbounded; and a session with no deadline is left
-alone because renewal extends a deadline rather than introducing one.
-
-The renewable-past-deadline case, if anyone spots it: a session past its deadline
-but not yet reaped IS renewable, on purpose. The reaper runs on an interval, so
-that window is scheduling, not policy, and a client presenting a valid token
-inside it is exactly the client that should keep its gem.
+restricts. That is section 11, three slides away. A scope decides whether a
+client gets in at all.
 -->
 
 ---
@@ -4775,6 +4824,20 @@ scope-hierarchies MUST. The router compares scopes by exact string, which
 satisfies it only while all configured scopes are flat and unrelated -- true of
 mcp:use and mcp:write today. No test, because there is no hierarchy API to test
 yet, and introducing one needs a design decision first.
+
+================================================================================
+TWO THREADS ARRIVE HERE FROM SLIDE 2, now that the three slides between were
+folded into it on 2026-09-14. Both are one sentence if a hand goes up.
+================================================================================
+WHY profile IS ADVERTISED AT ALL, which slide 2's notes hand forward: userIdClaim
+is preferred_username on a Keycloak deployment, and profile is the scope that
+emits it. It is in scopes_supported for THAT reason, not this one.
+
+AND SESSION LIFETIME, which is what offline_access is about -- refresh tokens.
+Slide 2's notes carry the whole of it now: a session is capped at its access
+token's own exp, and a request bearing a refreshed token for the same user moves
+that cap. Nothing in this deviation changes either, which is the point of saying
+what it is NOT.
 
 ONE THING TO SETTLE BEFORE THE TALK: docs/MCP_Client_Notes.md says this SHOULD NOT
 is draft-only and therefore not a gap in either supported revision, which is the
@@ -4894,7 +4957,7 @@ MCP_WORKER_USER=McpReadOnly ./run-server.sh
 `McpRouter>>workerUserId` names it — **one user per router, not per session**: every worker gem this router opens logs in as that user. `startWithId:workerUser:` does the login. **Default `nil` — the front end's own user.** Enforced **in the stone, by the VM, on every operation**.
 
 * **No credential is configured.** The front end mints a **one-time password per session**, needing **one committed grant** — `addOnetimePasswordUserId:` on the front-end user. So `configDict` carries **only an identifier** (§3)
-* **`McpAuthRouter` refuses `workerUserId:`** — a fourth class invariant (§9): there each worker is **the user its bearer token names**, and **silently ignoring a configured one would be the dangerous reading**
+* **`McpAuthRouter` refuses `workerUserId:`** — a further class invariant (§9): there each worker is **the user its bearer token names**, and **silently ignoring a configured one would be the dangerous reading**
 * **The commit lock.** `UserProfile>>disableCommits` → `sessionCanCommit` is false **from login**; `commit` raises **`TransactionError` 2249**. Reads and compiling still work — the session accumulates pending work it cannot keep, so the **`[session]` line points it at `abort`**
 * **Object authorization does better where it applies:** a write this user is not authorized for is refused **`SecurityError` 2116 *at the write*** — `needsCommit` stays false, so **no dirty state** and no phantom value for its own later reads
 

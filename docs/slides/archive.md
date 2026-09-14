@@ -43,7 +43,7 @@ style: |
 
 <!--
 ================================================================================
-ARCHIVE. TWENTY-EIGHT SLIDES SET ASIDE FROM deck.md ON 2026-09-14, FOR TIME.
+ARCHIVE. THIRTY-ONE SLIDES SET ASIDE FROM deck.md ON 2026-09-14, FOR TIME.
 This file is not a talk. It is a holding pen, kept renderable so the slides can
 be looked at, and kept in deck.md's own running order so any of them can be put
 back where it came from.
@@ -70,6 +70,17 @@ pairs, with slice 10's header whole. Its notes were not split but CONDENSED: one
 VERSIONS block at the end of deck.md page 22's notes carries the whole argument
 in shorter form, because page 22's table is where the room first sees "3.7.5".
 Read that header before putting any of these back.
+
+AND THREE FROM SECTION 9, last of all and a THIRD kind of cut: not a set-aside
+and not a thinning, but a FOLD. The section's mechanism slide was rewritten from
+"a reachable port, and the three invariants that pay for it" into a four-sentence
+summary of the whole mechanism, and these three -- every request carries the
+token; the login; the token is the real bound -- were redundant behind it. They
+are at the very end of this file under a header of their own. Their notes are
+transplanted WHOLE onto that one deck slide, under three banners, rather than
+split across several or condensed: read that header before putting any of them
+back, because putting one back means cutting its banner out of the deck slide's
+notes or the same thing gets said twice.
 
 WHAT STAYED BEHIND IN THE DECK, deliberately:
   * DEMO C -- a session is a gem. Section 4's demo, kept without section 4. It is
@@ -143,11 +154,21 @@ and section 12 whole, by its page numbers in the 66-slide deck that followed
   62  #51438: right length, wrong content
   63  What the floor moving actually deleted
 
+and the section 9 fold, by its page numbers in the 63-slide deck that followed
+(a FOURTH distinct numbering; none of these four groups share one):
+
+  46  Every request carries the token — the session id is **not** a credential
+  47  The login: the worker gem is **the user's**, not the server's
+  48  The token is the real bound — and the cap is on the **grant**
+
 THE SLICE HEADERS CAME WITH THEIR SLIDES. Slice 5 (section 4), slice 7 (section
 6) and slice 10 (section 12) are reproduced whole below, including their running
 orders, their "what to cut if the hour is going" lists and their departures from
 docs/Presentation.md. Slice 6's header was split: the trace paragraphs are here,
-the codec paragraphs went to deck.md with the codec slides.
+the codec paragraphs went to deck.md with the codec slides. SLICE 8's DID NOT
+COME: section 9 still exists in the deck, so its header stayed there and was
+rewritten around the fold. The header below these three slides is the only
+account of them in this file.
 
 RENDERING is the same as the deck, and the --html flag is just as required here:
   marp --html --pdf --allow-local-files --no-stdin -o out/archive.pdf docs/slides/archive.md
@@ -1728,4 +1749,174 @@ nothing stops them trying. No .gs file changed for the support decision itself -
 this deletion came after, and separately. It is a documentation and support
 decision, not a compilation barrier, right up until src/auth, which genuinely
 cannot compile before 3.7.5.
+-->
+
+---
+
+<!--
+================================================================================
+FROM SECTION 9, McpAuthRouter -- three slides, FOLDED AWAY 2026-09-14 rather than
+cut for time. This is the only group in this file that left because a surviving
+slide started saying what they said.
+
+WHAT HAPPENED: deck.md page 45's face was rewritten -- from "a reachable port,
+and the three invariants that pay for it", which was three numbered invariants
+and a version line, to four sentences that state the whole mechanism at headline
+level, ending "The JWT logs in the worker gem as that user, subject to that
+user's privileges." Once that sentence was on the slide, the login slide had
+nothing left to announce, and the other two were the consequences of it. So the
+section went from a lead, five slides and a demo to a lead, two slides and a
+demo; 190 seconds of slides became 90 seconds of one; and the slice's total went
+from 6:20 to 4:40. It is the biggest single saving in the deck.
+
+THEIR NOTES WENT WHOLE, NOT SPLIT AND NOT CONDENSED, which is the thing to know
+before putting one back. All three slides' notes are on deck.md page 45 under
+three banners -- EVERY REQUEST CARRIES THE TOKEN, THE LOGIN, THE TOKEN IS THE
+REAL BOUND -- each naming the slide it came from. That slide is now SPOKEN rather
+than read: it is four quiet sentences with three slides' worth of argument
+underneath them. So if one of these comes back, CUT ITS BANNER OUT OF PAGE 45's
+NOTES, or the same material is in the deck twice, once as a slide and once as
+something to say over a summary of it.
+
+WHICH ONE TO PUT BACK FIRST, if a minute appears: slide 3, the token as the real
+bound. It carries the renewal bug, which is the best story in the section -- a
+client working steadily, its gem and its uncommitted work gone one access-token
+lifetime after opening, nothing errored, and the diagnosis is that activity was
+feeding the idle clock while the absolute deadline was what was actually going to
+end the session. It is silent data loss with a fix that reads as obvious only
+afterwards. It survives as prose on page 45 and it is better as a slide.
+
+Then slide 1, for its blockquote: the MCP-Session-Id once WAS a credential, so an
+expired or revoked token kept working as long as the session was kept alive, and
+the GET stream and DELETE took no credential at all. A confession lands better
+with the room reading it. Slide 2 is the one that costs least to leave out --
+page 45's last sentence IS its headline, and what the slide added beyond that is
+the two-validations point and the error vocabulary, both of which answer a
+question rather than raise one.
+
+WHERE THEY GO BACK: after page 45 and before the offline_access deviation, in
+this order, which is where they were. Page 45's face would want its fine line
+back too -- "src/auth needs JsonWebToken, JwtSecurityData, jwtPassword: -- 3.7.5.
+An external OIDC IdP -- 3.7.6." -- because the fold took it and the version fact
+is now nowhere on a face in that section except demo G's "needs the 3.7.6 stone".
+
+Running order and plans as they were, in seconds -- every request carries the
+token 45; the login 45; the token is the real bound 55.
+================================================================================
+-->
+## Every request carries the token — the session id is **not** a credential
+
+`requestAuthorized:on:` is the base-class hook on `McpRouter`, and this is the class that fills it in. Verify the **signature** against the stone's trusted JWT keys, then the resource-server claim checks: **`exp`** (required), and where configured **issuer**, **audience** (RFC 8707) and **required scopes**.
+
+* A request naming an existing session must also present a token belonging to **that session's user**
+* **One exception, by design:** the Protected Resource Metadata endpoint is unauthenticated — it is what a client reads *in order to learn how to authenticate*
+
+> **It once was a credential.** `initialize` alone was authenticated and the `MCP-Session-Id` admitted every later request — so an **expired or revoked token kept working** for as long as the session was kept alive, and the **GET stream and DELETE needed no credential at all**.
+
+<span class="fine">The spec is explicit: authorization *"MUST be included in every HTTP request from client to server, even if they are part of the same logical session"*, and the server MUST validate on each protected-resource request. RFC 9728 metadata is served at **both** the root and the path-scoped form, because a conforming client probes the path-scoped one **first**.</span>
+
+<!--
+The blockquote is a confession and lands better delivered as one. The session id
+was doing a job it was never designed for: it is a routing key, it is 128 bits of
+randomness, and it looked exactly like a credential -- which is how this kind of
+mistake survives review. The failure mode is the one that matters: revocation did
+nothing. Revoke a user's access and their session kept working until the idle
+reaper happened to get to it.
+
+And the two endpoints nobody thought about, which is the usual shape of this bug:
+the GET stream and DELETE were not "initialize", so they took no credential
+whatsoever. Anyone holding a session id could read that session's stream.
+
+The metadata exception is the one thing that MUST stay open, and it is worth one
+sentence because it sounds like a hole and is not: it is a discovery document
+whose entire purpose is to tell an unauthenticated client where to go and get
+authenticated. Refusing it without a token would be a bootstrap that cannot
+start.
+
+If asked what changed in practice: every request now pays a signature
+verification. It is cheap against the stone's trusted keys, and nobody has
+measured it as a problem -- but it is an honest cost to name rather than deny.
+-->
+
+---
+
+## The login: the worker gem is **the user's**, not the server's
+
+On `initialize` the router derives the GemStone userId from a configurable claim — **`userIdClaim`, default `sub`**, typically `preferred_username` on Keycloak — then opens the worker:
+
+```smalltalk
+McpSession startWithId: newId user: aUserId jwt: aJwtString
+  → worker username: … ; jwtPassword: … ; login
+```
+
+* **GemStone re-validates the JWT at login** — signature against its trusted keys, plus that user's `JwtSecurityData` — so a bad or expired token **fails the login**, not merely the gate
+* Missing · malformed · forged · expired · wrong-audience → **401 `invalid_token`**. Missing a required scope → **403 `insufficient_scope`**
+* Both carry `WWW-Authenticate: Bearer` with `error`, `error_description`, `scope` and `resource_metadata` — everything a client needs to fix itself
+
+<span class="fine">**`supportedScopes` is derived, never configured** — the union of `requiredScopes` and `extraScopes` — so a required scope is *always* advertised. The way to get it wrong is made **unrepresentable** rather than checked for.</span>
+
+<!--
+The headline is the payoff of the whole section and it is what demo G shows: the
+gem is Alice's. Her code runs as her GemStone user, her privileges apply, her
+name is in the session list. The server is not impersonating anybody.
+
+Two validations, and it is worth being clear they are not redundant. The router
+checks the token because it is the resource server and that is its job. GemStone
+checks it again at login because it is not going to take this server's word for
+who a user is -- and that second check is against the USER's JwtSecurityData,
+which is a fact about the account rather than about the request.
+
+The derived scope set is a small design point that generalises, and it is the
+same move as section 2's named tool surface: the wrong state is not
+detected, it is made impossible to express. A required scope that no client is
+ever told to request is unrepresentable, so requireResourceServerConfig has no
+subset rule to check and no caller has one to maintain.
+
+If asked about userIdClaim: sub is the default because it is the one claim OIDC
+guarantees, but it is usually a UUID. preferred_username is what a Keycloak
+deployment actually wants, and that is why profile is advertised -- it is the
+scope that emits it. That thread continues on the next slide.
+-->
+
+---
+
+## The token is the real bound — and the cap is on the **grant**
+
+Every session is capped at its access token's own `exp`, **whatever the idle policy says** — the worker gem *is* logged in as that token's user, so a session outliving its token would leave the authorization it was opened with in force after the grant expired. **An expiry is never probed around and never forgiven.**
+
+> **And then the bug.** A client working steadily had its worker gem torn down and **its uncommitted transaction lost** one access-token lifetime after opening — however recently it had called. Activity feeds the *idle* clock, and the idle clock is not what ends an authenticated session. **That is silent data loss**: the client gets a new token, opens a new session, and nothing looks broken.
+
+* The fix is to read the credential in front of you: a request bearing a **refreshed** token for the same user extends the session to the **new** token's `exp` (`renewSessionExpiry:from:`). Refreshing sooner would not have helped — **the renewed token was never consulted about lifetime**
+* **Two boundaries kept**, which is why it is a separate selector and not a relaxed ratchet: a **nil `exp` moves nothing**, and a session with **no** deadline is left alone — renewal extends a deadline, it never introduces one
+
+<!--
+Spend the time here. The first paragraph is policy and the rest is a bug worth
+telling properly.
+
+Say the failure as the user experienced it, not as the code did: you are working,
+you are calling every few seconds, and one hour after you started -- an access
+token lifetime -- your gem is gone and your uncommitted work with it. Nothing
+errored. Your client got a fresh token, opened a fresh session, and carried on.
+You would find out when you went looking for the changes you had made.
+
+Then the diagnosis, which is the interesting half: activity was feeding the idle
+clock, and the idle clock was never what was going to end this session. The
+absolute deadline was, and nothing was moving it. The client had been presenting
+a renewed grant on every single request and the server was not reading its exp.
+
+What bounds what an authenticated session may DO is not a scope -- it is the
+GemStone user the bearer token names, whose UserProfile an administrator
+restricts. Section 11. A scope decides whether a client gets in at all.
+
+One of only two wall-clock grounds in the whole reaper -- section 8 -- which is
+worth saying if that section has already run.
+
+A nil exp moves nothing because a token whose expiry cannot be read must not be
+able to turn a bounded session unbounded; and a session with no deadline is left
+alone because renewal extends a deadline rather than introducing one.
+
+The renewable-past-deadline case, if anyone spots it: a session past its deadline
+but not yet reaped IS renewable, on purpose. The reaper runs on an interval, so
+that window is scheduling, not policy, and a client presenting a valid token
+inside it is exactly the client that should keep its gem.
 -->
