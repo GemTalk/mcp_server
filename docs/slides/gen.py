@@ -284,10 +284,10 @@ SLIDES = [
   "an accept loop forked THERE is frozen and never serves a request. Therefore the accept loop has\n"
   "to be a dedicated gem's blocking main activity. It is worth slowing down for: they know the fact\n"
   "is true, what they have not necessarily done is follow it to three separate conclusions. The\n"
-  "other two are section 6's and section 8's -- the front end must own the client's STREAM, and the\n"
-  "front end must own VIEW HYGIENE, because only the front end has a heartbeat. Promise both rather\n"
-  "than spending them here; section 5's nbExecute: slide meets the same fact from the other\n"
-  "direction and says so.\n"
+  "other two: the front end must own the client's STREAM, and the front end must own VIEW HYGIENE,\n"
+  "because only the front end has a heartbeat. View hygiene is section 8 and is paid in full. The\n"
+  "stream is section 6, which is archived as of 2026-09-14, so that promise is now redeemed only by\n"
+  "demo D and by four boxes of the gem-contents sequence -- promise it smaller, or not at all.\n"
   "Have the third argument ready anyway, because somebody always jumps ahead. On every OTHER count\n"
   "the worker is the better-informed party: it can read its own commits-behind, the stone's backlog,\n"
   "whether it holds the oldest commit record, and needsCommit, none of which the front end can see.\n"
@@ -300,7 +300,8 @@ SLIDES = [
   "up in **one** call at session open; `forward:` runs a request in it. A **mutex** around the handle "
   "makes GCI&#8217;s one-call-at-a-time rule explicit rather than accidental.",
   "Two guarantees used to hold by accident when forwarding was a blocking executeString:, and are\n"
-  "now explicit -- one call in flight per session, and no interleaving. Section 5.\n"
+  "now explicit -- one call in flight per session, and no interleaving. The slide that showed the\n"
+  "nbExecute: doing it is archived; this line is where the fact enters the talk now.\n"
   "The worker class and toolsets are resolved PER SESSION, so a Grail install that lands after\n"
   "startup reaches the next client without a restart."),
 

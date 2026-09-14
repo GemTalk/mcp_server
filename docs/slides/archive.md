@@ -1,0 +1,1085 @@
+---
+marp: true
+theme: default
+paginate: true
+header: 'mcp_server — GemStone developers'
+style: |
+  section { font-size: 24px; }
+  section.lead { display: flex; flex-direction: column; justify-content: center; }
+  section.lead h1 { font-size: 46px; margin-bottom: .2em; }
+  section.demo { background: #16211f; color: #eef3f1; }
+  section.demo h1 { color: #fff; }
+  section.demo strong { color: #f4b199; }
+  section.demo code { background: rgba(255,255,255,.09); }
+  section.demo pre { background: rgba(255,255,255,.06); color: #eef3f1; }
+  section.demo pre code, section.demo pre code span { background: none; color: inherit; }
+  section.demo .fine { color: #a9b6bd; }
+  h1 { font-size: 34px; line-height: 1.15; }
+  table { font-size: 19px; }
+  pre, code { font-size: 19px; }
+  blockquote { border-left: 5px solid #b4451f; padding-left: .7em; font-style: normal; }
+  .fine { font-size: 18px; color: #4a5560; }
+  .verbatim { column-count: 2; column-gap: 34px; font-size: 20px; line-height: 1.45; }
+  .verbatim p { margin: 0 0 .8em; }
+  .verbatim .elide { color: #b4451f; opacity: .7; letter-spacing: .22em; margin: 0 0 .8em; }
+  .cap { color: #b4451f; font-weight: 600; }
+  .ex { font-family: ui-monospace, monospace; font-size: 16.5px; line-height: 1.5;
+        border-left: 3px solid #ccd6da; padding-left: .7em; margin: 0 0 1.6em; }
+  .exlbl { font-size: 13.5px; letter-spacing: .06em; text-transform: uppercase;
+           color: #4a5560; margin: 0 0 .2em; }
+  svg .hl rect { fill: #f6e1d6; stroke: #b4451f; stroke-width: 2.6; }
+  svg .hl text { fill: #b4451f; }
+  svg .hl path { stroke: #b4451f; stroke-width: 3; }
+  svg .hl { color: #b4451f; }
+  .boxnote { font-size: 21px; line-height: 1.5; max-width: 1010px; margin: 16px auto 0; text-align: left; }
+  .tools { display: flex; gap: 24px; margin-top: 18px; font-size: 18px; line-height: 1.62; }
+  .tools > div { flex: 1 1 0; }
+  .tools p { margin: 0; font-family: ui-monospace, monospace; }
+  .tools .tset { font-family: inherit; font-weight: 600; color: #b4451f; font-size: 16px;
+                 margin: 0 0 .15em; }
+  .tools p + .tset { margin-top: 1em; }
+  .tools .grail { flex: 0 0 auto; border-left: 2px dashed #b4451f; padding-left: 22px; }
+---
+
+<!--
+================================================================================
+ARCHIVE. NINETEEN SLIDES SET ASIDE FROM deck.md ON 2026-09-14, FOR TIME.
+This file is not a talk. It is a holding pen, kept renderable so the slides can
+be looked at, and kept in deck.md's own running order so any of them can be put
+back where it came from.
+
+WHY: the talk's target came down to 45 minutes. Three whole stretches came out --
+section 4 (trace 1, a brand-new client's first request), the trace half of
+section 5 (a follow-up request), and section 6 (progress notifications). Together
+they are about 14 minutes of slides, which is most of what the new target needed.
+Nothing here was cut for being wrong.
+
+WHAT STAYED BEHIND IN THE DECK, deliberately:
+  * DEMO C -- a session is a gem. Section 4's demo, kept without section 4. It is
+    the load-bearing demo of the talk and it needs no walk in front of it: the
+    gem appearing in the cache statistics IS the argument that section 4 spent
+    eight slides making.
+  * DEMO D -- watching a long call report. Section 6's demo, kept without section
+    6, on the same reasoning: the contrast at the end of it (same call, one
+    token's difference) is the whole of what the five slides argued.
+  * The three JSON codec slides, which were section 5's second half. They moved
+    to the END of deck.md instead, after section 12, as optional material -- they
+    are the part the room can act on, and they stand alone.
+The demos being kept is the plan the deck is now built around: A, B, C and maybe
+D run together as one long stretch of terminal rather than one demo per section.
+
+WHAT THIS COSTS, and it is worth knowing before putting anything back. The two
+surviving demos now carry material no slide sets up any more, and their notes in
+deck.md say what to say instead. Section 7 opens without sections 4 and 5 having
+walked a request in and out; it was written to lean on that and no longer can.
+And "same client, second call" -- the first slide of the trace-2 group below --
+cannot come back on its own: its opening move is a comparison with a first call
+the room will not have seen.
+
+HOW TO PUT ONE BACK: copy the slide, its trailing notes comment, and whatever its
+slice header below says about it, into deck.md at the position named in the map,
+then re-render and re-count the slice header there. Slide numbers in the map are
+the ORIGINAL deck.md numbers as of 2026-09-14, before any of this came out; this
+file renumbers from 1, so they will not match the page numbers here.
+
+THE MAP -- original deck.md page, and title:
+
+  29  Trace 1
+  30  The bytes, and the path they take
+  31  The front door: a GsProcess per connection, then three gates
+  32  servePost: parses only enough of the body to route it
+  33  openSessionCreating: — the widest window in the class
+  34  What travels into the worker, and why it travels at all
+  35  Inside the worker, the order is the point
+  36  runWorker: — four lines, and the whole concurrency story
+  37  The worker answers, and the version is negotiated
+  38  Three session ids, and why every gem names itself
+  40  Same client, second call. What is *different*
+  41  The request id lives exactly as long as the call
+  42  handleToolsCall: — and **two** different failure envelopes
+  43  THE VIEW. NO TOOL REFRESHES IT.
+  47  A worker cannot write to its own client
+  48  The client opts in — and for a while this server threw it away
+  49  Three pieces of judgement the reporter carries, so tools need not
+  50  Two bugs that only exist end to end
+  51  The other stream, in one slide — because §8 rides it
+
+THE SLICE HEADERS CAME WITH THEIR SLIDES. Slice 5 (section 4) and slice 7
+(section 6) are reproduced whole below, including their running orders, their
+"what to cut if the hour is going" lists and their departures from
+docs/Presentation.md. Slice 6's header was split: the trace paragraphs are here,
+the codec paragraphs went to deck.md with the codec slides.
+
+RENDERING is the same as the deck, and the --html flag is just as required here:
+  marp --html --pdf --allow-local-files --no-stdin -o out/archive.pdf docs/slides/archive.md
+This file contains no generated block -- gen.py owns nothing here -- and no
+inline svg except the ones that came with these slides, which carry deck.md's own
+rule about never putting a blank line inside an <svg>.
+================================================================================
+-->
+<!--
+================================================================================
+VERTICAL SLICE 5 -- section 4, trace 1: a brand-new client's first request. Ten
+slides -- a lead, eight walking the path, and demo C. Cut 2026-09-12: third in
+running order, fifth to be cut.
+
+Running order and plans, in seconds -- lead 10; the bytes and the picture 40;
+the front door 45; servePost: 40; openSessionCreating: 60; what travels into the
+worker 45; the order inside the worker 45; runWorker: 60; the dispatcher answers
+40; three ids and the gem names 45 (430s of slides); demo C 120. About 9 minutes,
+which is the longest slice in the deck and is meant to be.
+
+THE OUTLINE SAYS 5-7 SLIDES AND THIS IS TEN. Deliberate, and the reason is worth
+writing down: section 4 is the only section that earns the right to be slow,
+because everything after it is a variation on a path the room has already walked.
+Sections 5 and 6 are "the same path, but --", section 8 is the same worker seen
+from the front end's clock, and section 7 is what happens inside one tool call.
+Walked properly once, all of those get cheaper. Walked in five slides, none of
+them do.
+
+WHAT TO CUT IF THE HOUR IS GOING. In order, and none of them takes a later
+section with it:
+  1. the lead (10s), as everywhere;
+  2. "three ids and the gem names" (45s) -- it is the most beautiful slide in the
+     section and the least load-bearing. Demo C shows the same table live;
+  3. "the dispatcher answers" (40s) -- version negotiation is a fact, not an
+     argument, and section 13 re-opens it anyway.
+Do NOT cut openSessionCreating: or runWorker:. Those two are the section.
+
+THE REQUEST PICTURE LIVES HERE, which is what slice 3 reserved it for, and it is
+a SEQUENCE diagram rather than a deployment one -- slide 14 already drew the
+boxes, so this one draws the order. Every later slide in the slice is one band of
+it, and the notes name which.
+
+DEPARTURES from docs/Presentation.md:
+  * the outline's step 15 (the MCP-Session-Id going back, and what a later
+    request must echo) is the last band of the picture and one line of the
+    naming slide. Section 5 opens on exactly that header, so spending a slide on
+    it here would be paying twice;
+  * the outline's step 12 (the four-hop path from class-side handleJsonString:
+    to McpJson write:) is speaker notes, not a slide. It is a call chain with no
+    decision in it;
+  * no slide shows the forward: send, and that is worth knowing when slice 6 is
+    cut, because the two sections legitimately send DIFFERENT selectors.
+    serveInitialize:on: sends forward:lifetimeBounds: -- an initialize cannot be
+    cancelled by a client that has no session id yet, so there is no request id
+    to carry. serveCall: sends forward:lifetimeBounds:requestId:, which is
+    section 5's. The outline has both right; do not "fix" either into the other.
+
+THE MERGE OF 2026-09-11/12 touches two numbers in this slice. defaultServerVersion
+is 0.8.0 now, which nothing on a slide states (it reaches the room only through
+serverInfo in demo C). And the worker login is the plain 3.7.5
+useOnetimePassword spelling, which is why slide 5's bullet says "one-time
+password" and explains nothing.
+================================================================================
+-->
+
+<!-- _class: lead -->
+
+# Trace 1
+
+### One request, from the socket to the `MCP-Session-Id`
+
+<br>
+
+**§4** · a brand-new client, saying `initialize` for the first time
+
+<!--
+Where we are: section 3 forked the gem and left it in its accept loop with
+nothing to do. This is the first thing that happens to it.
+
+Say what kind of section this is, because it is different from the two before it
+and the room should know how to listen. Sections 2 and 3 were configuration.
+This is a trace -- one request, in call order, nothing skipped -- and the reason
+to spend nine minutes on it is that every later section is this path with one
+thing changed. Promise that explicitly.
+
+Kernel-level HTTP and JSON parsing are assumed known and are not on any slide.
+This is the mcp_server path only.
+-->
+
+---
+
+## The bytes, and the path they take
+
+```
+POST /mcp HTTP/1.1
+Accept: application/json, text/event-stream
+Content-Type: application/json
+
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25",
+ "capabilities":{},"clientInfo":{"name":"claude-code","version":"…"}}}
+```
+
+<div style="text-align:center">
+<svg viewBox="0 0 960 330" width="880" role="img" aria-label="Sequence diagram: the client POSTs initialize to the front-end gem, which forks a GsProcess, reads and traces the request, applies the transport and credential gates, parses only enough to route it, mints a session id and takes a slot, then logs in a new worker gem with a one-time password, prepares it in one round trip, forwards the request with a non-blocking call, and answers the client with the worker's JSON and the MCP-Session-Id header.">
+  <defs>
+    <marker id="m4" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <!-- lifeline heads -->
+  <rect x="62" y="8" width="156" height="30" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+  <text x="140" y="28" font-size="14" text-anchor="middle" font-weight="600" fill="currentColor">client</text>
+  <rect x="368" y="8" width="224" height="30" rx="3" fill="none" stroke="currentColor" stroke-width="1.9"/>
+  <text x="480" y="28" font-size="14" text-anchor="middle" font-weight="600" fill="currentColor">front-end gem</text>
+  <rect x="730" y="8" width="200" height="30" rx="3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="830" y="28" font-size="14" text-anchor="middle" font-weight="600" fill="currentColor">worker gem (new)</text>
+  <!-- lifelines -->
+  <line x1="140" y1="38" x2="140" y2="322" stroke="currentColor" stroke-width="1" opacity=".45" stroke-dasharray="4 4"/>
+  <line x1="480" y1="38" x2="480" y2="322" stroke="currentColor" stroke-width="1.3" opacity=".65"/>
+  <line x1="830" y1="38" x2="830" y2="196" stroke="currentColor" stroke-width="1" opacity=".3" stroke-dasharray="3 6"/>
+  <line x1="830" y1="196" x2="830" y2="322" stroke="currentColor" stroke-width="1.3" opacity=".65"/>
+  <!-- 1: the POST -->
+  <line x1="142" y1="64" x2="476" y2="64" stroke="currentColor" stroke-width="1.5" marker-end="url(#m4)"/>
+  <text x="309" y="58" font-size="13" text-anchor="middle" fill="currentColor">POST /mcp &#183; initialize</text>
+  <!-- 2-5: front-end self calls -->
+  <circle cx="480" cy="92" r="3.5" fill="currentColor"/>
+  <text x="466" y="97" font-size="13" text-anchor="end" fill="currentColor">serve: forks a GsProcess &#183; readRequest &#183; trace</text>
+  <circle cx="480" cy="118" r="3.5" fill="currentColor"/>
+  <text x="466" y="123" font-size="13" text-anchor="end" fill="currentColor">route:on: &#8212; Origin &#183; protocol &#183; credential &#183; verb</text>
+  <circle cx="480" cy="144" r="3.5" fill="currentColor"/>
+  <text x="466" y="149" font-size="13" text-anchor="end" fill="currentColor">servePost: &#8212; only enough of the body to route it</text>
+  <circle cx="480" cy="170" r="3.5" fill="#b4451f"/>
+  <text x="466" y="175" font-size="13" text-anchor="end" fill="#b4451f" font-weight="600">openSessionCreating: &#8212; mint the id, take the slot</text>
+  <!-- 6-8: into the worker -->
+  <line x1="482" y1="196" x2="826" y2="196" stroke="currentColor" stroke-width="1.5" marker-end="url(#m4)"/>
+  <text x="654" y="190" font-size="13" text-anchor="middle" fill="currentColor">login &#8212; one-time password</text>
+  <line x1="482" y1="230" x2="826" y2="230" stroke="currentColor" stroke-width="1.5" marker-end="url(#m4)"/>
+  <text x="654" y="224" font-size="13" text-anchor="middle" fill="currentColor">prepareWorker &#8212; one round trip</text>
+  <line x1="482" y1="264" x2="826" y2="264" stroke="currentColor" stroke-width="1.5" marker-end="url(#m4)"/>
+  <text x="654" y="258" font-size="13" text-anchor="middle" fill="#b4451f" font-weight="600">handleJsonString: &#8212; nbExecute:</text>
+  <!-- 9: the return -->
+  <line x1="826" y1="292" x2="484" y2="292" stroke="currentColor" stroke-width="1.3" stroke-dasharray="6 4" marker-end="url(#m4)"/>
+  <text x="654" y="286" font-size="13" text-anchor="middle" fill="currentColor">the JSON-RPC response, as a String</text>
+  <!-- 10: to the client -->
+  <line x1="478" y1="318" x2="144" y2="318" stroke="currentColor" stroke-width="1.5" marker-end="url(#m4)"/>
+  <text x="309" y="312" font-size="13" text-anchor="middle" fill="currentColor">200 &#183; MCP-Session-Id: 978EC559&#8230;</text>
+</svg>
+</div>
+
+<!--
+Put this up, walk it once in about twenty seconds, and say that the next seven
+slides are the bands of it in order. Then leave it: every following slide names
+which band it is, so nobody has to hold the whole thing in their head.
+
+Two things to point at now rather than later. The worker lifeline does not exist
+at the top of the picture -- this client's gem is created by this request, which
+is the fact the whole section is about. And the two red bands are the two slides
+that matter: openSessionCreating:, which is where the concurrency lives, and
+nbExecute:, which is where the front end's ability to serve anybody else lives.
+
+The Accept header is not decoration. The spec REQUIRES a client to offer both
+application/json and text/event-stream, and both real clients do; it is what
+keeps a hand-rolled caller that asked for JSON from being handed a stream it
+cannot read. curl with no Accept header stays on the plain-JSON path, and so does
+every check in test.sh.
+
+protocolVersion 2025-11-25 in the body is the one the room may not have seen. Do
+not explain it here -- slide 9 negotiates it.
+-->
+
+---
+
+## The front door: a `GsProcess` per connection, then three gates
+
+**`serve:`** — each connection is handled in **its own `GsProcess`**, so a slow client cannot block the accept loop; the forked handler runs during the loop's accept waits.
+
+**`McpHttpConnection>>readRequest`** — one request in, one response out. **Bails after an 8-second read timeout**, so a client that connects and never finishes a request cannot wedge a process.
+
+**`handleConnection:`** — `readRequest` → `traceRequest:` → `route:on:`. Any error is contained and answered **500**; the connection is *always* closed.
+
+> **The trace tap is here on purpose.** This is the only point that sees *every* client message — before the Origin, protocol and credential gates — and a **refused** request is exactly the one an operator is trying to see. **Headers are never traced: one of them is a bearer token.**
+
+**`route:on:`**, in this order: `originAllowed:` → **403** · `protocolVersionAllowed:` → **400** · `requestAuthorized:on:` (the hook; §9) · then the verb table → **405**.
+
+<span class="fine">Transport gates first: they concern the **connection** rather than the principal, and are cheaper. An *absent* `Origin` is allowed — curl, and every non-browser client.</span>
+
+<!--
+Bands 2 and 3 of the picture.
+
+The GsProcess per connection is the first half of the concurrency story and
+nbExecute: on slide 8 is the other half. Say that now so the room knows a second
+shoe is coming: a process per connection is worth nothing if the gem freezes
+inside the process, which is exactly what the blocking GCI call used to do.
+
+The blockquote is the one to slow down for, and it generalises: a log that only
+records what was ACCEPTED cannot answer the question an operator actually has.
+Headers never being traced is the other half of the same decision and needs no
+defending -- say it and move on.
+
+If asked why an absent Origin is allowed: Origin is a BROWSER fact. A browser
+always sends it, so the DNS-rebinding defence works where the attack exists; a
+non-browser client never sends it, and refusing those would refuse curl, Claude
+Code, and every check in test.sh while stopping no attack at all.
+
+The 8-second timeout is worth one sentence if anyone asks what happens to a
+half-open connection: nil from readRequest, no route, connection closed, process
+exits. It costs one GsProcess for at most eight seconds.
+
+Where TLS fits, if asked: serve: completes the server-side handshake BEFORE
+building the connection, and a failed handshake closes the socket and serves
+nothing -- there is no plaintext fallback. Section 9 is where TLS stops being
+optional.
+-->
+
+---
+
+## `servePost:` parses only enough of the body to route it
+
+Four questions, in order, and **two of them never reach the worker at all**:
+
+1. an `id` and **no `method`** → a JSON-RPC *response*: the client answering something **this server** sent on its stream. Not routable — the worker's dispatcher would answer it `-32600` — so it is correlated here and acknowledged **202**
+2. **`notifications/cancelled` → handled here, never routed.** Routing it would queue it on the session's worker mutex **behind the very call it asks to stop** — measured at **17 seconds on a 20-second call** before this existed
+3. `initialize` → `serveInitialize:on:` — the rest of this section
+4. anything else → `serveRouted:…` — that is §5
+
+<span class="fine">The **one** exception to "only enough to route it": a `tools/call` carrying a `progressToken` in `params._meta` is answered as an SSE stream rather than one JSON object, and the `Content-Type` has to be chosen **before the worker is called** — so the front end has to look. The worker cannot be what decides how its own answer is framed (§6).</span>
+
+<!--
+Band 4. The slide is really one idea -- the front end reads the body to decide
+WHERE it goes, not WHAT it means -- plus the two things that turn out not to have
+a where.
+
+Question 2 is the one to spend time on, and the number is the argument. Before
+this existed a cancellation was routed like everything else, which meant it
+queued on the worker mutex behind the call it was asking to stop, and got acted
+on -- if the word applies -- once that call had finished on its own. Seventeen
+seconds on a twenty-second call. It is handled at the front end because that is
+where the session is reachable WITHOUT the worker, which is the whole trick.
+
+Measured 2026-08-31, and worth saying because it is how cancellation actually
+arrives today: Claude Code sends notifications/cancelled within seconds of the
+user pressing Esc, with the right requestId, and does NOT close the response
+stream. So this notification, not a dropped connection, is the real signal.
+
+Question 1 exists because this server sends requests of its own -- the liveness
+ping in section 8. The client's ANSWER comes back as a POST like any other, and
+it is the one body shape that is a response rather than a request.
+
+The fine line is a forward reference and should be read as one. Do not open
+section 6 here.
+-->
+
+---
+
+## `openSessionCreating:` — the widest window in the class
+
+```smalltalk
+newId := mutex critical: [
+  (maxSessions notNil and: [self sessionCount >= maxSessions])
+    ifTrue: [nil]
+    ifFalse: [sessionsOpening := sessionsOpening + 1. self nextSessionId]].
+```
+
+* **Taking the slot and minting the id are one critical section.** The slow part is the **login**, and the front end goes on running other `GsProcess`es across it. **A cap of three cannot be talked past by three clients that all looked before any of them logged in**
+* The reservation is a **count**, not a placeholder in the map: nothing may find a half-built session by id, and the count still has to include it. Released in an `ensure:`, whether the session registers or the login fails
+* Past the cap: `McpError` kinded `#sessionLimit` → JSON-RPC **`-32001`** in an HTTP 200, bearing the request's own id, **no `MCP-Session-Id`, and no login attempted**
+* `nextSessionId` — a cryptographically-random **128-bit** token as hex
+* **Registered last** (`sessions at: newId put: sess`), so no request can reach an unprepared worker
+
+<span class="fine">**The only place `maxSessions` is enforced** — `serveInitialize:on:` asks no question of its own. Why there is a cap at all is §8.</span>
+
+<!--
+Band 5, the first red one, and the first slide in the section this audience will
+want to argue with. Give it the time.
+
+The argument is not "locking is hard". It is that the expensive thing here --
+a GemStone login -- is exactly the thing you cannot hold a lock across, because
+the front end must keep serving other clients while it happens. So the lock
+covers the DECISION and the reservation, and the login happens outside it with
+the count standing in for the session that does not exist yet.
+
+Say why a count and not a placeholder, because it is the question a Smalltalker
+asks: a placeholder in the map is findable by id, and a half-built session that
+can be found is worse than a cap that is briefly approximate. The count is not
+approximate -- it is exact and it is inside the same mutex.
+
+The -32001 shape is worth reading out once: HTTP 200, JSON-RPC error, the
+request's own id, no session header. It is a protocol-level refusal, not a
+transport one, because the transport worked perfectly. And no login was
+attempted, which is the part that matters on a stone with a login-slot limit.
+
+If asked why 3: it is a default chosen so that a laptop demo cannot accidentally
+open twenty gems, not a tuned number. Section 8 says what it is protecting.
+-->
+
+---
+
+## What travels into the worker, and why it travels at all
+
+`McpSession startWithId: newId workerUser:` — `GsTsExternalSession`, **one-time password**, `login`, then `cacheWorkerIds`: the worker's stone session id and host pid, **fetched once, at login**.
+
+Then the front end **pushes what the worker is to be** — its class, its toolsets and their options, the identity it advertises, and its two deadlines — and `prepareWorker` sends **one expression**:
+
+```smalltalk
+McpServer prepareWorkerWithToolsets: #('McpBrowsingToolset' 'McpExecutionToolset' …)
+  options: nil serverName: nil title: nil version: nil
+  frontEnd: 5 cacheName: 'McpServer:5:978EC559'
+```
+
+* Every string embedded via **`printString`**, so this cannot smuggle anything into the worker's compiler. Load-bearing for **`title:`** in particular — unlike a name or a version it is free-form operator prose
+* Toolset **options travel as one `printString`-quoted JSON string** — the only argument whose shape the core does not know
+
+<span class="fine">`cacheWorkerIds` is also a **safety** measure: `printOn:` sends those same two accessors, and each is a *memoizing remote call*, so printing a worker nothing has queried **overwrites its `lastResult`** — answering a client the gem's pid where its response belongs.</span>
+
+<!--
+Bands 6 and 7, from the front end's side. The next slide is the same two bands
+from the worker's.
+
+The eight setters, if anyone wants them: workerClassName:, toolsetNames:,
+toolsetOptions:, serverName:, serverTitle:, serverVersion:,
+requestTimeoutSeconds:, maintenanceCallTimeoutSeconds:.
+
+The through-line: a worker never chooses anything. Its class, its tools, its
+identity, its deadlines and its name all arrive from the front end, because the
+front end is the only party that knows the deployment -- and, once section 9
+lands, the only party that has seen the token. Say that sentence; it is what
+makes the authenticated router possible later.
+
+printString is worth ten seconds and no more. It is not a clever defence, it is
+the ordinary one, and the reason to mention it at all is the title: names and
+versions are identifiers the router already validated, but a title is whatever
+an operator typed into MCP_TITLE.
+
+The fine line is the best bug story in the section and it is completely
+non-obvious. printOn: -- the innocent thing a debugger or a log line does -- is
+a REMOTE CALL against a session that has not memoized its ids yet, and it lands
+in the same slot the response is read from. The fix is to make the accessors
+memoize at login, when nothing is in flight. Tell it if the room is enjoying
+itself; skip it if the clock is bad.
+
+If asked why the two fetches cannot be folded into one executeString:, it is
+because it is the ACCESSOR sends that populate the kernel's instance variables,
+so a single expression would leave printOn: still calling out.
+-->
+
+---
+
+## Inside the worker, the order is the point
+
+```smalltalk
+self nameThisGem: aCacheNameOrNil.
+SessionTemps current at: #McpFrontEndSession put: aFrontEndSessionOrNil.
+srv := self newWithToolsetNames: … toolsetOptions: … .
+SessionTemps current at: #McpServer put: srv.
+```
+
+* **`nameThisGem:` first**, before anything in this method that can fail
+* `#McpFrontEndSession` — the doorbell for a tool's progress (§6), pushed **once**, not per request
+* **Tool registration happens now, at session open** — not on the client's first request. An unresolvable worker class or toolset fails **here**, where the message can say what to fix
+* **`#McpServer` in `SessionTemps` for the gem's life**, answered only by `currentServer`: there are **two** entries into a worker, and **the blind-write ledgers live on the instance** — a second would licence writes on reads it never saw
+
+<span class="fine">Answers one line for the log: `McpServer ready: 31 tool(s)`.</span>
+
+<!--
+The same two bands from the inside. Five statements, and every one of them is in
+that position for a reason -- which is why this is a slide rather than a
+paragraph.
+
+The full version of the first one, since the slide is terse: a bootstrap that
+dies on an unresolvable toolset is precisely the moment an operator is looking at
+the session list, and it costs nothing to have the gem already named by then. A
+name the cache refuses leaves the gem as it was rather than failing the login.
+
+The front-end session pushed into SessionTemps is constant for this worker's
+whole life, which is why it is pushed once here rather than repeated on every
+request -- only the per-call id travels with the request. Section 6.
+
+The two entries into a worker are a client's request and the front end's own
+maintenance call (refreshViewForFrontEnd, section 8) -- worth naming, because
+"two entries" is the part that makes the single instance necessary rather than
+tidy.
+
+The last bullet is the one that reaches forward, and it is section 7's
+foundation. Say it slowly: the guardrail's ledgers are instance state on the
+McpServer, so "which instance" is not a style question. Two instances would be
+two ledgers, and the second one would licence a write on the strength of a read
+it never saw. That is why currentServer exists and why nothing else builds one.
+
+"31 tool(s)" is the core seven's count, and this is the first place in the deck
+the surface gets COUNTED -- section 2 spends one line saying only that toolsetNames
+nil resolves to defaultToolsetNames. Section 10 counts it again at 40, with Grail
+named. Point forward if the room caught it.
+-->
+
+---
+
+## `runWorker:` — four lines, and the whole concurrency story
+
+```smalltalk
+^self workerMutex critical: [
+  worker nbExecute: anExpressionString.
+  self awaitWorkerResult.
+  self touch.
+  worker lastResult]
+```
+
+* **`nbExecute:`, not `executeString:`.** A blocking GCI call blocks **in C** — so while it ran, the front-end gem executed **no Smalltalk and no `GsProcess` in it ran**: not another client's request, not the accept loop, not the reaper
+* **Measured: a second client served in ~1s while an 8-second call is in flight**, where it used to wait the full 8
+* **The mutex.** GCI allows one call in flight per session; the blocking call guaranteed that by *freezing the gem*. Now it is explicit, and two outstanding requests **queue** rather than collide
+
+> **Two traps, each able to corrupt a response silently.** Read the result with **`lastResult`** — `waitForResultForSeconds:` consumes it internally. And only once **`isCallInProgress`** answers false: after a timed-out wait it still holds the **previous** call's value.
+
+<!--
+Band 8, the second red one, and the slide the GemStone developers in the room
+came for. This is the one place where the right answer is a kernel fact rather
+than a design preference.
+
+Lead with the failure, not the fix: a blocking executeString: blocks in the C
+client, and a gem parked in the C client executes no Smalltalk -- so every
+GsProcess in the front end stops. That is the SAME fact as section 1's McpRouter
+box -- a forked GsProcess runs only while the gem is executing Smalltalk --
+arriving from the other direction, and it is worth saying so out loud. The front end has three kinds of work in flight
+at any moment (connections, the reaper, open streams) and all three used to stop
+for the length of the longest tool call.
+
+The measurement is the proof and it is small enough to remember: one second
+instead of eight.
+
+An open SSE stream's keepalives froze too, which is the fourth thing on the list
+and did not fit on the slide -- mention it if section 6 is still ahead.
+
+The blockquote is pure hard-won API detail and this audience is exactly the
+audience for it. A later nbResult after waitForResultForSeconds: has consumed the
+result simply fails, which is the loud half of the first trap. Both traps corrupt a response SILENTLY -- no error, just the
+wrong bytes going back to a client -- and both are one line apart in the method
+comment. If anyone asks how they were found: the second one, by a response
+arriving that belonged to the previous call.
+
+If asked what happens when the deadline passes: the call is ENDED rather than
+waited out, awaitWorkerResult raises, and whatever the break left behind is never
+examined. Section 8 owns that; do not open it here.
+-->
+
+---
+
+## The worker answers, and the version is negotiated
+
+`McpDispatcher>>handle:` is the whole protocol router, and it fits on a line: **`initialize`** · **`ping`** · **`tools/list`** · **`tools/call`** · anything starting `notifications/` → **`nil`**, no response · an id-less unknown → **`nil`** · otherwise **`-32601`**.
+
+**`initializeResultFor:`** — echo the client's `protocolVersion` when we support it, else answer our latest.
+
+* `McpDispatcher class>>supportedProtocolVersions` is the single source of truth for **both** this and the header check in `protocolVersionAllowed:`, **so the two cannot drift**
+* Supported: **`2025-06-18`** and **`2025-11-25`**. `2025-03-26` deliberately **not** — a server on that revision must accept JSON-RPC **batches**, and the single-object body parser does not
+* Capabilities: **`tools`, and nothing else.** Not `listChanged` (no session's surface changes after `initialize`), not resources, prompts or completions — this server has none. **`progress` needs no declaration**: a client opts in per *request*, with a `progressToken` in `_meta`
+* `serverInfo`: name, version, and `title` **omitted when nil rather than sent as null** — an absent title is what tells a client to display the name
+* Plus **`instructions`** — §7's material, and it enters here
+
+<!--
+Band 9. A facts slide, not an argument slide -- run it briskly.
+
+The one thing to actually make sure lands: two places in this codebase decide
+what a protocol version is, and they read the same class method. Version
+negotiation in the worker and the MCP-Protocol-Version header check in the front
+end cannot disagree, by construction. That is the kind of thing that is invisible
+when it works and a two-day bug when it does not.
+
+The 2025-03-26 exclusion is an honest limitation stated as one: that revision
+requires batch support, batching was removed again in 2025-06-18, and writing a
+batch parser to support one deprecated revision would be the wrong trade. Say it
+that way rather than apologising.
+
+'logging' was declared until 2026-08-27, purely to licence notifications/message
+as a carrier for two warnings that no longer exist -- and the draft revision
+prohibits an unsolicited notifications/message anyway. Worth mentioning only if
+someone asks why a server with a gem log declares no logging capability.
+
+instructions is a hint to the MODEL, not documentation for a person, which is why
+it says what a session IS here rather than what the tools do. Section 7 reads it
+in full -- do not read it here.
+-->
+
+---
+
+## Three session ids, and why every gem names itself
+
+Every gem here is a `GsTsExternalSession`'s, so without help the front end, every worker, **and any unrelated external session on the stone** all arrive called `GciTs`.
+
+```
+name                     pid     sessionId
+McpServer:5:978EC559     43793   4
+McpRouter:8000           42435   5
+McpServer:5:5ADC62A4     43797   6
+```
+
+* **The class comes first** in both — for a worker, the class the router *told* it to be — so a deployment running a subclass sees that subclass. The two stay distinguishable by **shape**: a front end has one `:` field after its class, a worker two
+* The middle field is the **front end's** session id, so a stone running several routers still sorts into servers; the last is the **first 8 hex of the `MCP-Session-Id`**, so grepping the gem log finds that client's traffic
+* A name is **truncated rather than allowed to fail a login** — and the **identifying fields are kept whole while the class name is cut.** `McpRouter:80` would name a port nothing is listening on
+
+<span class="fine">Three ids, not one: the **`MCP-Session-Id`** (128-bit hex, the protocol's), the **front end's** stone session id, and the **worker's** stone session id and pid. `System cacheName:` names only the session that *sends* it, which is why a worker's name travels **into** the worker.</span>
+
+<!--
+The last band, and the prettiest slide in the section. It is also the first one
+to cut if the hour is going -- demo C shows this exact table live.
+
+Read the three rows out. The point lands without explanation: a DBA looking at
+cacheStatisticsForAllSlots can see which server, which client, and which gem,
+with no log to cross-check. Before this, all three rows said GciTs.
+
+The truncation rule is the detail worth keeping if you cut everything else on
+this slide, because it is a design principle in four words: keep the part that
+identifies. A name is 'what this is' followed by 'which one it is', and it is
+the second part a reader needs.
+
+The cache takes 1-31 characters and raises OutOfRange outside that, which is why
+a name is truncated rather than allowed to fail a login -- say it only if someone
+asks why truncation is the behaviour rather than an error.
+
+Three ids and they get confused constantly, which is why the fine line ends on
+them. The MCP-Session-Id is the protocol's and the client echoes it; the other
+two are the stone's and the client never sees them. Section 5 opens on the first
+of the three.
+-->
+
+---
+
+<!--
+================================================================================
+TRACE 2, the first four slides of what was VERTICAL SLICE 6 -- section 5, a
+follow-up request. ARCHIVED 2026-09-14. Its other three slides, the JSON codec,
+did NOT come here: they are still in deck.md, moved to the very end as optional
+material. Slice 6's original header is reproduced below with the codec paragraphs
+lifted out, and those now sit beside the codec slides where they went.
+
+Running order and plans, in seconds -- what is different 40, the request id 40,
+handleToolsCall: 50, the view 45. 175s, and that is what archiving these four
+gives back.
+
+NO LEAD SLIDE, and this was the only non-centrepiece slice without one. Section 5
+is not a new subject, it is the same walk with one thing changed, and announcing
+it as a section would undo the thing that makes it cheap. It opened on the header
+that ends section 4 -- MCP-Session-Id -- and read as the next sentence. THAT IS
+WHY THESE FOUR CANNOT COME BACK ALONE: the first slide's whole rhetorical move is
+"same client, second call", and there is no first call in the deck any more.
+Bring section 4 back with them, or rewrite the opening.
+
+Slides 1-4 are trace, and they get faster as they go because the room has walked
+this path. Slide 4 was the pivot: "THE VIEW. NO TOOL REFRESHES IT." is the
+dispatcher's own capitals and it is section 7's whole premise arriving one section
+early -- so state it, do not argue it, and let section 7 do the work. Section 7
+survives in the deck and now carries that premise unassisted, which it was always
+able to do; this slide only got there first.
+
+DEPARTURES from docs/Presentation.md that belong to the trace half:
+  * THE SUMMARY DIAGRAM FOR SECTIONS 4-5 IS NOT HERE, deliberately, and this is
+    the departure to revisit if anyone wants it back. The outline asks for "the
+    whole chain on one page, front end above the line and worker below, with the
+    GCI hop drawn as the only thing crossing it", to be reused in sections 6 and
+    8 with an arm added each time. Three reasons it is gone: slice 5's sequence
+    diagram already IS that picture, drawn before the walk rather than after it,
+    and a second view of one chain eighteen slides later recaps rather than
+    teaches; section 8 does not reuse it, so the "one arm each time" economy was
+    never going to be collected; and section 6's own picture is a different shape
+    anyway. If it comes back, it belongs HERE, as slide 5.
+  * the outline's step 7 (McpJson write: -> the string -> GCI -> writeJson:, and
+    a notification's empty answer becoming 202) is one line of slide 2's notes.
+    It is a call chain with no decision in it, and 202 was already established
+    on section 4's servePost: slide.
+================================================================================
+-->
+
+## Same client, second call. What is *different*
+
+```
+POST /mcp   MCP-Session-Id: 978EC559…
+{"jsonrpc":"2.0","id":2,"method":"tools/call",
+ "params":{"name":"get_method_source","arguments":{"className":"McpServer",…}}}
+```
+
+Everything transport-side is the same **up to `servePost:`**. Not a response, not a cancellation, not `initialize` → **`serveRouted:id:progressToken:sessionId:on:`**.
+
+* **The session gates live in `serveRouted:`** — missing id → **400**, unknown or expired → **404** — and they *have* to live there, above both answer shapes: **a stream cannot be opened before it is known there is a session to serve**, or the refusal would have to be written into a response already committed to being a stream
+* `progressTokenFor:accepting:` then decides the **framing**, not the content: `nil` → one JSON object (`serveCall:`) · non-nil → an SSE stream (`serveStreamedCall:`, §6)
+
+<span class="fine">A 404 is the one a client is expected to recover from: a compliant client re-`initialize`s and gets a new session. Three conditions for a token, all in one method: it is a `tools/call`, it carries `params._meta.progressToken`, **and** its `Accept` offers a stream.</span>
+
+<!--
+Open by saying what this section is: the same walk, with the differences called
+out, and it gets faster as it goes. Nobody needs the front door again.
+
+The gate placement is the one piece of design on this slide and it is worth the
+sentence. It is an ordering constraint of the same family as section 3's
+"capture the ids before launching the loop": once the headers of a stream have
+gone out there is no second HTTP response to be had, so anything that might
+refuse has to refuse BEFORE the shape is chosen. That is why the gates are in
+the method above the fork rather than duplicated in the two below it.
+
+If someone asks why an expired session is 404 rather than 401 or 410: 404 is
+what the spec names, and the client behaviour it produces is the one wanted --
+re-initialize, get a new gem, carry on. Section 8 is where sessions end.
+
+Claude Code puts a progressToken on every single tools/call it has ever sent, so
+in practice the live server takes the stream branch almost always. Trace 2 takes
+the nil branch because it is the simpler one and because section 6 is the other.
+-->
+
+---
+
+## The request id lives exactly as long as the call
+
+`serveCall:` → `sess forward: body lifetimeBounds: … requestId: anIdOrNil`
+
+* The id is remembered **only while the call runs**, so a `notifications/cancelled` naming it can be matched to it — and cleared in an `ensure:` **at both ends**. A flag outliving its call would end **the next one**; and a cancel can arrive in the instant between a call finishing and the clearing
+* `runWorker:` as in trace 1 — **non-blocking**, which is where "clients really do run concurrently" stops being a claim
+
+> **Two guarantees the blocking call used to provide by accident, now explicit.** The per-session **mutex** — GCI allows one call in flight per session. And the reaper **skipping any session with a call in flight** (`McpSession>>isBusy`), instead of logging a worker out mid-request.
+
+<span class="fine">Neither could have been needed before: while forwarding froze the whole front-end gem, no second request could collide and the reaper could not run either. Making the gem keep working is what made both necessary. `isBusy` reads the external session's own state and makes **no GCI call** — and deliberately excludes an *abandoned* worker, whose call is in flight and always will be.</span>
+
+<!--
+The blockquote is the slide, and it is a general lesson worth naming as one:
+when you remove an accidental serialization, you inherit every invariant it was
+quietly providing. Two here, and both were found by reasoning rather than by a
+failure -- which is the good outcome and worth saying, because it is the case
+FOR spending the time.
+
+The ensure:-at-both-ends detail is small and real. Cleared on the way OUT for
+the obvious reason. Cleared on the way IN because another GsProcess sets this
+flag, and it can set it in the instant between a call finishing and the ensure:
+running -- at which point the flag is sitting there waiting to end a call that
+has not started yet.
+
+The same method clears the view-release flag and its pass count, for the same
+reason and set by the reaper rather than a client. Section 8.
+
+If asked what happens after: McpJson write: turns the response Dictionary into
+the JSON string, it crosses GCI as the value of the expression, and the front
+end writes it with conn writeJson:. A notification's answer is empty, which
+becomes a 202 with no body -- the same 202 as section 4's slide.
+-->
+
+---
+
+## `handleToolsCall:` — and **two** different failure envelopes
+
+* `params.name` missing → **`-32602`** `invalidParams` · unknown tool → **`-32602`** `notFound`
+* **Schema enforcement is structural, and says so.** `validationErrorFor:` rejects unknown top-level keys under `additionalProperties: false` *naming the allowed ones*, and requires every `required` key. **No deep type checks.** Schemas are JSON Schema 2020-12; no `$schema` needed
+
+> **Per MCP 2025-11-25, the two are split by what the model can act on.** A malformed **request** — missing name, unknown tool — is a **protocol** error `-32602`: the model is unlikely to recover. Arguments that violate the **tool's own `inputSchema`** come back as a **tool execution error**, `isError: true` *in the result*, because they carry actionable feedback a model can use to self-correct and retry.
+
+<span class="fine">Before 2025-11-25 both were `-32602`. **Only the envelope changed** — the check still runs *before* the tool is invoked, so a rejected call still has **no side effect**.</span>
+
+<!--
+This is the slide for anyone in the room who will write a toolset, and the two
+envelopes are the part that is not obvious. The split is not about severity, it
+is about who can do something with the answer: a model cannot invent a tool that
+does not exist, but it can absolutely fix an argument if you tell it which one
+and what was allowed. That is why the schema failure goes in the RESULT.
+
+Be honest about the validator, because someone will read McpTool and find out
+anyway. It is structural: unknown keys and missing required keys, nothing
+deeper. In practice that has been enough, because the failure mode it catches is
+a model guessing an argument name, and the errors name the allowed ones -- which
+is the actionable feedback the spec is asking for.
+
+tools/list is unfiltered: every tool a session's toolsets registered is offered,
+and none is refused for being unsafe. What bounds a session is the GemStone user
+its worker gem logs in as -- section 11.
+-->
+
+---
+
+## `THE VIEW. NO TOOL REFRESHES IT.`
+
+The dispatcher's own capitals — and the premise of §7, arriving one section early.
+
+**A session sees one consistent snapshot of the repository until the client itself asks for another:** by committing, by aborting, or by calling `refresh`.
+
+> This is **not an omission. It is the guardrail.** GemStone's conflict check is write-write **against the view**, and does not track what a client *read* — so the view is the only record the stone has of what this client saw.
+
+* Two earlier designs *did* refresh under the tool: first `abortTransaction` before every call, then briefly `continueTransaction`. **Both were wrong for the same reason** — they tell the stone the client has seen changes it has not, and a commit that should have been refused as stale is accepted instead, **silently discarding another session's work**
+* Then `tool callWith: args` → the handler → `contentText:isError:` → **`annotateContent:`**, which appends the `[session]` line (§7) — to **both** envelopes, because a tool that raised is exactly when dirty state most needs reporting, and computed from the state left **after** the tool ran
+
+<!--
+State this, do not argue it. Section 7 is eleven minutes of arguing it, with two
+diagrams and a live demo, and every second spent here is a second stolen from
+there. If a hand goes up: "that is the section after next".
+
+What to say, and stop: the stone cannot help us here, because it does not track
+reads. The view is the only record of what the client saw. So refreshing the
+view under a client that has not asked is not a courtesy, it is destroying
+evidence -- and the damage does not show up as an error, it shows up as somebody
+else's work missing.
+
+Measured both ways before it was believed, and the measurement is in
+docs/server-to-client-messaging.md 15 -- which is one of the documents not in
+the tree (see the slice header).
+
+annotateContent: applying to the ERROR envelope too is the detail worth keeping
+if the clock is bad: a tool that raised is precisely when a client most needs to
+be told what state it is now in. Section 7 slide 9 is the whole of it.
+-->
+
+---
+
+<!--
+================================================================================
+VERTICAL SLICE 7 -- section 6, progress notifications. Five slides and demo D.
+Cut 2026-09-12: fifth in running order, seventh to be cut.
+
+Running order and plans, in seconds -- a worker cannot write to its own client 50,
+the client opts in 50, the reporter's three judgements 40, two end-to-end bugs 50,
+the other stream 40 (230s of slides); demo D 90. About 5 1/2 minutes.
+
+THE OUTLINE SAYS 2-3 SLIDES AND THIS IS FIVE. The outline's own bullet list under
+section 6 runs to a page and a half and includes a picture, a demo, and the whole
+of the standalone GET stream, which section 8 then rides. Two or three slides was
+a budget guess made before that list existed, not a judgement about the material.
+Five is what it takes; the two to cut under pressure are named below.
+
+NO LEAD SLIDE, again, and for a better reason than section 5's. Section 6 IS a new
+subject -- it is the first time anything travels from a worker BACK to a client --
+but the premise and the picture are the same slide, and a lead in front of them
+would announce what slide 1 then proves. Slide 1 is the lead.
+
+WHAT TO CUT IF THE HOUR IS GOING, in order:
+  1. "the other stream" (40s) -- section 8 needs the outbox, but it can introduce
+     it in one sentence where it uses it. This slide is a convenience, not a
+     dependency;
+  2. demo D (90s) -- it is the most timing-dependent demo in the deck and the
+     least load-bearing, and slide 4 already tells its story.
+Do NOT cut slide 4. It is the best material in the section: two bugs that cannot
+exist in a unit test, both found end to end, and this audience knows exactly how
+expensive that class of bug is.
+
+THE PICTURE IS NEW rather than the one the outline asked for. The outline says
+"draw it as the section 5 diagram plus one arrow each way" -- but there is no
+section 5 diagram (see slice 6's header for why the summary diagram is gone), and
+a tick's path is a different shape from a request's anyway: it leaves a gem that
+is not answering anything, goes through a queue owned by the STONE, and arrives
+at a process that has to work out which call it belongs to. Drawn on its own it
+is four boxes; grafted onto a request diagram it would have been an annotation.
+Seventh inline svg.
+
+THE HONEST BIT, and it must stay honest: the Claude Code transport is configured
+timeoutMs 60000, and SOME MCP clients reset that timer on each progress
+notification. If this one does, progress is not a nicety, it is the fix for long
+GemStone jobs being cut off client-side. NOT TESTED. Slide 2 says "not measured"
+in those words, and the notes say to say it out loud. Do not let this one drift
+into a claim between now and the talk -- measure it or keep saying so.
+
+DEPARTURES from docs/Presentation.md:
+  * the outline's step-by-step path (its six numbered steps) is the diagram plus
+    slide 3, not a slide of its own. Numbered call chains do not survive being
+    read off a screen, and every step in that list is either on the picture or is
+    a consequence the later slides spend properly;
+  * McpProgressChannel existing BESIDE McpOutbox rather than reusing it -- the
+    outline gives it a bullet under "where progress may travel" -- is the closing
+    line of slide 5, where both queues are on screen together and the shared
+    protocol can be pointed at.
+================================================================================
+-->
+
+## A worker cannot write to its own client
+
+<div style="text-align:center">
+<svg viewBox="0 0 960 234" role="img" aria-label="A progress tick's path: the worker gem's reporter sends an inter-session signal to the Stone's 50-message queue, the front end's signal poller drains it every 100ms and routes it by call id to that call's progress channel, and the front end writes it to the client as a notifications/progress SSE frame.">
+  <defs>
+    <marker id="m6" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <!-- arrow labels, above the row -->
+  <text x="243" y="58" font-size="12" text-anchor="middle" fill="currentColor" opacity=".8">System sendSignal:</text>
+  <text x="243" y="76" font-size="12" text-anchor="middle" fill="currentColor" opacity=".8">to:withMessage:</text>
+  <text x="511" y="58" font-size="12" text-anchor="middle" fill="currentColor" opacity=".8">InterSessionSignal poll</text>
+  <text x="511" y="76" font-size="12" text-anchor="middle" fill="currentColor" opacity=".8">every 100ms</text>
+  <text x="779" y="58" font-size="12" text-anchor="middle" fill="currentColor" opacity=".8">notifications/</text>
+  <text x="779" y="76" font-size="12" text-anchor="middle" fill="currentColor" opacity=".8">progress</text>
+  <!-- boxes -->
+  <rect x="14" y="92" width="190" height="70" rx="4" fill="none" stroke="currentColor" stroke-width="1.6"/>
+  <text x="109" y="118" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">worker gem</text>
+  <text x="109" y="140" font-size="12" text-anchor="middle" fill="currentColor" opacity=".7">McpProgressReporter</text>
+  <rect x="282" y="92" width="190" height="70" rx="4" fill="none" stroke="currentColor" stroke-width="1.6"/>
+  <text x="377" y="118" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">the Stone&#8217;s queue</text>
+  <text x="377" y="140" font-size="12" text-anchor="middle" fill="currentColor" opacity=".7">50 messages, per session</text>
+  <rect x="550" y="92" width="190" height="70" rx="4" fill="none" stroke="currentColor" stroke-width="1.9"/>
+  <text x="645" y="118" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">front-end gem</text>
+  <text x="645" y="140" font-size="12" text-anchor="middle" fill="currentColor" opacity=".7">poller &#183; channelAt: callId</text>
+  <rect x="818" y="92" width="128" height="70" rx="4" fill="none" stroke="currentColor" stroke-width="1.6"/>
+  <text x="882" y="118" font-size="15" text-anchor="middle" font-weight="600" fill="currentColor">client</text>
+  <text x="882" y="140" font-size="12" text-anchor="middle" fill="currentColor" opacity=".7">SSE frame</text>
+  <!-- arrows -->
+  <line x1="206" y1="127" x2="278" y2="127" stroke="currentColor" stroke-width="1.5" marker-end="url(#m6)"/>
+  <line x1="474" y1="127" x2="546" y2="127" stroke="currentColor" stroke-width="1.5" marker-end="url(#m6)"/>
+  <line x1="742" y1="127" x2="814" y2="127" stroke="currentColor" stroke-width="1.5" marker-end="url(#m6)"/>
+  <!-- notes -->
+  <text x="377" y="186" font-size="13" text-anchor="middle" fill="#b4451f" font-weight="600">SignalBufferFull in the SENDER on the 51st</text>
+  <text x="480" y="216" font-size="14" text-anchor="middle" fill="currentColor">The socket belongs to the front end&#8217;s process. That is the whole reason this path exists.</text>
+</svg>
+</div>
+
+A worker gem is a **separate OS process**, and the client's socket was accepted by the front end's. **A file descriptor means nothing outside the process that owns it, and GemStone exposes no way to pass one.** So a tool rings a doorbell instead.
+
+<!--
+The premise first, and it is one sentence: a tool cannot write to its own client,
+and no amount of design gets around that. Everything in this section follows.
+
+Walk the picture once. The part worth pausing on is the middle box -- the queue
+belongs to the STONE, not to either gem, and it is shared by every worker
+signalling this front end. That is where the rate limit on slide 3 comes from,
+and the red line is the reason it cannot be politeness.
+
+The payload is deliberately tiny: JSON with one-letter keys, because the signal
+message caps at 1023 bytes. c for callId, p for progress, t for total, m for a
+message truncated at 700 characters. The FRONT END turns that into the JSON-RPC
+notification, which is what keeps the client's progressToken out of the worker
+gem entirely -- the worker knows an opaque call id and nothing about the client.
+
+If asked why polling rather than an interrupt: InterSessionSignal CAN be made to
+raise in the receiving gem (enableSignalling), which would interrupt whatever the
+router happened to be doing at the time. Polling costs a wakeup ten times a second
+and can interrupt nothing. 100ms is the latency floor for every notification this
+server sends.
+-->
+
+---
+
+## The client opts in — and for a while this server threw it away
+
+A `progressToken` in `params._meta` on a `tools/call`. **No capability, no `initialize` field, no per-tool annotation** in either revision — so a client *cannot* lose it by failing to notice a declaration.
+
+> **Claude Code has sent a token on every single `tools/call` since it first connected** (measured 2026-08-27). For a while this server read none of it: **it was handed an explicit opt-in on every call and threw it away.**
+
+* That is the exact mirror of the retired idle warning (§8), where the server **sent** what no client would read. **One feature failed by not listening, the other by not being listened to** — and both were settled by measurement rather than by reading the spec harder
+* **An open measurement, not a claim.** The Claude Code transport is configured `timeoutMs: 60000`, and *some* clients reset that timer on each progress notification. If this one does, progress is **the fix for long GemStone jobs being cut off client-side**. **Not yet tested; I am saying so**
+* In the draft, **closing a request's response stream MUST be treated as cancellation** — a normative, per-request stop signal, better than any deadline this server could invent (§8)
+
+<!--
+The blockquote is the slide and it is a confession, so deliver it as one. The
+server was being handed an explicit, unambiguous opt-in on every single call and
+was discarding it. Nobody had to guess; nobody had to negotiate; the information
+was just there.
+
+Then the mirror, because together they are a lesson rather than two anecdotes.
+The idle warning (section 8) was the server SENDING something no client would
+ever render. Progress was the server IGNORING something every client was already
+sending. Same root: the spec was read instead of the wire being watched. Both
+were settled in an afternoon once somebody turned on MCP_TRACE and looked.
+
+SAY "NOT MEASURED" OUT LOUD on the timeout payoff. It is the most attractive
+claim in this section and it is the one I cannot yet support: some clients reset
+their request timer on a progress notification, and if Claude Code does, this
+stops being a nicety. The honest version is worth more to this room than the
+attractive one, and somebody may well know the answer.
+
+The stream-close-as-cancellation point is a forward reference worth planting,
+because section 8 spends a slide on the fact that this server has no request
+deadline by default. The draft gives a NORMATIVE per-request stop signal, which
+is strictly better than a timeout invented here.
+
+Two things trimmed off this slide for room, both worth saying if the clock is
+kind. What a full Grail suite run does to a 60-second client timeout: blows
+straight through it. And the era point -- this is THE ONE SCENARIO where the
+draft revision and 2025-11-25 agree, so unlike everything else on this subject,
+building it was not a bet: notifications/progress is a BASIC utility, carries no
+deprecation notice, and is request-scoped in both.
+-->
+
+---
+
+## Three pieces of judgement the reporter carries, so tools need not
+
+* **Rate limit — `minIntervalMilliseconds`, 250ms.** The Stone-side queue holds **50** messages per session and raises `SignalBufferFull` **in the sender** on the 51st, shared across every worker signalling one router. A per-test tick from a **5372-test suite** would blow through that in the first second. **The limit is not politeness**, it is what keeps the channel working
+* **Strictly increasing** — required by the spec, and refused **twice**: at the reporter, and again at the channel. The reporter runs **arbitrary tool code** and can be wrong; the channel is the end that owes the client a conforming stream
+* **Unfailable.** Every send is wrapped, and `SignalBufferFull` is an **expected outcome, not a defect**: a full buffer means the front end has not drained yet, and the right response is to drop the tick. **A progress notification that failed a five-minute test run would make this server strictly worse than one that said nothing**
+
+<span class="fine">A tool reaches all of this through `McpToolset>>progress:of:message:`, which **does nothing at all when there is no reporter** — so a tool called from topaz, or by a client that asked for no progress, behaves exactly as it always did. `nowMilliseconds` is `System millisecondsSinceLogin`, **not** `millisecondClockValue`: that one is a Squeak/Pharo selector GemStone does not implement, and because every send here is wrapped, the `doesNotUnderstand` became **a tick that silently never went**.</span>
+
+<!--
+Three rules, one sentence each, and the third is the one with a principle in it.
+
+The rate limit's number is the argument: 50 messages, shared, and SignalBufferFull
+raises IN THE SENDER -- which means an over-chatty tool does not degrade its own
+reporting, it breaks. 250ms was chosen to sit well inside that while still looking
+live to a human.
+
+Refusing non-monotonic ticks twice is worth defending if anyone calls it belt and
+braces, because it is not: the two ends are answerable for different things. The
+reporter is defending a tool from itself and can be wrong, since it runs code it
+did not write. The channel is defending the CLIENT, and owes it a stream that
+conforms whatever the tool did.
+
+The fine line's second half is the best small story here and it is a GemStone
+story, so this room will enjoy it: an unfailable component swallows its own
+bugs. Every send is wrapped, so a doesNotUnderstand on a Pharo selector became a
+tick that never went, silently, with nothing in any log. The fix is one selector;
+the lesson is that "cannot raise" and "cannot be wrong" are different properties
+and the first one hides the second.
+-->
+
+---
+
+## Two bugs that only exist end to end
+
+**The last tick.** The worker sends its final tick and returns **in the same breath** — so that tick is still sitting in the Stone's queue when the call's `ensure:` forgets the channel, and the poller, up to 100ms later, finds **nowhere to put it**.
+
+> **Every reported call lost its last step that way** — the one saying the work is *finished*. Hence the explicit `drainWorkerSignals` before the unregister, and a second `drain:` after it.
+
+**Nesting.** `handleJsonString:` nests: a tool that runs a test suite can run tests that themselves send `handleJsonString:`, and this project's own suites do exactly that.
+
+* The first version **cleared the reporter on the way out**, so the first nested call wiped the reporter its **caller** was still reporting through
+* Fixing that revealed the other half: the nested call then reported **its** progress on the **outer call's** stream — observed as a client told `1/1 test classes` by a call working through **six**
+* So a **depth counter**. At depth 1 the reporter is the front end's and is left alone; deeper, it is taken away for the duration and given back in an `ensure:`. **A nested tool call reports nothing, which is right — nobody asked to be told about it**
+
+<!--
+The best slide in the section, and the one to protect. Both bugs are invisible to
+a unit test of one call, both were found by watching a real client, and this room
+knows what that costs.
+
+The last tick is the more elegant of the two. Nothing is wrong with any component:
+the worker is right to send and return together, the ensure: is right to forget
+the channel, the poller is right to run on its own schedule. The bug lives in the
+gap between three correct things, and it eats exactly the tick that matters most
+-- 100% of reported calls lost the one saying "done".
+
+The nesting story is worth telling as two acts, because the first fix is what
+revealed the second bug, and that is the part people recognise. Act one: a nested
+call cleared its caller's reporter and every later tick vanished. Act two: with
+save-and-restore in place, the nested call was now reporting ITS numbers on the
+OUTER call's stream -- so a client watching six test classes was told 1/1, and
+the outer call's own ticks were then refused for not increasing. Two bugs, one
+symptom, and the second only visible once the first was gone.
+
+What the depth counter does NOT catch, since somebody will ask: code that calls a
+toolset method DIRECTLY rather than sending a request. No request, no depth to
+count, so such a call reports on its caller's stream with its own numbers.
+mcp_server's own McpToolTest does this, which is how it was found; a deployment's
+tools would have to go out of their way to.
+-->
+
+---
+
+## The other stream, in one slide — because §8 rides it
+
+`GET /mcp` opens the **standalone** server→client SSE stream for a session. `McpOutbox` is its per-session FIFO.
+
+* **Bounded at 256**, dropping the **oldest** and recording the gap **in the gem log** — the operator, not the client: an overflow is a server-side fault and there was never anything a client could do about it
+* **Keepalive comment every 15s**, comfortably under the usual 30–60s proxy and NAT idle timeouts — the only thing that interval has to beat
+* **Both directions are guarded.** Every frame waits on `writeWillNotBlockWithin:` first, because `GsSocket>>write:` suspends with **no timeout at all**; and each 100ms tick polls the read side without blocking, so a client that vanished is noticed in **~100ms**
+* **Exactly one drainer.** A newer `GET` **supersedes** the previous stream — `attachStream` hands out a *generation*, and a loop runs only while it is still the current one. Two `GsProcess`es draining onto one socket would interleave SSE frames and corrupt the stream
+
+<span class="fine">`McpProgressChannel` exists **beside** this rather than reusing it, because progress is **request-scoped** in every revision and the draft bars it from the long-lived stream outright. The two present the **same** queueing protocol on purpose, so `drain:to:` writes either onto a socket without knowing which it has.</span>
+
+<!--
+A facts slide, run briskly, and the first thing to cut if the hour is going --
+section 8 can introduce the outbox in one sentence where it uses it.
+
+The one line worth slowing for is GsSocket>>write: suspending with no timeout.
+That is a kernel fact with teeth: a client that stops reading but does not close
+will otherwise park a GsProcess forever, and on the front end that is a process
+that was serving somebody. Every write in the SSE path is gated on writability
+for that reason, with a five-second patience -- a full TCP window for five
+seconds on a connection carrying a keepalive means the peer has stopped reading,
+not that it is slow.
+
+Generations are the answer to a real client behaviour rather than a hypothetical:
+a client that reconnects its GET stream without closing the old one leaves two
+sockets both entitled to the same queue. The newest wins, the older ends on its
+next tick, and nothing interleaves.
+
+No event ids and no Last-Event-ID replay, deliberately, if asked: ids are only
+useful with a replay buffer behind them, and offering them without one invites a
+client to ask for a resume this server cannot honour.
+-->
