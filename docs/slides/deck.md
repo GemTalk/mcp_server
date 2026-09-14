@@ -4189,7 +4189,7 @@ on purpose:
   * one new slide: the human-in-a-browser diagram, the guard working. It is the
     setup for the agent diagram and the two are read as a pair.
 
-THE GUARDRAIL IS ONE SLIDE NOW, "the rule, the ledgers, the stamp", and that was
+THE GUARDRAIL IS ONE SLIDE NOW, "the rule, the ledgers, and the stamp", and that was
 the second cut of 2026-09-14. It absorbed the re-validation paragraph and the
 granularity problem into its own prose, so "two consequences that shape
 everything after" and "re-validation: what the client is told when the view
@@ -4574,17 +4574,17 @@ dictionary's printString, which holds the conflicting OBJECTS and can be enormou
 
 ---
 
-## The rule, the ledgers, the stamp
+## The rule, the ledgers, and the stamp
 
-> A mutating tool may not touch a method, class, or dictionary if the last recorded read does not
-> match the **current view.**
+> A mutation tool may not touch a method, class, or dictionary unless the recorded read stamp
+> matches the **current view.**
 
 The `readLedger` is a *dictionary* storing **SHA-256** stamps of each browsing tool result. It is
 *revalidated* at every `commit`, `abort`, and `refresh`. The client is told of dropped entries.
 
 The `writeLedger` is a *set* of keys of anything written by a mutation tool. It is for resolving
-the stone's identity-based conflict report back into class names the client can understand. It is
-*wiped* at every successful `commit` or `abort`.
+the stone's identity-based conflict report back into class for the client. It is *wiped* at every
+successful `commit` or `abort`.
 
 | grain | key | stamped over |
 |---|---|---|
@@ -4696,20 +4696,13 @@ note, which can only come from checking everything.
 
 ---
 
-## Full disclosure: `execute_code`, and three limits
+## Full disclosure: `execute_code` circumvents the guardrail
 
 **`execute_code` is outside the guardrail, and its own description says so.** This cannot be
-closed: it evaluates arbitrary Smalltalk, so any check is walked around with `perform:`, and it can
-send `System commitTransaction` itself.
+closed: it can send `System commitTransaction` itself, and read, write, and abort directly.
 
-**And there is no way to observe what it wrote.** `System needsCommit` only flips on the *first*
-write of a transaction; `PomWriteSet` is empty until the commit flush; `_enableTraceNewPomObjs`
-traces objects only *after* they are committed. So the commit result reports **how many
-`execute_code` calls happened in the window** — the most that can be said without inventing
-precision.
-
-A deployment needing a hard guarantee **composes the toolset out.** Limits: cross-class staleness
-is not caught · `execute_code` · the grains differ.
+The stone still protects against write-write conflicts. But a client using `execute_code` can
+silently overwrite another session's commits.
 
 <!--
 Say this plainly rather than burying it. The guardrail covers the tools that name their subject,
@@ -4717,9 +4710,18 @@ and the tool that names nothing is exempt. A deployment that needs the guarantee
 McpExecutionToolset, which is resolved per session like any other — though the boundary that
 actually holds is the worker gem's GemStone user, which is section 11.
 
-The three observability failures are worth naming because each is a thing I tried. needsCommit
-reports the case that does not matter and misses the case that does. PomWriteSet is empty until
-flush. And the trace primitive traces after commit, which is too late by definition.
+AND THERE IS NO WAY TO OBSERVE WHAT IT WROTE -- off the slide 2026-09-14 for time, and the
+sentence to say if anyone asks what the server does about it. The three observability failures are
+worth naming because each is a thing I tried. needsCommit reports the case that does not matter and
+misses the case that does -- it flips on the FIRST write of a transaction and says nothing after.
+PomWriteSet is empty until the commit flush. And the trace primitive, _enableTraceNewPomObjs, traces
+objects only after they are committed, which is too late by definition. So what the commit result
+actually reports is HOW MANY execute_code CALLS HAPPENED IN THE WINDOW -- a count, not a write set.
+That is the most that can be said without inventing precision, and saying less would be pretending
+the hole is smaller than it is.
+
+The limits line that came off with it: cross-class staleness is not caught, execute_code is exempt,
+and the grains differ. All three are below or on the previous slide.
 
 Cross-class staleness: read Foo>>a, write Bar>>b on the strength of it, and another session's
 change to Foo>>a will not stop the commit — the repository validates Bar only, and the guardrail
