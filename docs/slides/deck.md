@@ -42,7 +42,7 @@ style: |
 ---
 
 <!--
-SIXTY-FIVE SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut once;
+SIXTY-SIX SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut once;
 three stretches of them are now set aside. Section 13 is the only one never written.
 
 THE TARGET IS 45 MINUTES as of 2026-09-14, down from an hour, and that is what the current shape is
@@ -54,11 +54,11 @@ for. The running order:
   27-30   THE DEMO RUN -- A, B, C and D, back to back, about 6 minutes of terminal
   31-38   section 7 -- the transaction model and the blind-write guardrail, then demo E
   39-43   section 8 -- the router maintenance cycle, then demo F
-  44-49   section 9 -- McpAuthRouter, a reachable port, then demo G
-  50-54   section 10 -- extending it: a server for YOUR software
-  55-57   section 11 -- the worker gem's GemStone user
-  58-62   section 12 -- versions: the floor moved, and why
-  63-65   the JSON codec -- OPTIONAL, run only if the clock allows
+  44-50   section 9 -- McpAuthRouter, a reachable port, then demo G
+  51-55   section 10 -- extending it: a server for YOUR software
+  56-58   section 11 -- the worker gem's GemStone user
+  59-63   section 12 -- versions: the floor moved, and why
+  64-66   the JSON codec -- OPTIONAL, run only if the clock allows
 
 WHAT IS SET ASIDE, and where. docs/slides/archive.md holds twenty-three slides removed on 2026-09-14
 for time: section 4 (trace 1, a brand-new client's first request, ten slides), the trace half of
@@ -4178,7 +4178,7 @@ A worker at least `maxCommitsBehind` (20) behind is sent one `System continueTra
 | `doomed` | the pending work now **conflicts** — and the *worker* tells its client so on every later call |
 | `stuck` | the view did not move at all; `continueTransaction` was illegal there |
 
-**On a quiet repository, a long call is never ended however long it runs.**
+* On a **quiet repository,** a long call is **never ended** however long it runs.
 
 * **A stuck view is reaped.** All **four** of: configured at all; stuck on *more* passes than the grace; far enough behind to matter; **and** the stone over its own threshold.
 
@@ -4345,12 +4345,14 @@ saying so takes ten seconds you will want back.
 
 <!--
 ================================================================================
-VERTICAL SLICE 8 -- section 9, McpAuthRouter: a reachable port. Five slides and
-demo G. Cut 2026-09-12: eighth in running order, eighth to be cut.
+VERTICAL SLICE 8 -- section 9, McpAuthRouter: a reachable port. A lead, five
+slides and demo G. Cut 2026-09-12: eighth in running order, eighth to be cut. The
+lead slide was added 2026-09-14, so every slide number below counts from it and
+the five content slides are 2 to 6.
 
-Running order and plans, in seconds -- three invariants 45, every request carries
-the token 45, the login 45, the token is the real bound 55, the offline_access
-deviation 60 (250s of slides); demo G 120. About 6 minutes.
+Running order and plans, in seconds -- lead 10; three invariants 45; every
+request carries the token 45; the login 45; the token is the real bound 55; the
+offline_access deviation 60 (260s of slides); demo G 120. About 6:20.
 
 THE OUTLINE SAYS 3 SLIDES AND THIS IS FIVE, which is the same arithmetic as
 section 6's was: the budget line was written before the bullet list under it, and that
@@ -4358,10 +4360,10 @@ list contains three things that are each a slide on their own -- the invariants,
 the renewal bug, and the deviation the outline itself says deserves "a slide of
 its own".
 
-WHAT TO CUT, in order: slide 3 (the login) folds into slide 2 as one sentence if
+WHAT TO CUT, in order: slide 4 (the login) folds into slide 3 as one sentence if
 it has to, and demo G is already the riskiest demo in the deck. Do NOT cut slide
-4 or slide 5. Slide 4 is a silent-data-loss bug with a fix that reads as obvious
-only afterwards; slide 5 is the one place in the talk where this project
+5 or slide 6. Slide 5 is a silent-data-loss bug with a fix that reads as obvious
+only afterwards; slide 6 is the one place in the talk where this project
 knowingly departs from a normative SHOULD NOT, and saying so out loud in front of
 the people who will read the conformance suite is the whole point of having it.
 
@@ -4374,9 +4376,12 @@ exists because without it a real client cannot log in at all.
 
 NO DIAGRAM, deliberately. The shape here is the base router's shape with one hook
 filled in (requestAuthorized:on:, which the archived section 4 spent a slide on), and drawing it again
-with a padlock on it would say less than the sentence already on slide 2.
+with a padlock on it would say less than the sentence already on slide 3. The
+lead slide says the same thing in words, which is the other reason not to draw
+it.
 
-THE VERSION DEPENDENCY is one fine line on slide 1 and nothing more, because
+THE VERSION DEPENDENCY is one fine line on slide 2, echoed in a sentence of the
+lead's notes, and nothing more, because
 section 12 owns versions and spends 12.1 on the obstacle that moved the floor.
 The outline calls 3.7.6 "the one thing in this talk that is a straight ask of the
 room" -- that framing belongs to section 13, which collects the asks; here it is
@@ -4387,7 +4392,7 @@ repository before the talk" (items 7 and 8) and both affecting THIS section:
   * docs/MCP_Client_Notes.md says the offline_access SHOULD NOT is "draft-only,
     and so not a gap in either supported revision". McpAuthConformanceTest says
     SEP-2207 is "status Final, so it binds independently of which revision we
-    claim". Those are opposite claims about whether slide 5's deviation is a
+    claim". Those are opposite claims about whether slide 6's deviation is a
     deviation at all. THE SLIDE FOLLOWS THE CONFORMANCE SUITE, because that is
     the reading the code actually enforces -- but somebody in that room may have
     MCP_Client_Notes.md open, so resolve it before the talk rather than on stage;
@@ -4397,6 +4402,40 @@ repository before the talk" (items 7 and 8) and both affecting THIS section:
     is the first thing a curious attendee will read about conformance.
 ================================================================================
 -->
+<!-- _class: lead -->
+
+# McpAuthRouter
+
+### A reachable port, TLS, and a bearer token on every request
+
+<br>
+
+**§9** · authorization is not a gate in *front* of the server — it decides **whose gem runs the code**
+
+<!--
+One sentence before the first slide, and it is the sentence the whole section is
+a consequence of: this is not "we added OAuth". Every request arrives with a
+token, the token names a GemStone user, and the worker gem that runs the code is
+LOGGED IN AS THAT USER. Authorization here does not stand in front of the server
+deciding whether to let a request through; it decides whose gem runs it. Say that
+and the five slides that follow each read as a consequence rather than a feature.
+
+Name the class, because the shape matters to this room: McpAuthRouter is a
+SUBCLASS of the router they have already seen, with one hook filled in. Nothing
+in the base class changed to make authorization possible. That is why there is no
+new diagram here -- it is the same picture with one method overridden.
+
+The version line, briefly and once: src/auth needs 3.7.5; an external OIDC IdP
+needs 3.7.6. Section 12 owns that argument and will spend a slide on why the
+floor moved, so resist relitigating it here -- it is a fact about what runs
+where, not the ask.
+
+Where this ends: demo G, Alice running code as Alice. It is the riskiest demo in
+the deck because it needs the IdP reachable, so know before you start whether you
+are going to run it.
+-->
+
+---
 
 ## A reachable port, and the three invariants that pay for it
 
