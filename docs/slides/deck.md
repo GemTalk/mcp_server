@@ -3482,8 +3482,7 @@ rather than at commit. Section 11.
 </svg>
 </div>
 
-**S2 commits *after* S1's view — so it is still in `writeSetUnion`.** X is in both write sets, and
-the stone refuses. Nothing is lost, and S1 is told.
+**S2 commits *after* S1's view — so it is still in `writeSetUnion`.** X is in both write sets, and the stone refuses. Nothing is lost, and S1 is told.
 
 <!--
 This is the case the repository was designed for, and it works perfectly. Spend a moment on it,
@@ -3566,8 +3565,7 @@ and re-verify per version.
 </svg>
 </div>
 
-> `readLedger ⊇ writeLedger` was an invariant enforced by the **user interface**, for free, in
-> every Smalltalk browser — so the repository never had to check it.
+> `readLedger ⊇ writeLedger` was an invariant enforced by the **user interface**, for free, in every Smalltalk browser — so the repository never had to check it.
 
 <!--
 One thing changed: `edit X` split into `read X` and `write X`, and something moved the view in
@@ -3717,14 +3715,11 @@ dictionary's printString, which holds the conflicting OBJECTS and can be enormou
 
 ## The rule, the ledgers, and the stamp
 
-> A mutation tool may not touch a method, class, or dictionary unless the recorded read stamp
-> matches the **current view.**
+> A mutation tool may not touch a method, class, or dictionary unless the recorded read stamp matches the **current view.**
 
-`readLedger` is a *dictionary* storing **SHA-256** stamps of each browsing tool result. It is
-*revalidated* at every `commit`, `abort`, and `refresh`. The client is told of dropped entries.
+`readLedger` is a *dictionary* storing **SHA-256** stamps of each browsing tool result. It is *revalidated* at every `commit`, `abort`, and `refresh`. The client is told of dropped entries.
 
-`writeLedger` is a *set* of keys written by a mutation tool. It helps resolve the identity-based
-conflict report back into class names. It is *wiped* at every successful `commit` or `abort`.
+`writeLedger` is a *set* of keys written by a mutation tool. It helps resolve the identity-based conflict report back into class names. It is *wiped* at every successful `commit` or `abort`.
 
 | grain | key | stamped over |
 |---|---|---|
@@ -3838,11 +3833,9 @@ note, which can only come from checking everything.
 
 ## Full disclosure: Circumventing the guardrail
 
-**`execute_code` is outside the guardrail, and its own description says so.** This cannot be
-closed: it can send `System commitTransaction` itself, and read, write, and abort directly.
+**`execute_code` is outside the guardrail, and its own description says so.** This cannot be closed: it can send `System commitTransaction` itself, and read, write, and abort directly.
 
-The stone still protects against write-write conflicts. But a client using `execute_code` can
-silently overwrite another session's commits.
+The stone still protects against write-write conflicts. But a client using `execute_code` can silently overwrite another session's commits.
 
 ## Relevant test suites
 
@@ -5056,18 +5049,15 @@ docs/ReadOnly_User.md has the probe tables.
 
 ## What privileges are needed
 
-> Putting a commit lock on a gem does not prevent a user from **logging in
-> another gem** via `GsTsExternalSession>>login` through which to execute code.
+> Putting a commit lock on a gem does not prevent a user from **logging in another gem** via `GsTsExternalSession>>login` through which to execute code.
 
 * `NoUserAction` and `NoGsFileOnServer` are both assigned to disable this
 * `NoPerformOnServer` and `NoGsFileOnClient` are assigned
-* `CodeModification` is granted so that `execute_code` is available, and so
-that `run_test_class` can be used on classes that compile
+* `CodeModification` is granted so that `execute_code` is available, and so that `run_test_class` can be used on classes that compile
 
 ## Should write locks be privilege-gated?
 
-No privilege allows or prevents `System writeLock:`. A single statement can
-walk `Globals` and take over two thousand locks.
+No privilege allows or prevents `System writeLock:`. A single statement can walk `Globals` and take over two thousand locks.
 
 <!--
 Run this one briskly; the full table is in docs/ReadOnly_User.md and this slide
@@ -5364,8 +5354,7 @@ compiles can be followed by one that runs.
 
 ### `McpGrailToolset` is the worked example
 
-* **Nine tools** — eval, transpile, source, class and method browsing, module
-state, tests, and two search tools — in **its own source group** included via `MCP_TOOLSETS`
+* **Nine tools** — eval, transpile, source, class and method browsing, module state, tests, and two search tools — in **its own source group** included via `MCP_TOOLSETS`
 * It uses two **toolset options** — `grailDirectory` and `testGemConfig` — for proper configuration. These travel as **JSON in the fork string**
 
 <!--
