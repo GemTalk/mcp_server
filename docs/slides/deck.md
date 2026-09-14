@@ -42,7 +42,7 @@ style: |
 
 <!--
 ELEVEN VERTICAL SLICES. Sections 0-12 are cut, and THIS FILE IS IN RUNNING ORDER THROUGHOUT.
-Section 13 is the only one left. Sections 0 and 1 (two slides), then sections 1 to 3 (ten), then
+Section 13 is the only one left. Sections 0 and 1 (two slides), then sections 1 to 3 (eight), then
 section 4 (ten), then section 5 (seven), then section 6 (six), then section 7 (fourteen), then
 section 8 (ten), then section 9 (six), then section 10 (five), then section 11 (three), then
 section 12 (five). In the order they were CUT that is slice 3, slice 4, slice 5, slice 6, slice 7,
@@ -748,10 +748,19 @@ The socket, the routes, the `MCP-Session-Id`&#8594;`McpSession` map behind a mut
 
 <!--
 Two things this slide used to print and now only says: the front end NEVER RUNS A TOOL, and
-transactionless is what stops it pinning the stone's oldest commit record. Section 3's own
-transactionless slide is where the cost gets argued; here they are one clause each.
-Transactionless is the constraint with teeth: front-end code must not read persistent object
-graphs. Stone primitives and lookups by name are fine; walking a committed collection is not.
+transactionless is what stops it pinning the stone's oldest commit record. Section 3's slide
+arguing the cost came down on 2026-09-13, so both halves of it belong here now, a breath each.
+THE PRICE: front-end code must not read persistent object graphs. No walking a committed
+collection, no caching a persistent object across statements. Stone primitives and lookups by
+name are fine, and the class comment says so in capitals.
+THE PAYOFF is the same property from the other side, and it is the half worth saying out loud
+because somebody here has lost an afternoon to it: a COMMITTED recompile of front-end code takes
+effect in a RUNNING server, within two maintenance passes. That is the answer to 'my transport
+fix did not take' -- wait one pass, then check the gem's start time. A gem that cannot hold a
+view across statements is a gem that re-reads its code from the repository constantly.
+The measurement that made the mode non-negotiable is section 8's, and one number carries it: a
+front end left IN transaction sat on the stone's oldest commit record for fifteen hours. Leave
+the rest of that argument to section 8's maintenance-pass slide.
 If someone asks why the router decides the worker's class and toolsets rather than the worker --
 because only this side can see the token.
 THE KERNEL FACT IN THE PROSE IS THE ONE THIS ROOM KNOWS, and section 3's slide for it came down
@@ -2467,17 +2476,19 @@ IDLE worker holding a stale view, the one moment that worker cannot run a line o
 
 <!--
 ================================================================================
-VERTICAL SLICE 4 -- installing, and starting a server. Ten slides -- a lead, the
-file-out table that is all that is left of section 1, two for section 2, four for
-section 3, then demo A and demo B back to back at the end. Cut 2026-09-11: second
-in running order, fourth to be cut. It took the install slide and demo A on
-2026-09-13, when section 1 stopped being a section of its own, and lost two
-slides the same day.
+VERTICAL SLICE 4 -- installing, and starting a server. Eight slides -- a lead,
+the file-out table that is all that is left of section 1, two for section 2, two
+for section 3, then demo A and demo B back to back at the end. Cut 2026-09-11:
+second in running order, fourth to be cut. It took the install slide and demo A
+on 2026-09-13, when section 1 stopped being a section of its own, and lost four
+slides over the two days after -- this slice is now half slides and half demo,
+which is deliberate. It is the first place in the hour the room can see the thing
+running, and nothing here is worth arriving at it tired.
 
 Running order and plans, in seconds -- lead 10; nothing to install 35 (section 1);
 config on an instance 30, what initialize seeds 35 (65s, section 2); forkOnPort:
-45, in the child 40, the banner 30, transactionless 50 (165s, section 3); demo A
-60, demo B 90. 275s of slides plus 150s of demo -- 7:05.
+45, in the child 40 (85s, section 3); demo A 60, demo B 90. 195s of slides plus
+150s of demo -- 5:45.
 
 THE TWO DEMOS ARE ADJACENT ON PURPOSE and they are provisional: demo A installs
 from nothing and demo B starts a server from a here-doc, which is one story told
@@ -2488,8 +2499,8 @@ THE THESIS OF THE PAIR is one sentence and the lead says it: a server is a gem,
 started by evaluating an expression, configured entirely on an instance, and
 detached. Nothing about it is committed and nothing about it is a fact about the
 image -- which is what lets several differently-configured routers serve one
-stone at once, and is also why there is no file on disk to read afterwards (hence
-the banner slide).
+stone at once, and is also why there is no file on disk to read afterwards --
+which is what makes the gem log worth tailing on stage, and is demo B's step 2.
 
 Section 2 is the cheap half and should be run fast. Section 3 is where this
 audience is, and it now opens on forkOnPort: rather than on the kernel fact --
@@ -2501,17 +2512,27 @@ end owns the stream, and owns view hygiene, because only the front end has a
 heartbeat -- sections 6 and 8 each come back for one), and its deployment half is
 in forkOnPort:'s notes, where the seven steps ARE the picture it used to draw.
 
-NOTHING IN THIS SLICE DRAWS ANY MORE. The deployment diagram went with that
-slide, and the loss is smaller than it looks: the gem-contents sequence spends
-seventeen slides on the same three kinds of gem, one box at a time, and the
-request picture is section 4's. If this run ever feels too verbal, the diagram is
-in git -- 3441ade and earlier.
+SECTION 3 IS TWO SLIDES NOW, and both are code. The banner and transactionless
+came down on 2026-09-13 for the same reason, one slide apart: each was being
+described immediately before the room could see it. The banner is demo B's step 2
+-- a slide listing seven lines of log thirty seconds before tailing the log was
+the deck saying a thing out loud and then showing it -- and its notes are on demo
+B, in the order to point at them. Transactionless is a clause in section 1's
+McpRouter box, fourteen slides earlier, and its argument split in two: the price
+and the payoff into that box's notes, the fifteen-hour measurement and the
+refreshFrontEndView bug detector into section 8's maintenance-pass slide, where
+step 1 is the thing the measurement justifies.
+
+NOTHING IN THIS SLICE DRAWS ANY MORE. The deployment diagram went with the
+idle-gem slide, and the loss is smaller than it looks: the gem-contents sequence
+spends seventeen slides on the same three kinds of gem, one box at a time, and
+the request picture is section 4's. If this run ever feels too verbal, the
+diagram is in git -- 3441ade and earlier.
 
 DEPARTURES from docs/Presentation.md:
-  * the outline gives section 3 "2-3 slides"; it gets four plus the demo. The
-    banner is a slide of its own because it is the only artefact that records
-    what a running router was told, and because DEMO B is nothing but that banner
-    on a projector.
+  * the outline gives section 3 "2-3 slides"; it gets two plus the demo, which
+    is the outline's floor rather than a departure. It was four until
+    2026-09-13; what came off is accounted for above.
   * the outline's forkOnPort: step 2 carries a 3.7.2-compatibility aside -- the
     long-way spelling of newDefaultForGemHost: and useOnetimePassword. The slide
     does not mention it at all, because the code is being changed to the 3.7.5
@@ -2651,7 +2672,8 @@ for the config file, and it is worth exactly that much.
 The claim to make explicitly, because it is unusual enough to be worth saying out
 loud: there is no server object in the repository. Nothing was committed when this
 started. If you want to know what a running server was told, you read its gem log
--- which is why the banner gets a slide of its own in a moment.
+-- which is why demo B tails the gem log, and why its banner is seven
+deliberate lines rather than a debug dump.
 
 If someone asks why not a config file: the fork string IS the config file, and it
 has the property a file does not -- it cannot drift from the process that is
@@ -2672,7 +2694,7 @@ running. Two routers on one stone would need two files and a way to say which.
 | this gem | `frontEndTransactionMode` `transactionless` |
 | security | `allowedOriginHosts` loopback · `messageTrace` **false** |
 
-Where `nil` becomes a default: `workerClassName` → `McpServer`; `toolsetNames` → `defaultToolsetNames`; `workerUserId` → **the front end gem's own user.**
+Where `nil` becomes a default: `workerClassName` → `McpServer`; `toolsetNames` → `defaultToolsetNames`; `workerUserId` → the front end gem's own user.
 
 <!--
 Do not read the table. Say the rule, let them scan, and move on -- the numbers
@@ -2751,14 +2773,12 @@ be asserted on an image that carries them.
 ## `McpRouter>>forkOnPort:`, in order
 
 1. `validateWorkerConfig` + `validateTimerConfig` — **in the launching session, not just the child**
-2. Build a `GsTsExternalSession`: **same user, one-time password**, valid 300s
+2. Build a `GsTsExternalSession` with a one-time password**
 3. `login`
 4. **Capture `stoneSessionId` and the host pid _before_ launching the loop** — once the non-blocking call is running, the external session refuses further queries (`GciError`, *operation in progress*)
 5. `forkAndDetachString: 'McpRouter runOnPort: 8000 configJson: ''{…}'''`
 6. `logout` the handle — **the child is independent**
 7. Answer a status string carrying **three ways to stop it**: `./stop-server.sh` (by port), `System stopSession: <id>` (from any session), `kill <pid>` (shell)
-
-Step 1 is the one that earns its keep: without it the operator sees a cheerful *“forked into gem session 42”* and **a port that never opens**, with the reason buried in a detached gem's log.
 
 <!--
 Two things on this slide are worth the room's time and the rest is narration.
@@ -2849,86 +2869,6 @@ between a method that owns its gem and one that is a guest in yours.
 
 ---
 
-## The banner is the only record of what this router was told
-
-Nothing is committed and nothing is on disk, so the gem log **is** the configuration. Seven lines, written after the bind:
-
-* listening address and scheme · **workers and toolsets** — the surface §2 resolved
-* session lifetime · concurrent-session cap (its own line: *how many at once* is a different question from *how long each lasts*)
-* **shared cache name, read back from the cache** — so the log and `System cacheStatisticsForAllSlots` cannot disagree; a name too long arrives truncated
-* **transaction mode as the gem reports it**, not as it was configured
-* view hygiene, in full (§8) · and the trace line **only when tracing is on**
-
-> A reader has to be able to tell a **quiet** server from an **untraced** one. Otherwise an absence of message lines reads as an absence of traffic, which is the wrong conclusion and the expensive one.
-
-<span class="fine">Find the log with `lsof -nP -iTCP:8000 -sTCP:LISTEN`.</span>
-
-<!--
-This slide is here because the demo is about to be this slide, and because it is
-the answer to the question section 2 raised and left open: if nothing is
-committed, how do you find out what a running server is doing?
-
-The two "read it back rather than report it" lines are the ones worth pointing
-at, and they are the same idea twice. The banner must say what IS, not what was
-intended -- because the two diverge in exactly the cases an operator is reading
-the log to understand. A cache name over 31 characters is truncated; a
-transactionless mode that could not be set leaves the gem in whatever mode it
-logged in with, logged at the time with the reason.
-
-The transaction-mode line is also the one that tells you whether the once-a-pass
-abort is releasing a commit record or re-pinning a fresh one. That is the next
-slide.
-
-The blockquote is a small thing that generalises well, and if the room is warm it
-is worth ten seconds: silence is ambiguous, so a log has to say when it is not
-recording. It applies to more of this server than the trace line.
--->
-
----
-
-## The front end runs `transactionless` — and what that costs
-
-**Why:** a front-end gem left in transaction sat on the stone's **oldest commit record for 15 hours**, its last transaction boundary its own login — and *nothing stone-side could ever have moved it*. An in-transaction gem is immune to `sigAbort` unless it asked not to be.
-
-**So:** the mode at startup, and an abort at the top of **every maintenance pass** (`refreshFrontEndView`). It holds no commit record longer than one interval.
-
-* **The price: front-end code must not read persistent object graphs.** No walking a committed collection, no caching a persistent object across statements. Stone primitives and lookups by name are fine — the class comment says so in capitals
-* **The payoff, the same fact from the other side:** a committed recompile of front-end code **takes effect in a running server**, within two passes. That is the answer to *“my transport fix didn't take”* — wait one pass, then check the gem's start time
-
-`refreshFrontEndView` also carries a **bug detector**. Out of transaction, a write to a committed object is allowed, sets `needsCommit`, and is then discarded by the abort with **no error raised anywhere**. The front end writes nothing today; if that ever stops being true, that log line is the only thing that will say so.
-
-<!--
-The measurement is the slide. Fifteen hours, one gem, and the stone with no way
-to move it -- that number is why the mode is not a preference, and this audience
-will recognise the shape of the problem immediately.
-
-Say the asymmetry plainly, because it is the part that surprises: the stone's
-sigAbort mechanism, which exists precisely for this, fires only when the backlog
-is over StnSignalAbortCrBacklog AND the session is on the oldest record AND the
-session is not in a transaction. The gem that is hurting you most is the one
-least reachable.
-
-The price and the payoff are the same property and it is worth saying so. A gem
-that cannot hold a view across statements is a gem whose code is re-read from the
-repository constantly -- which is why a recompile lands in a running server, and
-also why front-end code that cached a persistent object would be reading
-something that no longer exists.
-
-The bug detector is the best small thing in this section and takes fifteen
-seconds. Out of transaction, the mistake that would raise 2030 at commit time in
-an ordinary gem raises NOTHING -- the write is simply discarded. A one-line check
-at the top of each pass is the whole defence, and it has never fired.
-
-If asked "so what if the mode cannot be set": it is logged and swallowed. A front
-end that could not get the mode is still a working front end, just one that pins
-a commit record; refusing to serve for that reason would be the worse trade. The
-failure that actually happens is transactionless in a SOLO session -- the
-repository open by this gem alone -- which is no way to run a server but is
-exactly how someone tries one out.
--->
-
----
-
 <!-- _class: demo -->
 
 # DEMO A — install, from nothing
@@ -2987,9 +2927,9 @@ one-liner is the demo's only fragile part, and hunting for a gem log on a
 projector is dead air.
 
 What to point at, in order: the three stop lines (there is no pid file, this is
-the record), then the toolsets line in the banner -- which is section 2's slide
-three, live, and the moment to say "seven toolsets, thirty-one tools, and Grail
-is not among them because I did not name it". If the demo machine has a Grail
+the record), then the toolsets line in the banner -- which is the one line
+section 2 spends on toolsetNames, live, and the moment to say "seven toolsets,
+thirty-one tools, and Grail is not among them because I did not name it". If the demo machine has a Grail
 checkout, having a SECOND server on 8001 with MCP_TOOLSETS set is a thirty-second
 addition that makes the point better than any slide: same image, two servers,
 different surfaces.
@@ -3002,6 +2942,38 @@ Fallback if the fork fails on stage: the banner is a screenshot, and say so
 without apologising. The thing that actually fails here is a netldi that is not
 running, which --check would have caught; run install.sh --check in demo A and
 this one is already de-risked.
+
+THE BANNER, absorbed 2026-09-13 from the slide that used to sit just before this
+run. It came down because step 2 puts the real thing on the projector, and a
+slide describing seven lines of log immediately before the log itself was the
+deck telling the room something it was thirty seconds from seeing. What that
+slide argued is worth saying over the scroll, in this order.
+
+The frame first, and it closes section 2's open question: nothing is committed
+and nothing is on disk, so THE GEM LOG IS THE CONFIGURATION. It is the only
+record of what this router was told, which is why it is seven deliberate lines
+written immediately after the bind rather than a debug dump.
+
+Then point at lines, not at all of them. Listening address and scheme; workers
+and toolsets, which is the surface section 2 resolved and is already the second
+thing to point at above; session lifetime and the concurrency cap on SEPARATE
+lines, because how many
+at once is a different question from how long each lasts; view hygiene in full,
+which section 8 will come back and read.
+
+The two lines that are read BACK rather than reported are the same idea twice and
+are the best thing on the screen: the shared cache name comes from the cache, so
+the log and System cacheStatisticsForAllSlots cannot disagree -- a name over 31
+characters arrives truncated -- and the transaction mode is what the GEM REPORTS,
+not what was configured. The banner must say what IS, not what was intended,
+because the two diverge in exactly the cases somebody is reading the log to
+understand.
+
+Last, the trace line, which appears ONLY when tracing is on. Ten seconds if the
+room is warm, because it generalises past this server: a reader has to be able to
+tell a QUIET server from an UNTRACED one, or an absence of message lines reads as
+an absence of traffic -- the wrong conclusion, and the expensive one. Silence is
+ambiguous, so a log has to say when it is not recording.
 -->
 
 ---
@@ -4941,6 +4913,31 @@ Step 1 first: the front end moves its OWN view, which is two things at once -- i
 commit record open for the rest of the stone, and it is the front end's code-refresh point (a
 committed recompile of McpRouter takes effect within two passes). Everything after it therefore
 reasons about the repository as it is NOW rather than as it was when this gem logged in.
+
+WHY STEP 1 IS NOT HOUSEKEEPING, absorbed 2026-09-13 from section 3's transactionless slide. The
+measurement is the whole argument and it is one sentence: a front-end gem left in transaction sat on
+this stone's oldest commit record for FIFTEEN HOURS, its last transaction boundary its own login,
+and nothing stone-side could ever have moved it. That is why the mode is set at startup and why this
+step is first rather than convenient.
+
+Say the asymmetry plainly if the room is with you, because it is the part that surprises and this
+audience will recognise it: sigAbort, which exists precisely for this, fires only when the backlog
+is over StnSignalAbortCrBacklog AND the session is on the oldest record AND the session is NOT in a
+transaction. The gem hurting you most is the one least reachable. Section 1's McpRouter box says the
+front end runs transactionless and what it costs; this is where the number lives.
+
+The bug detector in refreshFrontEndView is the best small thing in the section and takes fifteen
+seconds. Out of transaction, a write to a committed object is ALLOWED, sets needsCommit, and is then
+discarded by the abort with no error raised anywhere -- the mistake that would raise 2030 at commit
+time in an ordinary gem raises nothing here. A one-line check at the top of each pass is the whole
+defence. The front end writes nothing today; if that ever stops being true, that log line is the
+only thing that will say so, and it has never fired.
+
+Two answers to have ready. If asked what happens when the mode cannot be set: it is logged and
+swallowed, because a front end that pins a commit record is still a working front end and refusing
+to serve for that reason would be the worse trade. The failure that actually happens is
+transactionless in a SOLO session -- the repository open by this gem alone -- which is no way to run
+a server but is exactly how someone tries one out.
 
 Reaping last: a session found gone while probing is freed in the SAME pass rather than the next one.
 At a 60-second interval that is a minute of a login slot, every time.
