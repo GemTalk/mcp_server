@@ -4642,9 +4642,7 @@ are going to run it.
 
 ## A secure router on a reachable port
 
-`McpAuthRouter` is the class you instantiate to get a port reachable beyond loopback. `bindAddress` is configurable. **TLS is mandatory,** even on loopback. Requires a resource server to issue JWTs naming the auth router in its audience.
-
-The JWT logs in the worker gem as that user, subject to that user's privileges.
+`McpAuthRouter` is the class for a configurable `bindAddress`. **TLS is mandatory,** even on loopback. Requires a resource server to issue JWTs with the auth router in its audience. Logs into the worker gem as that user.
 
 <!--
 THIS SLIDE WAS FOUR SLIDES UNTIL 2026-09-14. Its face was rewritten to state the
@@ -4812,16 +4810,15 @@ client gets in at all.
 
 ---
 
-## The `offline_access` deviation — said out loud, on purpose
+### The `offline_access` deviation
 
-**The rule.** MCP **SEP-2207** (status *Final*, so the conformance suite treats it as binding whichever revision we claim): **SHOULD NOT** advertise `offline_access` in `WWW-Authenticate` or `scopes_supported`.
-
-**What forces it is a pair of conditions, neither of them ours:** a client that **appends `offline_access` to its authorization request on its own**, plus an authorization server that **rejects a request naming a scope that client was never assigned**. Keycloak and Authelia reject **before any login page**.
-
-* **Keycloak compounds it.** An RFC 7591 dynamic registration carrying a `scope` field **replaces** the realm's defaults — so the resource *advertising* the scope is the only way such a client ever holds it. Omitting it **breaks the browser login outright**, not merely shortens sessions
+**The rule.** MCP **SHOULD NOT** advertise `offline_access` in `WWW-Authenticate` or `scopes_supported`. However:
+* The Claude Code client appends `offline_access` to its authorization request **on its own**
+* Some authorization servers **reject a request naming a scope that client was never assigned**. Keycloak and Authelia reject **before any login page**
+**Keycloak compounds it.** An RFC 7591 dynamic registration carrying a `scope` field **replaces** the realm's defaults — so the resource *advertising* the scope is the only way such a client ever holds it.
 * **Two exits tried, neither available.** Pinning the scopes **client-side** failed (2026-08-20) — the client kept appending it. Nothing **server-side** substitutes: policies only *validate*, mappers only *emit claims*; neither can **assign** a scope. **CIMD** remains, untested
 
-> **How it is kept honest.** The conformance suite asserts the rule against a **`conformantRouter` fixture** — so a router is spec-clean *unless an operator opts out* — and the test deployment opts out via `MCP_EXTRA_SCOPES`, **knowingly**.
+> Our conformance suite asserts the rule against a **`conformantRouter` fixture** — so a router is spec-clean *unless an operator opts out* via `MCP_EXTRA_SCOPES`.
 
 <!--
 This is the slide this section exists to be able to give. A deliberate departure
