@@ -4948,17 +4948,17 @@ different history, it is on the slide on purpose, and it is what earns the ask.
 ================================================================================
 -->
 
-## The boundary is the GemStone user the worker logs in as
+## A read-only user for McpRouter
 
 ```bash
 MCP_WORKER_USER=McpReadOnly ./run-server.sh
 ```
 
-`McpRouter>>workerUserId` names it — **one user per router, not per session**: every worker gem this router opens logs in as that user. `startWithId:workerUser:` does the login. **Default `nil` — the front end's own user.** Enforced **in the stone, by the VM, on every operation**.
+Configured at `McpRouter>>workerUserId` — **one user per router, not per session.** `startWithId:workerUser:` does the login. Default `nil` — the front end's own user.
 
-* **No credential is configured.** The front end mints a **one-time password per session**, needing **one committed grant** — `addOnetimePasswordUserId:` on the front-end user. So `configDict` carries **only an identifier** (§3)
-* **`McpAuthRouter` refuses `workerUserId:`** — a further class invariant (§9): there each worker is **the user its bearer token names**, and **silently ignoring a configured one would be the dangerous reading**
-* **The commit lock.** `UserProfile>>disableCommits` → `sessionCanCommit` is false **from login**; `commit` raises **`TransactionError` 2249**. Reads and compiling still work — the session accumulates pending work it cannot keep, so the **`[session]` line points it at `abort`**
+* **No credential.** The front end mints a **one-time password per session**, needing **one committed grant** — `addOnetimePasswordUserId:` on the front-end user. So `configDict` carries **only an identifier**
+* **`McpAuthRouter` refuses `workerUserId:`** — there each worker is **the user its bearer token names**
+* `UserProfile>>disableCommits` → `sessionCanCommit` is false **from login**; `commit` raises **`TransactionError` 2249**. Reads and compiling still work — the session accumulates pending work it cannot keep, so the **`[session]` line points it at `abort`**
 * **Object authorization does better where it applies:** a write this user is not authorized for is refused **`SecurityError` 2116 *at the write*** — `needsCommit` stays false, so **no dirty state** and no phantom value for its own later reads
 
 <!--
@@ -5000,15 +5000,19 @@ docs/ReadOnly_User.md has the probe tables.
 
 ---
 
-## What it costs, and what it does not close
+## What privileges are needed or withheld
 
-**One privilege is granted on purpose:** `CodeModification`. Without it `execute_code` raises **2151** on so much as a helper class, and `run_test_class` cannot run a suite that compiles anything. **Nothing compiled can be committed**, so it dies with the gem.
+> Putting a commit lock on a gem does not prevent a user from **logging in
+> another gem** via `GsTsExternalSession>>login` through which to execute code.
 
-* Four **inverse** privileges are withheld, and they are cached in the VM **at login** — they must be on the profile *before* the worker gem logs in: `NoPerformOnServer`, `NoUserAction`, `NoGsFileOnServer`, `NoGsFileOnClient`
-* **Which one closes the second-gem route** — can a commit-locked session log in a *second* gem that is not locked? Measured, one privilege at a time: **the commit lock alone does not close it.** `GsTsExternalSession>>login` is an **FFI callout**, and **`NoUserAction` or `NoGsFileOnServer` each refuse it** with 2151. The default set has both
-* **A different user resolves names differently.** A symbol list is name *resolution*, not authorization — but `Mcp` is not in a new profile's default list, and a worker that cannot see it **fails its first session**. `setup-read-only-user.sh` copies the front-end user's list, **a point-in-time snapshot**
+* `NoUserAction` and `NoGsFileOnServer` are both assigned to disable this
+* `NoPerformOnServer` and `NoGsFileOnClient` are assigned
+* `CodeModification` is granted so that `execute_code` is available, and so
+that `run_test_class` can be used on classes that compile
 
-<span class="fine">**What stays open:** reads (object security policies are the answer to *that*, not this), resources (§8's lifetimes), and **locks**.</span>
+**A different user resolves names differently.** `Mcp` is not in a new profile's default list, and a worker that cannot see it **fails its first session**. `setup-read-only-user.sh` copies the front-end user's list.
+
+<span class="fine">**What stays open:** reads (object security policies are the answer to *that*, not this), resources, and **locks**.</span>
 
 <!--
 Run this one briskly; the full table is in docs/ReadOnly_User.md and this slide
