@@ -2672,7 +2672,7 @@ running. Two routers on one stone would need two files and a way to say which.
 | this gem | `frontEndTransactionMode` `transactionless` |
 | security | `allowedOriginHosts` loopback · `messageTrace` **false** |
 
-Where `nil` becomes a default: `workerClassName` → `McpServer`; `toolsetNames` → `defaultToolsetNames` — **the core seven, and nothing else.**
+Where `nil` becomes a default: `workerClassName` → `McpServer`; `toolsetNames` → `defaultToolsetNames`; `workerUserId` → **the front end gem's own user.**
 
 <!--
 Do not read the table. Say the rule, let them scan, and move on -- the numbers
@@ -2696,6 +2696,15 @@ requestTimeoutSeconds nil is the one that draws a question. The honest answer is
 section 8's and it is one sentence: a deadline on the front end cannot stop the
 work, it can only stop waiting for it, which left the gem running and the client
 told it had failed. Promise section 8 and move on.
+
+workerUserId is the third of the three, and the only one whose default is a
+SECURITY default rather than a convenience: nil means the worker gem logs in as
+whoever started the front end, so an unconfigured server is exactly as privileged
+as the person who launched it. It is one line here and section 9's whole argument
+later. Two things to have ready if the hand goes up now: it is per ROUTER, not per
+session -- every worker this router opens is the same GemStone user -- and
+McpAuthRouter REFUSES it, because there the bearer token names the user. Say
+"section 9" and move on.
 
 THE TOOL SURFACE, absorbed 2026-09-13 from the slide that used to follow this
 one. The last line of the slide is all that is left of it, and the argument
@@ -3377,8 +3386,10 @@ McpServer, so "which instance" is not a style question. Two instances would be
 two ledgers, and the second one would licence a write on the strength of a read
 it never saw. That is why currentServer exists and why nothing else builds one.
 
-"31 tool(s)" is the core seven's count, and it is the same 31 that was on section
-2's toolset slide. Point at that if the room caught it.
+"31 tool(s)" is the core seven's count, and this is the first place in the deck
+the surface gets COUNTED -- section 2 spends one line saying only that toolsetNames
+nil resolves to defaultToolsetNames. Section 10 counts it again at 40, with Grail
+named. Point forward if the room caught it.
 -->
 
 ---
