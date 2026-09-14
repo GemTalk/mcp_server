@@ -106,8 +106,10 @@ time: the collision slide and the upstream-ask slide, which between them held
 EVERY MEASUREMENT THAT SECTION HAD. Section 10 is now a lead and two slides, and
 what it has left is the shape without the evidence -- it says what extending this
 server looks like and no longer shows anybody having done it. Their notes, and
-their faces in prose, are on deck.md page 52 under two banners anchored to the
-two words that survive there: "tests" and "two search tools". These three section
+their faces in prose, are on deck.md page 51 under two banners anchored to the
+two words that survive there: "tests" and "two search tools". (That was page 52
+until the two slides left in the section were merged into one, later the same
+day.) These three section
 10 slides are last in this file, under two headers.
 
 WHAT STAYED BEHIND IN THE DECK, deliberately:
@@ -2089,7 +2091,8 @@ the toolset and a fictional one for the subclass.)
 With a named toolset on the face of that slide, this one's job -- introducing the
 idea of a toolset at all -- was being done a slide later and more concretely.
 Section 10 went from a lead and five slides to a lead and four, and from about 4
-minutes to about 3 1/4.
+minutes to about 3 1/4. By the end of that day it was a lead and one merged
+slide, about 90 seconds; see the header below this one.
 
 WHAT THE DECK NO LONGER SAYS ANYWHERE ON A FACE, and this is the part worth
 weighing before this one stays gone. How a toolset is WRITTEN: subclass
@@ -2098,7 +2101,8 @@ builders, write handlers that answer a String, and pass mutations through
 assertMutableClass:. The deck is a talk to GemStone developers about extending
 this server, and after this cut no slide in it shows a line of that. It is all on
 deck.md page 51 under a banner -- the FACE as well as the notes, which no other
-entry in this file needed -- so a speaker reading their notes still has it. A room
+entry in this file needed, and page 51 is now the merged slide that is the whole
+of section 10 -- so a speaker reading their notes still has it. A room
 that only watches does not.
 
 AND ONE POINTER WENT WITH IT: the blockquote reading "tools/list is unfiltered:
@@ -2206,8 +2210,11 @@ PAGE 52's NOTES, and trim the paragraph above them that says this slide now ends
 the talk proper.
 
 WHERE THEY GO BACK: after the worked example, in this order, which is where they
-were. Section 10's lead and slice header would both want reverting too -- the
-lead's notes now promise that the section ends on the worked example, and the
+were -- but the worked example is no longer a slide of its own. It was merged
+into the surface slide later on 2026-09-14, so restoring either of these means
+splitting page 51 back into two first, and its notes name the three banners to
+take apart. Section 10's lead and slice header would both want reverting too --
+the lead's notes now promise that the section ends on its one slide, and the
 slice header's WHAT TO CUT list has been rewritten around their absence.
 
 Running order and plans as they were, in seconds -- the collision 55, the

@@ -42,7 +42,7 @@ style: |
 ---
 
 <!--
-FIFTY-SIX SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut
+FIFTY-FIVE SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut
 once; eight stretches of them are now set aside. Section 13 is the only one never written.
 
 THE TARGET IS 45 MINUTES as of 2026-09-14, down from an hour, and that is what the current shape is
@@ -56,8 +56,8 @@ for. The running order:
   39-43   section 8 -- the router maintenance cycle, then demo F
   44-47   section 9 -- McpAuthRouter, a reachable port, then demo G (FOLDED 2026-09-14)
   48-49   section 11 -- the worker gem's GemStone user (MOVED HERE, THEN FOLDED, 2026-09-14)
-  50-52   section 10 -- a lead, then extending it: a server for YOUR software (CUT TO THE BONE)
-  53-56   THE APPENDIX -- a lead, then the JSON codec. OPTIONAL, run only if the clock allows
+  50-51   section 10 -- a lead, then ONE slide: extending it, a server for YOUR software
+  52-55   THE APPENDIX -- a lead, then the JSON codec. OPTIONAL, run only if the clock allows
 
 RUNNING ORDER IS NOT SECTION-NUMBER ORDER ANY MORE. Section 11 was moved ahead of section 10 on
 2026-09-14, so the deck runs 9, 11, 10. The reason is thematic rather than structural: section 9's
@@ -127,8 +127,10 @@ domain toolset collides with the session model" and "A GemStone result, and thre
 filed" both went, taking every measurement the section had: 132 defects against 386/386 clean, the
 31 modified objects of a cold Grail import, the 262-second test class, the sender search that
 answers an empty array where twelve senders exist, and the three filed Grail issues. All of it is
-on page 52 under two banners, anchored to the two words that survive on that face -- "tests" and
-"two search tools". The section is a lead and two slides now, about 100 seconds, and it is THE
+on page 51 under two banners, anchored to the two words that survive on that face -- "tests" and
+"two search tools". THEN THE TWO SLIDES THAT WERE LEFT WERE MERGED, tightened until the surface
+shapes and the worked example fitted one face with the Grail half as a subheading. The section is a
+lead and ONE slide now, about 90 seconds, carrying three banners' worth of notes, and it is THE
 SHAPE WITHOUT THE EVIDENCE: it says what extending this server looks like and no longer shows
 anybody having done it. It is the first place to spend a minute if one appears. Thirty-five slides
 are now set aside in total.
@@ -5183,20 +5185,29 @@ the room looks unconvinced that this reaches past application data.
 <!--
 ================================================================================
 VERTICAL SLICE 9 -- section 10, extending it: a server for YOUR software, with
-the Grail MCP Server as the worked example. A lead and two slides, no demo. Cut
+the Grail MCP Server as the worked example. A lead and ONE slide, no demo. Cut
 2026-09-12: ninth in running order, ninth to be cut. IT IS NOW TENTH, AND LAST
 BEFORE THE OPTIONAL CODEC: section 11 was moved ahead of it on 2026-09-14, so
 this section closes the talk proper.
 
-Running order and plans, in seconds -- lead 10, pick a surface 50, the worked
-example 40. About 1 2/3 minutes.
+Running order and plans, in seconds -- lead 10, the one content slide 80. About
+1 1/2 minutes.
 
-CUT TO THE BONE 2026-09-14, in three passes on one day: the toolset slide went
-first, then the collision and the upstream ask together. A lead and five slides
-and 4 minutes became a lead and two slides and 100 seconds. WHAT IS LEFT IS THE
+CUT TO THE BONE 2026-09-14, in four passes on one day: the toolset slide went
+first, then the collision and the upstream ask together, and finally the two that
+were left were TIGHTENED UNTIL THEY FITTED ONE FACE and merged. A lead and five
+slides and 4 minutes became a lead and one slide and 90 seconds.
+
+A LEAD IN FRONT OF A SINGLE SLIDE is worth a deliberate look now. It was right
+when it introduced five; ten seconds to announce one slide is a different
+proposition, and the alternative is to fold the lead's sentence into the slide's
+own opening and give the section a straight 80 seconds. Kept for now because the
+lead is what tells the room the talk has changed register -- from "what this
+server does" to "here is the seam" -- and that turn is worth announcing whatever
+follows it. WHAT IS LEFT IS THE
 SHAPE AND NOT THE EVIDENCE -- how a deployment picks a surface, and Grail as the
 worked example of one. Everything measured that this section used to put on a
-screen is now in slide 3's notes under two banners: the 132-against-386/386 test
+screen is now in the notes of that one slide, under three banners: the 132-against-386/386 test
 result, the 31 modified objects of a cold import, the 262-second class, the
 empty-array sender search, and Grail #883/#884/#885. THAT IS A LOT OF ARGUMENT
 BEHIND TWO SLIDES, and it is the section most likely to want a minute back if one
@@ -5222,13 +5233,13 @@ nothing about it is special. Slide numbers below COUNT THE LEAD.
 THE OUTLINE SAYS 2 SLIDES. It is the third section where that number predates
 the bullet list under it, and this one is the most lopsided: the list runs to
 nine bullets and two of them are measurements with a story attached. It ran to
-five slides; it is two, since 2026-09-14, and the outline's number is now nearly
-right for the wrong reason.
+five slides; since 2026-09-14 it is one, and the outline's number is now wrong in
+the other direction for the first time.
 
 THIS IS THE SECTION THE ROOM CAN ACT ON SECOND-MOST, after the codec's defect
 table -- which is now at the END of the deck and may not run at all, so if it does not, this is
 the first. That was easier to claim while the Grail result and its three filed issues were on a
-face; since 2026-09-14 they are in slide 3's notes, so acting on this section now depends on the
+face; since 2026-09-14 they are in slide 2's notes, so acting on this section now depends on the
 speaker saying so. Since 2026-09-14 it is also the LAST thing the room hears if the codec
 does not run, which is a second reason to protect it. Everything before it has been "here is what this server does"; this is
 "here is the seam, and here is what happens when you use it". Pitch it that way.
@@ -5249,16 +5260,18 @@ disagreement is yours to resolve -- with a number attached that nobody can argue
 with, 132 defects against 386/386 clean. Every vendor in that room who writes a
 toolset will meet some version of it. IT IS NOT A SLIDE ANY MORE, as of
 2026-09-14, and this paragraph stays because it is still the best thirty seconds
-in the section: it is the first banner in slide 3's notes, and it is what to say
+in the section: it is the second banner in slide 2's notes, and it is what to say
 if the clock gives anything back.
 
 WHAT TO CUT: nothing is left to cut but the section. Both of the slides this list
 used to nominate have gone, and so has the one it said not to cut -- the upstream
-ask first, the collision with it. What remains is a lead, the surface shapes and
-the worked example, which is the minimum that makes the section an argument
-rather than a mention. If more time has to come out of this talk, take the whole
-section and keep the appendix; do not take the worked example and leave the
-shapes, because then nothing shows that a third party has actually done it.
+ask first, the collision with it. What remains is a lead and one slide carrying
+both the surface shapes and the worked example, which is the minimum that makes
+the section an argument rather than a mention. If more time has to come out of
+this talk, take the whole section and keep the appendix. There is no half of this
+slide worth keeping without the other: the shapes without the worked example show
+nothing a third party has done, and the worked example without the shapes is a
+Grail slide in a talk that is not about Grail.
 
 NO DEMO, matching the demo inventory and the outline AS IT WAS. THE NEW OUTLINE
 AT THE END OF docs/Presentation.md ASKS FOR ONE -- its section 6 is "Grail MCP
@@ -5267,22 +5280,22 @@ oversight to tidy away here. The argument against is still the one below: demo C
 already showed a tool surface being chosen, and a sixth demo showing a different
 one is the same screen with different words in it. The argument for is that this
 is now the last section before the optional codec, so it ends the talk, and
-ending on a live Grail server is a better close than ending on the worked
-example -- which is where the section now stops, the upstream ask having been set
+ending on a live Grail server is a better close than ending on the one slide the
+section has left -- which is where the section now stops, the upstream ask having been set
 aside on 2026-09-14. The case for a demo is stronger than it was.
 Decide it deliberately; nothing in this slice depends on the answer.
 
 DEPARTURES from docs/Presentation.md:
   * the outline's Grail bullet names grailDirectory as the options example.
     There are TWO declared options -- grailDirectory and testGemConfig -- and
-    slide 3 says two, because "a toolset declares its options" is the point and
+    slide 2 says two, because "a toolset declares its options" is the point and
     one option makes it look like a special case;
-  * McpGrailToolset's OTHER collision with the model is speaker notes on slide 3,
+  * McpGrailToolset's OTHER collision with the model is speaker notes on slide 2,
     inside the collision banner rather than on a face: Grail models Python exceptions outside the Smalltalk Error
     hierarchy, so McpDispatcher's `on: Error do:` cannot see them and an uncaught
     one would take the whole worker gem down rather than answer the client. It is
     excellent material and there is no room for it; it is the first thing to say
-    if a hand goes up on slide 3.
+    if a hand goes up on slide 2.
 ================================================================================
 -->
 
@@ -5311,19 +5324,19 @@ gone and nothing joins a tool surface by being loaded. Before that merge this
 section could only describe how you WOULD add a toolset. Now it can say "copy
 this" and mean it literally, and the worked example is not an insider.
 
-Do NOT spend the seam's argument here -- slide 2 picks a surface and, since the
-toolset slide was removed on 2026-09-14, carries how a toolset is written in its
-notes as well. It is fifty seconds away. The lead says what the section is FOR,
-not how it works.
+Do NOT spend the seam's argument here -- slide 2 is the whole of the section now,
+and carries the surface shapes, the worked example, and in its notes how a
+toolset is written. It is ten seconds away. The lead says what the section is
+FOR, not how it works.
 
-Where this ends, and it is worth knowing before you start: slide 3, the worked
-example. It used to end two slides further on, with the collision between a domain
-model and this server's session model -- 132 defects against 386/386 clean, the
-thing every vendor in the room who writes a toolset would have recognised. Both
-of those slides were set aside on 2026-09-14 and both are in slide 3's notes. So
-the section's best material is now something you say after the last bullet rather
-than something the room reads, and this lead should promise the shape rather than
-the number.
+Where this ends, and it is worth knowing before you start: slide 2, which is the
+only slide. It used to end three slides further on, with the collision between a
+domain model and this server's session model -- 132 defects against 386/386
+clean, the thing every vendor in the room who writes a toolset would have
+recognised. That slide and the upstream ask were set aside on 2026-09-14 and both
+are in slide 2's notes. So the section's best material is now something you say
+after the last bullet rather than something the room reads, and this lead should
+promise the shape rather than the number.
 
 THIS IS NOW THE LAST SECTION OF THE TALK PROPER. The codec slides after it are
 optional and go first if the clock has gone, so plan to land on the worked
@@ -5345,12 +5358,25 @@ compiles can be followed by one that runs.
 
 ## How a deployment picks a surface — three shapes
 
-* **`MCP_TOOLSETS="BrainFreezeToolset"`** → a server with **its own tools**
-to surface **its own domain operations** in a meaningful way, not developer coding tools
-* **`MCP_WORKER_CLASS=AcmeDbServer`** → subclass `McpServer` to change **behaviour:** the kernel guards (`isProtectedClass:`, `protectedDictionaryNames`), the server instructions, the identity **defaults** an unconfigured deployment reports
-* **`serverName:` / `serverVersion:` say which *software* this is** — the product's to set. **`serverTitle:` labels *this instance***
+* **`MCP_TOOLSETS="BrainFreezeToolset"`** → a server with **its own tools** to surface **its own domain operations** rather than developer coding tools
+* **`MCP_WORKER_CLASS=AcmeDbServer`** → subclass `McpServer` to change **behaviour:** `isProtectedClass:`, `protectedDictionaryNames`, server instructions, the **defaults** for an unconfigured deployment
+* **`serverName:` / `serverVersion:`** to identify the product. `serverTitle:` labels *the instance*
+
+### `McpGrailToolset` is the worked example
+
+* **Nine tools** — eval, transpile, source, class and method browsing, module
+state, tests, and two search tools — in **its own source group** included via `MCP_TOOLSETS`
+* It uses two **toolset options** — `grailDirectory` and `testGemConfig` — for proper configuration. These travel as **JSON in the fork string**
 
 <!--
+THIS SLIDE IS TWO SLIDES MERGED, 2026-09-14. "How a deployment picks a
+surface" and "McpGrailToolset is the worked example" were tightened until
+they fitted one face, and the Grail half is the ### subheading half way down.
+IT IS THE ONLY CONTENT SLIDE SECTION 10 HAS. Everything the section used to
+show is in the three banners below -- how a toolset is written, the collision,
+and the upstream ask -- so this one slide is the shape and the notes are the
+whole of the evidence.
+
 Three shapes and they are genuinely different decisions, which is why they are
 three bullets rather than a paragraph. What tools; how it behaves; and what it
 calls itself. SINCE 2026-09-14 THIS SLIDE OPENS THE SECTION -- the "write a
@@ -5384,6 +5410,36 @@ serverTitle: is omitted entirely rather than sent as null, the same rule the
 archived section 4 met on serverInfo -- an absent key means "none given", and null
 means the word null rendered somewhere. So a title being present means a human
 deliberately labelled that box.
+
+This slide is the payoff of section 2's one line on the named tool surface, and
+it is worth pointing back explicitly. Before that merge, the only optional
+toolset in the tree was wired by a mechanism nobody else could use, so this
+section could only describe how you WOULD add one. Now it can say copy this.
+Since 2026-09-13 section 2 makes the claim and this section makes the case, so
+expect the "why did the probe exist at all?" question HERE: convenience, and it
+was wrong for a reason worth naming -- installing something and running it are
+different decisions, and conflating them meant an operator who had never heard of
+Grail was serving its tools.
+
+"It needs nothing from the server" is the claim to make deliberately. Grail's
+toolset gets no hook, no special case, no entry in core -- it resolves by name
+like any other and takes its options like any other. If it needed a hook of its
+own, it would not be an example of anything.
+
+Two options rather than one matters for the same reason: one option looks like a
+special case, two looks like a mechanism.
+
+The narrowing rule at the end is the one a vendor will hit: configure options for
+a toolset, then change the surface and forget, and the router tells you at
+startup instead of silently dropping them. Section 2's validateWorkerConfig.
+
+THIS SLIDE NOW ENDS THE TALK PROPER. The two slides that followed it were set
+aside on 2026-09-14 and their notes are below, so the last words before the
+optional appendix are yours rather than the screen's. TWO WORDS IN THE FIRST
+BULLET ARE ALL THAT IS LEFT OF THEM -- "tests" and "two search tools" -- and each
+had a slide of its own with a measurement on it. If the clock is holding, spend
+thirty seconds on either; if a hand goes up about Grail, it is almost certainly
+about one of these two.
 
 ================================================================================
 TO ADD TOOLS, WRITE A TOOLSET -- from the slide of that name, the section's first
@@ -5430,49 +5486,6 @@ should not have to know. The fail-closed-with-no-server case is not theoretical
 If asked how a handler reports failure: raise. The dispatcher classifies Errors
 into the isError envelope with a kind, which the archived section 5 showed. A
 handler does not build error envelopes itself.
--->
-
----
-
-## `McpGrailToolset` is the worked example
-
-* **Nine tools** — eval, transpile, source, class and method browsing, module
-state, tests, and two search tools — in **its own source group** — turned on by
-naming it in `MCP_TOOLSETS`
-* It also uses **toolset options**. `McpGrailToolset class>>declaredOptionNames`
-declares **two** — `grailDirectory` and `testGemConfig` — and they travel as
-**JSON in the fork string**
-
-<!--
-This slide is the payoff of section 2's one line on the named tool surface, and
-it is worth pointing back explicitly. Before that merge, the only optional
-toolset in the tree was wired by a mechanism nobody else could use, so this
-section could only describe how you WOULD add one. Now it can say copy this.
-Since 2026-09-13 section 2 makes the claim and this section makes the case, so
-expect the "why did the probe exist at all?" question HERE: convenience, and it
-was wrong for a reason worth naming -- installing something and running it are
-different decisions, and conflating them meant an operator who had never heard of
-Grail was serving its tools.
-
-"It needs nothing from the server" is the claim to make deliberately. Grail's
-toolset gets no hook, no special case, no entry in core -- it resolves by name
-like any other and takes its options like any other. If it needed a hook of its
-own, it would not be an example of anything.
-
-Two options rather than one matters for the same reason: one option looks like a
-special case, two looks like a mechanism.
-
-The narrowing rule at the end is the one a vendor will hit: configure options for
-a toolset, then change the surface and forget, and the router tells you at
-startup instead of silently dropping them. Section 2's validateWorkerConfig.
-
-THIS SLIDE NOW ENDS THE TALK PROPER. The two slides that followed it were set
-aside on 2026-09-14 and their notes are below, so the last words before the
-optional appendix are yours rather than the screen's. TWO WORDS IN THE FIRST
-BULLET ARE ALL THAT IS LEFT OF THEM -- "tests" and "two search tools" -- and each
-had a slide of its own with a measurement on it. If the clock is holding, spend
-thirty seconds on either; if a hand goes up about Grail, it is almost certainly
-about one of these two.
 
 ================================================================================
 WHEN A DOMAIN TOOLSET COLLIDES WITH THE SESSION MODEL -- from the slide of that
