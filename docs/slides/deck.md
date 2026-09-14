@@ -23,10 +23,10 @@ style: |
   .verbatim p { margin: 0 0 .8em; }
   .verbatim .elide { color: #b4451f; opacity: .7; letter-spacing: .22em; margin: 0 0 .8em; }
   .cap { color: #b4451f; font-weight: 600; }
-  .ex { font-family: ui-monospace, monospace; font-size: 15px; line-height: 1.45;
-        border-left: 3px solid #ccd6da; padding-left: .7em; margin: 0 0 .55em; }
-  .exlbl { font-size: 13px; letter-spacing: .06em; text-transform: uppercase;
-           color: #4a5560; margin: 0 0 .12em; }
+  .ex { font-family: ui-monospace, monospace; font-size: 16.5px; line-height: 1.5;
+        border-left: 3px solid #ccd6da; padding-left: .7em; margin: 0 0 1.6em; }
+  .exlbl { font-size: 13.5px; letter-spacing: .06em; text-transform: uppercase;
+           color: #4a5560; margin: 0 0 .2em; }
   svg .hl rect { fill: #f6e1d6; stroke: #b4451f; stroke-width: 2.6; }
   svg .hl text { fill: #b4451f; }
   svg .hl path { stroke: #b4451f; stroke-width: 3; }
@@ -4178,20 +4178,34 @@ bugs are the material anyway.
 <!--
 ================================================================================
 VERTICAL SLICE 1 -- section 7, the transaction model and the blind-write
-guardrail. Fourteen slides. Re-cut 2026-09-10 to the running order below; it
-diverged from the outline on purpose:
+guardrail. Twelve slides. Re-cut 2026-09-10 to the running order below, then cut
+again on 2026-09-14; it diverged from the outline on purpose:
 
   * the measured seven-line trace is now speaker notes on the agent diagram, not
     a slide;
   * "why this never needed to exist before" is dissolved into the agent diagram,
     whose closing blockquote it now is;
-  * the four-way refresh measurement is now speaker notes on "one pass", not a
-    slide;
-  * two new slides: the human-in-a-browser diagram (the guard working), and "one
-    pass" -- the design that makes every tool succeed by making commit meaningless.
+  * one new slide: the human-in-a-browser diagram, the guard working. It is the
+    setup for the agent diagram and the two are read as a pair.
+
+WHAT CAME OFF ON 2026-09-14, and where it went. "One pass" -- the design that
+makes every tool succeed by making commit meaningless -- is now speaker notes on
+the agent diagram, told as four beats, because it is that picture's consequence
+rather than a claim of its own; the four-way refresh measurement went with it, as
+did the canary story. "Why the repository does not catch it" is speaker notes on
+the human-in-a-browser diagram, which already shows the mechanism working: this
+room knows the bitmap intersection, and what was left worth saying is one sentence
+about reads having no date, plus the StrongReadSet caveat.
+
+THE TWO PICTURES ARE NOW ADJACENT, and the [session] examples follow them rather
+than preceding them -- the examples read as consequences once the room has seen
+what goes wrong, and as a wall of prose before it. The accent colours on the two
+pictures are deliberately the wrong way round: the REFUSED commit is red and the
+SUCCESSFUL one is green, and saying why is the point of the pair.
 
 Budget: 11:10 at the plans in docs/Presentation.md's demo inventory -- 490s of
-slides plus a 180s demo. Slide 5 carries 90 of those seconds and is the one to
+slides plus a 180s demo, and the two cut slides give about 110s of that back.
+The agent diagram, fourth in the slice, carries 90 seconds and is the one to
 protect.
 ================================================================================
 -->
@@ -4219,7 +4233,7 @@ Eleven minutes including the demo. If we run long, the demo is the part to prote
 
 ---
 
-## The client is told what a transaction view is
+## The model is told about transaction views
 
 <div class="verbatim">
 
@@ -4263,8 +4277,9 @@ Point at, in order:
     real.
   * NOTHING COMMITS FOR YOU: says out loud that the mutation tools leave work uncommitted. Six
     weeks ago every one of them committed inside its own call, which is slide 6.
-  * THE SECOND ELISION is the [session] line -- four paragraphs of it, and the next slide is the
-    line itself. Say only that it is there and that it is unintelligible without its paragraph,
+  * THE SECOND ELISION is the [session] line -- four paragraphs of it. Since 2026-09-14 the slide
+    showing the line itself comes three slides later, AFTER the two pictures, so promise it rather
+    than pointing at it: say that it is there and that it is unintelligible without its paragraph,
     which is most of why these instructions exist at all. The last thing cut with it is worth
     keeping in your pocket for the questions: a failed commit is the one failure here you cannot
     retry your way out of, and the conflict is reported per CLASS rather than per method, so two
@@ -4283,50 +4298,7 @@ rather than at commit. Section 11.
 
 ---
 
-## What that line actually looks like
-
-<p class="exlbl">uncommitted work pending</p>
-<p class="ex">[session] You have uncommitted changes. No tool commits for you: call commit to persist them or abort to discard them. They are lost if this session ends first.</p>
-
-<p class="exlbl">the client's own commit was refused</p>
-<p class="ex">[session] Your last commit FAILED: another session changed the same objects since your view was taken (Write-Write(2)). Nothing was written. Your changes are still here but cannot be committed and your view cannot move until you call abort, which discards them -- save anything you need first, then abort, re-read, and redo it.</p>
-
-<p class="exlbl">the server moved the view, and the pending work is now doomed</p>
-<p class="ex">[session] The server refreshed your view -- it had fallen far enough behind to be holding the repository's commit records open -- and your uncommitted changes now CONFLICT with work another session has committed: it changed McpFixtureA. They cannot be committed, and abort is the only way out [...]</p>
-
-<p class="exlbl">the view moved, and some reads no longer hold</p>
-<p class="ex">[session] The view moved: 2 of 7 earlier reads are stale and must be re-read before writing to them: Foo>>bar:, Baz:shape.</p>
-
-**Computed from the state left *after* the tool ran** — not the state the call arrived in.
-
-<!--
-Four of the five shapes; the fifth is a nested transaction, which just says commit and abort
-cannot reach the outer one.
-
-Read the second and third aloud one after the other, because the difference between them is the
-detail I would defend hardest. Same jam — view moved, pending work un-committable, abort the only
-way out — but two different causes, and the client must not be told the wrong one. "Your last
-commit FAILED" is right only when a commit is what failed. Where the SERVER's own refresh doomed
-the work, the client made no commit at all and would go looking for one it never made.
-
-Why "after the tool ran": the note describes the state the client is actually left in. That is
-what lets `abort` clear a pending conflict and answer "Transaction aborted." with no contradicting
-warning stapled to it — while abort itself stays two lines that know nothing about any of this.
-Annotating from the pre-call state would need every transaction tool to suppress a note the
-dispatcher had already decided to add.
-
-Appended by `annotateContent:` to BOTH the success and the error envelope, because a tool that
-raised is exactly when dirty state most needs reporting. `structuredContent` is deliberately not
-touched: the error kind and message stay what the tool raised, so a client branching on the kind
-is unaffected by prose meant for the model.
-
-`Write-Write(2)` is the stone's own conflict category and a count — deliberately not the conflict
-dictionary's printString, which holds the conflicting OBJECTS and can be enormous.
--->
-
----
-
-## A human at a browser. The stone's guard works
+## A human uses a browser.
 
 <div style="text-align:center">
 <svg viewBox="0 0 940 300" width="880" role="img" aria-label="Timeline. Session one aborts, taking a view. Session two then commits a change to X. Session one then edits X and commits, and the commit is refused, because session one's view was taken before session two committed.">
@@ -4347,9 +4319,9 @@ dictionary's printString, which holds the conflicting OBJECTS and can be enormou
   <text x="330" y="240" font-size="16" text-anchor="middle" fill="currentColor">commit X&#8242;</text>
   <circle cx="560" cy="66" r="6" fill="currentColor"/>
   <text x="560" y="46" font-size="16" text-anchor="middle" fill="currentColor">edit X</text>
-  <circle cx="810" cy="66" r="6" fill="#2e6a4f"/>
-  <text x="810" y="46" font-size="16" text-anchor="middle" font-weight="600" fill="#2e6a4f">commit &#10007;</text>
-  <text x="810" y="94" font-size="14" text-anchor="middle" fill="#2e6a4f">refused, nothing written</text>
+  <circle cx="810" cy="66" r="6" fill="#b4451f"/>
+  <text x="810" y="46" font-size="16" text-anchor="middle" font-weight="600" fill="#b4451f">commit &#10007;</text>
+  <text x="810" y="94" font-size="14" text-anchor="middle" fill="#b4451f">refused, nothing written</text>
 </svg>
 </div>
 
@@ -4380,11 +4352,34 @@ slide.
 If asked about the grain: the object in the write set is the class's GsMethodDictionary and a
 per-class SymbolSet, so this refusal also fires when S1 and S2 edit DIFFERENT selectors on the same
 class. Coarse, and coarse in the safe direction.
+
+WHY THE REPOSITORY CANNOT DO BETTER, absorbed 2026-09-14 from the slide that used to sit after these
+two pictures. It came down because this slide already shows the mechanism working and this room
+knows the mechanism; what is left is one sentence and one caveat, and both belong here.
+
+The mechanism in one line: at commit the stone intersects OOP bitmaps -- writeWriteConflicts =
+writeSet * writeSetUnion, where writeSetUnion is the union of the write sets of every transaction
+committed since your view. No timestamps, no per-object versions. Only your VIEW is dated; the
+objects are not. So it cannot express a question about reads even in principle -- there is nothing
+on a read to compare. It answers one question and answers it well: did anyone change something I am
+WRITING, since I last looked at the repository? It has no opinion about what you read, or how long
+ago you read it.
+
+Be explicit that this is not a defect being worked around. It is an optimistic check doing what an
+optimistic check does, and the next slide is where that stops being enough.
+
+The caveat, for the hand that goes up: the alternative IS available. The StrongReadSet -- hidden set
+38, deliberately ordinary-user-writable -- makes your commit fail when another session changes an
+object you only READ, with a Read-Write entry. Put a long-browsing session's reads in it and the
+session becomes progressively unable to commit anything at all. I declined that trade, and it is in
+the known limits later in this section. Worth knowing: the Programmer's Guide names StrongReadSet
+once, in a table, and never mentions GsBitmap or hidden sets -- treat it as undocumented-but-real
+and re-verify per version.
 -->
 
 ---
 
-## An agent. The same guard, walked past
+## An agent uses tools.
 
 <div style="text-align:center">
 <svg viewBox="0 0 940 300" width="880" role="img" aria-label="Timeline. Session one reads X. Session two commits a change to X. Session one aborts, so its view jumps past that commit. Session one then writes X from the pre-abort read and commits successfully, silently discarding session two's work.">
@@ -4401,21 +4396,21 @@ class. Coarse, and coarse in the safe direction.
   <text x="140" y="46" font-size="16" text-anchor="middle" fill="currentColor">read X</text>
   <circle cx="330" cy="206" r="6" fill="currentColor"/>
   <text x="330" y="240" font-size="16" text-anchor="middle" fill="currentColor">commit X&#8242;</text>
-  <line x1="470" y1="30" x2="470" y2="250" stroke="#b4451f" stroke-width="1.6" stroke-dasharray="6 5"/>
-  <circle cx="470" cy="66" r="6" fill="#b4451f"/>
-  <text x="470" y="46" font-size="16" text-anchor="middle" font-weight="600" fill="#b4451f">abort</text>
-  <text x="470" y="276" font-size="14" text-anchor="middle" fill="#b4451f">S1&#8217;s view moves here</text>
+  <line x1="470" y1="30" x2="470" y2="250" stroke="#2e6a4f" stroke-width="1.6" stroke-dasharray="6 5"/>
+  <circle cx="470" cy="66" r="6" fill="#2e6a4f"/>
+  <text x="470" y="46" font-size="16" text-anchor="middle" font-weight="600" fill="#2e6a4f">abort</text>
+  <text x="470" y="276" font-size="14" text-anchor="middle" fill="#2e6a4f">S1&#8217;s view moves here</text>
   <circle cx="640" cy="66" r="6" fill="currentColor"/>
   <text x="640" y="46" font-size="16" text-anchor="middle" fill="currentColor">write X</text>
   <text x="640" y="94" font-size="13.5" text-anchor="middle" fill="currentColor" opacity=".62">from the pre-abort read</text>
-  <circle cx="810" cy="66" r="6" fill="#b4451f"/>
-  <text x="810" y="46" font-size="16" text-anchor="middle" font-weight="600" fill="#b4451f">commit &#10003;</text>
-  <text x="810" y="94" font-size="14" text-anchor="middle" fill="#b4451f">X&#8242; gone, silently</text>
+  <circle cx="810" cy="66" r="6" fill="#2e6a4f"/>
+  <text x="810" y="46" font-size="16" text-anchor="middle" font-weight="600" fill="#2e6a4f">commit &#10003;</text>
+  <text x="810" y="94" font-size="14" text-anchor="middle" fill="#2e6a4f">X&#8242; gone, silently</text>
 </svg>
 </div>
 
 > `readLedger ⊇ writeLedger` was an invariant enforced by the **user interface**, for free, in
-> every Smalltalk browser ever written — so the repository never had to check it.
+> every Smalltalk browser — so the repository never had to check it.
 
 <!--
 One thing changed: `edit X` split into `read X` and `write X`, and something moved the view in
@@ -4464,107 +4459,101 @@ abort and refresh all move the view. All three open this hole.
 If asked why the final commit is not refused: by then S1's write set and the union of everything
 committed since S1's view no longer intersect, because S1's view is newer than S2's commit. The
 check is exactly right about the question it is asked.
--->
 
----
+THE OBVIOUS FIX, AND WHAT IT COST, absorbed 2026-09-14 from the slide that used to follow this run.
+It had a slide because it is the mistake anyone in this room would make, me included, and because
+admitting it buys the guardrail its credibility. Tell it as a story, in four beats, and it takes
+ninety seconds.
 
-## So make every tool self-contained: abort, write, commit — in one pass
+One: the obvious thing to build. Make every tool self-contained -- fresh view on the way in, commit
+on the way out -- and no tool can ever fail on a stale view. Tools that always work. I built it:
+handleToolsCall: ran System abortTransaction before invoking EVERY tool, and each mutation tool
+committed inside its own call.
 
-If each tool takes a **fresh view** on the way in and **commits** on the way out, no tool can ever
-fail on a stale view. Tools that always work. It is the obvious thing to build, and I built it.
+Two: including the commit tool. Pause there and let them get to it first. The pre-call abort had no
+exemption, not even for the three tools whose whole job is the transaction, so tool_commit aborted
+and then committed the empty transaction it was left with -- and commitTransaction answers TRUE,
+because committing nothing succeeds. The tool reported "Transaction committed." to a client whose
+work had just been discarded. A commit that can never fail, achieved by never committing anything.
+refresh had the same bug in miniature: it and abort were literally the same two lines, so refresh
+threw the caller's work away while reporting "View refreshed." The demonstration, if they want it,
+is three calls: execute_code plants a probe, commit says it committed, execute_code reads it back
+and it is gone.
 
-`McpDispatcher>>handleToolsCall:id:` ran `System abortTransaction` before invoking **every** tool —
-and each mutation tool committed inside its own call.
+Three: why nobody noticed. The mutation tools each committed INSIDE their own call, so the tools
+people actually used never needed the transaction to outlive the call. compile_method worked.
+delete_class worked. The two-step workflow -- make changes, look at them, then commit -- did not
+exist at all, and nothing in the tool surface made that visible.
 
-**Including the `commit` tool.**
-
-```
-execute_code   UserGlobals at: #McpCommitProbe put: 'probe-...'   -> written
-commit                                                           -> "Transaction committed."
-execute_code   read it back                                       -> GONE
-```
-
-<!--
-Pause after "including the commit tool" and let them get there first.
-
-The pre-call abort applied to every tool with no exemption — including the three whose whole job is
-to manage the transaction. So `tool_commit` aborted the transaction and then committed the empty
-one it was left with. And `commitTransaction` answers TRUE, because committing nothing succeeds. So
-the tool reported "Transaction committed." A client was told its work was safe when nothing had
-been written.
-
-A commit that can never fail. Which is achieved by never committing anything.
-
-`refresh` had the same bug in miniature: it and `abort` were literally the same two lines, so
-`refresh` discarded the caller's work while reporting "View refreshed."
-
-Why it went unnoticed for so long, and this is the interesting part: the mutation tools each
-committed INSIDE their own call, so the tools everybody actually used never depended on the
-transaction outliving the call. compile_method worked. delete_class worked. The two-step workflow —
-make changes, look at them, then commit — did not exist at all, and nothing in the tool surface
-made that visible.
-
-How it was found: while trying to demonstrate something else entirely. A canary value planted in a
-worker gem to test session lifetime vanished — and so did a control planted and read back three
-seconds later in a live session with no reap in between. Two lessons I would keep. A canary meant
-to prove something about lifetime must first be shown to survive a null interval. And when an
-experiment produces a clean expected result, THAT is the moment to check the instrument: the first
-canary vanished exactly on schedule, which is what made it convincing and wrong.
-
-Then the deeper problem, which is the link back to the last slide: a blanket pre-call refresh makes
-every write a blind write BY CONSTRUCTION. Measured four ways, one shared object, two sessions,
-S1 reading before S2 commits over it:
+Four, and this is the beat that ties back to the picture above: a blanket pre-call refresh makes
+every write a blind write BY CONSTRUCTION. Same rig, one shared object, S1 reading before S2
+commits over it:
   * no refresh at all               -> commit false, retryFailure. S2's value survives.
   * continueTransaction first       -> commit true. S2's work silently gone.
   * abortTransaction first          -> commit true. Identical.
   * S1 writes first, refresh after  -> commit false. S2's value survives.
-Rows two and three say the hole was as old as the blanket refresh, not introduced when I replaced
-abort with continueTransaction in August. Row four says the protection is not lost wholesale: once
-you have written the object, a later refresh does not launder it. It is the READ that goes
-unprotected — the dangerous half, because the read is what the plan was built on.
-
-Both designs were checked carefully — does it destroy work, does it raise, does it pin pages — and
-both were checked against the wrong question. Never "what does this tell the STONE about this
-session?" A two-session test that nobody had written would have answered it in a minute.
+Rows two and three say the hole was as old as the blanket refresh rather than introduced when I
+swapped abort for continueTransaction in August. Row four is the one the rest of the section leans
+on: protection is not lost wholesale -- once the object is in your write set a later refresh does
+not launder it. It is the READ that goes unprotected, which is the dangerous half, because the read
+is what the plan was built on.
 
 What shipped 2026-08-28: handleToolsCall: no longer refreshes at all. A session sees one snapshot
-until the client itself asks for another, and `refresh` is documented as not free.
+until the client asks for another, and refresh is documented as not free.
+
+Two lessons from how it was found, if there is time and only then -- it turned up while
+demonstrating something else entirely. A canary planted in a worker gem to test session lifetime
+vanished, and so did a control planted and read back three seconds later with no reap in between.
+A canary meant to prove something about lifetime must first be shown to survive a null interval.
+And when an experiment gives a clean expected result, THAT is the moment to check the instrument:
+the first canary vanished exactly on schedule, which is what made it convincing and wrong.
+
+Both designs were checked carefully -- does it destroy work, does it raise, does it pin pages -- and
+both were checked against the wrong question. Never "what does this tell the STONE about this
+session?" A two-session test nobody had written would have answered it in a minute.
 -->
 
 ---
 
-## Why the repository does not catch it — and is right not to
+## Session status is appended to tool results
 
-At commit the stone intersects OOP bitmaps:
+<p class="exlbl">uncommitted work pending</p>
+<p class="ex">[session] You have uncommitted changes. No tool commits for you: call commit to persist them or abort to discard them. They are lost if this session ends first.</p>
 
-```smalltalk
-writeWriteConflicts = writeSet * writeSetUnion
-```
+<p class="exlbl">the client's own commit was refused</p>
+<p class="ex">[session] Your last commit FAILED: another session changed the same objects since your view was taken (Write-Write(2)). Nothing was written. Your changes are still here but cannot be committed and your view cannot move until you call abort, which discards them -- save anything you need first, then abort, re-read, and redo it.</p>
 
-**No timestamps. No per-object versions. Only your *view* is dated; the objects are not.**
+<p class="exlbl">the server moved the view, and the pending work is now doomed</p>
+<p class="ex">[session] The server refreshed your view -- it had fallen far enough behind to be holding the repository's commit records open -- and your uncommitted changes now CONFLICT with work another session has committed: it changed McpFixtureA. They cannot be committed, and abort is the only way out [...]</p>
 
-So it answers one question, and answers it well: *did anyone change something I am **writing**,
-since I last looked at the repository?* It has no opinion about what you **read**, and none about
-how long ago you read it.
+<p class="exlbl">the view moved, and some reads no longer hold</p>
+<p class="ex">[session] The view moved: 2 of 7 earlier reads are stale and must be re-read before writing to them: Foo>>bar:, Baz:shape.</p>
 
 <!--
-This is the slide where I am telling this room something it already knows, so the point of it is
-the last sentence rather than the formula.
+Four of the five shapes; the fifth is a nested transaction, which just says commit and abort
+cannot reach the outer one.
 
-`writeSetUnion` is the union of the write sets of every transaction committed since your view.
-Because only the view carries a date, the mechanism cannot express a question about reads even in
-principle — there is nothing on a read to compare.
+Read the second and third aloud one after the other, because the difference between them is the
+detail I would defend hardest. Same jam — view moved, pending work un-committable, abort the only
+way out — but two different causes, and the client must not be told the wrong one. "Your last
+commit FAILED" is right only when a commit is what failed. Where the SERVER's own refresh doomed
+the work, the client made no commit at all and would go looking for one it never made.
 
-I want to be explicit that this is not a defect I am working around. It is an optimistic check
-doing what an optimistic check does. And the alternative is available: the StrongReadSet, hidden
-set 38, deliberately ordinary-user-writable. Add a browsed object to it and your commit fails when
-another session changes it, with a Read-Write entry, even though you never wrote it. Try that on a
-long-browsing session and the session becomes progressively unable to commit anything at all. I
-declined that trade; it is in the known limits two slides on.
+The claim that used to be the slide's last line, and is worth making out loud because nothing on
+the screen says it any more: every one of these is computed from the state the session is left in
+AFTER the tool ran, not the state the call arrived in. That
+what lets `abort` clear a pending conflict and answer "Transaction aborted." with no contradicting
+warning stapled to it — while abort itself stays two lines that know nothing about any of this.
+Annotating from the pre-call state would need every transaction tool to suppress a note the
+dispatcher had already decided to add.
 
-Worth knowing if it comes up: the Programmer's Guide names StrongReadSet once, in a table, and
-never mentions GsBitmap or hidden sets. Treat it as undocumented-but-real, and re-verify per
-version.
+Appended by `annotateContent:` to BOTH the success and the error envelope, because a tool that
+raised is exactly when dirty state most needs reporting. `structuredContent` is deliberately not
+touched: the error kind and message stay what the tool raised, so a client branching on the kind
+is unaffected by prose meant for the model.
+
+`Write-Write(2)` is the stone's own conflict category and a count — deliberately not the conflict
+dictionary's printString, which holds the conflicting OBJECTS and can be enormous.
 -->
 
 ---
@@ -4588,8 +4577,8 @@ it sits on a repository whose conflicts are per class. So a client can still be 
 over a method it never touched. That is coarse in the safe direction, which is the right way
 round, but it means the recovery path has to be good, because clients will meet it.
 
-The second is the sentence the design turns on, and it is row four of the four-way measurement two
-slides back: if you have already written the object, refreshing does not save you. It is the READ
+The second is the sentence the design turns on, and it is row four of the four-way measurement in
+the agent diagram's notes: if you have already written the object, refreshing does not save you. It is the READ
 that goes unprotected.
 -->
 
