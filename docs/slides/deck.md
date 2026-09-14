@@ -4398,7 +4398,7 @@ and re-verify per version.
   <text x="330" y="240" font-size="16" text-anchor="middle" fill="currentColor">commit X&#8242;</text>
   <line x1="470" y1="30" x2="470" y2="250" stroke="currentColor" stroke-width="1.4" stroke-dasharray="6 5" opacity=".5"/>
   <circle cx="470" cy="66" r="6" fill="currentColor"/>
-  <text x="470" y="46" font-size="16" text-anchor="middle" font-weight="600" fill="currentColor">abort</text>
+  <text x="470" y="46" font-size="16" text-anchor="middle" fill="currentColor">abort</text>
   <text x="470" y="276" font-size="14" text-anchor="middle" fill="currentColor" opacity=".62">S1&#8217;s view moves here</text>
   <circle cx="640" cy="66" r="6" fill="currentColor"/>
   <text x="640" y="46" font-size="16" text-anchor="middle" fill="currentColor">write X</text>
