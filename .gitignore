@@ -8,4 +8,5 @@ certs/
 .claude/settings.local.json
 .claude/worktrees/
 .DS_Store
+.gemstone/
 .mcp.json
