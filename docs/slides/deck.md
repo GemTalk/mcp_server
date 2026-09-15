@@ -50,8 +50,9 @@ for. The running order:
 
   1-2     sections 0 and 1 -- the title, and what is different
   3-20    the gem-contents sequence (GENERATED -- see below), plus its tool inventory
-  21-26   sections 1 to 3 -- installing, and starting a server
-  27-30   THE DEMO RUN -- A, B, C and D, back to back, about 6 minutes of terminal
+  21-28   sections 1 to 3 -- installing and starting a server, with demos A and B
+          INSIDE the run rather than after it (REORDERED 2026-09-15)
+  29-30   demos C and D -- a session is a gem, then a long call reporting while it runs
   31-38   section 7 -- the transaction model and the blind-write guardrail, then demo E
   39-43   section 8 -- the router maintenance cycle, then demo F
   44-46   section 9 -- McpAuthRouter, a reachable port, then demo G (FOLDED, THEN MERGED, 2026-09-14)
@@ -2594,23 +2595,39 @@ IDLE worker holding a stale view, the one moment that worker cannot run a line o
 <!--
 ================================================================================
 VERTICAL SLICE 4 -- installing, and starting a server. Eight slides -- a lead,
-the file-out table that is all that is left of section 1, two for section 2, two
-for section 3, then demo A and demo B back to back at the end. Cut 2026-09-11:
+the file-out table that is all that is left of section 1, two for section 2, then
+demo A and demo B, then two for section 3. The demos are IN THE MIDDLE of the
+run as of 2026-09-15, not at the end of it. Cut 2026-09-11:
 second in running order, fourth to be cut. It took the install slide and demo A
 on 2026-09-13, when section 1 stopped being a section of its own, and lost four
 slides over the two days after -- this slice is now half slides and half demo,
 which is deliberate. It is the first place in the hour the room can see the thing
 running, and nothing here is worth arriving at it tired.
 
-Running order and plans, in seconds -- lead 10; nothing to install 35 (section 1);
-config on an instance 30, what initialize seeds 35 (65s, section 2); forkOnPort:
-45, in the child 40 (85s, section 3); demo A 60, demo B 90. 195s of slides plus
-150s of demo -- 5:45.
+Running order and plans, in seconds -- lead 10; installation is file-outs 35
+(section 1); config on an instance 30, what initialize seeds 35 (65s, section 2);
+demo A 60, demo B 90 (150s); forkOnPort: 45, in the child 40 (85s, section 3).
+195s of slides plus 150s of demo -- 5:45. THE TOTAL DID NOT CHANGE ON 2026-09-15;
+only the order did.
 
 THE TWO DEMOS ARE ADJACENT ON PURPOSE and they are provisional: demo A installs
 from nothing and demo B starts a server from a here-doc, which is one story told
 twice on the same machine. Dropping A, or folding its --check into the head of B,
 is the cheapest 60 seconds in the deck and is expected rather than feared.
+
+WHY THEY MOVED IN FRONT OF SECTION 3, 2026-09-15. They used to close this slice,
+so the room met forkOnPort: and the child-gem loop as CODE FIRST and saw a server
+only afterwards. Now section 2 says where the config lives, the demos start a
+server on that config, and section 3 explains the two methods that just ran. The
+room reads the seven steps against something it has already watched work, which
+is the difference between a walkthrough and a recap. Nothing was cut and nothing
+was rewritten to do it -- the slides are in a different order and that is all.
+
+WHAT IT COSTS, so it can be undone knowingly: the six-minute block of terminal is
+now TWO blocks, 2:30 here and 3:30 at demos C and D, separated by the 85 seconds
+of section 3. That was a deliberate trade and the demo-run header on demo C
+records the other half of it. If the reordering ever feels wrong on stage, the
+old shape is demo A and demo B moved back behind "Then, in the child".
 
 THE THESIS OF THE PAIR is one sentence and the lead says it: a server is a gem,
 started by evaluating an expression, configured entirely on an instance, and
@@ -2891,7 +2908,8 @@ r forkOnPort: 8000
 ```
 
 * **There is no class-side config state.** A launch script or a test reconfigures the *instance*; `forkOnPort:` serializes it into the child gem's fork string as JSON
-* So **several differently-configured routers can serve one stone at once** — a browsing-only one on 8001, an authenticated one on 8443 — and none of them is a fact about the image
+* So **several differently-configured routers can serve one stone at once** — a read-only one on 8001, an authenticated one on 8443 — and none of them is a fact about the image
+* What travels in that string is **paths and identifiers only, never key material**
 
 <!--
 Run this slide fast. It exists so that nobody spends the rest of the hour looking
@@ -2907,14 +2925,13 @@ If someone asks why not a config file: the fork string IS the config file, and i
 has the property a file does not -- it cannot drift from the process that is
 running. Two routers on one stone would need two files and a way to say which.
 
-WHAT TRAVELS IN THE FORK STRING CAME OFF THE FACE 2026-09-15 -- the bullet read
-"paths and identifiers only, never key material" -- and this is the room that
-will ask, because a fork string is an argv and an argv is visible to anyone who
-can run ps. HAVE THE ANSWER READY: the JSON carries a certificate PATH, an
-issuer, an audience, a user id; it never carries a private key, a secret or a
-token. Say it in the same breath as "serializes it into the fork string" rather
-than waiting to be asked -- volunteered it is a design property, and extracted
-under questioning it sounds like a concession.
+WHAT TRAVELS IN THE FORK STRING went off the face and came back the same day,
+2026-09-15, and the bullet is the answer to a question this room gets to fast: a
+fork string is an argv, and an argv is visible to anyone who can run ps. Now that
+it is printed, do not read it -- POINT at it and say the specifics, which are not
+on the face: the JSON carries a certificate PATH, an issuer, an audience, a user
+id; it never carries a private key, a secret or a token. Volunteered it is a
+design property; extracted under questioning it sounds like a concession.
 -->
 
 ---
@@ -2929,11 +2946,11 @@ under questioning it sounds like a concession.
 | this gem | `frontEndTransactionMode` `transactionless` |
 | security | `allowedOriginHosts` loopback · `messageTrace` false |
 
-**Where `nil` is itself the default:**
+**Where `nil` resolves to a default:**
 
 * `workerClassName` → `McpServer`
 * `toolsetNames` → `defaultToolsetNames`
-* `workerUserId` → the front end gem's own user
+* `workerUserId` → the front-end gem's own user
 
 <!--
 THE RULE CAME OFF THE FACE 2026-09-15, SO IT IS NOW YOURS TO SAY, and the slide
@@ -3012,6 +3029,118 @@ McpContractTest pins this in the CORE suite rather than the Grail one, which is
 the right place for it: the property is that an unconfigured router's surface
 does not depend on which optional groups the image happens to carry, so it has to
 be asserted on an image that carries them.
+-->
+
+---
+
+<!-- _class: demo -->
+
+# DEMO A — install, from nothing
+
+```bash
+./install.sh --check
+./install.sh
+```
+
+1. The **environment report** — `GEMSTONE`, the stone, the netldi, and `GEMSTONE_GLOBAL_DIR`
+2. The **group selection deciding itself**: auth in or out by probing the image for `JsonWebToken`
+3. File-in, group by group, and one commit
+
+<span class="fine">**`GEMSTONE_GLOBAL_DIR` is the variable that decides whether anything works.** Get it wrong and you get `getaddrinfo failed, EAI error 8 ... Number: 4065`, which reads like DNS and is not. `--check` is the first thing to run on a new machine.</span>
+
+<span class="fine">**60 seconds, hard stop.**</span>
+
+<!--
+This demo moved on 2026-09-13 to sit immediately before demo B, and the two are now one stretch of
+terminal: install from nothing, then start a server from a here-doc. On 2026-09-15 the PAIR moved
+again, forward past section 3, so the room sees a server exist before it is shown the two methods
+that make one; demo C still picks up the same terminal two slides later. It costs nothing to stage --
+no server, no second gem, no timing -- so it is still the one to stretch if the room is settling,
+and it is the FIRST thing to cut if we are behind. Cutting it to a single `--check`, or folding
+that `--check` into the head of demo B, loses nothing but the scroll.
+
+What to point at while it scrolls: the line where it decides about auth. That is the whole version
+story in one line of output. Nothing comes back to it now that section 12 is gone -- slide 22 is
+where the version numbers get said, and its notes carry the argument if it is asked for.
+
+Do NOT get drawn into GEMSTONE_GLOBAL_DIR here beyond the one sentence. The full version is in the
+README and it is a ten-minute conversation: netldi and stone each bind an ephemeral port and record
+it under that directory, /etc/services is a trap rather than a fix, and install.sh logs in linked
+(-l) specifically so it needs no netldi at all.
+-->
+
+---
+
+<!-- _class: demo -->
+
+# DEMO B — a server, from a here-doc
+
+```bash
+./run-server.sh
+lsof -nP -iTCP:8000 -sTCP:LISTEN     # find the gem, and its log
+```
+
+1. The script returns immediately — and prints **the session id, the host pid, and three ways to stop it**
+2. `tail` the gem log: **the banner**, the whole configuration of a server that has nothing on disk
+3. `System cacheStatisticsForAllSlotsShort` — **`McpRouter:8000`**, alone, with no workers yet
+
+<span class="fine">Leave the `tail -f` running. DEMO C adds the worker rows to the same cache statistics, and DEMO F reads view hygiene out of this same log.</span>
+
+<span class="fine">**90 seconds.**</span>
+
+<!--
+Have the log path resolved BEFORE the talk and the lsof line in scrollback -- the
+one-liner is the demo's only fragile part, and hunting for a gem log on a
+projector is dead air.
+
+What to point at, in order: the three stop lines (there is no pid file, this is
+the record), then the toolsets line in the banner -- which is the one line
+section 2 spends on toolsetNames, live, and the moment to say "seven toolsets,
+thirty-one tools, and Grail is not among them because I did not name it". If the demo machine has a Grail
+checkout, having a SECOND server on 8001 with MCP_TOOLSETS set is a thirty-second
+addition that makes the point better than any slide: same image, two servers,
+different surfaces.
+
+Then the single cache row. It is worth a beat on its own precisely because it is
+lonely -- one gem, no workers, nothing else in the repository knows this server
+exists. DEMO C is the payoff.
+
+Fallback if the fork fails on stage: the banner is a screenshot, and say so
+without apologising. The thing that actually fails here is a netldi that is not
+running, which --check would have caught; run install.sh --check in demo A and
+this one is already de-risked.
+
+THE BANNER, absorbed 2026-09-13 from the slide that used to sit just before this
+run. It came down because step 2 puts the real thing on the projector, and a
+slide describing seven lines of log immediately before the log itself was the
+deck telling the room something it was thirty seconds from seeing. What that
+slide argued is worth saying over the scroll, in this order.
+
+The frame first, and it closes section 2's open question: nothing is committed
+and nothing is on disk, so THE GEM LOG IS THE CONFIGURATION. It is the only
+record of what this router was told, which is why it is seven deliberate lines
+written immediately after the bind rather than a debug dump.
+
+Then point at lines, not at all of them. Listening address and scheme; workers
+and toolsets, which is the surface section 2 resolved and is already the second
+thing to point at above; session lifetime and the concurrency cap on SEPARATE
+lines, because how many
+at once is a different question from how long each lasts; view hygiene in full,
+which section 8 will come back and read.
+
+The two lines that are read BACK rather than reported are the same idea twice and
+are the best thing on the screen: the shared cache name comes from the cache, so
+the log and System cacheStatisticsForAllSlots cannot disagree -- a name over 31
+characters arrives truncated -- and the transaction mode is what the GEM REPORTS,
+not what was configured. The banner must say what IS, not what was intended,
+because the two diverge in exactly the cases somebody is reading the log to
+understand.
+
+Last, the trace line, which appears ONLY when tracing is on. Ten seconds if the
+room is warm, because it generalises past this server: a reader has to be able to
+tell a QUIET server from an UNTRACED one, or an absence of message lines reads as
+an absence of traffic -- the wrong conclusion, and the expensive one. Silence is
+ambiguous, so a log has to say when it is not recording.
 -->
 
 ---
@@ -3122,135 +3251,34 @@ between a method that owns its gem and one that is a guest in yours.
 
 ---
 
-<!-- _class: demo -->
-
-# DEMO A — install, from nothing
-
-```bash
-./install.sh --check
-./install.sh
-```
-
-1. The **environment report** — `GEMSTONE`, the stone, the netldi, and `GEMSTONE_GLOBAL_DIR`
-2. The **group selection deciding itself**: auth in or out by probing the image for `JsonWebToken`
-3. File-in, group by group, and one commit
-
-<span class="fine">**`GEMSTONE_GLOBAL_DIR` is the variable that decides whether anything works.** Get it wrong and you get `getaddrinfo failed, EAI error 8 ... Number: 4065`, which reads like DNS and is not. `--check` is the first thing to run on a new machine.</span>
-
-<span class="fine">**60 seconds, hard stop.**</span>
-
-<!--
-This demo moved on 2026-09-13 to sit immediately before demo B, and the two are now one stretch of
-terminal: install from nothing, then start a server from a here-doc. It costs nothing to stage --
-no server, no second gem, no timing -- so it is still the one to stretch if the room is settling,
-and it is the FIRST thing to cut if we are behind. Cutting it to a single `--check`, or folding
-that `--check` into the head of demo B, loses nothing but the scroll.
-
-What to point at while it scrolls: the line where it decides about auth. That is the whole version
-story in one line of output. Nothing comes back to it now that section 12 is gone -- slide 22 is
-where the version numbers get said, and its notes carry the argument if it is asked for.
-
-Do NOT get drawn into GEMSTONE_GLOBAL_DIR here beyond the one sentence. The full version is in the
-README and it is a ten-minute conversation: netldi and stone each bind an ephemeral port and record
-it under that directory, /etc/services is a trap rather than a fix, and install.sh logs in linked
-(-l) specifically so it needs no netldi at all.
--->
-
----
-
-<!-- _class: demo -->
-
-# DEMO B — a server, from a here-doc
-
-```bash
-./run-server.sh
-lsof -nP -iTCP:8000 -sTCP:LISTEN     # find the gem, and its log
-```
-
-1. The script returns immediately — and prints **the session id, the host pid, and three ways to stop it**
-2. `tail` the gem log: **the banner**, the whole configuration of a server that has nothing on disk
-3. `System cacheStatisticsForAllSlotsShort` — **`McpRouter:8000`**, alone, with no workers yet
-
-<span class="fine">Leave the `tail -f` running. DEMO C adds the worker rows to the same cache statistics, and DEMO F reads view hygiene out of this same log.</span>
-
-<span class="fine">**90 seconds.**</span>
-
-<!--
-Have the log path resolved BEFORE the talk and the lsof line in scrollback -- the
-one-liner is the demo's only fragile part, and hunting for a gem log on a
-projector is dead air.
-
-What to point at, in order: the three stop lines (there is no pid file, this is
-the record), then the toolsets line in the banner -- which is the one line
-section 2 spends on toolsetNames, live, and the moment to say "seven toolsets,
-thirty-one tools, and Grail is not among them because I did not name it". If the demo machine has a Grail
-checkout, having a SECOND server on 8001 with MCP_TOOLSETS set is a thirty-second
-addition that makes the point better than any slide: same image, two servers,
-different surfaces.
-
-Then the single cache row. It is worth a beat on its own precisely because it is
-lonely -- one gem, no workers, nothing else in the repository knows this server
-exists. DEMO C is the payoff.
-
-Fallback if the fork fails on stage: the banner is a screenshot, and say so
-without apologising. The thing that actually fails here is a netldi that is not
-running, which --check would have caught; run install.sh --check in demo A and
-this one is already de-risked.
-
-THE BANNER, absorbed 2026-09-13 from the slide that used to sit just before this
-run. It came down because step 2 puts the real thing on the projector, and a
-slide describing seven lines of log immediately before the log itself was the
-deck telling the room something it was thirty seconds from seeing. What that
-slide argued is worth saying over the scroll, in this order.
-
-The frame first, and it closes section 2's open question: nothing is committed
-and nothing is on disk, so THE GEM LOG IS THE CONFIGURATION. It is the only
-record of what this router was told, which is why it is seven deliberate lines
-written immediately after the bind rather than a debug dump.
-
-Then point at lines, not at all of them. Listening address and scheme; workers
-and toolsets, which is the surface section 2 resolved and is already the second
-thing to point at above; session lifetime and the concurrency cap on SEPARATE
-lines, because how many
-at once is a different question from how long each lasts; view hygiene in full,
-which section 8 will come back and read.
-
-The two lines that are read BACK rather than reported are the same idea twice and
-are the best thing on the screen: the shared cache name comes from the cache, so
-the log and System cacheStatisticsForAllSlots cannot disagree -- a name over 31
-characters arrives truncated -- and the transaction mode is what the GEM REPORTS,
-not what was configured. The banner must say what IS, not what was intended,
-because the two diverge in exactly the cases somebody is reading the log to
-understand.
-
-Last, the trace line, which appears ONLY when tracing is on. Ten seconds if the
-room is warm, because it generalises past this server: a reader has to be able to
-tell a QUIET server from an UNTRACED one, or an absence of message lines reads as
-an absence of traffic -- the wrong conclusion, and the expensive one. Silence is
-ambiguous, so a log has to say when it is not recording.
--->
-
----
-
 <!--
 ================================================================================
-THE DEMO RUN -- what is left of sections 4, 5 and 6, and it is two demos.
+DEMOS C AND D -- what is left of sections 4, 5 and 6, and it is two demos.
 Assembled 2026-09-14, when the target came down to 45 minutes and three stretches
 of slides went to archive.md. The sections that walked a request in and out are
 gone; their demos are not, because a demo shows in ninety seconds what those
 slides argued in eight.
 
-FOUR DEMOS NOW RUN AS ONE STRETCH OF TERMINAL: A (install, from nothing), B (a
-server, from a here-doc), C (a session is a gem) and, if the clock allows, D (a
-long call reporting while it runs). Nothing but the deck's own page turns
-separates them, so run them as one continuous thing -- one terminal, one scroll,
-one story -- rather than as four demos that happen to be adjacent. The natural
-break is after C: A, B and C are one server coming to life, and D is a different
-point about the same server.
+THIS IS TWO DEMOS, NOT FOUR, AS OF 2026-09-15. It read "four demos now run as one
+stretch of terminal" until demo A and demo B moved forward to sit between section
+2 and section 3, which is where the slice 4 header argues they belong. So A and B
+are one stretch, back there; C (a session is a gem) and D (a long call reporting
+while it runs, if the clock allows) are this one. Nothing but the deck's own page
+turns separates C from D -- run the two as one continuous thing, one terminal,
+one scroll -- and A and B the same way in their own place.
 
-Running order and plans, in seconds -- demo C 120, demo D 90. With A's 60 and B's
-90 in front of them, the run is about 6 minutes of terminal, which is now the
-single biggest uninterrupted block in the talk. Budget it as one thing.
+THE TERMINAL IS STILL THE SAME TERMINAL, and that is the thing to preserve
+through the reordering: C opens a session against the server B started and the
+scrollback from B is still above it, so do NOT clear between them and do not
+restart the server for C. The 85 seconds of section 3 that now sit in between are
+slides, not terminal; the machine does not know they happened. Said out loud once
+-- "this is the server we started before those two slides" -- the break costs
+nothing and the code slides gain a running example.
+
+Running order and plans, in seconds -- demo C 120, demo D 90, so 3:30 here, with
+A and B's 2:30 earlier. Six minutes of terminal in the hour, no longer six
+minutes of it at once: this is now the second biggest uninterrupted block in the
+talk rather than the biggest, and budget it as 3:30 rather than as part of a six.
 
 WHAT THE DEMOS NOW CARRY ALONE, and the notes on each say it in place:
   * demo C is the only place a worker gem is born in front of the room, and the
@@ -3411,7 +3439,7 @@ afford 60 rather than the 40 it had.
 
 <!-- _class: lead -->
 
-# The transaction model, and the blind-write guardrail
+# Transactions and the blind-write guardrail
 
 ### A browser invariant, restored by rule
 
@@ -3878,9 +3906,9 @@ note, which can only come from checking everything.
 
 ## Full disclosure: Circumventing the guardrail
 
-**`execute_code` is outside the guardrail, and its own description says so.** This cannot be closed: it can send `System commitTransaction` itself, and read, write, and abort directly.
+**`execute_code` is outside the guardrail, and its own description says so.** This cannot be closed: it can send `System commitTransaction`, and it can read, write, and abort directly.
 
-The stone still protects against write-write conflicts. But a client using `execute_code` can silently overwrite another session's commits.
+The stone still protects against write-write conflicts. But an agent using `execute_code` can silently overwrite another session's commits.
 
 ## Relevant test suites
 
