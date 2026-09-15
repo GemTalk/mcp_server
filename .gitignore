@@ -11,6 +11,7 @@ docs/slides/out/
 .claude/settings.local.json
 .claude/worktrees/
 .DS_Store
+.gemstone/
 .mcp.json
 
 # Python bytecode cache (docs/slides/gen.py gets imported by ad-hoc scripts)
