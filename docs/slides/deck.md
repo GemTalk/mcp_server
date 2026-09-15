@@ -2929,7 +2929,11 @@ under questioning it sounds like a concession.
 | this gem | `frontEndTransactionMode` `transactionless` |
 | security | `allowedOriginHosts` loopback · `messageTrace` false |
 
-Where `nil` is a default: `workerClassName` → `McpServer`; `toolsetNames` → `defaultToolsetNames`; `workerUserId` → the front end gem's own user.
+**Where `nil` is itself the default:**
+
+* `workerClassName` → `McpServer`
+* `toolsetNames` → `defaultToolsetNames`
+* `workerUserId` → the front end gem's own user
 
 <!--
 THE RULE CAME OFF THE FACE 2026-09-15, SO IT IS NOW YOURS TO SAY, and the slide
