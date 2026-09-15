@@ -227,10 +227,18 @@ ARIA = ("Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- w
 SLIDES = [
  (None, "Two gems, and what is in each",
   "Every box is **one object**. The front-end gem owns the socket and knows who the sessions are; "
-  "the worker gem runs the tools. Nothing is shared between them &#8212; not a variable, not a view, "
-  "not a transaction. **One string crosses the gap in each direction**.",
+  "the worker gem runs the tools. Nothing is shared between them. **One string crosses the gap in "
+  "each direction**.",
   "The establishing shot. Do not explain anything yet -- name the two gems, say that the boxes are\n"
-  "objects rather than classes-in-general, and move. Everything on this slide gets its own slide."),
+  "objects rather than classes-in-general, and move. Everything on this slide gets its own slide.\n"
+  "\n"
+  "WHAT \"NOTHING IS SHARED\" MEANS CAME OFF THE BOX 2026-09-15. It read \"Nothing is\n"
+  "shared between them -- not a variable, not a view, not a transaction.\" The three\n"
+  "are worth saying even though the box no longer lists them, because each one is a\n"
+  "section: not a view is section 7, not a transaction is section 8, and not a\n"
+  "variable is why the fork string exists at all (slide 23). Unqualified, \"nothing\n"
+  "is shared\" sounds like ordinary good manners between objects; the list is what\n"
+  "makes it a claim about GEMS."),
 
  ("c-client", "MCP client &#8212; one per editor",
   "Claude Code, a VS Code extension, `curl`. It speaks **HTTP/1.1 and JSON-RPC 2.0**: it POSTs each "

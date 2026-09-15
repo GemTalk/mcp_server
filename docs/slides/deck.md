@@ -301,7 +301,7 @@ honestly" (35s), load.gs (35s) and "How it is verified" (40s).
 
 <br>
 
-**For the GemStone developers** — a report on the state of the project
+**A report on the state of the project**
 
 <!--
 Say the shape of the hour before the first slide, because it is the thing that stops people
@@ -486,13 +486,21 @@ to archive.md on 2026-09-14, so the sequence is the only picture of the shape th
 
 <div class="boxnote">
 
-Every box is **one object**. The front-end gem owns the socket and knows who the sessions are; the worker gem runs the tools. Nothing is shared between them &#8212; not a variable, not a view, not a transaction. **One string crosses the gap in each direction**.
+Every box is **one object**. The front-end gem owns the socket and knows who the sessions are; the worker gem runs the tools. Nothing is shared between them. **One string crosses the gap in each direction**.
 
 </div>
 
 <!--
 The establishing shot. Do not explain anything yet -- name the two gems, say that the boxes are
 objects rather than classes-in-general, and move. Everything on this slide gets its own slide.
+
+WHAT "NOTHING IS SHARED" MEANS CAME OFF THE BOX 2026-09-15. It read "Nothing is
+shared between them -- not a variable, not a view, not a transaction." The three
+are worth saying even though the box no longer lists them, because each one is a
+section: not a view is section 7, not a transaction is section 8, and not a
+variable is why the fork string exists at all (slide 23). Unqualified, "nothing
+is shared" sounds like ordinary good manners between objects; the list is what
+makes it a claim about GEMS.
 -->
 
 ---
@@ -2884,7 +2892,6 @@ r forkOnPort: 8000
 
 * **There is no class-side config state.** A launch script or a test reconfigures the *instance*; `forkOnPort:` serializes it into the child gem's fork string as JSON
 * So **several differently-configured routers can serve one stone at once** — a browsing-only one on 8001, an authenticated one on 8443 — and none of them is a fact about the image
-* What travels in that string is **paths and identifiers only, never key material**
 
 <!--
 Run this slide fast. It exists so that nobody spends the rest of the hour looking
@@ -2899,25 +2906,38 @@ deliberate lines rather than a debug dump.
 If someone asks why not a config file: the fork string IS the config file, and it
 has the property a file does not -- it cannot drift from the process that is
 running. Two routers on one stone would need two files and a way to say which.
+
+WHAT TRAVELS IN THE FORK STRING CAME OFF THE FACE 2026-09-15 -- the bullet read
+"paths and identifiers only, never key material" -- and this is the room that
+will ask, because a fork string is an argv and an argv is visible to anyone who
+can run ps. HAVE THE ANSWER READY: the JSON carries a certificate PATH, an
+issuer, an audience, a user id; it never carries a private key, a secret or a
+token. Say it in the same breath as "serializes it into the fork string" rather
+than waiting to be asked -- volunteered it is a design property, and extracted
+under questioning it sounds like a concession.
 -->
 
 ---
 
 ## What `initialize` seeds, and what stays `nil`
 
-**The rule:** seed a field when `nil` would be unsafe, **or when `nil` is itself a setting**.
-
-| what it bounds | seeded defaults |
+| subject | seeded defaults |
 |---|---|
-| concurrency | `maxSessions` **3** — `nil` would mean *no cap*, which is a setting in itself |
+| concurrency | `maxSessions` **3** — `nil` means *no cap*, which is a setting in itself |
 | session lifetime | `sessionIdleTimeoutSeconds` 1800 · `livenessProbeIntervalSeconds` 120 · `reaperIntervalSeconds` 60 · two stream deadlines, 60 and 10 · `requestTimeoutSeconds` `nil` · `maxSessionLifetimeSeconds` `nil` |
 | view hygiene | `maxCommitsBehind` 20 · `stuckViewGraceSeconds` 60 · `pinnedViewGraceSeconds` 300 |
 | this gem | `frontEndTransactionMode` `transactionless` |
-| security | `allowedOriginHosts` loopback · `messageTrace` **false** |
+| security | `allowedOriginHosts` loopback · `messageTrace` false |
 
-Where `nil` becomes a default: `workerClassName` → `McpServer`; `toolsetNames` → `defaultToolsetNames`; `workerUserId` → the front end gem's own user.
+Where `nil` is a default: `workerClassName` → `McpServer`; `toolsetNames` → `defaultToolsetNames`; `workerUserId` → the front end gem's own user.
 
 <!--
+THE RULE CAME OFF THE FACE 2026-09-15, SO IT IS NOW YOURS TO SAY, and the slide
+does not survive without it -- a bare table of defaults is a reference card, and
+the rule is what makes it an argument. It is one sentence: SEED A FIELD WHEN nil
+WOULD BE UNSAFE, OR WHEN nil IS ITSELF A SETTING. Say it before they start
+reading, because it is the only thing that tells them what the table is FOR.
+
 Do not read the table. Say the rule, let them scan, and move on -- the numbers
 are all on later slides where they matter, and this one is here so that section 8
 does not have to stop and explain where 20 came from. maintenanceCallTimeoutSeconds
@@ -2925,8 +2945,9 @@ does not have to stop and explain where 20 came from. maintenanceCallTimeoutSeco
 three seeded values not spelled out, for room; section 8 introduces all three
 where they are used.
 
-The rule is the slide, and it is worth one extra sentence if there is time: the
-awkward cases are the ones where nil is MEANINGFUL. maxSessions nil is "no cap at
+The rule is the slide even though it is no longer printed on it, and it is worth
+one extra sentence if there is time: the awkward cases are the ones where nil is
+MEANINGFUL. maxSessions nil is "no cap at
 all". maxCommitsBehind nil is "view hygiene off". Neither could double as "use the
 default", so both are seeded, and the class comment says so at each one.
 
@@ -5915,7 +5936,7 @@ a 63KB body.
 
 ---
 
-## Five defects, measured — and this is **the ask**
+## Five defects, measured
 
 | # | defect | effect |
 |---|---|---|
