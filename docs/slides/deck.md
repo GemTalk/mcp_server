@@ -2701,7 +2701,7 @@ If we are behind: this lead slide is the first thing to cut in the whole deck.
 
 ---
 
-## There is nothing to install but topaz file-outs
+## Installation is via topaz file-outs
 
 | group | classes | what | when |
 |---|---|---|---|
@@ -2717,8 +2717,13 @@ If we are behind: this lead slide is the first thing to cut in the whole deck.
 <span class="fine">`install.sh` picks the groups by **probing the image rather than asking**: `src/auth` needs `JsonWebToken` and `JwtSecurityData`, neither of which exists before 3.7.5.</span>
 
 <!--
-Spend no time defending the absence of a package manager; state it and move on. The audience this
-matters to is the one that has to file it into an image on a customer machine.
+THE ABSENCE OF A PACKAGE MANAGER CAME OFF THE FACE 2026-09-14. The title read
+"There is nothing to install but topaz file-outs" and now reads "Installation is
+via topaz file-outs", which describes the mechanism without making the claim. So
+SAY IT, once, in the words the title used to use -- there is nothing to install
+BUT these file-outs: no package manager, no loader to install first, no runtime
+dependency. Then move on; do not defend it. The audience this matters to is the
+one that has to file it into an image on a customer machine.
 
 The byte-exact round trip is the part worth one extra sentence, because it is what makes the
 rule enforceable: file the class out canonically, diff against the repo, and a difference means a
@@ -2898,7 +2903,7 @@ running. Two routers on one stone would need two files and a way to say which.
 
 ---
 
-## What `initialize` seeds, and why the rest stays `nil`
+## What `initialize` seeds, and what stays `nil`
 
 **The rule:** seed a field when `nil` would be unsafe, **or when `nil` is itself a setting**.
 
@@ -2989,7 +2994,7 @@ be asserted on an image that carries them.
 ## `McpRouter>>forkOnPort:`, in order
 
 1. `validateWorkerConfig` + `validateTimerConfig` — **in the launching session, not just the child**
-2. Build a `GsTsExternalSession` with a one-time password**
+2. Build a `GsTsExternalSession` with a one-time password
 3. `login`
 4. **Capture `stoneSessionId` and the host pid _before_ launching the loop** — once the non-blocking call is running, the external session refuses further queries (`GciError`, *operation in progress*)
 5. `forkAndDetachString: 'McpRouter runOnPort: 8000 configJson: ''{…}'''`
@@ -3042,9 +3047,9 @@ here at most.
 
 `McpRouter class>>runOnPort:configJson:` → `applyConfigJson:` → `applyFrontEndTransactionMode` → the instance-side `runOnPort:`
 
-* `makeListenerOnPort:` — **loopback only**, and `bindAddress` has **no setter on the base class**: a base `McpRouter` authenticates nothing, so a reachable port would be an open door into the repository. `McpAuthRouter` is the class that adds one (§9)
+* `makeListenerOnPort:` — **loopback only**, and `bindAddress` has **no setter** on the base class: a base `McpRouter` authenticates nothing, so a reachable port would be an open door into the repository. `McpAuthRouter` is the class that adds one
 * `nameThisGem: 'McpRouter:8000'` — **after the bind.** A gem that failed to take the port is not this server
-* `forkReaper` (§8) + `forkSignalPoller` — two `GsProcess`es, running *during the loop's waits*
+* `forkReaper` + `forkSignalPoller` — two `GsProcess`es, running *during the loop's waits*
 
 ```smalltalk
 [isRunning] whileTrue: [
@@ -3073,6 +3078,13 @@ readWillNotBlockWithin: behaves identically for both.
 Naming after the bind is thirty seconds of DBA goodwill: the name is what makes
 the gem findable in System cacheStatisticsForAllSlots, and it would be actively
 misleading on a gem that never got the port.
+
+THE TWO FORWARD POINTERS CAME OFF THE FACE 2026-09-14 -- the bullets read
+"McpAuthRouter is the class that adds one (§9)" and "forkReaper (§8)". Say both
+as asides rather than letting the room wonder whether either is ever explained:
+the reaper forked here is what section 8's whole maintenance cycle runs in, and
+the router that takes a reachable port is section 9. This is the only slide that
+names either before its section arrives.
 
 Have this ready if anyone is reading along in the source and asks why the
 transaction mode is applied in the CLASS-side runOnPort:configJson: and nowhere
@@ -4657,9 +4669,9 @@ are going to run it.
 
 ### The `offline_access` deviation
 
-**The rule.** MCP **SHOULD NOT** advertise `offline_access` in `WWW-Authenticate` or `scopes_supported`. However:
+The server **SHOULD NOT** advertise `offline_access` in `WWW-Authenticate` or `scopes_supported`. But:
 * The Claude Code client appends `offline_access` to its authorization request **on its own**
-* Some authorization servers **reject a request naming a scope that client was never assigned**. Keycloak and Authelia reject **before any login page**
+* Some authorization servers **reject a request naming any scope that the client was not assigned**. Keycloak and Authelia reject **before any login page**
 
 **Keycloak compounds it.** An RFC 7591 dynamic registration carrying a `scope` field **replaces** the realm's defaults — so the resource *advertising* the scope is the only way such a client ever holds it.
 
@@ -4724,6 +4736,13 @@ with the reasoning rather than an apology.
 Authorization servers that gate scopes per client behave this way; others
 silently narrow the grant and need none of this, which is why the deviation looks
 unnecessary until you meet one that does not.
+
+THE ATTRIBUTION WENT WITH IT ON THE SAME DAY. The line read "MCP SHOULD NOT
+advertise" and now reads "The server SHOULD NOT advertise", which is the same
+requirement with nothing saying WHOSE it is. SAY WHOSE: this is the spec's rule,
+not a house policy we are failing to keep. Without that, the face reads as the
+server contradicting its own standard, and the blockquote's "asserts the rule"
+has nothing to point at.
 
 THE RULE'S NAME CAME OFF THE FACE 2026-09-14 and is worth having, because this
 room will want to look it up: it is MCP SEP-2207, and its status is FINAL. That
