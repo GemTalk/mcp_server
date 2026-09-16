@@ -4513,7 +4513,7 @@ stranger, because the refresh only ever travels the dead worker's own closed cha
 -->
 
 ---
-## View hygiene: **one** ground, and it is this session's own distance from *now*
+## View hygiene: the commit-record backlog
 
 A worker at least `maxCommitsBehind` (20) behind is sent one `System continueTransaction` — a current view with its uncommitted work **kept**. Three answers come back:
 
@@ -4530,6 +4530,16 @@ A worker at least `maxCommitsBehind` (20) behind is sent one `System continueTra
 * **A *running* call pinning the oldest record is ended.** Those three **plus** holding the oldest record.
 
 <!--
+THE TITLE STOPPED MAKING THE CLAIM ON 2026-09-16. It read "View hygiene: **one**
+ground, and it is this session's own distance from *now*", and that was an
+argument rather than a label: ONE ground, and the ground is maxCommitsBehind --
+how far THIS worker's view has fallen behind -- not the repository's
+commit-record backlog. The backlog appears on this face only as a conjunct in
+the last two bullets, as PRESSURE that licenses acting on the ground. The
+distinction is the slide's second half and is measured, so say it out loud now
+that the heading does not: a high backlog is not evidence that anybody is behind,
+which is why the route that keyed on it was deleted.
+
 Two things to get across, and the second is the one they will argue with.
 
 First, `doomed`. This is what makes the whole arm defensible and it connects straight back to section
