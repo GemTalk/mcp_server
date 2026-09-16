@@ -48,7 +48,7 @@ once; eight stretches of them are now set aside. Section 13 is the only one neve
 THE TARGET IS 45 MINUTES as of 2026-09-14, down from an hour, and that is what the current shape is
 for. The running order:
 
-  1-2     sections 0 and 1 -- the title, then the design directions and where they landed
+  1-2     sections 0 and 1 -- the title, and what is different
   3-20    the gem-contents sequence (GENERATED -- see below), plus its tool inventory
   21-27   sections 1 to 3 -- installing and starting a server, with demo A INSIDE the
           run rather than after it (REORDERED 2026-09-15)
@@ -213,9 +213,7 @@ command with a quoted argument in it (found 2026-09-12).
 VERTICAL SLICE 3 -- section 0: framing. Two slides -- the title and "What is
 different". Cut 2026-09-11: first in running order, third to be cut.
 
-Running order and plans, in seconds -- title 10, the directions-and-where-they-landed slide
-40 (50s). THE 40 HAS NOT BEEN RE-TIMED SINCE 2026-09-16, when that slide went from four
-bullets to eight and grew a second heading. Time it once out loud before trusting the 50.
+Running order and plans, in seconds -- title 10, what is different 40 (50s).
 
 SECTION 1 IS NO LONGER A SECTION, as of 2026-09-13. It was four slides; the
 load.gs loader and "How it is verified" were deleted and are now speaker notes on
@@ -225,7 +223,7 @@ went with it, to sit immediately before what was then demo B -- and on 2026-09-1
 the two were merged, so it is now one demo. So this slice is the title and
 one slide, and everything after them is slice 4's until section 4 begins.
 
-The gem-contents sequence runs between the directions slide and that run, which is
+The gem-contents sequence runs between "What is different" and that run, which is
 deliberate: the room gets the reason for gems before it is shown what is in
 them.
 
@@ -332,19 +330,13 @@ the same section in full with nothing on screen.
 
 ---
 
-## Design directions
+## What is different
 
-* Make an MCP server that runs in GemStone, to replace the **GCI-based Jasper MCP server** for VS Code, so that **any** client can reach it over plain HTTP
-* The server should run on older versions of GemStone, if possible
-* The server should run in a **detached** GsTsExternalSession and use a **separate gem** for each client
-
-## Today on [GitHub / GemTalk](https://github.com/GemTalk)
-
-* The new server runs **inside the image**. No Node process, no GCI bridge, no FFI
-* The server runs in GemStone 3.7.5+
+* This exists to replace the **GCI-based Jasper MCP server** with something **any** MCP client can reach over plain HTTP
+* It runs **inside the image**. No Node process, no GCI bridge, no FFI
 * The socket runs in a **gem**. The tools execute in a **gem** — with a **login**, a **transaction view**, and a **commit record**
-* The server conforms to MCP specifications [2025-06-18](https://modelcontextprotocol.io/specification/2025-06-18) and [2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25) but not [2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28) (yet)
-* The server answers `initialize`, `ping`, `tools/list`, and `tools/call`. Everything else — `resources/*`, `prompts/*`, `completion/complete`, `logging/setLevel` — is answered `-32601`, because this server declares exactly one capability: `tools`
+* This server conforms to MCP specifications [2025-06-18](https://modelcontextprotocol.io/specification/2025-06-18) and [2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25) but not [2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28) (yet)
+* It answers `initialize`, `ping`, `tools/list`, and `tools/call`. Everything else — `resources/*`, `prompts/*`, `completion/complete`, `logging/setLevel` — is answered `-32601`, because this server declares exactly one capability: `tools`
 
 <!--
 This slide is section 0's thesis and MCP's whole surface in one, and it was two slides until
@@ -352,17 +344,7 @@ This slide is section 0's thesis and MCP's whole surface in one, and it was two 
 from opposite ends. It now runs THIRD in the file, before the gem-contents sequence, so that the
 room has the reason for gems before it is shown what is in them.
 
-IT BECAME TWO HEADINGS ON 2026-09-16 -- "Design directions" and "Today on GitHub / GemTalk" -- and
-that is a change of GENRE, not of content. It used to assert what this thing is; it now sets out
-what was WANTED and then what was BUILT, which invites the room to check one list against the
-other. Three of the four directions are answered a line later and the fourth, "should run on older
-versions of GemStone, if possible", is answered by "runs in GemStone 3.7.5+" -- so read them as
-PAIRS rather than as two lists, and do not read the second heading aloud as though it were news.
-The slide is now eight bullets deep and nearly full; there is about a third of a line of room left
-at the bottom, so anything added here has to displace something.
-
-The login bullet, slowly -- it is third under the second heading now: it is the only thing on this
-slide anyone needs to carry forward, and it is
+Third bullet, slowly: it is the only thing on this slide anyone needs to carry forward, and it is
 the spine of sections 7, 8 and 9. A session is a login (9), a session is a transaction view (7),
 and a view is a commit record the stone cannot dispose of (8). That last one is what turns a
 convenience into a design constraint -- an idle MCP client is not free here the way an idle HTTP
