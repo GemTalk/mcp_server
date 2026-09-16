@@ -255,8 +255,15 @@ SLIDES = [
 
  ("c-http", "McpHttpConnection &#8212; one per request",
   "Reads **one** HTTP/1.1 request and writes **one** JSON response, `MCP-Session-Id` header included. "
-  "It also writes the SSE stream, every frame gated on the socket being writable, plus a "
-  "non-blocking read-side disconnect check &#8212; which is how a **closed editor tab** is noticed.",
+  "It writes the SSE stream, every frame gated on the socket being writable, plus a "
+  "non-blocking read-side disconnect check.",
+  "HOW A CLOSED EDITOR TAB IS NOTICED CAME OFF THE BOX 2026-09-16, SO IT IS NOW YOURS TO SAY. The\n"
+  "box used to end \"-- which is how a **closed editor tab** is noticed\", and the mechanism is still\n"
+  "printed: the non-blocking read-side disconnect check is the last clause on it. What the box no\n"
+  "longer says is what that check is FOR. Say it, because nothing else in the deck explains how the\n"
+  "server learns a client is gone, and a closed tab is how most of this room will ever end a\n"
+  "session -- no DELETE, no logout, just a socket that stops being there.\n"
+  "\n"
   "Off the slide since 2026-09-13, and worth a sentence if the question comes: the gem is released\n"
   "about ten seconds later. The ten seconds is a grace for a client that might reattach to the\n"
   "same session. A reopened\n"
