@@ -330,11 +330,11 @@ the same section in full with nothing on screen.
 
 ---
 
-## What is different
+## What is [mcp_server](https://github.com/GemTalk)?
 
-* This exists to replace the **GCI-based Jasper MCP server** with something **any** MCP client can reach over plain HTTP
+* This server exists to replace the **GCI-based Jasper MCP server** with something **any** MCP client can reach over plain HTTP
 * It runs **inside the image**. No Node process, no GCI bridge, no FFI
-* The socket runs in a **gem**. The tools execute in a **gem** — with a **login**, a **transaction view**, and a **commit record**
+* The socket runs in a **gem**. The tools execute in another **gem** — with a **login**, a **transaction view**, and a **commit record**
 * This server conforms to MCP specifications [2025-06-18](https://modelcontextprotocol.io/specification/2025-06-18) and [2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25) but not [2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28) (yet)
 * It answers `initialize`, `ping`, `tools/list`, and `tools/call`. Everything else — `resources/*`, `prompts/*`, `completion/complete`, `logging/setLevel` — is answered `-32601`, because this server declares exactly one capability: `tools`
 
@@ -1658,7 +1658,7 @@ assembled per call, so the surface a client sees is fixed for the life of its se
 
 ---
 
-## Mcp*Toolset &#8212; the unit you add tools in
+## Mcp*Toolset &#8212; the unit in which tools are added
 
 <div style="text-align:center">
 <svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel. A tick starts at a toolset, which reaches the McpProgressReporter held in SessionTemps under #McpProgress.">
@@ -2651,7 +2651,8 @@ of section 3. That was a deliberate trade and the demo-run header on demo B
 records the other half of it. If the reordering ever feels wrong on stage, the
 old shape is demo A moved back behind "Then, in the child".
 
-THE THESIS OF THE PAIR is one sentence and the lead says it: a server is a gem,
+THE THESIS OF THE PAIR is one sentence and the lead used to print it -- the
+section line came off on 2026-09-16, so it is now said rather than read: a server is a gem,
 started by evaluating an expression, configured entirely on an instance, and
 detached. Nothing about it is committed and nothing about it is a fact about the
 image -- which is what lets several differently-configured routers serve one
@@ -2721,11 +2722,16 @@ section that needed it. The seeds slide's notes carry what to say if asked.
 
 ### A gem, forked and detached, whose main activity is the accept loop
 
-<br>
-
-**§1–3** · nothing here is committed, and nothing here is a fact about the image
-
 <!--
+THE SECTION LINE CAME OFF THIS LEAD 2026-09-16, SO IT IS NOW YOURS TO SAY. It
+read "**§1–3** · nothing here is committed, and nothing here is a fact about the
+image", and it is the thesis of the whole run rather than a label on it -- the
+slice header calls it that. Say it over the lead in your own words. Both halves
+earn their keep later: nothing committed is why there is no file on disk and the
+gem log is the only record of what a router was told (demo A's step 4), and not a
+fact about the image is why several differently-configured routers can serve one
+stone at once (the config slide, two on).
+
 Where we are: the gem-contents sequence has just shown what is in a front end
 and what is in a worker. This run is the first of them being born -- installed on
 the next slide, forked four slides later. DEMO B is the second, and it is now the only
@@ -3521,11 +3527,13 @@ afford 60 rather than the 40 it had.
 
 ### A browser invariant, restored by rule
 
-<br>
-
-**§7** · the second of the two sections that do not survive being read afterwards
-
 <!--
+THE SECTION LINE CAME OFF THIS LEAD 2026-09-16, SO IT IS NOW YOURS TO SAY. It read
+"**§7** · the second of the two sections that do not survive being read afterwards", and it is a
+warning about THIS ROOM rather than about the material: sections 7 and 8 are the two where a
+reader of the slides afterwards gets the facts and misses the argument, so they are the two to
+spend breath on rather than to hurry. The other one is section 8, which follows immediately.
+
 Where we are: the demos have just shown a worker gem being born and a long call reporting while
 it runs. The sections that walked a request in and out line by line are archived, so this section
 follows the demos directly -- which changes the pitch here: the room has SEEN a session, it has not
@@ -4182,7 +4190,7 @@ simultaneous initializes cannot both see a free slot.
 
 # The maintenance cycle
 
-### One front-end process, monitoring the sessions
+### One front-end process that monitors the sessions
 
 <!--
 Frame the section in one sentence before the first slide: everything in here is
@@ -4199,7 +4207,7 @@ front end observed. Promise that and they will spend the section checking it.
 
 ---
 <div style="text-align:center">
-<svg viewBox="0 0 960 232" width="760" role="img" aria-label="The maintenance pass as it runs by default: refresh the front end's own view, then measure each worker's view hygiene, then probe quiet sessions, then reap. Step one comes first so everything after it reasons about the repository as it is now; reaping comes last so a session found gone while probing is freed in the same pass.">
+<svg viewBox="0 0 960 232" width="1130" role="img" aria-label="The maintenance pass as it runs by default: refresh the front end's own view, then measure each worker's view hygiene, then probe quiet sessions, then reap. Step one comes first so everything after it reasons about the repository as it is now; reaping comes last so a session found gone while probing is freed in the same pass.">
   <defs>
     <marker id="m8" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
       <path d="M0,0 L7,3 L0,6 Z" fill="currentColor"/>
