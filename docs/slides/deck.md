@@ -5527,7 +5527,7 @@ seam and pick a surface. Give it fifty seconds rather than forty-five.
 THE LEAD WAS ADDED 2026-09-14 AND NAMED GRAIL, on instruction -- the outline's
 section 6 is "Grail MCP Server" -- so the title gave the room a named server it
 may already know and the subtitle carried the generality. ON 2026-09-16 THAT WAS
-TURNED AROUND: the lead is now "Customized servers" over "How to make an MCP
+TURNED AROUND: the lead is now "Custom servers" over "How to make an MCP
 server for *your* software", and GRAIL IS NOT ON IT AT ALL. The room meets the category
 first and meets Grail on slide 2, which is already the slide that has to both
 open the seam and pick a surface.
@@ -5617,7 +5617,7 @@ the upstream-ask slide that was set aside that morning.
 
 DEPARTURES from docs/Presentation.md:
   * the outline's section 6 is titled "Grail MCP Server"; since 2026-09-16 the
-    lead is "Customized servers" and does not name Grail at all, so the section
+    lead is "Custom servers" and does not name Grail at all, so the section
     is introduced as a category and the example arrives on slide 2;
   * the outline's Grail bullet names grailDirectory as the options example.
     There are TWO declared options -- grailDirectory and testGemConfig -- and
@@ -5634,7 +5634,7 @@ DEPARTURES from docs/Presentation.md:
 
 <!-- _class: lead -->
 
-# Customized servers
+# Custom servers
 
 ### How to make an MCP server for *your* software
 
