@@ -4649,9 +4649,13 @@ MCP_MAX_COMMITS_BEHIND=2 MCP_REAPER_INTERVAL=10s ./run-server.sh
 3. Wait one pass — the gem log writes `view hygiene: session ... is 3 commits behind`
 4. Any tool call: the **`[session]`** line says the server refreshed the view, and **names what went stale**
 
-<span class="fine">**90 seconds, hard stop.** Fall back to a gem-log screenshot if the timing is awkward on stage.</span>
-
 <!--
+THE FINE LINE CAME OFF THIS FACE 2026-09-16. It read "**90 seconds, hard stop.** Fall back to a
+gem-log screenshot if the timing is awkward on stage." The hard stop is in the slice header and
+the fallback is the paragraph below, so nothing is lost -- but the two were on the FACE together
+for a reason, and that reason is now yours to remember: this is the demo where deciding to fall
+back has to happen BEFORE you start, not thirty seconds in.
+
 The point of the demo is the LAST step, not the log line: the client is told, on its next result, in
 the same [session] channel section 7 introduced -- and the stale reads are named. Everything before
 it is staging.
@@ -4731,11 +4735,12 @@ with a padlock on it would say less than the sentence already on slide 2. The
 lead slide says the same thing in words, which is the other reason not to draw
 it.
 
-THE VERSION DEPENDENCY IS NO LONGER ON A FACE IN THIS SECTION AT ALL. It was one
+THE VERSION DEPENDENCY IS NOWHERE ON SCREEN IN THIS SECTION. It was one
 fine line on slide 2, and the fold took the fine line with the rest of that
-slide's body on 2026-09-14; what is left on screen is demo F's "needs the 3.7.6
-stone". It survives as a sentence in the lead's notes and a paragraph in slide
-2's, which is enough -- it used to be nothing more BECAUSE section 12 owned
+slide's body on 2026-09-14; demo F's "needs the 3.7.6 stone" was the last of it
+on a face and came off on 2026-09-16. It survives as a sentence in the lead's
+notes and a paragraph in slide
+2's, and that now has to be enough -- it used to be nothing more BECAUSE section 12 owned
 versions, and section 12 went whole the same day, so the argument is in slide
 22's notes beside the install table that first says 3.7.5, and that is where an
 interested room gets taken. The outline
@@ -4764,11 +4769,13 @@ repository before the talk" (items 7 and 8) and both affecting THIS section:
 
 ### A reachable port, TLS, and a bearer token on every request
 
-<br>
-
-**§9** · authorization is not a gate in *front* of the server — it decides **whose gem runs the code**
-
 <!--
+THE SECTION LINE CAME OFF THIS LEAD 2026-09-16. It read "**§9** · authorization is not
+a gate in *front* of the server -- it decides **whose gem runs the code**", which is
+the paragraph below said in one line. Nothing is lost as long as the paragraph
+below is SAID; if it is skipped, the section opens on a title and a subtitle and
+the room has to wait five slides to learn what it is about.
+
 One sentence before the first slide, and it is the sentence the whole section is
 a consequence of: this is not "we added OAuth". Every request arrives with a
 token, the token names a GemStone user, and the worker gem that runs the code is
@@ -4788,10 +4795,11 @@ in the base class changed to make authorization possible. That is why there is n
 new diagram here -- it is the same picture with one method overridden.
 
 The version line, briefly and once: src/auth needs 3.7.5; an external OIDC IdP
-needs 3.7.6. NOTHING IN THIS SECTION SHOWS IT ANY MORE except demo F's "needs the
-3.7.6 stone" -- the fine line went when slide 2 was rewritten on 2026-09-14 -- and
-nothing later in the deck picks it up either, section 12 having gone whole the
-same day. So say it here or not at all, and resist relitigating it: it is a fact
+needs 3.7.6. NOTHING IN THIS SECTION SHOWS IT ANY MORE AT ALL -- slide 2's fine
+line went when the slide was rewritten on 2026-09-14, and demo F's "needs the
+3.7.6 stone" went on 2026-09-16 -- and
+nothing later in the deck picks it up either, section 12 having gone whole with
+the first of those. So say it here or not at all, and resist relitigating it: it is a fact
 about what runs where, not the ask. If the room wants the argument, it is in
 slide 22's notes and it belongs in the hallway.
 
@@ -4804,13 +4812,13 @@ are going to run it.
 
 ## A secure router on a reachable port
 
-`McpAuthRouter` is the class for a configurable `bindAddress`. **TLS is mandatory,** even on loopback. Requires a resource server to issue JWTs with the auth router in its audience. Logs into the worker gem as that user.
+`McpAuthRouter` is the class for a configurable `bindAddress`. **TLS is mandatory,** even on loopback. Requires a resource server to issue JWTs with the auth router in its audience. The worker gem runs as that user.
 
 ### The `offline_access` deviation
 
 The server **SHOULD NOT** advertise `offline_access` in `WWW-Authenticate` or `scopes_supported`. But:
 * The Claude Code client appends `offline_access` to its authorization request **on its own**
-* Some authorization servers **reject a request naming any scope that the client was not assigned**. Keycloak and Authelia reject **before any login page**
+* Some (most?) authorization servers **reject a request naming any scope that the client was not assigned.** Keycloak and Authelia reject **before any login page**
 
 **Keycloak compounds it.** An RFC 7591 dynamic registration carrying a `scope` field **replaces** the realm's defaults — so the resource *advertising* the scope is the only way such a client ever holds it.
 
@@ -4858,9 +4866,10 @@ not merely useless, it is actively wrong in two directions at once: it accepts
 tokens minted for ANY resource, and it publishes a discovery document naming
 NOWHERE to get one. Neither failure is loud.
 
-THE VERSION LINE IS NO LONGER ON A SLIDE FACE IN THIS SECTION. The fine line went
-when this slide was rewritten, and demo F's "needs the 3.7.6 stone" is all that
-is left of it on screen. Say it in a sentence if it is wanted: src/auth needs
+THE VERSION LINE IS NO LONGER ANYWHERE ON SCREEN IN THIS SECTION. The fine line
+went when this slide was rewritten on 2026-09-14, and demo F's "needs the 3.7.6
+stone" -- the last of it on any face -- went on 2026-09-16. Say it in a sentence,
+because nothing else will: src/auth needs
 JsonWebToken, JwtSecurityData and jwtPassword:, so 3.7.5; an EXTERNAL OIDC IdP
 needs 3.7.6. On an image older than 3.7.5 those methods CANNOT COMPILE AT ALL,
 which is why install.sh probes the image rather than asking, and leaves the group
@@ -5081,13 +5090,32 @@ of "What to fix in the repository before the talk".
 2. `execute_code` — and `status` showing **Alice's own GemStone userId**
 3. `System cacheStatisticsForAllSlotsShort` — the `McpServer:…` row **is hers**
 
-<span class="fine">**The point to land: the worker gem is her session, not the server's.** Needs the 3.7.6 stone. If the browser flow looks risky on the day, `verify-oidc-login.sh` plus a curl with a **pre-fetched token** is the safe version — have one ready either way.</span>
-
-<span class="fine">**Not built, and an invitation:** mapping **scopes to privileges**, and **loading toolsets by scope**. The router already resolves the tool surface **per session, on the side that can see the token** (§2) — the mechanism is in place and unused. What is missing is the policy. §13.</span>
-
-<span class="fine">**2 minutes.**</span>
-
 <!--
+THREE FINE LINES CAME OFF THIS FACE 2026-09-16, and one of them was carrying
+something nothing else in the deck carries. Verbatim, in order:
+
+  1. "**The point to land: the worker gem is her session, not the server's.**
+     Needs the 3.7.6 stone. If the browser flow looks risky on the day,
+     `verify-oidc-login.sh` plus a curl with a **pre-fetched token** is the safe
+     version -- have one ready either way."
+  2. "**Not built, and an invitation:** mapping **scopes to privileges**, and
+     **loading toolsets by scope**. The router already resolves the tool surface
+     **per session, on the side that can see the token** (§2) -- the mechanism is
+     in place and unused. What is missing is the policy. §13."
+  3. "**2 minutes.**"
+
+THE 3.7.6 IS THE ONE THAT MATTERS. That clause was the LAST place the version
+dependency appeared on any face in this section -- slide 2's fine line went on
+2026-09-14 -- so as of 2026-09-16 it is nowhere on screen in the talk. Three
+paragraphs elsewhere in this section's notes used to say "demo F's needs the
+3.7.6 stone is all that is left on screen"; they now say it is gone. Say it here
+in one sentence or the talk does not contain it: src/auth needs 3.7.5, an
+EXTERNAL OIDC IdP needs 3.7.6, and that is a fact about what runs where rather
+than an ask.
+
+THE INVITATION is the second one, and it is the deck's only mention of scopes
+mapping to privileges. The paragraph at the foot of these notes is how to say it.
+
 The riskiest demo in the deck: a browser, an IdP, a different stone, and a
 redirect that has to come back. Decide by the morning which version is running
 and rehearse THAT one -- switching to the fallback live is how this becomes four
@@ -5100,8 +5128,9 @@ What to point at, in order: her userId in the status output, then her row in the
 cache statistics. Those two together are the whole section -- the authorization
 did not just let her in, it decided which GemStone user is executing her code.
 
-The invitation at the end is deliberate and section 13 picks it up. Say it as an
-open question rather than a roadmap: the surface is already resolved per session
+The invitation is deliberate and section 13 picks it up. It was printed at the
+foot of this face until 2026-09-16 and is now spoken, so it happens only if you
+do it. Say it as an open question rather than a roadmap: the surface is already resolved per session
 on the side that holds the token, so the mechanism exists; what nobody has
 decided is the policy, and whether GemStone's own privileges should carry any of
 it. That is a question for this room specifically, and it is worth leaving in the
@@ -5196,7 +5225,7 @@ earns the ask.
 MCP_WORKER_USER=McpReadOnly ./run-server.sh
 ```
 
-Configured at `McpRouter>>workerUserId` — **one user per router, not per session.** `startWithId:workerUser:` does the login. Default `nil` — the front end's own user.
+Configured at `McpRouter>>workerUserId` — **per router, not per session.** `startWithId:workerUser:` does the login. Default `nil` — the front end's own user.
 
 * **No credential.** The front end mints a **one-time password per session**, needing **one committed grant** — `addOnetimePasswordUserId:` on the front-end user. So `configDict` carries **only an identifier**
 * **`McpAuthRouter` refuses `workerUserId:`** — there each worker is **the user its bearer token names**
@@ -5253,7 +5282,7 @@ docs/ReadOnly_User.md has the probe tables.
 
 ## Should write locks be privilege-gated?
 
-No privilege allows or prevents `System writeLock:`. A single statement can walk `Globals` and take over two thousand locks.
+No privilege allows or prevents `System writeLock:`. A single statement can quickly walk `Globals` and place more than 2000 locks.
 
 <!--
 Run this one briskly; the full table is in docs/ReadOnly_User.md and this slide
@@ -5501,11 +5530,11 @@ DEPARTURES from docs/Presentation.md:
 
 ### A worked example of a server for *your* software
 
-<br>
-
-**§10** · everything so far has been what *this* server does — here is **the seam**, and what happens when you use it
-
 <!--
+THE SECTION LINE CAME OFF THIS LEAD 2026-09-16. It read "**§10** · everything so far
+has been what *this* server does -- here is **the seam**, and what happens when
+you use it", which is the sentence below, printed. Say the sentence.
+
 Ten seconds, and the sentence that earns the section: everything up to here has
 been an account of what this server does. From here it is the seam -- what you
 attach to it, and what you run into when you do.
@@ -5794,9 +5823,14 @@ MCP_TOOLSETS="McpGrailToolset" ./run-server.sh        # a Grail stone, one clien
 3. **`import _grail_session`, then run it again** → **`compiled 12`**, every hit printing **`env 1`** beside it. The stock search scans **environment 0**
 4. Step 3 also raises the **`[session]`** line — because **a cold Grail import is a database write**
 
-<span class="fine">**90 seconds.** No second gem, no IdP, no timing window. The `not searched:` block prints **Grail #885** on screen, so the ask reads itself out.</span>
-
 <!--
+THE FINE LINE CAME OFF THIS FACE 2026-09-16. It read "**90 seconds.** No second gem, no IdP, no
+timing window. The `not searched:` block prints **Grail #885** on screen, so the ask reads itself
+out." The #885 claim is about the DEMO'S OWN OUTPUT and is still true -- the block prints the issue
+number whether or not the slide says so -- and the slice header rests on it. What came off is the
+reassurance, which was there for you: after demo F this is the safe one, and it is the reason this
+demo rather than the test fork is where the section ends.
+
 THIS DEMO IS THE SECTION'S EVIDENCE, put back on a screen without putting a slide
 back. Section 10 was cut on 2026-09-14 from a lead and five slides to a lead and
 one, and what went was everything it could prove. This is the one measurement of
