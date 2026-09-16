@@ -4679,6 +4679,9 @@ single content slide is 2 and demo F is 3.
 
 Running order and plans, in seconds -- lead 10; the one content slide 150, being
 90 for the secure router and 60 for the deviation; demo F 120. About 4:40.
+THE 120 PREDATES THE 2026-09-16 REBUILD, when demo F went from three beats and
+one login to six beats and two. It has not been re-timed and the 4:40 is
+therefore optimistic; time the demo once and correct both numbers here.
 
 THE MERGE, 2026-09-14, after the fold below and on the same day. The secure
 router and the offline_access deviation were tightened until the pair fitted one
@@ -4803,9 +4806,10 @@ the first of those. So say it here or not at all, and resist relitigating it: it
 about what runs where, not the ask. If the room wants the argument, it is in
 slide 22's notes and it belongs in the hallway.
 
-Where this ends: demo F, Alice running code as Alice. It is the riskiest demo in
-the deck because it needs the IdP reachable, so know before you start whether you
-are going to run it.
+Where this ends: demo F, Alice and Bob writing code on one image. It is the
+riskiest demo in the deck because it needs the IdP reachable and, since
+2026-09-16, needs it TWICE -- two users, two tokens -- so know before you start
+whether you are going to run it, and have both tokens in hand if you are.
 -->
 
 ---
@@ -4979,7 +4983,10 @@ block sits here.
 ================================================================================
 The payoff of the whole section, and it is what demo F shows: the gem is Alice's.
 Her code runs as her GemStone user, her privileges apply, her name is in the
-session list. The server is not impersonating anybody. Mechanically: on
+session list. Since the demo was rebuilt on 2026-09-16 it shows this through what
+Alice and Bob are each REFUSED rather than through her name in the session list,
+so "her name is in the session list" is now a thing to say here rather than a
+thing they will see there. The server is not impersonating anybody. Mechanically: on
 initialize the router derives the GemStone userId from a configurable claim --
 userIdClaim, default sub, typically preferred_username on Keycloak -- and
 McpSession startWithId:user:jwt: opens the worker with username: and
@@ -5080,17 +5087,58 @@ of "What to fix in the repository before the talk".
 
 <!-- _class: demo -->
 
-# DEMO F — Alice runs code as Alice
+# DEMO F — Alice and Bob write code on an image
 
 ```bash
 ./run-auth-server.sh          # TLS, an IdP, and a reachable port
 ```
 
 1. **The browser login** through the IdP
-2. `execute_code` — and `status` showing **Alice's own GemStone userId**
-3. `System cacheStatisticsForAllSlotsShort` — the `McpServer:…` row **is hers**
+2. **Alice** uses `execute_code` and tries to write to a **protected object**
+3. Alice writes **her own** class
+4. **Bob** uses `execute_code` and looks for Alice's class
+5. Bob tries to write his own class
+6. Alice removes her class
 
 <!--
+THE DEMO WAS REBUILT 2026-09-16, and it is a different demonstration rather than
+a longer one. It was "Alice runs code as Alice", three beats, and the two that
+went are the two that were the EVIDENCE:
+
+  * "`execute_code` -- and `status` showing **Alice's own GemStone userId**"
+  * "`System cacheStatisticsForAllSlotsShort` -- the `McpServer:...` row **is
+    hers**"
+
+Those two were what the section's argument pointed at: the gem in the cache list
+is Alice's, by name, and the server is not impersonating anybody. The new six
+beats show the same claim from the other side -- two users on one image, each
+bounded by what their own GemStone user may do -- which is a BETTER argument and
+a more expensive one. Two things follow and neither is cosmetic.
+
+FIRST, IT IS NOW TWO LOGINS, NOT ONE. Alice and Bob each need a token, so the
+riskiest demo in the deck just doubled its risky part. Have TWO pre-fetched
+tokens in scrollback, not one, and know which browser profile is which before you
+start; a second live redirect on stage is not worth the authenticity.
+
+SECOND, THE CACHE-STATISTICS BEAT IS GONE, so nothing on this face shows the
+worker gem by name any more. If the room is to see that at all it is demo B's
+cache row, twenty minutes earlier and without a user attached to it. Run the
+statistics line here anyway if there is time -- two McpServer rows, Alice's and
+Bob's, side by side -- because it costs ten seconds and it is the picture the
+whole section has been building.
+
+WHAT THE NEW BEATS BUY, and it is worth knowing which is load-bearing: beat 2 is
+the one to protect. A write refused at the write, on a protected object, is
+SecurityError 2116 -- which is exactly what section 11's privileges slide asserts
+two slides from now, and this is the only place in the talk it happens in front
+of anybody. Beats 3 to 6 are the pair working: Bob can see Alice's class only
+because she committed, which quietly re-runs section 7's view argument on live
+users, and beat 6 leaves the image as it was found, which is good manners and
+also the cue to stop.
+
+THE BUDGET SAYS 120 SECONDS AND WAS WRITTEN FOR THREE BEATS. Six beats and two
+logins are not two minutes. Time it once before trusting the section's 4:40.
+
 THREE FINE LINES CAME OFF THIS FACE 2026-09-16, and one of them was carrying
 something nothing else in the deck carries. Verbatim, in order:
 
@@ -5121,12 +5169,17 @@ redirect that has to come back. Decide by the morning which version is running
 and rehearse THAT one -- switching to the fallback live is how this becomes four
 minutes.
 
-Have a pre-fetched token in scrollback regardless. Even in the good case it turns
-a failed redirect into a five-second recovery.
+Have pre-fetched tokens in scrollback regardless -- two of them since the rebuild,
+one per user. Even in the good case they turn a failed redirect into a
+five-second recovery.
 
-What to point at, in order: her userId in the status output, then her row in the
-cache statistics. Those two together are the whole section -- the authorization
-did not just let her in, it decided which GemStone user is executing her code.
+What to point at, in order: the refusal in beat 2, then Bob finding Alice's class
+in beat 4. Those two together are the whole section -- the authorization did not
+just let them in, it decided which GemStone user is executing each one's code,
+and the stone enforced it without the server being asked. Until 2026-09-16 the
+two things pointed at here were Alice's userId in the status output and her row
+in the cache statistics; say the second of those out loud even though it is no
+longer a beat.
 
 The invitation is deliberate and section 13 picks it up. It was printed at the
 foot of this face until 2026-09-16 and is now spoken, so it happens only if you
@@ -5526,7 +5579,7 @@ DEPARTURES from docs/Presentation.md:
 
 <!-- _class: lead -->
 
-# The Grail MCP Server
+# A Grail MCP Server
 
 ### A worked example of a server for *your* software
 
