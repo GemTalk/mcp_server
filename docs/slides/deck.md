@@ -5579,7 +5579,7 @@ DEPARTURES from docs/Presentation.md:
 
 <!-- _class: lead -->
 
-# A Grail MCP Server
+# MCP Server for Grail
 
 ### A worked example of a server for *your* software
 
