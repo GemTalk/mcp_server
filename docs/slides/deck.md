@@ -1658,7 +1658,7 @@ assembled per call, so the surface a client sees is fixed for the life of its se
 
 ---
 
-## Mcp*Toolset &#8212; the unit in which tools are added
+## Mcp*Toolset &#8212; a set of tools, added together
 
 <div style="text-align:center">
 <svg viewBox="0 0 1140 352" width="1130" role="img" aria-label="Two gems. The front-end gem holds McpHttpConnection, the McpRouter -- whose box carries a circular-arrow glyph marking the accept loop, the gem's blocking main activity -- McpSession, McpOutbox, McpProgressChannel and two background GsProcesses -- the reaper and the signal poller. The worker gem holds SessionTemps, and beneath it McpServer, McpDispatcher, McpToolRegistry, the toolsets and the tools. An arrow is a hand-off, in the direction the work travels: a request runs down from McpHttpConnection through the router to McpSession and across to SessionTemps, the router writes every response back up on the connection, McpSession feeds its McpOutbox, and a progress tick comes back from the worker to the signal poller, which routes it by call id to that call's McpProgressChannel. A tick starts at a toolset, which reaches the McpProgressReporter held in SessionTemps under #McpProgress.">

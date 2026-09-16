@@ -396,7 +396,7 @@ SLIDES = [
   "Short slide. The only thing worth pausing on is that tools/list is answered from here rather than\n"
   "assembled per call, so the surface a client sees is fixed for the life of its session."),
 
- ("c-toolset", "Mcp*Toolset &#8212; the unit in which tools are added",
+ ("c-toolset", "Mcp*Toolset &#8212; a set of tools, added together",
   "A tool pack: `registerOn:` contributes its tools and their schemas to the tool registry, and it "
   "owns its `tool_*` handlers and the shared schema builders.",
   "SAY THE REST, and the inventory two slides on shows it: seven core toolsets, one per tool\n"
