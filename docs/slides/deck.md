@@ -3198,17 +3198,22 @@ later demos read that same log and that same scrollback.
 
 ---
 
-## `McpRouter>>forkOnPort:`, in order
+## `McpRouter>>forkOnPort:`
 
-1. `validateWorkerConfig` + `validateTimerConfig` — **in the launching session, not just the child**
+1. `validateWorkerConfig` + `validateTimerConfig` — in the launching session, not just the child
 2. Build a `GsTsExternalSession` with a one-time password
 3. `login`
-4. **Capture `stoneSessionId` and the host pid _before_ launching the loop** — once the non-blocking call is running, the external session refuses further queries (`GciError`, *operation in progress*)
+4. Capture `stoneSessionId` and the host pid _before_ launching the loop — once the non-blocking call is running, the external session refuses further queries (`GciError`, *operation in progress*)
 5. `forkAndDetachString: 'McpRouter runOnPort: 8000 configJson: ''{…}'''`
-6. `logout` the handle — **the child is independent**
-7. Answer a status string carrying **three ways to stop it**: `./stop-server.sh` (by port), `System stopSession: <id>` (from any session), `kill <pid>` (shell)
+6. `logout` the handle — the child is independent
+7. Answer a status string carrying three ways to stop it: `./stop-server.sh` (by port), `System stopSession: <id>` (from any session), `kill <pid>` (shell)
 
 <!--
+THE BOLD CAME OFF ALL SEVEN STEPS ON 2026-09-16, and the title lost ", in order".
+Nothing was cut -- every word is still there -- but the slide no longer tells the
+room where to look, so the two paragraphs below are now the only thing doing it.
+Steps 4 and 7 were the bolded ones and they are the two that matter.
+
 Two things on this slide are worth the room's time and the rest is narration.
 
 Step 4 is the ordering constraint: it is not obvious, it cost time, and it is
@@ -3497,9 +3502,24 @@ the human-in-a-browser diagram, which already shows the mechanism working: this
 room knows the bitmap intersection, and what was left worth saying is one sentence
 about reads having no date, plus the StrongReadSet caveat.
 
-THE TWO PICTURES ARE NOW ADJACENT, and the [session] examples follow them rather
-than preceding them -- the examples read as consequences once the room has seen
-what goes wrong, and as a wall of prose before it. The accent colours on the two
+THE TWO PICTURES ARE STILL ADJACENT, BUT THE [session] EXAMPLES CAME BACK IN
+FRONT OF THEM ON 2026-09-16. They had been moved BEHIND the pictures on
+2026-09-14, and the argument recorded here at the time was that "the examples
+read as consequences once the room has seen what goes wrong, and as a wall of
+prose before it". That is now reversed: the examples sit immediately after the
+instructions slide, which is the slide that PROMISES them, so the room reads the
+[session] line while the paragraph explaining it is still a page behind rather
+than four.
+
+WHAT THE REVERSAL COSTS is exactly what the 2026-09-14 note named, so it is worth
+knowing rather than rediscovering on stage. The examples now arrive before the
+room has seen a commit refused or a write land silently, so the second one --
+"Your last commit FAILED" -- is prose here rather than a payoff. Spend less time
+on it in place and point BACK at it from the agent picture, which is now two
+slides further on instead of one slide earlier. If it reads as a wall on the day,
+the way back is the [session] slide moved behind the agent picture again.
+
+The accent colours on the two
 pictures are deliberately the wrong way round: the REFUSED commit is red and the
 SUCCESSFUL one is green, and saying why is the point of the pair.
 
@@ -3514,8 +3534,9 @@ Budget: 11:10 at the plans in docs/Presentation.md's demo inventory -- 490s of
 slides plus a 180s demo. The six slides cut on 2026-09-14 give back something
 like 270s of that, which puts the slice near 6:40 and makes it the shortest of
 the two GemStone sections rather than the longest. execute_code now carries two
-ideas rather than one, so give it 50 rather than the 30 it had. The agent diagram, fourth in
-the slice, carries 90 seconds and is the one to protect; "the rule, the ledgers,
+ideas rather than one, so give it 50 rather than the 30 it had. The agent diagram, FIFTH in
+the slice since the [session] slide moved in front of the pictures on 2026-09-16
+-- it was fourth -- carries 90 seconds and is the one to protect; "the rule, the ledgers,
 the stamp" is now the only slide standing between it and execute_code, so it can
 afford 60 rather than the 40 it had.
 ================================================================================
@@ -3589,14 +3610,15 @@ Point at, in order:
     change made on the strength of what you read EARLIER commits cleanly over their work. Then
     quote the line it ends on, because it is the one instruction in 551 words that asks the model
     to do something it would not otherwise do: "If you read something, thought about it, and are
-    only now acting, RE-READ IT FIRST." That exists because the failure two slides from now is
+    only now acting, RE-READ IT FIRST." That exists because the failure three slides from now is
     real.
   * NOTHING COMMITS FOR YOU: says out loud that the mutation tools leave work uncommitted. Six
     weeks ago every one of them committed inside its own call, which is slide 6.
-  * THE SECOND ELISION is the [session] line -- four paragraphs of it. Since 2026-09-14 the slide
-    showing the line itself comes three slides later, AFTER the two pictures, so promise it rather
-    than pointing at it: say that it is there and that it is unintelligible without its paragraph,
-    which is most of why these instructions exist at all. The last thing cut with it is worth
+  * THE SECOND ELISION is the [session] line -- four paragraphs of it. The slide showing the line
+    itself is THE VERY NEXT ONE as of 2026-09-16; it sat three slides later, behind the two
+    pictures, from 2026-09-14 until then. So point FORWARD at it rather than promising it: say
+    that four of its shapes are on the next slide, and that the line is unintelligible without
+    the paragraph elided here, which is most of why these instructions exist at all. The last thing cut with it is worth
     keeping in your pocket for the questions: a failed commit is the one failure here you cannot
     retry your way out of, and the conflict is reported per CLASS rather than per method, so two
     sessions compiling different methods on one class still collide.
@@ -3610,6 +3632,49 @@ prompt for attention.
 If asked: a session whose user cannot commit is still sent this, and still needs it -- it
 accumulates pending work exactly as any other does, and the [session] line points it at abort
 rather than at commit. Section 11.
+-->
+
+---
+
+## Session status is appended to tool results
+
+<p class="exlbl">uncommitted work pending</p>
+<p class="ex">[session] You have uncommitted changes. No tool commits for you: call commit to persist them or abort to discard them. They are lost if this session ends first.</p>
+
+<p class="exlbl">the client's own commit was refused</p>
+<p class="ex">[session] Your last commit FAILED: another session changed the same objects since your view was taken (Write-Write(2)). Nothing was written. Your changes are still here but cannot be committed and your view cannot move until you call abort, which discards them -- save anything you need first, then abort, re-read, and redo it.</p>
+
+<p class="exlbl">the server moved the view, and the pending work is now doomed</p>
+<p class="ex">[session] The server refreshed your view -- it had fallen far enough behind to be holding the repository's commit records open -- and your uncommitted changes now CONFLICT with work another session has committed: it changed McpFixtureA. They cannot be committed, and abort is the only way out [...]</p>
+
+<p class="exlbl">the view moved, and some reads no longer hold</p>
+<p class="ex">[session] The view moved: 2 of 7 earlier reads are stale and must be re-read before writing to them: Foo>>bar:, Baz:shape.</p>
+
+<!--
+Four of the five shapes; the fifth is a nested transaction, which just says commit and abort
+cannot reach the outer one.
+
+Read the second and third aloud one after the other, because the difference between them is the
+detail I would defend hardest. Same jam — view moved, pending work un-committable, abort the only
+way out — but two different causes, and the client must not be told the wrong one. "Your last
+commit FAILED" is right only when a commit is what failed. Where the SERVER's own refresh doomed
+the work, the client made no commit at all and would go looking for one it never made.
+
+The claim that used to be the slide's last line, and is worth making out loud because nothing on
+the screen says it any more: every one of these is computed from the state the session is left in
+AFTER the tool ran, not the state the call arrived in. That
+what lets `abort` clear a pending conflict and answer "Transaction aborted." with no contradicting
+warning stapled to it — while abort itself stays two lines that know nothing about any of this.
+Annotating from the pre-call state would need every transaction tool to suppress a note the
+dispatcher had already decided to add.
+
+Appended by `annotateContent:` to BOTH the success and the error envelope, because a tool that
+raised is exactly when dirty state most needs reporting. `structuredContent` is deliberately not
+touched: the error kind and message stay what the tool raised, so a client branching on the kind
+is unaffected by prose meant for the model.
+
+`Write-Write(2)` is the stone's own conflict category and a count — deliberately not the conflict
+dictionary's printString, which holds the conflicting OBJECTS and can be enormous.
 -->
 
 ---
@@ -3825,49 +3890,6 @@ the first canary vanished exactly on schedule, which is what made it convincing 
 Both designs were checked carefully -- does it destroy work, does it raise, does it pin pages -- and
 both were checked against the wrong question. Never "what does this tell the STONE about this
 session?" A two-session test nobody had written would have answered it in a minute.
--->
-
----
-
-## Session status is appended to tool results
-
-<p class="exlbl">uncommitted work pending</p>
-<p class="ex">[session] You have uncommitted changes. No tool commits for you: call commit to persist them or abort to discard them. They are lost if this session ends first.</p>
-
-<p class="exlbl">the client's own commit was refused</p>
-<p class="ex">[session] Your last commit FAILED: another session changed the same objects since your view was taken (Write-Write(2)). Nothing was written. Your changes are still here but cannot be committed and your view cannot move until you call abort, which discards them -- save anything you need first, then abort, re-read, and redo it.</p>
-
-<p class="exlbl">the server moved the view, and the pending work is now doomed</p>
-<p class="ex">[session] The server refreshed your view -- it had fallen far enough behind to be holding the repository's commit records open -- and your uncommitted changes now CONFLICT with work another session has committed: it changed McpFixtureA. They cannot be committed, and abort is the only way out [...]</p>
-
-<p class="exlbl">the view moved, and some reads no longer hold</p>
-<p class="ex">[session] The view moved: 2 of 7 earlier reads are stale and must be re-read before writing to them: Foo>>bar:, Baz:shape.</p>
-
-<!--
-Four of the five shapes; the fifth is a nested transaction, which just says commit and abort
-cannot reach the outer one.
-
-Read the second and third aloud one after the other, because the difference between them is the
-detail I would defend hardest. Same jam — view moved, pending work un-committable, abort the only
-way out — but two different causes, and the client must not be told the wrong one. "Your last
-commit FAILED" is right only when a commit is what failed. Where the SERVER's own refresh doomed
-the work, the client made no commit at all and would go looking for one it never made.
-
-The claim that used to be the slide's last line, and is worth making out loud because nothing on
-the screen says it any more: every one of these is computed from the state the session is left in
-AFTER the tool ran, not the state the call arrived in. That
-what lets `abort` clear a pending conflict and answer "Transaction aborted." with no contradicting
-warning stapled to it — while abort itself stays two lines that know nothing about any of this.
-Annotating from the pre-call state would need every transaction tool to suppress a note the
-dispatcher had already decided to add.
-
-Appended by `annotateContent:` to BOTH the success and the error envelope, because a tool that
-raised is exactly when dirty state most needs reporting. `structuredContent` is deliberately not
-touched: the error kind and message stay what the tool raised, so a client branching on the kind
-is unaffected by prose meant for the model.
-
-`Write-Write(2)` is the stone's own conflict category and a count — deliberately not the conflict
-dictionary's printString, which holds the conflicting OBJECTS and can be enormous.
 -->
 
 ---
