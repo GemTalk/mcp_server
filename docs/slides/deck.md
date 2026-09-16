@@ -42,7 +42,7 @@ style: |
 ---
 
 <!--
-FIFTY-FIVE SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut
+FIFTY-FOUR SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut
 once; eight stretches of them are now set aside. Section 13 is the only one never written.
 
 THE TARGET IS 45 MINUTES as of 2026-09-14, down from an hour, and that is what the current shape is
@@ -50,15 +50,20 @@ for. The running order:
 
   1-2     sections 0 and 1 -- the title, and what is different
   3-20    the gem-contents sequence (GENERATED -- see below), plus its tool inventory
-  21-28   sections 1 to 3 -- installing and starting a server, with demos A and B
-          INSIDE the run rather than after it (REORDERED 2026-09-15)
-  29-30   demos C and D -- a session is a gem, then a long call reporting while it runs
-  31-38   section 7 -- the transaction model and the blind-write guardrail, then demo E
-  39-43   section 8 -- the router maintenance cycle, then demo F
-  44-46   section 9 -- McpAuthRouter, a reachable port, then demo G (FOLDED, THEN MERGED, 2026-09-14)
-  47-48   section 11 -- the worker gem's GemStone user (MOVED HERE, THEN FOLDED, 2026-09-14)
-  49-51   section 10 -- a lead, ONE slide, and demo H: extending it, a server for YOUR software
-  52-55   THE APPENDIX -- a lead, then the JSON codec. OPTIONAL, run only if the clock allows
+  21-27   sections 1 to 3 -- installing and starting a server, with demo A INSIDE the
+          run rather than after it (REORDERED 2026-09-15)
+  28-29   demos B and C -- a session is a gem, then a long call reporting while it runs
+  30-37   section 7 -- the transaction model and the blind-write guardrail, then demo D
+  38-42   section 8 -- the router maintenance cycle, then demo E
+  43-45   section 9 -- McpAuthRouter, a reachable port, then demo F (FOLDED, THEN MERGED, 2026-09-14)
+  46-47   section 11 -- the worker gem's GemStone user (MOVED HERE, THEN FOLDED, 2026-09-14)
+  48-50   section 10 -- a lead, ONE slide, and demo G: extending it, a server for YOUR software
+  51-54   THE APPENDIX -- a lead, then the JSON codec. OPTIONAL, run only if the clock allows
+
+THE DEMOS WERE RELETTERED ON 2026-09-15, when the install demo and the start-a-server demo were
+merged into one. There are SEVEN now, A to G, and every letter after A moved up one: what was C is
+B, D is C, E is D, F is E, G is F, H is G. Notes written before that date, and any crib sheet that
+was not rewritten with them, mean the letter AFTER the one they name.
 
 RUNNING ORDER IS NOT SECTION-NUMBER ORDER ANY MORE. Section 11 was moved ahead of section 10 on
 2026-09-14, so the deck runs 9, 11, 10. The reason is thematic rather than structural: section 9's
@@ -69,7 +74,7 @@ section last, so the talk proper ends on "here is what you build on this" rather
 ONE REFERENCE FLIPPED DIRECTION AND WAS BETTER FOR IT, then left the deck entirely: section 10's
 toolset slide ended "(§11)", which the reorder turned from a forward pointer into a backward one --
 and that slide was removed later the same day, so no face makes the link now. Its notes do, on
-page 51. Section numbering still belongs to the material,
+page 50. Section numbering still belongs to the material,
 not to this cut -- the deck already read 3, 7, 8 -- and this is the same principle applied to order
 rather than to numbering. AND THE LAST STRETCH CARRIES NO SECTION NUMBER AT ALL: as of 2026-09-14
 the codec slides sit behind a lead that calls them THE APPENDIX, so the room is told the talk
@@ -78,8 +83,9 @@ proper has ended rather than told which section it is in. The material is still 
 WHAT IS SET ASIDE, and where. docs/slides/archive.md holds twenty-three slides removed on 2026-09-14
 for time: section 4 (trace 1, a brand-new client's first request, ten slides), the trace half of
 section 5 (a follow-up request, four), and section 6 (progress notifications, five). About fourteen
-minutes of slides. THEIR DEMOS STAYED -- demo C came out of section 4 and demo D out of section 6,
-and they now sit together with demos A and B as one continuous stretch of terminal. The archive is
+minutes of slides. THEIR DEMOS STAYED -- demo B came out of section 4 and demo C out of section 6,
+and they now run together as one continuous stretch of terminal, two slides behind the demo A that
+installs the image and starts the server they both use. The archive is
 renderable and carries its own map back; read its header before putting anything back, because two
 of those slides cannot return alone. THE SECTION NUMBERS WERE NOT RENUMBERED: the deck goes 3, 7,
 8, and the gap is the archive. Section numbering is a property of the material, not of this cut.
@@ -102,16 +108,16 @@ neither a set-aside nor a slide-by-slide thinning, but a REWRITE that made three
 Page 45's face went from "a reachable port, and the three invariants that pay for it" to a
 four-sentence summary of the whole mechanism, and the three slides behind it -- every request
 carries the token; the login; the token is the real bound -- came out. 190 seconds of slides became
-90 seconds of one. THE ARGUMENT DID NOT GO ANYWHERE: all three slides' notes are on page 45 under
+90 seconds of one. THE ARGUMENT DID NOT GO ANYWHERE: all three slides' notes are on page 44 under
 banners naming where each came from, so that slide is now spoken rather than read, and the renewal
 bug -- the best story in the section -- is a paragraph of them rather than a blockquote.
 
 AND SECTION 11 WAS FOLDED TOO, last of all on the same day and by the same move, which is the sixth
 stretch. Page 49's face took the lock exposure as a blockquote -- no privilege allows or prevents
 System writeLock:, and a single statement can take over two thousand locks -- and the slide that
-had been the section's whole reason for existing came out behind it. Its notes are on page 49 under
+had been the section's whole reason for existing came out behind it. Its notes are on page 48 under
 a banner, so the DataCurator measurement, the reverted lock reaper and the question itself all
-survive. THE ASK ITSELF IS STILL ON A FACE: later the same day page 49 gained a heading of its own
+survive. THE ASK ITSELF IS STILL ON A FACE: later the same day page 48 gained a heading of its own
 asking whether write locks should be privilege-gated, so what the fold cost is the argument under
 the question rather than the question.
 
@@ -119,7 +125,7 @@ AND SECTION 10 LOST ITS MECHANISM SLIDE, the seventh stretch and the last of the
 tools, write a toolset" -- registerOn:, toolNames, the schema builders, assertMutableClass:
 forwarding to the server -- was the only place in the deck that said how a toolset is written, and
 it came out when the surface slide beside it was rewritten to name a real customer's toolset and
-server in its bullets. Its notes AND its face are on page 51 under a banner, because no surviving
+server in its bullets. Its notes AND its face are on page 50 under a banner, because no surviving
 face carries any of it. WHAT THIS COSTS IS A POINTER: the "tools/list is unfiltered" blockquote went
 with it, and it was section 10's only face-level link back to section 11.
 
@@ -128,14 +134,14 @@ domain toolset collides with the session model" and "A GemStone result, and thre
 filed" both went, taking every measurement the section had: 132 defects against 386/386 clean, the
 31 modified objects of a cold Grail import, the 262-second test class, the sender search that
 answers an empty array where twelve senders exist, and the three filed Grail issues. All of it is
-on page 51 under two banners, anchored to the two words that survive on that face -- "tests" and
+on page 50 under two banners, anchored to the two words that survive on that face -- "tests" and
 "two search tools". THEN THE TWO SLIDES THAT WERE LEFT WERE MERGED, tightened until the surface
 shapes and the worked example fitted one face with the Grail half as a subheading. The section is a
 lead and ONE slide now, about 90 seconds, carrying three banners' worth of notes, and it is THE
 SHAPE WITHOUT THE EVIDENCE: it says what extending this server looks like and no longer shows
 anybody having done it. Thirty-five slides are now set aside in total.
 
-THEN DEMO H WENT IN, the same day, and it is the answer to that last sentence. The section had been
+THEN DEMO G WENT IN, the same day, and it is the answer to that last sentence. The section had been
 the only one in the deck with no demo, against an outline that asked for one; what settled the
 argument was that a demo could put the EVIDENCE back on a screen without putting a slide back. It
 runs the Grail sender search against the stock one, on the same name in the same session: empty
@@ -150,7 +156,7 @@ END of the file, after section 10, and is the first thing to drop if the clock h
 seam rather than a silent stop: if the clock has gone, end on the lead. Do not start the three and
 abandon them, because the ask is the last of them. It IS the concrete ask of the talk, so dropping
 it is not free; section 11's notes name it as one of the two things being asked for, the other
-being section 11's own lock question -- which since the fold is a heading at the foot of page 49
+being section 11's own lock question -- which since the fold is a heading at the foot of page 48
 rather than a slide.
 
 Each slice's own header comment sits beside its first slide. Seven of the original eleven slice
@@ -198,7 +204,7 @@ The `style:` block is deliberately minimal and is the thing to replace when the 
 dressed up. Nothing in the content depends on it. One rule in it is load-bearing rather than
 cosmetic: `section.demo pre code span` forces the syntax highlighter's own colours back to
 inherit. Without it a shell string literal renders dark blue on the dark demo ground and is
-invisible on a projector -- which nothing revealed until demo C's curl became the first demo
+invisible on a projector -- which nothing revealed until demo B's curl became the first demo
 command with a quoted argument in it (found 2026-09-12).
 -->
 
@@ -213,7 +219,8 @@ SECTION 1 IS NO LONGER A SECTION, as of 2026-09-13. It was four slides; the
 load.gs loader and "How it is verified" were deleted and are now speaker notes on
 the one slide that remains, the file-out table, and that slide has moved into
 slice 4's run behind a lead retitled "Installing and starting a server". Demo A
-went with it, to sit immediately before demo B. So this slice is the title and
+went with it, to sit immediately before what was then demo B -- and on 2026-09-15
+the two were merged, so it is now one demo. So this slice is the title and
 one slide, and everything after them is slice 4's until section 4 begins.
 
 The gem-contents sequence runs between "What is different" and that run, which is
@@ -316,7 +323,7 @@ know why a thing that looks like a web server is built out of gems. That second 
 whole talk.
 
 Eight demos, each with a hard stop rehearsed into it. (This read six while there
-were seven, and demo H made it eight.) If we run long the demos are what I will
+were seven, and demo G made it eight.) If we run long the demos are what I will
 protect, because a section summarised in two sentences beside a live worker gem lands better than
 the same section in full with nothing on screen.
 -->
@@ -327,8 +334,8 @@ the same section in full with nothing on screen.
 
 * This exists to replace the **GCI-based Jasper MCP server** with something **any** MCP client can reach over plain HTTP
 * It runs **inside the image**. No Node process, no GCI bridge, no FFI
-* The socket runs in a **gem**. The tools execute in a session in a **gem** — with a **login**, a **transaction view**, and a **commit record**
-* This server conforms to MCP specifications [2025-06-18](https://modelcontextprotocol.io/specification/2025-06-18) and [2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25) but not yet to [2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28)
+* The socket runs in a **gem**. The tools execute in a **gem** — with a **login**, a **transaction view**, and a **commit record**
+* This server conforms to MCP specifications [2025-06-18](https://modelcontextprotocol.io/specification/2025-06-18) and [2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25) but not [2026-07-28](https://modelcontextprotocol.io/specification/2026-07-28) (yet)
 * It answers `initialize`, `ping`, `tools/list`, and `tools/call`. Everything else — `resources/*`, `prompts/*`, `completion/complete`, `logging/setLevel` — is answered `-32601`, because this server declares exactly one capability: `tools`
 
 <!--
@@ -889,7 +896,7 @@ is true, what they have not necessarily done is follow it to three separate conc
 other two: the front end must own the client's STREAM, and the front end must own VIEW HYGIENE,
 because only the front end has a heartbeat. View hygiene is section 8 and is paid in full. The
 stream is section 6, which is archived as of 2026-09-14, so that promise is now redeemed only by
-demo D and by four boxes of the gem-contents sequence -- promise it smaller, or not at all.
+demo C and by four boxes of the gem-contents sequence -- promise it smaller, or not at all.
 Have the third argument ready anyway, because somebody always jumps ahead. On every OTHER count
 the worker is the better-informed party: it can read its own commits-behind, the stone's backlog,
 whether it holds the oldest commit record, and needsCommit, none of which the front end can see.
@@ -2594,10 +2601,11 @@ IDLE worker holding a stale view, the one moment that worker cannot run a line o
 
 <!--
 ================================================================================
-VERTICAL SLICE 4 -- installing, and starting a server. Eight slides -- a lead,
+VERTICAL SLICE 4 -- installing, and starting a server. Seven slides -- a lead,
 the file-out table that is all that is left of section 1, two for section 2, then
-demo A and demo B, then two for section 3. The demos are IN THE MIDDLE of the
-run as of 2026-09-15, not at the end of it. Cut 2026-09-11:
+demo A, then two for section 3. The demo is IN THE MIDDLE of the run as of
+2026-09-15, not at the end of it, and it is ONE demo as of the same day: what
+were demos A and B were merged, and every later demo moved up a letter. Cut 2026-09-11:
 second in running order, fourth to be cut. It took the install slide and demo A
 on 2026-09-13, when section 1 stopped being a section of its own, and lost four
 slides over the two days after -- this slice is now half slides and half demo,
@@ -2606,14 +2614,21 @@ running, and nothing here is worth arriving at it tired.
 
 Running order and plans, in seconds -- lead 10; installation is file-outs 35
 (section 1); config on an instance 30, what initialize seeds 35 (65s, section 2);
-demo A 60, demo B 90 (150s); forkOnPort: 45, in the child 40 (85s, section 3).
-195s of slides plus 150s of demo -- 5:45. THE TOTAL DID NOT CHANGE ON 2026-09-15;
-only the order did.
+demo A 150, install then a server; forkOnPort: 45, in the child 40 (85s, section 3).
+195s of slides plus 150s of demo -- 5:45. THE TOTAL DID NOT CHANGE ON 2026-09-15,
+twice over: neither the reordering nor the merge took a second out of it. What
+the merge took out is a page turn.
 
-THE TWO DEMOS ARE ADJACENT ON PURPOSE and they are provisional: demo A installs
-from nothing and demo B starts a server from a here-doc, which is one story told
-twice on the same machine. Dropping A, or folding its --check into the head of B,
-is the cheapest 60 seconds in the deck and is expected rather than feared.
+THE TWO DEMOS BECAME ONE ON 2026-09-15, which this header had been expecting.
+They were adjacent on purpose and marked provisional -- install from nothing, then
+start a server from a here-doc, one story told twice on the same machine -- and
+the note said folding them was the cheapest 60 seconds in the deck and was
+expected rather than feared. It cost nothing to do: both faces are on the merged
+slide whole, the steps run 1 to 5, and the budget is the same 150 seconds.
+WHAT IS STILL PROVISIONAL is the top half of it. Cutting back to a bare
+`./install.sh --check` and going straight to run-server.sh is still worth 60
+seconds. What is NOT cuttable any more is the slide, because steps 3 to 5 start
+the server demos B and E depend on.
 
 WHY THEY MOVED IN FRONT OF SECTION 3, 2026-09-15. They used to close this slice,
 so the room met forkOnPort: and the child-gem loop as CODE FIRST and saw a server
@@ -2624,17 +2639,17 @@ is the difference between a walkthrough and a recap. Nothing was cut and nothing
 was rewritten to do it -- the slides are in a different order and that is all.
 
 WHAT IT COSTS, so it can be undone knowingly: the six-minute block of terminal is
-now TWO blocks, 2:30 here and 3:30 at demos C and D, separated by the 85 seconds
-of section 3. That was a deliberate trade and the demo-run header on demo C
+now TWO blocks, 2:30 here and 3:30 at demos B and C, separated by the 85 seconds
+of section 3. That was a deliberate trade and the demo-run header on demo B
 records the other half of it. If the reordering ever feels wrong on stage, the
-old shape is demo A and demo B moved back behind "Then, in the child".
+old shape is demo A moved back behind "Then, in the child".
 
 THE THESIS OF THE PAIR is one sentence and the lead says it: a server is a gem,
 started by evaluating an expression, configured entirely on an instance, and
 detached. Nothing about it is committed and nothing about it is a fact about the
 image -- which is what lets several differently-configured routers serve one
 stone at once, and is also why there is no file on disk to read afterwards --
-which is what makes the gem log worth tailing on stage, and is demo B's step 2.
+which is what makes the gem log worth tailing on stage, and is demo A's step 4.
 
 Section 2 is the cheap half and should be run fast. Section 3 is where this
 audience is, and it now opens on forkOnPort: rather than on the kernel fact --
@@ -2649,7 +2664,7 @@ in forkOnPort:'s notes, where the seven steps ARE the picture it used to draw.
 
 SECTION 3 IS TWO SLIDES NOW, and both are code. The banner and transactionless
 came down on 2026-09-13 for the same reason, one slide apart: each was being
-described immediately before the room could see it. The banner is demo B's step 2
+described immediately before the room could see it. The banner is demo A's step 4
 -- a slide listing seven lines of log thirty seconds before tailing the log was
 the deck saying a thing out loud and then showing it -- and its notes are on demo
 B, in the order to point at them. Transactionless is a clause in section 1's
@@ -2706,12 +2721,12 @@ section that needed it. The seeds slide's notes carry what to say if asked.
 <!--
 Where we are: the gem-contents sequence has just shown what is in a front end
 and what is in a worker. This run is the first of them being born -- installed on
-the next slide, forked four slides later. DEMO C is the second, and it is now the only
+the next slide, forked four slides later. DEMO B is the second, and it is now the only
 place a worker gem is born in front of the room.
 
 The title took "Installing" on 2026-09-13, when section 1 came down to a single
 slide -- the file-out table -- and it made no sense to lead a one-slide section of
-its own. That slide now opens this run, and the two demos close it.
+its own. That slide now opens this run, and the demo sits in the middle of it.
 
 Say the thesis before the first slide, because it makes the rest of the pair
 coherent and it is the part this audience will test: a server is an EXPRESSION
@@ -2918,7 +2933,7 @@ for the config file, and it is worth exactly that much.
 The claim to make explicitly, because it is unusual enough to be worth saying out
 loud: there is no server object in the repository. Nothing was committed when this
 started. If you want to know what a running server was told, you read its gem log
--- which is why demo B tails the gem log, and why its banner is seven
+-- which is why demo A tails the gem log, and why its banner is seven
 deliberate lines rather than a debug dump.
 
 If someone asks why not a config file: the fork string IS the config file, and it
@@ -3035,7 +3050,7 @@ be asserted on an image that carries them.
 
 <!-- _class: demo -->
 
-# DEMO A — install, from nothing
+# DEMO A — install and run a server
 
 ```bash
 ./install.sh --check
@@ -3043,52 +3058,69 @@ be asserted on an image that carries them.
 ```
 
 1. The **environment report** — `GEMSTONE`, the stone, the netldi, and `GEMSTONE_GLOBAL_DIR`
-2. The **group selection deciding itself**: auth in or out by probing the image for `JsonWebToken`
-3. File-in, group by group, and one commit
+2. File-in, group by group, and one commit
 
-<span class="fine">**`GEMSTONE_GLOBAL_DIR` is the variable that decides whether anything works.** Get it wrong and you get `getaddrinfo failed, EAI error 8 ... Number: 4065`, which reads like DNS and is not. `--check` is the first thing to run on a new machine.</span>
+```bash
+./run-server.sh
+lsof -nP -iTCP:8000 -sTCP:LISTEN     # find the gem PID
+```
 
-<span class="fine">**60 seconds, hard stop.**</span>
+3. The script returns immediately — and prints **the session id, the host pid, and three ways to stop it**
+4. `tail` the gem log: **the banner**, the whole configuration of a server that has nothing on disk
+5. `System cacheStatisticsForAllSlotsShort` — **`McpRouter:8000`**, alone, with no workers yet
 
 <!--
-This demo moved on 2026-09-13 to sit immediately before demo B, and the two are now one stretch of
-terminal: install from nothing, then start a server from a here-doc. On 2026-09-15 the PAIR moved
-again, forward past section 3, so the room sees a server exist before it is shown the two methods
-that make one; demo C still picks up the same terminal two slides later. It costs nothing to stage --
-no server, no second gem, no timing -- so it is still the one to stretch if the room is settling,
-and it is the FIRST thing to cut if we are behind. Cutting it to a single `--check`, or folding
-that `--check` into the head of demo B, loses nothing but the scroll.
+TWO DEMOS RUN AS ONE, MERGED 2026-09-15. This was demo A (install from nothing,
+60s) and demo B (a server from a here-doc, 90s), adjacent since 2026-09-13 and
+already one continuous stretch of terminal; the slice header called folding them
+"the cheapest 60 seconds in the deck" and expected it. Nothing was cut to do it
+-- both faces are here whole and the steps simply run 1 to 5 -- so budget it as
+the two added up, 150 seconds, rather than as one demo's worth. EVERY LATER DEMO
+MOVED UP A LETTER the same day: what was C is now B, D is C, E is D, F is E, G
+is F, and H is G. Anything written before 2026-09-15 that names a letter means
+the one after it.
+
+WHAT THE MERGE CHANGED THAT IS NOT COSMETIC: this used to be the FIRST thing to
+cut if we were behind, because it was only the install. It is not any more.
+Steps 3 to 5 start the server that demo B opens a session against and that demo
+E reads view hygiene out of, so cutting this slide now cuts the live thread of
+the whole talk. WHAT IS STILL CUTTABLE IS THE TOP HALF: run `./install.sh
+--check` alone, say that the file-in happened, and go straight to run-server.sh.
+That is the sixty seconds, and it is still the cheapest sixty in the deck.
+
+On 2026-09-15 the pair also moved forward past section 3, so the room sees a
+server exist before it is shown the two methods that make one; demo B still
+picks up the same terminal two slides later.
 
 What to point at while it scrolls: the line where it decides about auth. That is the whole version
 story in one line of output. Nothing comes back to it now that section 12 is gone -- slide 22 is
 where the version numbers get said, and its notes carry the argument if it is asked for.
 
+THE AUTH LINE CAME OFF THE FACE 2026-09-15, SO IT IS NOW YOURS TO SAY. It was
+step 2 and it read "The group selection deciding itself: auth in or out by
+probing the image for JsonWebToken". The output still scrolls past whether or
+not the step is printed, so point at it: the installer does not ask which
+GemStone this is, it asks the IMAGE what it can do, and it files in the auth
+group only if the image already understands JsonWebToken.
+
+THE GEMSTONE_GLOBAL_DIR FINE LINE CAME OFF THE SAME DAY. Verbatim: "**`GEMSTONE_GLOBAL_DIR` is
+the variable that decides whether anything works.** Get it wrong and you get `getaddrinfo failed,
+EAI error 8 ... Number: 4065`, which reads like DNS and is not. `--check` is the first thing to run
+on a new machine." The error number is the part worth carrying in your mouth rather than in a
+slide: it is what turns a ten-minute confusion into a ten-second one, and this room will have seen
+it.
+
 Do NOT get drawn into GEMSTONE_GLOBAL_DIR here beyond the one sentence. The full version is in the
 README and it is a ten-minute conversation: netldi and stone each bind an ephemeral port and record
 it under that directory, /etc/services is a trap rather than a fix, and install.sh logs in linked
 (-l) specifically so it needs no netldi at all.
--->
 
----
+================================================================================
+FROM HERE DOWN, THE NOTES OF WHAT WAS DEMO B, moved whole on 2026-09-15 when the
+two slides became one. They are about steps 3, 4 and 5 -- run-server.sh, the gem
+log, and the single cache row.
+================================================================================
 
-<!-- _class: demo -->
-
-# DEMO B — a server, from a here-doc
-
-```bash
-./run-server.sh
-lsof -nP -iTCP:8000 -sTCP:LISTEN     # find the gem, and its log
-```
-
-1. The script returns immediately — and prints **the session id, the host pid, and three ways to stop it**
-2. `tail` the gem log: **the banner**, the whole configuration of a server that has nothing on disk
-3. `System cacheStatisticsForAllSlotsShort` — **`McpRouter:8000`**, alone, with no workers yet
-
-<span class="fine">Leave the `tail -f` running. DEMO C adds the worker rows to the same cache statistics, and DEMO F reads view hygiene out of this same log.</span>
-
-<span class="fine">**90 seconds.**</span>
-
-<!--
 Have the log path resolved BEFORE the talk and the lsof line in scrollback -- the
 one-liner is the demo's only fragile part, and hunting for a gem log on a
 projector is dead air.
@@ -3103,15 +3135,15 @@ different surfaces.
 
 Then the single cache row. It is worth a beat on its own precisely because it is
 lonely -- one gem, no workers, nothing else in the repository knows this server
-exists. DEMO C is the payoff.
+exists. DEMO B is the payoff.
 
 Fallback if the fork fails on stage: the banner is a screenshot, and say so
 without apologising. The thing that actually fails here is a netldi that is not
-running, which --check would have caught; run install.sh --check in demo A and
-this one is already de-risked.
+running, which --check would have caught -- and since the merge the --check is
+step 1 of this same slide, so by the time the fork runs it is already de-risked.
 
 THE BANNER, absorbed 2026-09-13 from the slide that used to sit just before this
-run. It came down because step 2 puts the real thing on the projector, and a
+run. It came down because step 4 puts the real thing on the projector, and a
 slide describing seven lines of log immediately before the log itself was the
 deck telling the room something it was thirty seconds from seeing. What that
 slide argued is worth saying over the scroll, in this order.
@@ -3141,6 +3173,14 @@ room is warm, because it generalises past this server: a reader has to be able t
 tell a QUIET server from an UNTRACED one, or an absence of message lines reads as
 an absence of traffic -- the wrong conclusion, and the expensive one. Silence is
 ambiguous, so a log has to say when it is not recording.
+
+THE TWO FINE LINES THAT CAME OFF THIS HALF OF THE FACE, 2026-09-15. Verbatim:
+"Leave the `tail -f` running. DEMO B adds the worker rows to the same cache
+statistics, and DEMO E reads view hygiene out of this same log." and "**90
+seconds.**" The first is a STAGING instruction rather than an argument and it is
+the one to keep in your head, because it is now the only place the dependency is
+written down: leave the tail running and do not clear the terminal, since two
+later demos read that same log and that same scrollback.
 -->
 
 ---
@@ -3253,43 +3293,45 @@ between a method that owns its gem and one that is a guest in yours.
 
 <!--
 ================================================================================
-DEMOS C AND D -- what is left of sections 4, 5 and 6, and it is two demos.
+DEMOS B AND C -- what is left of sections 4, 5 and 6, and it is two demos.
 Assembled 2026-09-14, when the target came down to 45 minutes and three stretches
 of slides went to archive.md. The sections that walked a request in and out are
 gone; their demos are not, because a demo shows in ninety seconds what those
 slides argued in eight.
 
-THIS IS TWO DEMOS, NOT FOUR, AS OF 2026-09-15. It read "four demos now run as one
-stretch of terminal" until demo A and demo B moved forward to sit between section
-2 and section 3, which is where the slice 4 header argues they belong. So A and B
-are one stretch, back there; C (a session is a gem) and D (a long call reporting
-while it runs, if the clock allows) are this one. Nothing but the deck's own page
-turns separates C from D -- run the two as one continuous thing, one terminal,
-one scroll -- and A and B the same way in their own place.
+THIS IS TWO DEMOS, NOT FOUR, AS OF 2026-09-15, AND THE LETTERS ARE NOT THE ONES
+THEY WERE. It read "four demos now run as one stretch of terminal" until the
+install-and-start demo moved forward to sit between section 2 and section 3,
+which is where the slice 4 header argues it belongs; later the same day the two
+demos that moved were merged into a single demo A, and every letter after it came
+up one. So demo A is one stretch, back there; B (a session is a gem) and C (a
+long call reporting while it runs, if the clock allows) are this one. Nothing but
+the deck's own page turn separates B from C -- run the two as one continuous
+thing, one terminal, one scroll.
 
 THE TERMINAL IS STILL THE SAME TERMINAL, and that is the thing to preserve
-through the reordering: C opens a session against the server B started and the
-scrollback from B is still above it, so do NOT clear between them and do not
-restart the server for C. The 85 seconds of section 3 that now sit in between are
+through the reordering: B opens a session against the server demo A started and
+the scrollback from A is still above it, so do NOT clear between them and do not
+restart the server for B. The 85 seconds of section 3 that now sit in between are
 slides, not terminal; the machine does not know they happened. Said out loud once
 -- "this is the server we started before those two slides" -- the break costs
 nothing and the code slides gain a running example.
 
-Running order and plans, in seconds -- demo C 120, demo D 90, so 3:30 here, with
-A and B's 2:30 earlier. Six minutes of terminal in the hour, no longer six
+Running order and plans, in seconds -- demo B 120, demo C 90, so 3:30 here, with
+demo A's 2:30 earlier. Six minutes of terminal in the hour, no longer six
 minutes of it at once: this is now the second biggest uninterrupted block in the
 talk rather than the biggest, and budget it as 3:30 rather than as part of a six.
 
 WHAT THE DEMOS NOW CARRY ALONE, and the notes on each say it in place:
-  * demo C is the only place a worker gem is born in front of the room, and the
+  * demo B is the only place a worker gem is born in front of the room, and the
     only sight of a session id, a tools/list, and the cache-statistics row that
     did not exist ten seconds ago. It was always the load-bearing demo; it is now
     load-bearing without a net;
-  * demo D is the only surviving material on progress notifications beyond four
+  * demo C is the only surviving material on progress notifications beyond four
     boxes of the gem-contents sequence. Its own closing contrast -- same call,
     one token's difference -- has to do the work that five archived slides did,
     so do not skip the contrast even if the rest of it is rushed.
-DEMO D IS STILL THE ONE TO CUT if the clock has gone, and cutting it now costs
+DEMO C IS STILL THE ONE TO CUT if the clock has gone, and cutting it now costs
 the progress story entirely rather than costing it a demonstration. That is a
 real loss and worth knowing before making it, but it is the right cut: everything
 after this point in the deck is material nothing else covers.
@@ -3297,7 +3339,7 @@ after this point in the deck is material nothing else covers.
 -->
 <!-- _class: demo -->
 
-# DEMO C — a session is a gem
+# DEMO B — a session is a gem
 
 ```bash
 curl -i -X POST localhost:8000/mcp -H 'Content-Type: application/json' \
@@ -3306,11 +3348,7 @@ curl -i -X POST localhost:8000/mcp -H 'Content-Type: application/json' \
 
 1. **`MCP-Session-Id:` comes back in the header** — and `serverInfo` names the version
 2. `tools/list`, echoing that id — **31 tools**
-3. In topaz: `System cacheStatisticsForAllSlotsShort` — **the `McpServer:5:…` row that did not exist ten seconds ago**, beside the `McpRouter:8000` from DEMO B
-
-<span class="fine">**This is the demo that makes “a session is a gem” concrete, and the one to keep if only one survives.** Practise the cache-statistics line until the three rows are readable on a projector.</span>
-
-<span class="fine">**2 minutes.**</span>
+3. In topaz: `System cacheStatisticsForAllSlotsShort` — **the `McpServer:5:…` row that did not exist ten seconds ago**, beside the `McpRouter:8000` from DEMO A
 
 <!--
 The load-bearing demo of the talk. Rehearse it more than any other except E.
@@ -3327,32 +3365,40 @@ one dies, and the params object is long enough to fumble.
 What to say while the tools/list output scrolls: 31, the same number the tool
 inventory in the gem-contents sequence showed and the same number the worker
 logged when it booted. If a Grail server
-is also running on 8001 from demo B, this is the moment to show 40 beside it.
+is also running on 8001 from demo A, this is the moment to show 40 beside it.
 
 If the room asks to see the session end: DELETE /mcp with the same id, then the
 statistics line again, and the row is gone. It is fifteen extra seconds and it
 closes the loop -- but only if we are on time.
+
+THE TWO FINE LINES CAME OFF THIS FACE 2026-09-15, and both were instructions to
+you rather than argument for the room, so nothing on screen was lost. Verbatim:
+"**This is the demo that makes “a session is a gem” concrete, and the one to keep
+if only one survives.** Practise the cache-statistics line until the three rows
+are readable on a projector." and "**2 minutes.**" The first sentence is the
+paragraph above this one, said shorter. The practice note is the part to act on
+before the day rather than to read on it, and it is the only place the deck says
+the cache-statistics output is the fragile thing on a projector.
 -->
 
 ---
 
 <!-- _class: demo -->
 
-# DEMO D — watching a long call report
+# DEMO C — watching a long call report
 
 ```bash
-curl -N -X POST localhost:8000/mcp -H 'MCP-Session-Id: …' \
-  -d '{… "method":"tools/call","params":{"name":"run_test_class",
-       "arguments":{"className":"McpRouterTest"},"_meta":{"progressToken":"p1"}}}'
+curl -N -X POST localhost:8001/mcp -H 'MCP-Session-Id: …' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{… "method":"tools/call","params":{"name":"run_python_tests",
+       "arguments":{"classNames":["DjangoTestCase"]},"_meta":{"progressToken":"p1"}}}'
 ```
 
-1. `notifications/progress` frames **arriving while the call runs** — `p`, `t`, and the message
+1. `notifications/progress` frames **arriving while the call runs** — `p` in seconds, and the class it is on
 2. The result as the **final frame** on the same stream
 3. The same call **without** the token: **one JSON object**, and nothing until it is done
 
-<span class="fine">Pick the test class by **wall clock**, not by size — 20–30 seconds of ticks, not 262. Rehearse the contrast last; it is what makes the point.</span>
-
-<span class="fine">**90 seconds.**</span>
+<span class="fine">**`Accept: text/event-stream` is what turns the frames on** — without it the token is read and ignored. Measured cold: `DjangoTestCase` **25s**, `FlaskScaffoldingTestCase` **262s**.</span>
 
 <!--
 The most timing-dependent demo in the deck and still the second to cut -- but the
@@ -3362,12 +3408,37 @@ notifications from the talk altogether. If it runs, the contrast at the end is t
 same call, one token's difference, and the difference between a client that can
 see a job moving and one staring at a closed fist for half a minute.
 
-Choose the suite by WALL CLOCK. A 262-test class that finishes in four seconds
-shows nothing; a 30-second class with steady ticks shows everything. Have the
-class name written down -- this is the demo most likely to be improvised badly.
+THIS RUNS ON 8001, the Grail server from demo A, and it needs its OWN session id:
+ids are per server, so the one demo B took from 8000 is not valid here. Initialize
+against 8001 first. The reason it cannot stay on 8000 is demo A's own line --
+"Grail is not among them because I did not name it" -- so the server that has
+run_python_tests has to be the second one.
+
+run_test_class CANNOT be substituted, and the slide said otherwise until
+2026-09-15. It reports NO progress at all, deliberately: per-test progress means
+iterating the suite by hand, and measured on 3.7.5 that changed the counts
+(McpTestingToolset>>tool_run_test_class:). A client that opts in gets one JSON
+object -- which is the "without the token" half of this demo's own contrast, with
+nothing on screen to say why. The class it named, McpRouterTest, never existed
+either; nothing in the Mcp suite is slow enough to be worth watching in any case,
+the whole set of 22 classes runs in about a second.
+
+Choose the suite by WALL CLOCK, and run_python_tests is the tool that reports one:
+it ticks every 5 seconds with elapsed seconds and the class it is on. Measured
+here 2026-09-15, each in a fresh gem: DjangoTestCase 25s (4 tests, all passing,
+30% of the memory ceiling), ZipfileTestCase 4s, EnumTestCase 1s. Django is the
+pick -- about five ticks, and it ends green. Have the class name written down;
+this is the demo most likely to be improvised badly.
 
 -N is not optional on that curl: without it, curl buffers and the frames all
-arrive at once, which shows the opposite of what the demo is for.
+arrive at once, which shows the opposite of what the demo is for. Neither is the
+Accept header: progressTokenFor:accepting: wants THREE things before it streams --
+a tools/call, a progressToken, and an Accept offering text/event-stream -- and
+missing the third fails silently onto the plain-JSON path.
+
+AN ASIDE IF IT LANDS: DjangoTestCase fails 4 of 4 in a warm session and passes 4
+of 4 in a fresh gem. That gap is the whole reason the tool forks a gem to run
+Grail's tests, and it is one sentence.
 
 Fallback: a screenshot of the frame sequence, and say so plainly. The frames are
 identical every run, so a screenshot loses only the liveness. The two end-to-end
@@ -3463,7 +3534,7 @@ Eleven minutes including the demo. If we run long, the demo is the part to prote
 
 ---
 
-## The model is told about transaction views
+## Tell the agent about transaction views
 
 <div class="verbatim">
 
@@ -3956,7 +4027,7 @@ now takes structured arguments and builds the definition itself, so it cannot ev
 
 <!-- _class: demo -->
 
-# DEMO E — two clients, six calls
+# DEMO D — two clients, six calls
 
 1. **A:** `get_method_source` on the fixture, then `compile_method` a change — uncommitted
 2. **B** (topaz, second gem): commit a *different* change to the same class
@@ -4021,13 +4092,13 @@ step if anything comes back, or the same paragraph will be in the deck twice.
 WHAT THE SECTION LOST BY IT, stated plainly so it can be reversed on purpose:
 the section no longer has an ending. It used to close on maxSessions -- the one
 slide whose answer is "we refuse" rather than "we measure", and the failure most
-likely to bite this room. It now ends on demo F. If section 8 is ever given a
+likely to bite this room. It now ends on demo E. If section 8 is ever given a
 minute back, maxSessions is what to spend it on, ahead of everything in the list
 below. Its whole argument is in the notes on slide 1.
 
 Slide numbers below are POST-fold and POST-removal; the running order is 1 lead,
 2 the pass and the counting rule, 3 reapReasonFor: and the dead gem, 4 view
-hygiene and the conjunct, then demo F.
+hygiene and the conjunct, then demo E.
 
 What the outline had as slides and this does not, all now speaker notes, on the
 same principle slice 1 settled -- a MEASUREMENT is evidence for a claim, not the
@@ -4046,7 +4117,7 @@ claim, and notes are where evidence belongs:
     they are the first thing that cannot be slides. If section 8 is ever given
     another minute, this is what to spend it on.
 
-Budget: about 4:00 -- roughly 150s of slides plus the 90s demo F, down from the
+Budget: about 4:00 -- roughly 150s of slides plus the 90s demo E, down from the
 7:10 this slice was cut at. Slide 2 is still the long one and still the part to
 protect: it carries both its own 25s and the counting rule's 45s. Slides 3 and 4
 are about 40s each, having been trimmed on the slide as well as thinned in
@@ -4062,7 +4133,7 @@ section worth regretting. It was the section's closing slide and the only one
 where the answer is "we REFUSE" rather than "we measure". It is also the failure
 most likely to bite somebody in this room, so if section 8 runs short, or if
 anybody asks what happens when clients pile up, this is the material to spend it
-on. The section now ends on demo F instead.
+on. The section now ends on demo E instead.
 
 THE ONE THING TO SAY, in a sentence: a session IS a GemStone login, Community
 Edition has ten, and the login that exhausts them fails for EVERY gem on the
@@ -4552,7 +4623,7 @@ one-minute pass -- and a stuck session writes one per pass for the whole of its 
 
 <!-- _class: demo -->
 
-# DEMO F — view hygiene, live
+# DEMO E — view hygiene, live
 
 ```bash
 MCP_MAX_COMMITS_BEHIND=2 MCP_REAPER_INTERVAL=10s ./run-server.sh
@@ -4583,12 +4654,12 @@ saying so takes ten seconds you will want back.
 <!--
 ================================================================================
 VERTICAL SLICE 8 -- section 9, McpAuthRouter: a reachable port. A lead, ONE
-slide and demo G. Cut 2026-09-12: eighth in running order, eighth to be cut. The
+slide and demo F. Cut 2026-09-12: eighth in running order, eighth to be cut. The
 lead slide was added 2026-09-14, so every slide number below counts from it: the
-single content slide is 2 and demo G is 3.
+single content slide is 2 and demo F is 3.
 
 Running order and plans, in seconds -- lead 10; the one content slide 150, being
-90 for the secure router and 60 for the deviation; demo G 120. About 4:40.
+90 for the secure router and 60 for the deviation; demo F 120. About 4:40.
 
 THE MERGE, 2026-09-14, after the fold below and on the same day. The secure
 router and the offline_access deviation were tightened until the pair fitted one
@@ -4621,7 +4692,7 @@ not slides any more.
 
 WHAT TO CUT: nothing here, and that is the point of the fold -- the cutting was
 done on 2026-09-14 and what is left is a lead, ONE slide and a demo. If this
-section still has to give time back, demo G is the only candidate, and it is
+section still has to give time back, demo F is the only candidate, and it is
 already the riskiest demo in the deck. Slide 2 cannot be cut at all -- it is the
 section. NOR CAN ITS LOWER HALF BE DROPPED IN DELIVERY, which is the new way to
 lose it now that it is not a slide of its own: the deviation is the one place in
@@ -4647,7 +4718,7 @@ it.
 
 THE VERSION DEPENDENCY IS NO LONGER ON A FACE IN THIS SECTION AT ALL. It was one
 fine line on slide 2, and the fold took the fine line with the rest of that
-slide's body on 2026-09-14; what is left on screen is demo G's "needs the 3.7.6
+slide's body on 2026-09-14; what is left on screen is demo F's "needs the 3.7.6
 stone". It survives as a sentence in the lead's notes and a paragraph in slide
 2's, which is enough -- it used to be nothing more BECAUSE section 12 owned
 versions, and section 12 went whole the same day, so the argument is in slide
@@ -4702,14 +4773,14 @@ in the base class changed to make authorization possible. That is why there is n
 new diagram here -- it is the same picture with one method overridden.
 
 The version line, briefly and once: src/auth needs 3.7.5; an external OIDC IdP
-needs 3.7.6. NOTHING IN THIS SECTION SHOWS IT ANY MORE except demo G's "needs the
+needs 3.7.6. NOTHING IN THIS SECTION SHOWS IT ANY MORE except demo F's "needs the
 3.7.6 stone" -- the fine line went when slide 2 was rewritten on 2026-09-14 -- and
 nothing later in the deck picks it up either, section 12 having gone whole the
 same day. So say it here or not at all, and resist relitigating it: it is a fact
 about what runs where, not the ask. If the room wants the argument, it is in
 slide 22's notes and it belongs in the hallway.
 
-Where this ends: demo G, Alice running code as Alice. It is the riskiest demo in
+Where this ends: demo F, Alice running code as Alice. It is the riskiest demo in
 the deck because it needs the IdP reachable, so know before you start whether you
 are going to run it.
 -->
@@ -4734,7 +4805,7 @@ The server **SHOULD NOT** advertise `offline_access` in `WWW-Authenticate` or `s
 THIS SLIDE IS TWO SLIDES MERGED, 2026-09-14. "A secure router on a reachable
 port" and "The offline_access deviation" were each tightened until the pair
 fitted one face, and the deviation is the ### half way down. IT IS THE ONLY
-CONTENT SLIDE SECTION 9 HAS, between the lead and demo G, and it carries about
+CONTENT SLIDE SECTION 9 HAS, between the lead and demo F, and it carries about
 150 seconds of talking -- 90 for the mechanism, 60 for the deviation. The
 temptation is to read seven lines and move on in thirty. Do not.
 
@@ -4773,7 +4844,7 @@ tokens minted for ANY resource, and it publishes a discovery document naming
 NOWHERE to get one. Neither failure is loud.
 
 THE VERSION LINE IS NO LONGER ON A SLIDE FACE IN THIS SECTION. The fine line went
-when this slide was rewritten, and demo G's "needs the 3.7.6 stone" is all that
+when this slide was rewritten, and demo F's "needs the 3.7.6 stone" is all that
 is left of it on screen. Say it in a sentence if it is wanted: src/auth needs
 JsonWebToken, JwtSecurityData and jwtPassword:, so 3.7.5; an EXTERNAL OIDC IdP
 needs 3.7.6. On an image older than 3.7.5 those methods CANNOT COMPILE AT ALL,
@@ -4882,7 +4953,7 @@ THE LOGIN -- from "the worker gem is the user's, not the server's", removed
 2026-09-14. This slide's last sentence IS that slide's headline, which is why the
 block sits here.
 ================================================================================
-The payoff of the whole section, and it is what demo G shows: the gem is Alice's.
+The payoff of the whole section, and it is what demo F shows: the gem is Alice's.
 Her code runs as her GemStone user, her privileges apply, her name is in the
 session list. The server is not impersonating anybody. Mechanically: on
 initialize the router derives the GemStone userId from a configurable claim --
@@ -4985,7 +5056,7 @@ of "What to fix in the repository before the talk".
 
 <!-- _class: demo -->
 
-# DEMO G — Alice runs code as Alice
+# DEMO F — Alice runs code as Alice
 
 ```bash
 ./run-auth-server.sh          # TLS, an IdP, and a reachable port
@@ -5030,7 +5101,7 @@ VERTICAL SLICE 11 -- section 11, the worker gem's GemStone user. Two slides,
 no demo, having been three until the fold recorded below. Cut 2026-09-13, and it closed the running-order gap at the time: every
 cut section, 0-12, was then in section-number order. THAT IS NO LONGER THE SHAPE.
 On 2026-09-14 this slice was MOVED AHEAD OF SECTION 10, to sit immediately after
-demo G, so the deck runs 9, 11, 10. The reason is thematic: section 9 has just
+demo F, so the deck runs 9, 11, 10. The reason is thematic: section 9 has just
 spent five slides and a demo on who a request is allowed to be, and this section
 is the one that says what actually bounds it -- carried back from McpAuthRouter
 to the plain McpRouter, which is where most of the room's servers will be.
@@ -5085,7 +5156,7 @@ cutting it cuts the ask. Two slides and two minutes is already the floor. If the
 clock has genuinely gone, what goes is the whole section rather than half of it.
 
 NO DEMO. The convincing demonstration here is a negative -- a commit that raises
-2249 -- and demo E already puts a failing commit on screen for a better reason.
+2249 -- and demo D already puts a failing commit on screen for a better reason.
 The lock result is a two-session setup that reads as a non-event on a projector.
 Both are measured in docs/ReadOnly_User.md if anyone asks for evidence.
 
@@ -5290,7 +5361,7 @@ the Grail MCP Server as the worked example. A lead, ONE slide and a demo. Cut
 BEFORE THE OPTIONAL CODEC: section 11 was moved ahead of it on 2026-09-14, so
 this section closes the talk proper.
 
-Running order and plans, in seconds -- lead 10, the one content slide 80, demo H
+Running order and plans, in seconds -- lead 10, the one content slide 80, demo G
 90. About 3 minutes.
 
 CUT TO THE BONE 2026-09-14, in four passes on one day: the toolset slide went
@@ -5366,7 +5437,7 @@ if the clock gives anything back.
 WHAT TO CUT: nothing is left to cut but the section. Both of the slides this list
 used to nominate have gone, and so has the one it said not to cut -- the upstream
 ask first, the collision with it. What remains is a lead, one slide carrying
-both the surface shapes and the worked example, and demo H. That is the minimum
+both the surface shapes and the worked example, and demo G. That is the minimum
 that makes the section an argument rather than a mention. CUT THE DEMO LAST, not
 first: without it this section is back to asserting that extending the server
 works and showing nobody having done it, which is the state it was in for about
@@ -5379,9 +5450,9 @@ Grail slide in a talk that is not about Grail.
 THERE IS A DEMO NOW, added 2026-09-14, and this paragraph records what settled a
 disagreement that stood for days. The outline at the end of docs/Presentation.md
 had always asked for one -- its section 6 is "Grail MCP Server / a. A custom
-toolset / Demo" -- and the standing argument against was that demo C already
+toolset / Demo" -- and the standing argument against was that demo B already
 showed a tool surface being chosen, so a second one is the same screen with
-different words in it. THAT ARGUMENT STILL HOLDS and demo H does not contradict
+different words in it. THAT ARGUMENT STILL HOLDS and demo G does not contradict
 it: it shows a RESULT, not a surface. What made the demo necessary was the
 cutting. By the end of 2026-09-14 this section was the shape without the
 evidence, and a demo was the only way to put a measurement back on a screen
@@ -5439,7 +5510,7 @@ and carries the surface shapes, the worked example, and in its notes how a
 toolset is written. It is ten seconds away. The lead says what the section is
 FOR, not how it works.
 
-Where this ends: demo H, the sender search, which is ninety seconds and the only
+Where this ends: demo G, the sender search, which is ninety seconds and the only
 evidence this section has left. Before it, slide 2, which is the only slide. It used to end three slides further on, with the collision between a
 domain model and this server's session model -- 132 defects against 386/386
 clean, the thing every vendor in the room who writes a toolset would have
@@ -5450,7 +5521,7 @@ promise the shape rather than the number.
 
 THIS IS NOW THE LAST SECTION OF THE TALK PROPER. The codec slides after it are
 optional and go first if the clock has gone, so THE TALK PROPER NOW LANDS ON A
-LIVE TERMINAL: demo H, with whatever of the collision you have time to say over
+LIVE TERMINAL: demo G, with whatever of the collision you have time to say over
 slide 2 on the way there. That argument is settled and the slice header records
 how.
 
@@ -5541,7 +5612,7 @@ The narrowing rule at the end is the one a vendor will hit: configure options fo
 a toolset, then change the surface and forget, and the router tells you at
 startup instead of silently dropping them. Section 2's validateWorkerConfig.
 
-DEMO H FOLLOWS THIS SLIDE, so it is no longer the last thing before the
+DEMO G FOLLOWS THIS SLIDE, so it is no longer the last thing before the
 appendix -- that was true for part of 2026-09-14 and is not now. The two slides that followed it were set
 aside on 2026-09-14 and their notes are below, so the last words before the
 optional appendix are yours rather than the screen's. TWO WORDS IN THE FIRST
@@ -5697,7 +5768,7 @@ talk mentioning it.
 
 <!-- _class: demo -->
 
-# DEMO H — the sender search, and what it says it did **not** search
+# DEMO G — the sender search, and what it says it did **not** search
 
 ```bash
 MCP_TOOLSETS="McpGrailToolset" ./run-server.sh        # a Grail stone, one client, fresh session
@@ -5732,7 +5803,7 @@ Beat 4 is free and worth five seconds if the room is with you: the import dirtie
 the session, so section 7's [session] line turns up unprompted in section 10. A
 cold Grail import is a database write -- 31 modified objects for a 7-test class,
 measured -- which is one of the two reasons run_python_tests forks a gem. The
-other is on page 51, in the collision banner. DO NOT open the collision here
+other is on page 50, in the collision banner. DO NOT open the collision here
 unless a hand goes up; it is fifty-five seconds and this demo is ninety.
 
 STAGING, and beat 1 depends on it entirely: the session must be FRESH. If
@@ -5755,7 +5826,7 @@ projector cannot show a terminal legibly at this size.
 
 WHAT THIS DEMO DOES NOT DO, said plainly because the slice header argued against
 a Grail demo for two days: it does not show a tool surface being chosen. That was
-demo C and this is not a second one. It shows a RESULT.
+demo B and this is not a second one. It shows a RESULT.
 -->
 
 ---
@@ -5772,7 +5843,7 @@ archive.md; these three stayed because they are the part THIS ROOM can act on --
 their defects, in their kernel, measured -- and slide 4 is the concrete ask of
 the talk, which section 13 collects and section 11's notes already name as one
 of the two things being asked for. (That read "section 11's slide" until the lock
-slide was folded away on 2026-09-14; the other ask is a heading on page 49 now,
+slide was folded away on 2026-09-14; the other ask is a heading on page 48 now,
 rather than a slide of its own.)
 
 Running order and plans, in seconds -- lead 10, why the writer is owned 50,
@@ -5832,7 +5903,7 @@ run at all, they run with that offer on them.
 
 <br>
 
-**Appendix** · the talk proper has ended — this is the one thing here that is an **ask** rather than a report
+**Appendix** · the class to remove when JSON parsing is fixed
 
 <!--
 Ten seconds, and only if the clock allows -- this is the one stretch of the deck

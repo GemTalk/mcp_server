@@ -113,11 +113,11 @@ day.) These three section
 10 slides are last in this file, under two headers.
 
 WHAT STAYED BEHIND IN THE DECK, deliberately:
-  * DEMO C -- a session is a gem. Section 4's demo, kept without section 4. It is
+  * DEMO B -- a session is a gem. Section 4's demo, kept without section 4. It is
     the load-bearing demo of the talk and it needs no walk in front of it: the
     gem appearing in the cache statistics IS the argument that section 4 spent
     eight slides making.
-  * DEMO D -- watching a long call report. Section 6's demo, kept without section
+  * DEMO C -- watching a long call report. Section 6's demo, kept without section
     6, on the same reasoning: the contrast at the end of it (same call, one
     token's difference) is the whole of what the five slides argued.
   * The three JSON codec slides, which were section 5's second half. They moved
@@ -230,13 +230,13 @@ rule about never putting a blank line inside an <svg>.
 <!--
 ================================================================================
 VERTICAL SLICE 5 -- section 4, trace 1: a brand-new client's first request. Ten
-slides -- a lead, eight walking the path, and demo C. Cut 2026-09-12: third in
+slides -- a lead, eight walking the path, and demo B. Cut 2026-09-12: third in
 running order, fifth to be cut.
 
 Running order and plans, in seconds -- lead 10; the bytes and the picture 40;
 the front door 45; servePost: 40; openSessionCreating: 60; what travels into the
 worker 45; the order inside the worker 45; runWorker: 60; the dispatcher answers
-40; three ids and the gem names 45 (430s of slides); demo C 120. About 9 minutes,
+40; three ids and the gem names 45 (430s of slides); demo B 120. About 9 minutes,
 which is the longest slice in the deck and is meant to be.
 
 THE OUTLINE SAYS 5-7 SLIDES AND THIS IS TEN. Deliberate, and the reason is worth
@@ -251,7 +251,7 @@ WHAT TO CUT IF THE HOUR IS GOING. In order, and none of them takes a later
 section with it:
   1. the lead (10s), as everywhere;
   2. "three ids and the gem names" (45s) -- it is the most beautiful slide in the
-     section and the least load-bearing. Demo C shows the same table live;
+     section and the least load-bearing. Demo B shows the same table live;
   3. "the dispatcher answers" (40s) -- version negotiation is a fact, not an
      argument, and section 13 re-opens it anyway.
 Do NOT cut openSessionCreating: or runWorker:. Those two are the section.
@@ -278,7 +278,7 @@ DEPARTURES from docs/Presentation.md:
 
 THE MERGE OF 2026-09-11/12 touches two numbers in this slice. defaultServerVersion
 is 0.8.0 now, which nothing on a slide states (it reaches the room only through
-serverInfo in demo C). And the worker login is the plain 3.7.5
+serverInfo in demo B). And the worker login is the plain 3.7.5
 useOnetimePassword spelling, which is why slide 5's bullet says "one-time
 password" and explains nothing.
 ================================================================================
@@ -721,7 +721,7 @@ McpServer:5:5ADC62A4     43797   6
 
 <!--
 The last band, and the prettiest slide in the section. It is also the first one
-to cut if the hour is going -- demo C shows this exact table live.
+to cut if the hour is going -- demo B shows this exact table live.
 
 Read the three rows out. The point lands without explanation: a DBA looking at
 cacheStatisticsForAllSlots can see which server, which client, and which gem,
@@ -925,12 +925,12 @@ be told what state it is now in. Section 7 slide 9 is the whole of it.
 
 <!--
 ================================================================================
-VERTICAL SLICE 7 -- section 6, progress notifications. Five slides and demo D.
+VERTICAL SLICE 7 -- section 6, progress notifications. Five slides and demo C.
 Cut 2026-09-12: fifth in running order, seventh to be cut.
 
 Running order and plans, in seconds -- a worker cannot write to its own client 50,
 the client opts in 50, the reporter's three judgements 40, two end-to-end bugs 50,
-the other stream 40 (230s of slides); demo D 90. About 5 1/2 minutes.
+the other stream 40 (230s of slides); demo C 90. About 5 1/2 minutes.
 
 THE OUTLINE SAYS 2-3 SLIDES AND THIS IS FIVE. The outline's own bullet list under
 section 6 runs to a page and a half and includes a picture, a demo, and the whole
@@ -947,7 +947,7 @@ WHAT TO CUT IF THE HOUR IS GOING, in order:
   1. "the other stream" (40s) -- section 8 needs the outbox, but it can introduce
      it in one sentence where it uses it. This slide is a convenience, not a
      dependency;
-  2. demo D (90s) -- it is the most timing-dependent demo in the deck and the
+  2. demo C (90s) -- it is the most timing-dependent demo in the deck and the
      least load-bearing, and slide 4 already tells its story.
 Do NOT cut slide 4. It is the best material in the section: two bugs that cannot
 exist in a unit test, both found end to end, and this audience knows exactly how
@@ -1325,7 +1325,7 @@ stone's number; map only 0 (disabled) and negative (unknown).
 ================================================================================
 FROM SECTION 8, SECOND THINNING -- two more slides, removed 2026-09-14 after the
 pair above. They were deck.md pages 43 and 44 at the time. Section 8 is now four
-slides and demo F, down from ten.
+slides and demo E, down from ten.
 
 What went this time is not mechanism, as it was above -- it is the section's two
 ENDINGS. Both are self-contained and both can come back alone:
@@ -1354,7 +1354,7 @@ Slide 9 was the maxSessions slide. The copy below still says it, and it is still
 true of THIS file, where both slides sit together.
 
 WHERE THEY GO BACK: at the end of section 8, in this order, immediately before
-demo F.
+demo E.
 ================================================================================
 -->
 
@@ -1851,7 +1851,7 @@ these three means splitting that page back into two first, and page 45's notes
 name the two halves and the four banners to take apart. Page 45's face would want its fine line
 back too -- "src/auth needs JsonWebToken, JwtSecurityData, jwtPassword: -- 3.7.5.
 An external OIDC IdP -- 3.7.6." -- because the fold took it and the version fact
-is now nowhere on a face in that section except demo G's "needs the 3.7.6 stone".
+is now nowhere on a face in that section except demo F's "needs the 3.7.6 stone".
 
 Running order and plans as they were, in seconds -- every request carries the
 token 45; the login 45; the token is the real bound 55.
@@ -1909,7 +1909,7 @@ McpSession startWithId: newId user: aUserId jwt: aJwtString
 <span class="fine">**`supportedScopes` is derived, never configured** — the union of `requiredScopes` and `extraScopes` — so a required scope is *always* advertised. The way to get it wrong is made **unrepresentable** rather than checked for.</span>
 
 <!--
-The headline is the payoff of the whole section and it is what demo G shows: the
+The headline is the payoff of the whole section and it is what demo F shows: the
 gem is Alice's. Her code runs as her GemStone user, her privileges apply, her
 name is in the session list. The server is not impersonating anybody.
 

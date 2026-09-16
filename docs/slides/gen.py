@@ -295,7 +295,7 @@ SLIDES = [
   "other two: the front end must own the client's STREAM, and the front end must own VIEW HYGIENE,\n"
   "because only the front end has a heartbeat. View hygiene is section 8 and is paid in full. The\n"
   "stream is section 6, which is archived as of 2026-09-14, so that promise is now redeemed only by\n"
-  "demo D and by four boxes of the gem-contents sequence -- promise it smaller, or not at all.\n"
+  "demo C and by four boxes of the gem-contents sequence -- promise it smaller, or not at all.\n"
   "Have the third argument ready anyway, because somebody always jumps ahead. On every OTHER count\n"
   "the worker is the better-informed party: it can read its own commits-behind, the stone's backlog,\n"
   "whether it holds the oldest commit record, and needsCommit, none of which the front end can see.\n"
