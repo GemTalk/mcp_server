@@ -5524,11 +5524,27 @@ is unfiltered" blockquote, which was this section's only face-level pointer back
 to section 11, and the section's opening move -- slide 2 now has to both open the
 seam and pick a surface. Give it fifty seconds rather than forty-five.
 
-THE LEAD WAS ADDED 2026-09-14 and it names GRAIL rather than the section, on
-instruction: the section title introduces the Grail MCP Server as an example of a
-custom MCP server, and the generality is the subtitle. That is the right way
-round for this room -- a named server they may already know, then the claim that
-nothing about it is special. Slide numbers below COUNT THE LEAD.
+THE LEAD WAS ADDED 2026-09-14 AND NAMED GRAIL, on instruction -- the outline's
+section 6 is "Grail MCP Server" -- so the title gave the room a named server it
+may already know and the subtitle carried the generality. ON 2026-09-16 THAT WAS
+TURNED AROUND: the lead is now "Customizing an MCP Server" over "Make a server
+for *your* software", and GRAIL IS NOT ON IT AT ALL. The room meets the category
+first and meets Grail on slide 2, which is already the slide that has to both
+open the seam and pick a surface.
+
+WHAT THAT COSTS, since the old order was chosen rather than fallen into: a named
+thing is easier to hold than a category, and "nothing about it is special" lands
+harder after the name than before it. With the name off the lead, the ten seconds
+the lead gets are where you put it back -- say Grail out loud, then take the
+specialness away. The paragraph below already tells you to do exactly that; as of
+2026-09-16 it is load-bearing rather than a flourish.
+
+THE SUBTITLE ALSO STOPPED SAYING "a worked example" and now says "Make", which is
+an instruction rather than a description. It promises a how-to that one slide and
+one demo cannot deliver, so keep "this is one worked example" in your mouth for
+the moment somebody asks for the steps.
+
+Slide numbers below COUNT THE LEAD.
 
 THE OUTLINE SAYS 2 SLIDES. It is the third section where that number predates
 the bullet list under it, and this one is the most lopsided: the list runs to
@@ -5596,6 +5612,9 @@ puts Grail #885 on the screen, which is the nearest thing the deck has left to
 the upstream-ask slide that was set aside that morning.
 
 DEPARTURES from docs/Presentation.md:
+  * the outline's section 6 is titled "Grail MCP Server"; since 2026-09-16 the
+    lead is "Customizing an MCP Server" and does not name Grail at all, so the
+    section is introduced as a category and the example arrives on slide 2;
   * the outline's Grail bullet names grailDirectory as the options example.
     There are TWO declared options -- grailDirectory and testGemConfig -- and
     slide 2 says two, because "a toolset declares its options" is the point and
@@ -5611,9 +5630,9 @@ DEPARTURES from docs/Presentation.md:
 
 <!-- _class: lead -->
 
-# MCP Server for Grail
+# Customizing an MCP Server
 
-### A worked example of a server for *your* software
+### Make a server for *your* software
 
 <!--
 THE SECTION LINE CAME OFF THIS LEAD 2026-09-16. It read "**§10** · everything so far
