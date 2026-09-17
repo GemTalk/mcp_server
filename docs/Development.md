@@ -159,7 +159,7 @@ Expected failures are real signal, not noise:
 
 ## Version support
 
-**Supported: 3.7.5, 3.7.6+ and 4.0.0.Alpha1.** The server's view handling relies on those images'
+**Supported: 3.7.5, 3.7.6+ and 4.0.0.a2.** The server's view handling relies on those images'
 implementation of `System continueTransaction`; earlier ones differ below the Smalltalk, in ways
 nothing in `src/` can detect or work around. Whether the floor settles at 3.7.5 or 3.7.6 is not yet
 decided. The 4.0 ceiling is now held by CI rather than by assumption — every suite runs there,
@@ -171,18 +171,24 @@ including the Grail toolset, which 4.0 alone can load.
 | 3.7.2 | **no** | no — no kernel JWT classes | dropped 2026-09-10: `System continueTransaction` differs below the image in two ways nothing in `src/` can detect or cover, and it carries #51438 |
 | 3.7.5 | yes | yes, against a local IdP | **no Grail**: Grail dropped 3.7.x on 2026-09-12 and requires 4.0 |
 | 3.7.6+ | yes | yes, including an external OIDC IdP | ditto |
-| 4.0.0.Alpha1 | yes | yes | **in CI**, and the only image that can carry Grail |
+| 4.0.0.a2 | yes | yes | **in CI**, and the only image that can carry Grail |
 
 **Grail is tested on 4.0 and nowhere else, because nowhere else can run it.** Grail's own
 `install_base.sh` refuses anything before 4.0, so CI excludes `3.7.5 + Grail` and runs the Grail leg
-on `4.0.0.Alpha1` instead — which is what keeps `src/grail` and `McpGrailToolsetTest` covered rather
+on the 4.0 alpha instead — which is what keeps `src/grail` and `McpGrailToolsetTest` covered rather
 than the exclusion quietly dropping them.
 
-**4.0.0.Alpha1 is downloaded from `dl.gemdb.com`, not from the public download server**, because it
+**The 4.0 alpha is downloaded from `dl.gemdb.com`, not from the public download server**, because it
 is a pre-release and is not published there. The base URL per version is matrix data in
 `health-check.yml`, so a version that moves is one line. Both hosts are GemTalk's, and the 4.0 one
 is the same catalog anything running this server on 4.0 installs its engine from, so the leg tests
 what users actually have.
+
+**That catalog keeps one alpha at a time, so the pinned version expires.** 4.0.0.a2 replaced
+4.0.0.Alpha1 on 2026-09-16 and the Alpha1 directory now answers 404, which takes the leg down at the
+download step. When that happens the fix is to read the current name off `https://dl.gemdb.com` and
+bump both the `gemstone-version` entry and its `download-base` — the spelling is not predictable
+(`Alpha1` became a lowercase `a2`), so it cannot be derived from the previous one.
 
 Anything present in **3.7.5** may be referenced directly, with no existence guard; the live concern
 is only what is newer than that. Genuinely optional things (Grail) still use an `objectNamed:`
