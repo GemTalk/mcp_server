@@ -43,7 +43,8 @@ style: |
 
 <!--
 ================================================================================
-ARCHIVE. THIRTY-FIVE SLIDES SET ASIDE FROM deck.md ON 2026-09-14, FOR TIME.
+ARCHIVE. THIRTY-NINE SLIDES SET ASIDE FROM deck.md, THIRTY-FIVE OF THEM ON
+2026-09-14, FOR TIME.
 This file is not a talk. It is a holding pen, kept renderable so the slides can
 be looked at, and kept in deck.md's own running order so any of them can be put
 back where it came from.
@@ -89,7 +90,7 @@ on the face of the slide before it, as a blockquote of two sentences. Its notes
 are transplanted whole onto that slide under one banner, so the measurement, the
 reverted lock reaper and the question itself all survive as things to say. IT IS
 THE ONE SLIDE IN THIS FILE WHOSE REMOVAL TOOK AN ASK OFF THE SCREEN, though only
-for a few hours: later the same day page 49 gained a heading of its own asking
+for a few hours: later the same day page 47 gained a heading of its own asking
 whether write locks should be privilege-gated, so what the fold finally cost is
 the argument under the question rather than the question. Its header is at the
 very end, and it says the rest.
@@ -99,18 +100,40 @@ time: "To add tools, write a toolset" came out because the slide beside it was
 rewritten to name a real toolset on its face. It is the only slide in this file
 that was the SOLE face-level account of a mechanism -- after it, no slide in the
 deck shows how a toolset is written. Its face as well as its notes are
-transplanted onto deck.md page 51.
+transplanted onto deck.md page 49.
 
 AND TWO MORE FROM SECTION 10, the last cut of the day and a plain set-aside for
 time: the collision slide and the upstream-ask slide, which between them held
 EVERY MEASUREMENT THAT SECTION HAD. Section 10 is now a lead and two slides, and
 what it has left is the shape without the evidence -- it says what extending this
 server looks like and no longer shows anybody having done it. Their notes, and
-their faces in prose, are on deck.md page 51 under two banners anchored to the
+their faces in prose, are on deck.md page 49 under two banners anchored to the
 two words that survive there: "tests" and "two search tools". (That was page 52
-until the two slides left in the section were merged into one, later the same
-day.) These three section
+when this was written, then 51; the deck has lost slides in front of it twice
+since.) These three section
 10 slides are last in this file, under two headers.
+
+AND THE APPENDIX, 2026-09-17 -- the JSON codec, a lead and three slides -- which
+is a different kind of cut again, because these were ALREADY optional. They were
+moved to the end of deck.md on 2026-09-14 and given a lead calling them THE
+APPENDIX precisely so they could be dropped on the day without the room noticing
+a gap. Setting them aside now is that decision taken in advance rather than on
+stage. They are LAST in this file, with their own header whole.
+
+WHAT THAT ONE COSTS, and it is more than four slides. THE TALK'S CONCRETE ASK WAS
+ON THE LAST OF THEM: the five-defect table is this room's own kernel, measured,
+and its closing line offers docs/kernel-json-unicode.md by name. Section 11's
+notes name it as one of the TWO things the talk asks for; the other is the
+write-lock question, which is a heading at the foot of deck.md page 47. So as of
+2026-09-17 the deck makes ONE ask rather than two, and it is a question rather
+than a document. If the hour turns out to have room, this is the first thing to
+put back, and it goes back whole.
+
+A SIDE EFFECT WORTH KNOWING: docs/kernel-json-unicode.md not being in the tree
+was a BEFORE-THE-TALK blocker while these slides ran, because the last of them
+offers a file that 404s from a README the room has open. It is no longer a
+blocker for the TALK. It is still a broken citation in README.md, McpJson's class
+comment, McpJsonTest and docs/utf8-wire.md.
 
 WHAT STAYED BEHIND IN THE DECK, deliberately:
   * DEMO B -- a session is a gem. Section 4's demo, kept without section 4. It is
@@ -120,11 +143,12 @@ WHAT STAYED BEHIND IN THE DECK, deliberately:
   * DEMO C -- watching a long call report. Section 6's demo, kept without section
     6, on the same reasoning: the contrast at the end of it (same call, one
     token's difference) is the whole of what the five slides argued.
-  * The three JSON codec slides, which were section 5's second half. They moved
-    to the END of deck.md instead -- after section 12, then after section 11 once
-    section 12 followed them here, and now after section 10, behind a lead added
-    on 2026-09-14 that calls them THE APPENDIX -- as optional material. They are
-    the part the room can act on, and they stand alone.
+  * The three JSON codec slides, which were section 5's second half, stayed
+    behind on 2026-09-14: they moved to the END of deck.md instead -- after
+    section 12, then after section 11 once section 12 followed them here, and
+    finally after section 10, behind a lead calling them THE APPENDIX -- as
+    optional material. THEY CAME HERE AFTER ALL ON 2026-09-17, lead and all, and
+    they are at the end of this file.
 The demos being kept is the plan the deck is now built around: A, B, C and maybe
 D run together as one long stretch of terminal rather than one demo per section.
 
@@ -1809,7 +1833,7 @@ FROM SECTION 9, McpAuthRouter -- three slides, FOLDED AWAY 2026-09-14 rather tha
 cut for time. This is the only group in this file that left because a surviving
 slide started saying what they said.
 
-WHAT HAPPENED: deck.md page 45's face was rewritten -- from "a reachable port,
+WHAT HAPPENED: deck.md page 44's face was rewritten -- from "a reachable port,
 and the three invariants that pay for it", which was three numbered invariants
 and a version line, to four sentences that state the whole mechanism at headline
 level, ending "The JWT logs in the worker gem as that user, subject to that
@@ -1820,7 +1844,7 @@ demo; 190 seconds of slides became 90 seconds of one; and the slice's total went
 from 6:20 to 4:40. It is the biggest single saving in the deck.
 
 THEIR NOTES WENT WHOLE, NOT SPLIT AND NOT CONDENSED, which is the thing to know
-before putting one back. All three slides' notes are on deck.md page 45 under
+before putting one back. All three slides' notes are on deck.md page 44 under
 three banners -- EVERY REQUEST CARRIES THE TOKEN, THE LOGIN, THE TOKEN IS THE
 REAL BOUND -- each naming the slide it came from. That slide is now SPOKEN rather
 than read: it is four quiet sentences with three slides' worth of argument
@@ -1834,20 +1858,20 @@ client working steadily, its gem and its uncommitted work gone one access-token
 lifetime after opening, nothing errored, and the diagnosis is that activity was
 feeding the idle clock while the absolute deadline was what was actually going to
 end the session. It is silent data loss with a fix that reads as obvious only
-afterwards. It survives as prose on page 45 and it is better as a slide.
+afterwards. It survives as prose on page 44 and it is better as a slide.
 
 Then slide 1, for its blockquote: the MCP-Session-Id once WAS a credential, so an
 expired or revoked token kept working as long as the session was kept alive, and
 the GET stream and DELETE took no credential at all. A confession lands better
 with the room reading it. Slide 2 is the one that costs least to leave out --
-page 45's last sentence IS its headline, and what the slide added beyond that is
+page 44's last sentence IS its headline, and what the slide added beyond that is
 the two-validations point and the error vocabulary, both of which answer a
 question rather than raise one.
 
-WHERE THEY GO BACK: after page 45 and before the offline_access deviation, in
+WHERE THEY GO BACK: after page 44 and before the offline_access deviation, in
 this order, which is where they were -- but the deviation is no longer a slide.
-It was merged onto the bottom of page 45 later on 2026-09-14, so restoring any of
-these three means splitting that page back into two first, and page 45's notes
+It was merged onto the bottom of page 44 later on 2026-09-14, so restoring any of
+these three means splitting that page back into two first, and page 44's notes
 name the two halves and the four banners to take apart. Page 45's face would want its fine line
 back too -- "src/auth needs JsonWebToken, JwtSecurityData, jwtPassword: -- 3.7.5.
 An external OIDC IdP -- 3.7.6." -- because the fold took it and the version fact
@@ -1983,7 +2007,7 @@ FROM SECTION 11, the worker gem's GemStone user -- one slide, FOLDED AWAY
 change of the day. It is also the only slide here whose removal took an ASK off
 the screen rather than an argument.
 
-WHAT HAPPENED: deck.md page 49's face -- the privileges slide -- ended in a fine
+WHAT HAPPENED: deck.md page 47's face -- the privileges slide -- ended in a fine
 line reading "What stays open: reads (object security policies are the answer to
 that, not this), resources (§8's lifetimes), and locks." That line was replaced
 by a blockquote saying the lock part outright: "No privilege allows or prevents
@@ -2001,7 +2025,7 @@ two asks are therefore at risk in different ways: this one from being spoken onl
 that one from being optional. If the talk is ever given to a room that matters
 more than the clock does, THIS IS THE FIRST SLIDE TO PUT BACK.
 
-ITS NOTES WENT WHOLE, NOT SPLIT AND NOT CONDENSED. They are on deck.md page 49
+ITS NOTES WENT WHOLE, NOT SPLIT AND NOT CONDENSED. They are on deck.md page 47
 under a banner reading THE LOCK ASK, and they carry what the face no longer does:
 the DataCurator measurement (a restricted gem locked only McpServer's method
 dictionary, and a privileged developer's compile-and-commit then failed with
@@ -2103,8 +2127,8 @@ McpToolset, implement registerOn: and toolNames, build schemas with the inherite
 builders, write handlers that answer a String, and pass mutations through
 assertMutableClass:. The deck is a talk to GemStone developers about extending
 this server, and after this cut no slide in it shows a line of that. It is all on
-deck.md page 51 under a banner -- the FACE as well as the notes, which no other
-entry in this file needed, and page 51 is now the merged slide that is the whole
+deck.md page 49 under a banner -- the FACE as well as the notes, which no other
+entry in this file needed, and page 49 is now the merged slide that is the whole
 of section 10 -- so a speaker reading their notes still has it. A room
 that only watches does not.
 
@@ -2117,10 +2141,10 @@ in deck.md were repointed to say the link is made in speech now: section 11's
 slice header, the notes of section 11's first slide, and this section's lead. If
 this slide comes back, all three want their (§11) back.
 
-ITS NOTES ARE ON PAGE 51, WHOLE, under a TO ADD TOOLS, WRITE A TOOLSET banner,
+ITS NOTES ARE ON PAGE 49, WHOLE, under a TO ADD TOOLS, WRITE A TOOLSET banner,
 with two additions rather than the usual none -- a WHAT THE SLIDE SAID paragraph
 reconstructing the face in prose, and a THE POINTER THAT WENT WITH IT paragraph.
-So if this slide is put back, CUT THAT WHOLE BANNER out of page 51's notes,
+So if this slide is put back, CUT THAT WHOLE BANNER out of page 49's notes,
 including both additions, or the mechanism is in the deck twice.
 
 WHERE IT GOES BACK: immediately after section 10's lead and before the surface
@@ -2215,7 +2239,7 @@ the talk proper.
 WHERE THEY GO BACK: after the worked example, in this order, which is where they
 were -- but the worked example is no longer a slide of its own. It was merged
 into the surface slide later on 2026-09-14, so restoring either of these means
-splitting page 51 back into two first, and its notes name the three banners to
+splitting page 49 back into two first, and its notes name the three banners to
 take apart. Section 10's lead and slice header would both want reverting too --
 the lead's notes now promise that the section ends on its one slide, and the
 slice header's WHAT TO CUT list has been rewritten around their absence.
@@ -2297,4 +2321,270 @@ The three issue numbers are on the slide so that nobody has to write them down
 from speech. Section 13 collects the asks; this one is already lodged, which is
 the point -- it is not a request made from a stage, it is a request made in the
 tracker with a talk mentioning it.
+-->
+
+---
+<!--
+================================================================================
+THE JSON CODEC -- a lead and the last three slides of what was VERTICAL SLICE 6,
+section 5.
+
+SET ASIDE 2026-09-17, AND THIS FILE IS WHERE THEY ARE NOW. Everything below this
+paragraph was written while they were still in deck.md and still says "the deck"
+and "the end of the deck"; read it as history. What has not changed is the
+argument for the four of them as a unit -- the ask is the last slide and the
+first three are what earn it -- so they go back together or not at all.
+
+MOVED TO THE END OF THE DECK 2026-09-14, after section 10 (after section 12
+until that section went, and after section 11 until sections 10 and 11 swapped,
+all the same day), as material to run
+only if there is time. The four trace slides that used to precede them are in
+archive.md; these three stayed because they are the part THIS ROOM can act on --
+their defects, in their kernel, measured -- and slide 4 is the concrete ask of
+the talk, which section 13 collects and section 11's notes already name as one
+of the two things being asked for. (That read "section 11's slide" until the lock
+slide was folded away on 2026-09-14; the other ask is a heading on page 47 now,
+rather than a slide of its own.)
+
+Running order and plans, in seconds -- lead 10, why the writer is owned 50,
+inbound 45, the five defects 60. 165s, all of it optional now.
+
+THE LEAD WAS ADDED 2026-09-14, and it calls this an APPENDIX on instruction.
+That is a framing decision rather than a cosmetic one: an appendix announces
+that the talk proper has ENDED, so running it is a gift and dropping it costs
+the room nothing it was promised -- which is exactly the contract these slides
+have had since they moved here. It also gives the drop a clean seam. If the
+clock has gone, stop at the lead; do not start the section and abandon it
+halfway, because the ask is the last slide and the first two are what earn it.
+The lead does NOT carry a section number in its last line where every other
+lead does -- the material is still section 5 and the deck does not renumber for
+a cut, but "Appendix" is what the room is being told. SLIDE NUMBERS BELOW COUNT
+THE LEAD.
+
+THEY STAND ALONE, which is why they could be moved at all: nothing in them
+depends on having walked a request, and the argument runs writer -> reader ->
+the filed report without reference to a trace. The only repair the move needed
+was the opening, which no longer arrives mid-section.
+
+the outline gives the codec "1-2 slides". It gets three, because the defect
+table cannot share a slide with the argument for owning the writer and stay
+readable at the back of a room.
+
+THE DEFECT TABLE SAYS FIVE; McpJson's class comment says three, and the COUNT is
+not the problem -- neither should be "fixed" into the other. The class comment
+enumerates the three defects that bear on ONE design decision (which half of the
+codec to own) and says so in its own words; the table is the filed 3.7.6 report,
+a superset adding the unchecked hex digits after \u and the leniency family.
+WHAT IS wrong is that the two number the same defects in a different ORDER --
+encoding is defect 1 in the class comment and defect 2 in the report -- and
+McpJsonTest already cites "defect 2" meaning the report's. So a reader who
+follows the class comment's list lands on the decoding defect instead. That is
+item 6 of "What to fix in the repository before the talk" in
+docs/Presentation.md, with the recommendation; it changes nothing on this slide,
+and it wants doing before docs/kernel-json-unicode.md reaches the tree.
+
+THE DOCUMENT THE SLIDE OFFERS IS NOT IN THE TREE. docs/kernel-json-unicode.md is
+cited from README.md, McpJson's class comment, McpJsonTest and docs/utf8-wire.md,
+and it lives outside the repository along with three later variants including the
+filed 3.7.6 report this table quotes. The outline already knows (its "What to fix
+before the talk", item 2) and recommends committing it. THAT HAS TO HAPPEN BEFORE
+THE TALK or slide 4's last line is an offer of something nobody can take: this
+room will ask for the file by name, and the README they have open cites a path
+that 404s. It is still true even though the slides are now optional -- if they
+run at all, they run with that offer on them.
+================================================================================
+-->
+
+<!-- _class: lead -->
+
+# Appendix: the JSON codec
+
+### Owning the writer, repairing the reader, and five measured kernel defects
+
+<br>
+
+**Appendix** · the class to remove when JSON parsing is fixed
+
+<!--
+Ten seconds, and only if the clock allows -- this is the one stretch of the deck
+that is PLANNED to be dropped. Say the word appendix out loud. It is not an
+apology for the material; it is a promise that nothing after this point is needed
+to understand anything before it. The three slides stand alone, which is why they
+could be moved here at all: nothing in them depends on having walked a request.
+
+IF THE CLOCK HAS GONE, STOP HERE rather than starting and abandoning it. Slide 4
+is the ask, and slides 2 and 3 are what earn the right to put it up -- the defect
+table on its own, with no account of why the writer is owned, is a list of
+complaints rather than a case.
+
+THE SECTION NUMBER IS STILL 5, and that is why this lead's last line says
+"Appendix" where every other lead says a section. The trace slides that were this
+section's first half are in archive.md; the deck does not renumber for a cut. Do
+not say "section 5" out loud -- say the JSON codec, which is what the slide says.
+
+WHERE IT LANDS, so the shape is in your head before you start: the last slide is
+five measured defects in THEIR kernel, with a copy-pasteable reproduction and a
+suggested fix for each, and a sentence asking for a name. That is the concrete
+ask of the talk and section 13 collects it. Two of the five are silent data
+corruption on a public API.
+
+BEFORE THE TALK, and true whether or not these slides run:
+docs/kernel-json-unicode.md is still not in the tree, and slide 4 offers it by
+name to a room with the README open. The slice header has it in full.
+-->
+
+---
+
+## Why this server owns its JSON **writer** — and only the writer
+
+`McpJson class>>write:` replaces `Object>>asJson` and answers **a byte `String` of UTF-8**.
+
+> **The one defect an application cannot route around.** `printJsonOn:` keeps only **bits 12–15** of a codepoint above U+FFFF instead of emitting a surrogate pair: U+1F600 goes out as `"\uF600"`, and some codepoints as a **lone surrogate**, which is not well-formed JSON. **By the time `asJson` has answered, the codepoint is gone** — no post-pass can recover it.
+
+* Writing UTF-8 **does not fix that arithmetic so much as never reach it**: a surrogate pair is an artefact of `\u` escapes and UTF-16, and UTF-8 spells an astral codepoint directly in four bytes. Only RFC 8259 §7's mandatory escapes are emitted
+* **Bytes rather than characters is load-bearing**, and three unrelated things downstream depend on it: `Content-Length` is written as `body size` · the worker→front-end hop is measured in bytes by the kernel's result fetch, **whose buffer is sized in bytes** · `MCP_TRACE` writes bodies through `GsFile`, where a 16-bit string comes out garbled
+
+<!--
+The shape of the argument, said once: exactly one of the kernel's JSON defects is
+on the WRITE path, and it is the only one that cannot be repaired from outside.
+That asymmetry is the whole design. Own the writer, keep the parser, and fix the
+inbound defect in forty lines at the edge -- which is the next slide.
+
+"By the time asJson has answered, the codepoint is gone" is the sentence to land.
+It is why this could not be a post-pass, a wrapper, or a sanitizer. The
+information has already been destroyed.
+
+The three downstream dependencies are worth reading out slowly, because they are
+three unrelated mechanisms that all happen to need the same property, and they
+all held under the OLD ASCII-only policy for an incidental reason -- nothing was
+ever above 0x7E. Under this one they hold structurally. That is the difference
+between a thing that works and a thing that is true.
+
+WHY THEY HOLD, which came off the face on 2026-09-14 and is the sentence that
+closes that bullet: a byte String's #size IS its byte count whatever the bytes
+are. Not "is checked to be", not "is usually" -- the two cannot disagree, so all
+three dependencies hold BY CONSTRUCTION rather than by anybody maintaining them.
+Say it after the third item, not before the first.
+
+"ON EVERY PRODUCTION PATH" ALSO CAME OFF THE FACE, and the qualifier is worth
+keeping in speech because a GemStone developer will wonder about it: asJson is
+not removed from the image and is not forbidden -- it is that no path that
+answers a client goes through it. The distinction matters if anyone asks whether
+this is a patch. It is not; nothing kernel is touched.
+
+The alternative to owning a writer, if anyone asks why not just patch it: a
+kernel method patched in an image is lost on an extent reload, and it changes
+behaviour for every other consumer in that image. Neither is acceptable for
+something a customer installs.
+
+The encoder has an oracle, if anyone asks how the UTF-8 arithmetic is trusted:
+writeUtf8CodePoint:on: must agree with the kernel primitive encodeAsUTF8 for
+every codepoint, checked across the whole range including both sides of all
+three sequence-length boundaries. 1,148 codepoints, zero disagreements. The
+escaping writer it replaced could only ever be checked against expectations
+written by the same hand that wrote it.
+-->
+
+---
+
+## Inbound: two `asString`s and one repair
+
+```smalltalk
+JsonParser parse: (self combineSurrogateEscapesIn: aString asString decodeFromUTF8 asString)
+```
+
+* **The leading `asString`.** The body does not reach the worker as the bytes the socket read — the front end forwards it **embedded in an expression**, and the worker **compiles that literal**, so its class comes from the worker's `#StringConfiguration`. A `Unicode16` — what an accented body compiles to on **any Grail image** — does not understand `decodeFromUTF8` **at all**
+* **The trailing one** narrows `Unicode7`/`16`/`32` back into the byte-string family: a `Unicode7` compared to a `String` **raises** on a stock image rather than answering false
+* **`combineSurrogateEscapesIn:`** — the one repair made *before* the parser sees the text. Kernel `JsonParser` sends `Character codePoint:` to each `\uXXXX` separately and 3.7.x refuses to build a surrogate, so an emoji written as the **pair RFC 8259 prescribes** failed the whole request with `-32700`. **Python's `json.dumps` escapes by default** — that is a real client, not a hypothetical
+
+<!--
+The leading asString is the best bug in this section for this audience, because
+nothing about it is a JSON problem. The body is wire bytes by origin and
+something else entirely by class, and the thing that changed its class is that
+the front end sent it to the worker as a compiled literal. So the receiver's
+StringConfiguration decides what parseBody: is handed -- and on every Grail
+image, which is what the live server runs on, that is Unicode16.
+
+And decodeFromUTF8 is implemented on String, ByteArray and Unicode7 ONLY.
+Unicode16 answers MessageNotUnderstood EVEN WHEN every codepoint in it is below
+256 and it therefore holds exactly the bytes the method is for. That is the API
+note in the report that is not itself a JSON defect, and it is the one this room
+is most likely to agree should just be fixed.
+
+How it was found and confirmed, if asked: read out of the worker's gem log with
+parseBody: instrumented, then confirmed causally -- revert the single asString
+in the image, restart the front end, and a non-ASCII initialize is a -32700
+while an ASCII one succeeds. Restore it and both succeed.
+
+THE ASYMMETRY CAME OFF THE FACE ON 2026-09-14 and it is what this slide is for,
+so say it at the end rather than losing it: FORTY LINES AT THE EDGE, where the
+outbound defect needed a whole writer. The reason is not that inbound was easier
+to write -- it is that inbound THE INFORMATION IS STILL THERE, in the escapes,
+where outbound it had already been destroyed by the time asJson answered. Repair
+is possible exactly when nothing has been thrown away yet.
+
+The two error behaviours went with it, and both are worth having ready because
+they are the obvious follow-up question. An unpaired half becomes U+FFFD -- a
+replacement character, because half a pair is a client's mistake and not a reason
+to refuse the request. A malformed BYTE sequence refuses the whole body with a
+-32700 naming the offset, because a bad encoder means nothing it sent can be
+trusted. Lenient about one, strict about the other, and the line between them is
+whether the damage is local.
+
+Performance footnote for anyone who worries about a scan per request: the repair
+gates its scan behind one primitive findString: and answers the receiver itself
+when there is no escape to find. 0.05ms against 3.6ms for a character loop over
+a 63KB body.
+-->
+
+---
+
+## Five defects, measured
+
+| # | defect | effect |
+|---|---|---|
+| 1 | `JsonParser>>string` — no surrogate-pair **decoding** | an escaped astral character raises `OutOfRange` (2723): **nothing above U+FFFF can be sent escaped** |
+| 2 | `printJsonOn:` — no surrogate-pair **encoding** | U+1F600 → `\uF600`; U+10000 → NUL; U+1D800 → a **lone surrogate**, ill-formed JSON. **No error** |
+| 3 | `JsonParser>>string` — an unrecognized escape is **dropped** | `{"a":"\x"}` parses to `'a' -> ''`; RFC 8259 §7 admits exactly eight escapes |
+| 4 | `JsonParser>>string` — the four characters after `\u` are **not hex-checked** | `\uZZZZ` becomes U+0000, because `'16rZZZZ' asNumber` is 0 |
+| 5 | `parse:` — leniencies, and error quality | trailing content ignored · raw control characters accepted · empty input is a `MessageNotUnderstood`, not a JSON error |
+
+**Two of the five are silent data corruption on a public API** (2, 4). One raises three layers from its cause (1). Two accept what is invalid (3, 5).
+
+<!--
+THE CONCRETE ASK OF THE TALK, and the slide section 13 collects. Everything
+before it in this section exists to earn the right to put it up.
+
+SAY THE ASK, BECAUSE IT IS NO LONGER ON THE SLIDE. It was the last line of the
+fine print until 2026-09-14 and it is seven words: "I WOULD LIKE TO HAND THIS TO
+SOMEONE." Nothing on the face asks for anything now -- the table states five
+defects and stops -- so if you do not say that sentence, the slide the whole
+appendix exists for makes no request at all. Say it plainly and then STOP
+TALKING. The room fixes these. Do not soften it, do not apologise for it, and do
+not fill the silence -- a pause here is the whole point, and somebody in that
+room will say a name.
+
+THE PROVENANCE CAME OFF THE FACE WITH IT, and it is what makes the ask credible
+rather than a complaint, so it goes in the same breath: measured against 3.7.6,
+on a stock extent0.dbf, every result a live measurement rather than a reading of
+the source -- with a copy-pasteable reproduction and a suggested fix per defect.
+That last clause is the one that turns "here are five bugs" into "here is work
+already done for you", and this room knows the difference.
+
+Rank them out loud, because five defects read as a list and two of them are not
+in the same league: 2 and 4 are SILENT. No exception, no log line, a wrong
+character written into the image and stored. 1 is at least loud, and it has a
+named client behind it -- Python's json.dumps escapes by default, so an emoji
+from any such client failed the whole request until forty lines of repair
+existed. 3 and 5 are leniency, which is a smaller thing.
+
+Have the reproduction for defect 2 in scrollback and ready to paste. It is one
+line -- (String with: (Character codePoint: 16r1F600)) asJson -- and it answers
+"\uF600" in front of them. If the room wants ONE thing to look at, that is it,
+and it is more persuasive than the table.
+
+BEFORE THE TALK: docs/kernel-json-unicode.md has to be in the tree. It is cited
+from README.md, from McpJson's class comment, from McpJsonTest and from
+docs/utf8-wire.md, and it is not committed -- see the slice header. This room
+will ask for it by name and will have the README open.
 -->

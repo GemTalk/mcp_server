@@ -42,8 +42,8 @@ style: |
 ---
 
 <!--
-FIFTY-FOUR SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut
-once; eight stretches of them are now set aside. Section 13 is the only one never written.
+FIFTY SLIDES, AND THIS FILE IS IN RUNNING ORDER THROUGHOUT. Sections 0-12 were all cut
+once; nine stretches of them are now set aside. Section 13 is the only one never written.
 
 THE TARGET IS 45 MINUTES as of 2026-09-14, down from an hour, and that is what the current shape is
 for. The running order:
@@ -57,8 +57,8 @@ for. The running order:
   38-42   section 8 -- the router maintenance cycle, then demo E
   43-45   section 9 -- McpAuthRouter, a reachable port, then demo F (FOLDED, THEN MERGED, 2026-09-14)
   46-47   section 11 -- the worker gem's GemStone user (MOVED HERE, THEN FOLDED, 2026-09-14)
-  48-50   section 10 -- a lead, ONE slide, and demo G: extending it, a server for YOUR software
-  51-54   THE APPENDIX -- a lead, then the JSON codec. OPTIONAL, run only if the clock allows
+  48-50   section 10 -- a lead, ONE slide, and demo G: extending it, a server for YOUR software.
+          THE DECK ENDS HERE, ON A LIVE TERMINAL, as of 2026-09-17
 
 THE DEMOS WERE RELETTERED ON 2026-09-15, when the install demo and the start-a-server demo were
 merged into one. There are SEVEN now, A to G, and every letter after A moved up one: what was C is
@@ -76,9 +76,11 @@ toolset slide ended "(§11)", which the reorder turned from a forward pointer in
 and that slide was removed later the same day, so no face makes the link now. Its notes do, on
 page 50. Section numbering still belongs to the material,
 not to this cut -- the deck already read 3, 7, 8 -- and this is the same principle applied to order
-rather than to numbering. AND THE LAST STRETCH CARRIES NO SECTION NUMBER AT ALL: as of 2026-09-14
-the codec slides sit behind a lead that calls them THE APPENDIX, so the room is told the talk
-proper has ended rather than told which section it is in. The material is still section 5's.
+rather than to numbering. THE APPENDIX IS GONE AS OF 2026-09-17: the four codec slides went to
+archive.md, so there is no longer a stretch after section 10 and no lead that says the talk proper
+has ended. THE DECK NOW ENDS ON DEMO G -- a live terminal, with no wind-down slide behind it -- so
+the last thing the room sees is a result and the last words are yours. That is a real change of
+ending and it is worth rehearsing as one.
 
 WHAT IS SET ASIDE, and where. docs/slides/archive.md holds twenty-three slides removed on 2026-09-14
 for time: section 4 (trace 1, a brand-new client's first request, ten slides), the trace half of
@@ -149,15 +151,19 @@ arrays from the stock tool, twelve senders and an env 1 attribution from the Gra
 not searched: block that prints the upstream issue number itself. 90 seconds, no second gem and no
 clock, which makes it the safest demo in the deck.
 
-THE CODEC SLIDES MOVED RATHER THAN LEFT, AND ARE NOW AN APPENDIX. Section 5's other half -- why this
-server owns its JSON writer, the inbound repair, and the five measured kernel defects -- is at the
-END of the file, after section 10, and is the first thing to drop if the clock has gone. On
-2026-09-14 a lead slide went in front of it saying so in the title, which makes the drop a clean
-seam rather than a silent stop: if the clock has gone, end on the lead. Do not start the three and
-abandon them, because the ask is the last of them. It IS the concrete ask of the talk, so dropping
-it is not free; section 11's notes name it as one of the two things being asked for, the other
-being section 11's own lock question -- which since the fold is a heading at the foot of page 48
-rather than a slide.
+THE CODEC SLIDES MOVED RATHER THAN LEFT ON 2026-09-14, AND THEN LEFT ON 2026-09-17. Section 5's
+other half -- why this server owns its JSON writer, the inbound repair, and the five measured
+kernel defects -- spent three days at the END of this file behind a lead calling it THE APPENDIX,
+as the first thing to drop if the clock had gone. It is now in archive.md instead, which is that
+drop decided in advance rather than on the day.
+
+WHAT THAT TOOK WITH IT, and it is the one thing to weigh if it is ever put back: THE TALK NOW MAKES
+ONE ASK RATHER THAN TWO. The defect table was the concrete one -- this room's own kernel, measured,
+with docs/kernel-json-unicode.md offered by name on the last line -- and section 11's notes still
+name it as one of the two things being asked for. The survivor is section 11's own lock question,
+which since the fold is a heading at the foot of page 47 rather than a slide of its own. So the
+deck's only remaining ask is a QUESTION, asked from a heading, and the archive's header says how to
+put the other one back.
 
 Each slice's own header comment sits beside its first slide. Seven of the original eleven slice
 headers are still here; slice 5's, slice 7's and slice 10's went to the archive with their slides,
@@ -5431,8 +5437,9 @@ ITSELF IS ON THE FACE -- "Should write locks be privilege-gated?" -- so you cann
 forget to ask it. What is NOT there is the shape of the answer, which was the
 removed slide's closing line: "At the source the bound is zero, not one heartbeat
 -- and that is the layer to fix it at, not a maintenance cycle." Say that, last,
-and then STOP TALKING. It is the second of the talk's two asks, and the only one
-that is not in an appendix that may never run.
+and then STOP TALKING. It was the second of the talk's two asks and it is now the
+ONLY one -- the codec's went to archive.md with the appendix on 2026-09-17 -- so
+it carries alone what the two used to share.
 
 Build it in three beats under that heading. One: a lock needs no privilege, so
 the most confined session you can provision still has it -- that much is on the
@@ -5486,9 +5493,10 @@ the room looks unconvinced that this reaches past application data.
 ================================================================================
 VERTICAL SLICE 9 -- section 10, extending it: a server for YOUR software, with
 the Grail MCP Server as the worked example. A lead, ONE slide and a demo. Cut
-2026-09-12: ninth in running order, ninth to be cut. IT IS NOW TENTH, AND LAST
-BEFORE THE OPTIONAL CODEC: section 11 was moved ahead of it on 2026-09-14, so
-this section closes the talk proper.
+2026-09-12: ninth in running order, ninth to be cut. IT IS NOW TENTH AND LAST
+FULL STOP: section 11 was moved ahead of it on 2026-09-14, and the optional codec
+behind it went to archive.md on 2026-09-17, so this section closes the deck
+rather than closing the talk proper.
 
 Running order and plans, in seconds -- lead 10, the one content slide 80, demo G
 90. About 3 minutes.
@@ -5556,12 +5564,12 @@ nine bullets and two of them are measurements with a story attached. It ran to
 five slides; since 2026-09-14 it is one, and the outline's number is now wrong in
 the other direction for the first time.
 
-THIS IS THE SECTION THE ROOM CAN ACT ON SECOND-MOST, after the codec's defect
-table -- which is now at the END of the deck and may not run at all, so if it does not, this is
-the first. That was easier to claim while the Grail result and its three filed issues were on a
-face; since 2026-09-14 they are in slide 2's notes, so acting on this section now depends on the
-speaker saying so. Since 2026-09-14 it is also the LAST thing the room hears if the codec
-does not run, which is a second reason to protect it. Everything before it has been "here is what this server does"; this is
+THIS IS THE SECTION THE ROOM CAN ACT ON, full stop, since 2026-09-17. It was second to the codec's
+defect table, and the codec went to archive.md, so there is no longer anything ahead of it. That is
+harder to carry than it sounds: the Grail result and its three filed issues came off this section's
+faces on 2026-09-14 and are in slide 2's notes, so the one section the room can act on depends
+entirely on the speaker saying so. It is also, since the same day, the LAST thing the room hears,
+which is a second reason to protect it. Everything before it has been "here is what this server does"; this is
 "here is the seam, and here is what happens when you use it". Pitch it that way.
 
 WHAT THE 2026-09-11 MERGE DID FOR THIS SECTION, and why slide 3 exists at all.
@@ -5591,7 +5599,9 @@ that makes the section an argument rather than a mention. CUT THE DEMO LAST, not
 first: without it this section is back to asserting that extending the server
 works and showing nobody having done it, which is the state it was in for about
 an hour and the reason the demo exists. If more time has to come out of this
-talk, take the whole section and keep the appendix. There is no half of this
+talk, this section is the candidate -- take it whole. That instruction used to end "and keep the
+appendix"; the appendix went to archive.md on 2026-09-17, so taking this section now leaves the
+talk ending on section 11 and making no ask at all. There is no half of this
 slide worth keeping without the other: the shapes without the worked example show
 nothing a third party has done, and the worked example without the shapes is a
 Grail slide in a talk that is not about Grail.
@@ -5671,11 +5681,12 @@ are in slide 2's notes. So the section's best material is now something you say
 after the last bullet rather than something the room reads, and this lead should
 promise the shape rather than the number.
 
-THIS IS NOW THE LAST SECTION OF THE TALK PROPER. The codec slides after it are
-optional and go first if the clock has gone, so THE TALK PROPER NOW LANDS ON A
-LIVE TERMINAL: demo G, with whatever of the collision you have time to say over
-slide 2 on the way there. That argument is settled and the slice header records
-how.
+THIS IS NOW THE LAST SECTION OF THE DECK, not merely of the talk proper -- the
+codec slides that used to follow it went to archive.md on 2026-09-17. So THE TALK
+LANDS ON A LIVE TERMINAL: demo G, with whatever of the collision you have time to
+say over slide 2 on the way there, and then nothing. There is no closing slide
+behind it. Know what the last sentence is before you start the demo, because the
+deck will not prompt you for it.
 
 SECTION 11 NOW COMES BEFORE THIS, not after, which changes one thing to have
 ready: "why is narrowing the tool surface not the boundary?" is the question a
@@ -5764,10 +5775,11 @@ The narrowing rule at the end is the one a vendor will hit: configure options fo
 a toolset, then change the surface and forget, and the router tells you at
 startup instead of silently dropping them. Section 2's validateWorkerConfig.
 
-DEMO G FOLLOWS THIS SLIDE, so it is no longer the last thing before the
-appendix -- that was true for part of 2026-09-14 and is not now. The two slides that followed it were set
-aside on 2026-09-14 and their notes are below, so the last words before the
-optional appendix are yours rather than the screen's. TWO WORDS IN THE FIRST
+DEMO G FOLLOWS THIS SLIDE, so it is no longer the last thing before the end --
+that was true for part of 2026-09-14 and is not now. The two slides that followed
+it were set aside on 2026-09-14 and their notes are below, so the last words of
+this section are yours rather than the screen's, and since 2026-09-17 they are
+the last words of the talk. TWO WORDS IN THE FIRST
 BULLET ARE ALL THAT IS LEFT OF THEM -- "tests" and "two search tools" -- and each
 had a slide of its own with a measurement on it. If the clock is holding, spend
 thirty seconds on either; if a hand goes up about Grail, it is almost certainly
@@ -5984,264 +5996,4 @@ projector cannot show a terminal legibly at this size.
 WHAT THIS DEMO DOES NOT DO, said plainly because the slice header argued against
 a Grail demo for two days: it does not show a tool surface being chosen. That was
 demo B and this is not a second one. It shows a RESULT.
--->
-
----
-
-<!--
-================================================================================
-THE JSON CODEC -- a lead and the last three slides of what was VERTICAL SLICE 6,
-section 5.
-MOVED TO THE END OF THE DECK 2026-09-14, after section 10 (after section 12
-until that section went, and after section 11 until sections 10 and 11 swapped,
-all the same day), as material to run
-only if there is time. The four trace slides that used to precede them are in
-archive.md; these three stayed because they are the part THIS ROOM can act on --
-their defects, in their kernel, measured -- and slide 4 is the concrete ask of
-the talk, which section 13 collects and section 11's notes already name as one
-of the two things being asked for. (That read "section 11's slide" until the lock
-slide was folded away on 2026-09-14; the other ask is a heading on page 48 now,
-rather than a slide of its own.)
-
-Running order and plans, in seconds -- lead 10, why the writer is owned 50,
-inbound 45, the five defects 60. 165s, all of it optional now.
-
-THE LEAD WAS ADDED 2026-09-14, and it calls this an APPENDIX on instruction.
-That is a framing decision rather than a cosmetic one: an appendix announces
-that the talk proper has ENDED, so running it is a gift and dropping it costs
-the room nothing it was promised -- which is exactly the contract these slides
-have had since they moved here. It also gives the drop a clean seam. If the
-clock has gone, stop at the lead; do not start the section and abandon it
-halfway, because the ask is the last slide and the first two are what earn it.
-The lead does NOT carry a section number in its last line where every other
-lead does -- the material is still section 5 and the deck does not renumber for
-a cut, but "Appendix" is what the room is being told. SLIDE NUMBERS BELOW COUNT
-THE LEAD.
-
-THEY STAND ALONE, which is why they could be moved at all: nothing in them
-depends on having walked a request, and the argument runs writer -> reader ->
-the filed report without reference to a trace. The only repair the move needed
-was the opening, which no longer arrives mid-section.
-
-the outline gives the codec "1-2 slides". It gets three, because the defect
-table cannot share a slide with the argument for owning the writer and stay
-readable at the back of a room.
-
-THE DEFECT TABLE SAYS FIVE; McpJson's class comment says three, and the COUNT is
-not the problem -- neither should be "fixed" into the other. The class comment
-enumerates the three defects that bear on ONE design decision (which half of the
-codec to own) and says so in its own words; the table is the filed 3.7.6 report,
-a superset adding the unchecked hex digits after \u and the leniency family.
-WHAT IS wrong is that the two number the same defects in a different ORDER --
-encoding is defect 1 in the class comment and defect 2 in the report -- and
-McpJsonTest already cites "defect 2" meaning the report's. So a reader who
-follows the class comment's list lands on the decoding defect instead. That is
-item 6 of "What to fix in the repository before the talk" in
-docs/Presentation.md, with the recommendation; it changes nothing on this slide,
-and it wants doing before docs/kernel-json-unicode.md reaches the tree.
-
-THE DOCUMENT THE SLIDE OFFERS IS NOT IN THE TREE. docs/kernel-json-unicode.md is
-cited from README.md, McpJson's class comment, McpJsonTest and docs/utf8-wire.md,
-and it lives outside the repository along with three later variants including the
-filed 3.7.6 report this table quotes. The outline already knows (its "What to fix
-before the talk", item 2) and recommends committing it. THAT HAS TO HAPPEN BEFORE
-THE TALK or slide 4's last line is an offer of something nobody can take: this
-room will ask for the file by name, and the README they have open cites a path
-that 404s. It is still true even though the slides are now optional -- if they
-run at all, they run with that offer on them.
-================================================================================
--->
-
-<!-- _class: lead -->
-
-# Appendix: the JSON codec
-
-### Owning the writer, repairing the reader, and five measured kernel defects
-
-<br>
-
-**Appendix** · the class to remove when JSON parsing is fixed
-
-<!--
-Ten seconds, and only if the clock allows -- this is the one stretch of the deck
-that is PLANNED to be dropped. Say the word appendix out loud. It is not an
-apology for the material; it is a promise that nothing after this point is needed
-to understand anything before it. The three slides stand alone, which is why they
-could be moved here at all: nothing in them depends on having walked a request.
-
-IF THE CLOCK HAS GONE, STOP HERE rather than starting and abandoning it. Slide 4
-is the ask, and slides 2 and 3 are what earn the right to put it up -- the defect
-table on its own, with no account of why the writer is owned, is a list of
-complaints rather than a case.
-
-THE SECTION NUMBER IS STILL 5, and that is why this lead's last line says
-"Appendix" where every other lead says a section. The trace slides that were this
-section's first half are in archive.md; the deck does not renumber for a cut. Do
-not say "section 5" out loud -- say the JSON codec, which is what the slide says.
-
-WHERE IT LANDS, so the shape is in your head before you start: the last slide is
-five measured defects in THEIR kernel, with a copy-pasteable reproduction and a
-suggested fix for each, and a sentence asking for a name. That is the concrete
-ask of the talk and section 13 collects it. Two of the five are silent data
-corruption on a public API.
-
-BEFORE THE TALK, and true whether or not these slides run:
-docs/kernel-json-unicode.md is still not in the tree, and slide 4 offers it by
-name to a room with the README open. The slice header has it in full.
--->
-
----
-
-## Why this server owns its JSON **writer** — and only the writer
-
-`McpJson class>>write:` replaces `Object>>asJson` and answers **a byte `String` of UTF-8**.
-
-> **The one defect an application cannot route around.** `printJsonOn:` keeps only **bits 12–15** of a codepoint above U+FFFF instead of emitting a surrogate pair: U+1F600 goes out as `"\uF600"`, and some codepoints as a **lone surrogate**, which is not well-formed JSON. **By the time `asJson` has answered, the codepoint is gone** — no post-pass can recover it.
-
-* Writing UTF-8 **does not fix that arithmetic so much as never reach it**: a surrogate pair is an artefact of `\u` escapes and UTF-16, and UTF-8 spells an astral codepoint directly in four bytes. Only RFC 8259 §7's mandatory escapes are emitted
-* **Bytes rather than characters is load-bearing**, and three unrelated things downstream depend on it: `Content-Length` is written as `body size` · the worker→front-end hop is measured in bytes by the kernel's result fetch, **whose buffer is sized in bytes** · `MCP_TRACE` writes bodies through `GsFile`, where a 16-bit string comes out garbled
-
-<!--
-The shape of the argument, said once: exactly one of the kernel's JSON defects is
-on the WRITE path, and it is the only one that cannot be repaired from outside.
-That asymmetry is the whole design. Own the writer, keep the parser, and fix the
-inbound defect in forty lines at the edge -- which is the next slide.
-
-"By the time asJson has answered, the codepoint is gone" is the sentence to land.
-It is why this could not be a post-pass, a wrapper, or a sanitizer. The
-information has already been destroyed.
-
-The three downstream dependencies are worth reading out slowly, because they are
-three unrelated mechanisms that all happen to need the same property, and they
-all held under the OLD ASCII-only policy for an incidental reason -- nothing was
-ever above 0x7E. Under this one they hold structurally. That is the difference
-between a thing that works and a thing that is true.
-
-WHY THEY HOLD, which came off the face on 2026-09-14 and is the sentence that
-closes that bullet: a byte String's #size IS its byte count whatever the bytes
-are. Not "is checked to be", not "is usually" -- the two cannot disagree, so all
-three dependencies hold BY CONSTRUCTION rather than by anybody maintaining them.
-Say it after the third item, not before the first.
-
-"ON EVERY PRODUCTION PATH" ALSO CAME OFF THE FACE, and the qualifier is worth
-keeping in speech because a GemStone developer will wonder about it: asJson is
-not removed from the image and is not forbidden -- it is that no path that
-answers a client goes through it. The distinction matters if anyone asks whether
-this is a patch. It is not; nothing kernel is touched.
-
-The alternative to owning a writer, if anyone asks why not just patch it: a
-kernel method patched in an image is lost on an extent reload, and it changes
-behaviour for every other consumer in that image. Neither is acceptable for
-something a customer installs.
-
-The encoder has an oracle, if anyone asks how the UTF-8 arithmetic is trusted:
-writeUtf8CodePoint:on: must agree with the kernel primitive encodeAsUTF8 for
-every codepoint, checked across the whole range including both sides of all
-three sequence-length boundaries. 1,148 codepoints, zero disagreements. The
-escaping writer it replaced could only ever be checked against expectations
-written by the same hand that wrote it.
--->
-
----
-
-## Inbound: two `asString`s and one repair
-
-```smalltalk
-JsonParser parse: (self combineSurrogateEscapesIn: aString asString decodeFromUTF8 asString)
-```
-
-* **The leading `asString`.** The body does not reach the worker as the bytes the socket read — the front end forwards it **embedded in an expression**, and the worker **compiles that literal**, so its class comes from the worker's `#StringConfiguration`. A `Unicode16` — what an accented body compiles to on **any Grail image** — does not understand `decodeFromUTF8` **at all**
-* **The trailing one** narrows `Unicode7`/`16`/`32` back into the byte-string family: a `Unicode7` compared to a `String` **raises** on a stock image rather than answering false
-* **`combineSurrogateEscapesIn:`** — the one repair made *before* the parser sees the text. Kernel `JsonParser` sends `Character codePoint:` to each `\uXXXX` separately and 3.7.x refuses to build a surrogate, so an emoji written as the **pair RFC 8259 prescribes** failed the whole request with `-32700`. **Python's `json.dumps` escapes by default** — that is a real client, not a hypothetical
-
-<!--
-The leading asString is the best bug in this section for this audience, because
-nothing about it is a JSON problem. The body is wire bytes by origin and
-something else entirely by class, and the thing that changed its class is that
-the front end sent it to the worker as a compiled literal. So the receiver's
-StringConfiguration decides what parseBody: is handed -- and on every Grail
-image, which is what the live server runs on, that is Unicode16.
-
-And decodeFromUTF8 is implemented on String, ByteArray and Unicode7 ONLY.
-Unicode16 answers MessageNotUnderstood EVEN WHEN every codepoint in it is below
-256 and it therefore holds exactly the bytes the method is for. That is the API
-note in the report that is not itself a JSON defect, and it is the one this room
-is most likely to agree should just be fixed.
-
-How it was found and confirmed, if asked: read out of the worker's gem log with
-parseBody: instrumented, then confirmed causally -- revert the single asString
-in the image, restart the front end, and a non-ASCII initialize is a -32700
-while an ASCII one succeeds. Restore it and both succeed.
-
-THE ASYMMETRY CAME OFF THE FACE ON 2026-09-14 and it is what this slide is for,
-so say it at the end rather than losing it: FORTY LINES AT THE EDGE, where the
-outbound defect needed a whole writer. The reason is not that inbound was easier
-to write -- it is that inbound THE INFORMATION IS STILL THERE, in the escapes,
-where outbound it had already been destroyed by the time asJson answered. Repair
-is possible exactly when nothing has been thrown away yet.
-
-The two error behaviours went with it, and both are worth having ready because
-they are the obvious follow-up question. An unpaired half becomes U+FFFD -- a
-replacement character, because half a pair is a client's mistake and not a reason
-to refuse the request. A malformed BYTE sequence refuses the whole body with a
--32700 naming the offset, because a bad encoder means nothing it sent can be
-trusted. Lenient about one, strict about the other, and the line between them is
-whether the damage is local.
-
-Performance footnote for anyone who worries about a scan per request: the repair
-gates its scan behind one primitive findString: and answers the receiver itself
-when there is no escape to find. 0.05ms against 3.6ms for a character loop over
-a 63KB body.
--->
-
----
-
-## Five defects, measured
-
-| # | defect | effect |
-|---|---|---|
-| 1 | `JsonParser>>string` — no surrogate-pair **decoding** | an escaped astral character raises `OutOfRange` (2723): **nothing above U+FFFF can be sent escaped** |
-| 2 | `printJsonOn:` — no surrogate-pair **encoding** | U+1F600 → `\uF600`; U+10000 → NUL; U+1D800 → a **lone surrogate**, ill-formed JSON. **No error** |
-| 3 | `JsonParser>>string` — an unrecognized escape is **dropped** | `{"a":"\x"}` parses to `'a' -> ''`; RFC 8259 §7 admits exactly eight escapes |
-| 4 | `JsonParser>>string` — the four characters after `\u` are **not hex-checked** | `\uZZZZ` becomes U+0000, because `'16rZZZZ' asNumber` is 0 |
-| 5 | `parse:` — leniencies, and error quality | trailing content ignored · raw control characters accepted · empty input is a `MessageNotUnderstood`, not a JSON error |
-
-**Two of the five are silent data corruption on a public API** (2, 4). One raises three layers from its cause (1). Two accept what is invalid (3, 5).
-
-<!--
-THE CONCRETE ASK OF THE TALK, and the slide section 13 collects. Everything
-before it in this section exists to earn the right to put it up.
-
-SAY THE ASK, BECAUSE IT IS NO LONGER ON THE SLIDE. It was the last line of the
-fine print until 2026-09-14 and it is seven words: "I WOULD LIKE TO HAND THIS TO
-SOMEONE." Nothing on the face asks for anything now -- the table states five
-defects and stops -- so if you do not say that sentence, the slide the whole
-appendix exists for makes no request at all. Say it plainly and then STOP
-TALKING. The room fixes these. Do not soften it, do not apologise for it, and do
-not fill the silence -- a pause here is the whole point, and somebody in that
-room will say a name.
-
-THE PROVENANCE CAME OFF THE FACE WITH IT, and it is what makes the ask credible
-rather than a complaint, so it goes in the same breath: measured against 3.7.6,
-on a stock extent0.dbf, every result a live measurement rather than a reading of
-the source -- with a copy-pasteable reproduction and a suggested fix per defect.
-That last clause is the one that turns "here are five bugs" into "here is work
-already done for you", and this room knows the difference.
-
-Rank them out loud, because five defects read as a list and two of them are not
-in the same league: 2 and 4 are SILENT. No exception, no log line, a wrong
-character written into the image and stored. 1 is at least loud, and it has a
-named client behind it -- Python's json.dumps escapes by default, so an emoji
-from any such client failed the whole request until forty lines of repair
-existed. 3 and 5 are leniency, which is a smaller thing.
-
-Have the reproduction for defect 2 in scrollback and ready to paste. It is one
-line -- (String with: (Character codePoint: 16r1F600)) asJson -- and it answers
-"\uF600" in front of them. If the room wants ONE thing to look at, that is it,
-and it is more persuasive than the table.
-
-BEFORE THE TALK: docs/kernel-json-unicode.md has to be in the tree. It is cited
-from README.md, from McpJson's class comment, from McpJsonTest and from
-docs/utf8-wire.md, and it is not committed -- see the slice header. This room
-will ask for it by name and will have the README open.
 -->
