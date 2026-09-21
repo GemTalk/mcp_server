@@ -1,0 +1,105 @@
+
+# Beforehand: Disable the Jasper MCP server in VS Code with /mcp
+
+* Blind-write guardrail
+* Privilege for locks
+* Grail as custom deployment
+
+# Demo A
+
+cd ~/Documents/Code/mcp_server
+./install.sh --check
+source .setenv
+./install.sh --check
+./install.sh 
+
+## Before or after what follows:
+System cacheStatisticsForAllSlotsShort
+
+## Either of these:
+./run-server.sh
+MCP_TITLE="GemDB MCP Server" MCP_MAX_SESSIONS=none ./run-server.sh
+
+lsof -nP -iTCP:8000 -sTCP:LISTEN
+	Grab the PID
+lsof -p <pid> | grep '\.log'
+	Grab the path
+clear && tail -f <path>"
+
+
+
+# Demo B
+
+curl -i -X POST localhost:8000/mcp -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"demo","version":"1.0"}}}'
+
+## Copy the MCP-Session-Id off the header and park it (32 hex chars, no quoting needed):
+SID=<paste>
+
+curl -s -X POST localhost:8000/mcp -H 'Content-Type: application/json' -H "MCP-Session-Id: $SID" -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+
+## If the room asks to see the session end -- then the cache line again, the row is gone:
+curl -i -X DELETE localhost:8000/mcp -H "MCP-Session-Id: $SID"
+
+
+
+# Demo C
+
+## 8010 has its own sessions: $SID is not valid here. Initialize against it first.
+curl -i -X POST localhost:8010/mcp -H 'Content-Type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"demo","version":"1.0"}}}'
+
+SID2=<paste>
+
+## The long call. -N or curl buffers the frames; the Accept header or it never streams
+## at all (a tools/call, a progressToken AND text/event-stream, or it falls back to
+## plain JSON with no complaint). DjangoTestCase measured 25s cold, 4 tests, all green.
+curl -N -X POST localhost:8010/mcp -H 'Content-Type: application/json' -H "MCP-Session-Id: $SID2" -H 'Accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"run_python_tests","arguments":{"classNames":["DjangoTestCase"]},"_meta":{"progressToken":"p1"}}}'
+
+## The contrast, and the point of the demo -- same call, minus _meta. One JSON object,
+## nothing for 25 seconds.
+curl -N -X POST localhost:8010/mcp -H 'Content-Type: application/json' -H "MCP-Session-Id: $SID2" -H 'Accept: application/json, text/event-stream' -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"run_python_tests","arguments":{"classNames":["DjangoTestCase"]}}}'
+
+
+
+# Demo D (skip)
+
+# Demo E (skip)
+
+# Demo F (on other computer)
+
+#!/usr/bin/env bash
+set -euo pipefail
+export GEMSTONE=/home/je-foster/gs376/product
+export GEMSTONE_NRS_ALL="!#netldi:gs376ldi#dir:/home/je-foster/gs376/test#log:/home/je-foster/gs376/test/%N_%P.log"
+export GS_STONE=teststone
+export MCP_PORT=8443
+export MCP_ISSUER=https://172.16.73.1:8543/realms/gs-mcp
+export MCP_AUDIENCE=https://geode:8443/mcp
+export MCP_USERID_CLAIM=preferred_username
+export MCP_REQUIRED_SCOPES=mcp:use
+export MCP_EXTRA_SCOPES="profile offline_access"
+export MCP_BIND_ADDRESS=172.16.73.10
+export MCP_TLS_CERT=/home/je-foster/certs/geode.crt
+export MCP_TLS_KEY=/home/je-foster/certs/geode.key
+cd ~/gs-mcp
+./run-auth-server.sh
+
+Alice: (Log in.)
+Can you evaluate 5 * 4 on gemstone-teststone?
+Can you add an instance method "foo" to class McpBase that returns "bar"? (on that image--don't touch the files)
+Good to know. Will it let you create a new class Foo as a subclass of Object?
+Please commit if it lets you.
+
+Bob: (Log in.)
+Can you evaluate 5 * 4 on gemstone-teststone?
+Can you find a Foo class? (I made one in another session.)
+Can you make a Bar class (subclass of Object) from your current login?
+Please try committing it anyway, just in case what it told you is wrong.
+
+Alice:
+Please remove it to clean up.
+(Log in.)
+Can you do it now?
+
+
+
+#Demo G
