@@ -960,7 +960,7 @@ toolsetOfClass: aToolsetClass
   "The toolset of aToolsetClass belonging to THIS test's full-surface server -- the receiver its
    registered blocks send the tool_* handler to, so a handler test drives it exactly as a real
    tools/call does. Built through McpServer so the toolset has its server: a mutation handler asks
-   the server for the kernel guard (see McpMutationToolset).
+   the server whether what it is about to overwrite has been read (see McpMutationToolset).
 
    ONE server per test, not one per call. A worker gem has exactly one, and its toolsets share it --
    which is what makes `self browsingTools` read something and `self mutationTools` then be allowed

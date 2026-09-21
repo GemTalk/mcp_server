@@ -458,15 +458,16 @@ new` into a DNU and took 84 of 103 tests down at once.
 
 Symbol-list order in a stock extent is `UserGlobals`, `Globals`, `Published`:
 
-* **`Globals`** holds all the base/kernel classes. It is the only dictionary a "don't mutate kernel
-  classes" guard should protect.
+* **`Globals`** holds all the base/kernel classes. Nothing in this project gates on that any more —
+  the kernel guard went on 2026-09-21 — but it is still the answer to "where do the base classes
+  live", and the paragraphs below are why the guard was hard to get right while it existed.
 * **`UserGlobals`** is the default home for new user classes and the *most mutable* dictionary.
   Never protect it — that blocks exactly the classes a user most wants to edit.
 * **`Published`** is the convention for developer-provided packages shipped as an addition to the
   core. It is not where typical users put work, and it may not be present in every image.
 
-Only `Globals` and `UserGlobals` are guaranteed present. That is fine for a guard list — a name that
-resolves to nil is skipped by the scan.
+Only `Globals` and `UserGlobals` are guaranteed present, so anything that walks a list of dictionary
+*names* must tolerate one that resolves to nil.
 
 **`dictionaryAndSymbolOf:` matches by VALUE, so it is the wrong basis for a kernel-class check.**
 `System myUserProfile dictionaryAndSymbolOf: aClass` answers the first symbol-list dictionary that
@@ -474,11 +475,25 @@ binds that object under **any** key — an alias in an earlier dictionary wins. 
 security hole here: in a Grail image the `Python` dictionary binds kernel `Object` under an alias and
 precedes `Globals`, so `Object` read as unprotected and the mutation tools would modify kernel
 classes. Not theoretical — a suite run in that image compiled a probe method onto `Object` and
-committed it. Ask the protected dictionary directly, by name *and* identity:
+committed it. Ask the dictionary directly instead, by name *and* identity:
 
 ```smalltalk
 (Globals at: aClass name asSymbol ifAbsent: [nil]) == aClass
 ```
+
+The guard that needed this is gone; the selector's behaviour is not, and it is still the wrong basis
+for any "which dictionary does this class really live in" question.
+
+**Kernel classes are protected by the stone, not by anything in the symbol list.**
+`Object objectSecurityPolicy` is `SystemObjectSecurityPolicy` (policy #1) — *Owner SystemUser write,
+World read* — so `(Object objectSecurityPolicy authorizationForUser: aUserProfile)` answers `#read`
+for an ordinary user, and compiling a method onto a kernel class raises `SecurityError` **2257**,
+"No authorization to set the current security policy to SystemObjectSecurityPolicy". A developer
+session does not meet this because of the **`ObjectSecurityPolicyProtection`** privilege, which
+bypasses the authorization check: `DataCurator` has it, `setup-read-only-user.sh`'s user does not.
+Measured 2026-09-21 on 3.7.5 — as `McpReadOnly`, `Object compileMethod:` raised 2257 while the same
+session compiled a method onto its own class in `UserGlobals` without complaint. See
+[ReadOnly_User.md](ReadOnly_User.md).
 
 **A `SymbolDictionary`'s name is the key inside it whose value is itself** —
 `name` is literally `^self keyAtValue: self ifAbsent: [nil]`; there is no `name` instance variable.

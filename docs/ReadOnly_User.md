@@ -36,6 +36,35 @@ Choosing a shorter `toolsetNames` list is still worth doing — it narrows what 
 and a smaller surface is a clearer one. It is not a security control, and this document is the
 reason.
 
+## Kernel classes: what the stone does about them
+
+There was a second advisory gate until 2026-09-21 — a *kernel guard* on the mutation tools, refusing
+any class `Globals` bound under its own name. It is gone for the reason read-only mode went, and this
+is what was underneath it all along.
+
+Kernel classes live in **`SystemObjectSecurityPolicy`** (policy #1): *Owner SystemUser write, World
+read*. Authorization is checked in the stone, at the write:
+
+```smalltalk
+Object objectSecurityPolicy authorizationForUser: (AllUsers userWithId: 'McpReadOnly')   "-> #read"
+```
+
+Measured 2026-09-21 on 3.7.5, in a gem logged in as `McpReadOnly`:
+
+| operation | result |
+|---|---|
+| `Object compileMethod: 'mcpAuthProbe ^1' …` | `SecurityError` **2257** — "No authorization to set the current security policy to SystemObjectSecurityPolicy(#1 …, Owner SystemUser write, World read)" |
+| `Object subclass: 'McpAuthProbeClass' … inDictionary: UserGlobals`, then `compileMethod:` on it | no error |
+
+Both in one session, seconds apart: the kernel is closed and the user's own classes are open, with
+nothing in `mcp_server` deciding either.
+
+What makes the difference is the **`ObjectSecurityPolicyProtection`** privilege, which bypasses the
+authorization check. `setup-read-only-user.sh`'s user does not have it; `DataCurator` does — which is
+why a developer session can edit `Object`, and why the kernel looks unprotected from one. A
+deployment whose worker user holds that privilege can modify kernel classes, and no list of class
+names inside the server was ever going to change that.
+
 ## The commit lock
 
 The load-bearing line of `setup-read-only-user.sh`:

@@ -17,6 +17,29 @@ reasoning has nowhere better to live, not that the entry should grow.
 
 ## Unreleased
 
+* **Breaking: the kernel-class guard is gone.** `McpServer>>assertMutableClass:` /
+  `assertRemovableDictionaryNamed:` / `isProtectedClass:` / `protectedDictionaryNames`, the
+  `McpToolset` forwarders of the first two, and `McpFixtureServer`'s hardened override are all
+  **removed**. The mutation tools no longer refuse a class for its home dictionary, and
+  `remove_dictionary` no longer refuses `Globals`; a third-party toolset has no guard to call and
+  no policy to override.
+
+  It was the same mistake read-only mode was, one layer down: a refusal issued *inside* the process
+  it claimed to bound. `execute_code`, a test body or a Python call reached past it in the next
+  request, it had to be taught about symbol-list shadowing to stay correct in a Grail image, and its
+  real cost was that it made a privileged session look restrained. GemStone has enforced this in the
+  stone all along — kernel classes live in `SystemObjectSecurityPolicy` (#1: owner SystemUser write,
+  world read), so a worker gem whose user lacks the `ObjectSecurityPolicyProtection` privilege is
+  refused **at the write** with `SecurityError` 2257, whichever tool asked. Measured against
+  `setup-read-only-user.sh`'s user, which edits its own classes in `UserGlobals` in the same session.
+
+  **To migrate:** if you were relying on the guard, give the worker gem a GemStone user that is
+  actually restricted — `MCP_WORKER_USER` with `./setup-read-only-user.sh`, or under `McpAuthRouter`
+  a restricted `UserProfile` for the users in question. A subclass that overrode
+  `protectedDictionaryNames` should drop the override; it is dead code now.
+  **[docs/ReadOnly_User.md](docs/ReadOnly_User.md)** gained the measurements, and is the reference
+  for what a user profile does and does not bound.
+
 * **Breaking: read-only mode is gone, replaced by the worker gem's GemStone user.** `McpRouter`'s
   `readOnly` flag, `MCP_READONLY`, `McpServer class>>sessionReadOnly:` /
   `coreReadOnlySafeToolNames`, `McpServer>>isReadOnly` / `isToolAllowed:`, every toolset's
