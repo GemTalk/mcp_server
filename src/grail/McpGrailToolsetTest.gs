@@ -143,6 +143,54 @@ signatureOf: aName fromEntry: anEntry
 %
 category: 'tests'
 method: McpGrailToolsetTest
+testCallSitesCountGrailsProbeTwinsAsOneCall
+  "One Python call that Grail prints twice is one call site, not two.
+
+   Grail wraps every call to a BUILTIN in a runtime global-shadow probe -- `iter` may have been
+   rebound on the module, so the generated code asks at run time and branches --  and
+   CallAst>>printGlobalShadowProbeOn:name:then: prints the ARGUMENTS ONCE PER BRANCH, deliberately:
+   only one branch runs, so each is still evaluated at most once, and the cost is generated source
+   rather than work. Both copies are real sends of `_dict` and both sit under one ___curPos___
+   store, so a scan positioned from the store alone reports the same call site twice, with the same
+   line and the same text -- indistinguishable from a genuine second call. Measured against
+   `_grail_session.SessionDict` on 4.0.0.a2 with Grail bcf842c6: `compiled 14` where the .py has 12,
+   the extra two being __iter__ and __len__, the only two of the twelve that call a builtin.
+
+   The source below is `SessionDict>>__iter__` as Grail emits it, pasted whole, so this pins the
+   rule with no Grail checkout and no import. It is byte-exact ON PURPOSE: the trailer's indices
+   address this very string, so the first two assertions check the paste before the rule is tested
+   -- reflow the literal and they fail saying so, rather than the test passing for the wrong reason.
+
+   The last assertion is the fallback, and it matters as much as the rule: with no trailer to read
+   -- a direct-to-IR method, or a trailer whose shape this cannot parse -- the same source reports
+   BOTH sends. Nothing is collapsed on a guess."
+  | ts src sites |
+  ts := McpGrailToolset new.
+  src := '__iter__
+<grailPython>
+| ___curPos___ |
+___curPos___ := #(61 15 61 33 ''        return iter(self._dict())'').
+^ (((_grail_session @env0:___instance___ @env0:dynamicInstVarAt: #''iter'') isNil ifTrue: [(((Python @env0:at: #builtins) instance) iter: ((self _dict)))] ifFalse: [(_grail_session @env0:___instance___ @env0:dynamicInstVarAt: #''iter'') @env1:___pyCallValue___: { ((self _dict)). } kw: nil])).
+
+"___GRAILPOS___ 246 257 61 20 61 32 370 381 61 20 61 32 112 395 61 15 61 33 "'.
+  "The trailer addresses this string: both spans hold the same call, printed twice."
+  self assert: (src copyFrom: 246 to: 257) equals: '(self _dict)'.
+  self assert: (src copyFrom: 370 to: 381) equals: '(self _dict)'.
+  "Three spans: the two twins, which share a Python range, and the whole probe expression."
+  self assert: (ts grailPositionSpansIn: src) size equals: 3.
+  self assert: (ts pythonSpanKeyAt: 252 in: (ts grailPositionSpansIn: src))
+    equals: (ts pythonSpanKeyAt: 376 in: (ts grailPositionSpansIn: src)).
+  "So the two sends are one call site, positioned from the store as before."
+  sites := ts callSitesIn: src forSelector: #'_dict'.
+  self assert: sites size equals: 1.
+  self assert: ((sites at: 1) at: 1) equals: 61.
+  self assert: ((sites at: 1) at: 2) equals: '        return iter(self._dict())'.
+  "With the trailer gone there is nothing to collapse ON, and both sends are reported."
+  self assert: (ts callSitesIn: (src copyFrom: 1 to: (src findString: '"___GRAILPOS___' startingAt: 1) - 1)
+    forSelector: #'_dict') size equals: 2
+%
+category: 'tests'
+method: McpGrailToolsetTest
 testCallSitesIgnoreLiteralsCommentsAndLongerNames
   "The four ways a substring scan for a sent selector finds something that is not a send. Each was
    measured against `_grail_session.SessionDict`, where the naive version reported 27 sites for the
@@ -173,6 +221,43 @@ TypeError ___signal___: ''SessionDict._dict() takes 0 positional arguments''.
   self assert: (ts callSitesIn: '_dict
 x := ''it''''s _dict here''.
 ^1' forSelector: #'_dict') isEmpty
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testCallSitesKeepTwoRealCallsInOneStatementApart
+  "Two calls to the same name in ONE statement are two call sites, and the probe rule must not eat
+   them.
+
+   This is the case that separates reading the trailer from the cheaper fix. Collapsing sites per
+   ___curPos___ store would also answer 1 here -- the two calls share a statement, so they share a
+   store -- and that would break the contract #pythonSendersOfName:in: states: one entry per call
+   site, so a method calling aName twice is reported twice. The trailer keeps them apart because
+   they occupy different COLUMNS: 5:15-5:27 and 5:35-5:47, against the probe twins' identical
+   61:20-61:32.
+
+   The source is what Grail emits for `return self._dict().update(self._dict())`, pasted whole and
+   checked against its own trailer first, as in #testCallSitesCountGrailsProbeTwinsAsOneCall. Note
+   what is NOT probed here: `update` is a method call, and only builtins get the shadow probe, which
+   is why eleven of SessionDict's twelve senders never doubled."
+  | ts src sites spans |
+  ts := McpGrailToolset new.
+  src := 'twice_in_one_statement
+<grailPython>
+| ___curPos___ |
+___curPos___ := #(5 15 5 48 ''        return self._dict().update(self._dict())'').
+^ ((((self _dict)) @env1:___pyAttrLoad___: #''update'') @env1:value: { ((self _dict)). } value: nil).
+
+"___GRAILPOS___ 141 152 5 15 5 27 140 187 5 15 5 34 206 217 5 35 5 47 139 232 5 15 5 48 "'.
+  self assert: (src copyFrom: 141 to: 152) equals: '(self _dict)'.
+  self assert: (src copyFrom: 206 to: 217) equals: '(self _dict)'.
+  "Different Python columns, so different spans -- and two sites."
+  spans := ts grailPositionSpansIn: src.
+  self assert: (ts pythonSpanKeyAt: 147 in: spans) equals: '5:15-5:27'.
+  self assert: (ts pythonSpanKeyAt: 212 in: spans) equals: '5:35-5:47'.
+  sites := ts callSitesIn: src forSelector: #'_dict'.
+  self assert: sites size equals: 2.
+  self assert: ((sites at: 1) at: 1) equals: 5.
+  self assert: ((sites at: 2) at: 1) equals: 5
 %
 category: 'tests'
 method: McpGrailToolsetTest
@@ -726,6 +811,56 @@ testGrailEmitsTheParameterKindsTheSignatureNeeds
   self assert: (self includesCS: '{ ' , q , 'args' , q , '. 2 }' in: src).
   self assert: (self includesCS: '{ ' , q , 'key' , q , '. 3. ' , q , 'None' , q , ' }' in: src).
   self assert: (self includesCS: '{ ' , q , 'kwargs' , q , '. 4 }' in: src)
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testGrailPositionSpansIgnoreTrailersInsideStringLiterals
+  "A trailer inside a string literal belongs to a DIFFERENT source, and its indices address that
+   one.
+
+   A module's generated `initialize` builds its classes by compiling each method from a source
+   string, so every inner method -- its own trailer included -- sits inside a quoted literal, with
+   indices counted from the inner source. Measured on `_grail_session>>initialize`: 14 ___GRAILPOS___
+   trailers, 13 of them embedded and one the method's own, and the embedded `246 257` addresses
+   `age helpers.` in the outer source rather than any call. Read those as the outer method's and the
+   span rule collapses or scatters sites on numbers that mean nothing here -- so the scan tracks
+   literal state, by the same quote rules #callSitesIn:forSelector: walks by.
+
+   The fixture is that shape in miniature, with the embedded trailer deliberately carrying the
+   numbers measured from SessionDict>>__iter__.
+
+   NB the site's LINE is not asserted. #positionStoresIn: scans the raw text for ___curPos___ and
+   does not track literals, so on a source like this it can answer a store from the embedded method
+   -- a separate limitation of the store scan, not of the span scan this test is about, and one no
+   caller has reached in practice because the doubled hits are what over-reported."
+  | ts src spans |
+  ts := McpGrailToolset new.
+  src := 'initialize
+<grailPython>
+| ___curPos___ |
+___curPos___ := #(30 16 30 26 ''class Holder:'').
+Holder @env0:compileMethod: ''get
+| ___curPos___ |
+___curPos___ := #(43 15 43 27 ''''        return self._dict()'''').
+^ ((self _dict)).
+
+"___GRAILPOS___ 246 257 43 15 43 27 "''.
+^ ((self _dict)).
+
+"___GRAILPOS___ 267 278 30 16 30 26 "'.
+  "The outer trailer addresses the outer call; the embedded one addresses the inner source."
+  self assert: (src copyFrom: 267 to: 278) equals: '(self _dict)'.
+  spans := ts grailPositionSpansIn: src.
+  self assert: spans size equals: 1.
+  self assert: (spans at: 1) equals: #( 267 278 30 16 30 26 ).
+  "One send is outside the literal; the one inside it was never a send to begin with."
+  self assert: (ts callSitesIn: src forSelector: #'_dict') size equals: 1.
+  "A comment that is not a trailer contributes nothing, and a malformed trailer is refused whole
+   rather than mis-grouped by six."
+  self assert: (ts grailSpansFromComment: 'just a comment') isEmpty.
+  self assert: (ts grailSpansFromComment: '___GRAILPOS___ 1 2 3 4 5') isEmpty.
+  self assert: (ts grailSpansFromComment: '___GRAILPOS___ 1 2 3 4 5 six') isEmpty.
+  self assert: (ts grailSpansFromComment: '___GRAILPOS___ 1 2 3 4 5 6') size equals: 1
 %
 category: 'tests'
 method: McpGrailToolsetTest

@@ -154,6 +154,10 @@ callSitesIn: aSourceString forSelector: aSelector
      3. THE METHOD'S OWN SELECTOR PATTERN. Line one of `_dict` is the word `_dict`.
      4. A LONGER IDENTIFIER. `_dict` is a substring of `__dict:`, which is the SAME name's varargs
         selector -- so every fast path appeared to be sent from its own arity glue.
+     5. THE SAME CALL PRINTED TWICE. Grail wraps a call to a BUILTIN in a runtime global-shadow
+        probe and prints the arguments ONCE PER BRANCH on purpose (de439ecb, 6efa71bb), so
+        `iter(self._dict())` holds the text `(self _dict)` twice under one store. Both are real
+        sends; only one is a Python call site.
 
    So this walks the source once tracking string-literal and comment state, starts after the
    selector pattern, and requires an identifier boundary on each side of the match. Comments are
@@ -161,14 +165,25 @@ callSitesIn: aSourceString forSelector: aSelector
    write is a position store (___emitCurPosRestoreCommentFor___:on:), which is already read from the
    raw text by #positionStoresIn: before this walk begins.
 
+   THE FIFTH IS NOT A TEXT PROBLEM, so it is not closed by a text rule. Nothing about the twin is
+   wrong -- it is the same call, printed again -- and the store cannot separate the two because it
+   is what they share. What does separate them is the ___GRAILPOS___ trailer, which gives every
+   stretch of generated code the PYTHON RANGE it came from: the twins carry one span, while two
+   genuine calls in one statement (`self._dict().update(self._dict())`) carry different columns. So
+   a site whose span has already been reported is dropped, and a site with no span -- no trailer, or
+   a trailer this cannot read -- is kept, which is the behaviour that was correct before the trailer
+   was read at all. See #grailPositionSpansIn:.
+
    WHY IT READS TEXT AT ALL, AND WHERE THAT STOPS. Grail publishes no way to ask a method for its
    call sites: both readers that do it properly are private and ip-keyed, which is asked about in
    GemTalk/Grail#883. Two limits follow, and each reports an ABSENT position rather than a wrong
    one -- the literal layout is an assumption, and a direct-to-IR method (GRAIL_IR_CODEGEN set)
    carries the user's Python with no store in it at all. A hit whose line is nil still names the
    method it is in, which is the part a caller can get nowhere else."
-  | stores key sites i size c inString inComment |
+  | stores spans seen key sites i size c inString inComment |
   stores := self positionStoresIn: aSourceString.
+  spans := self grailPositionSpansIn: aSourceString.
+  seen := Set new.
   key := self firstKeywordOf: aSelector.
   sites := OrderedCollection new.
   size := aSourceString size.
@@ -197,7 +212,12 @@ callSitesIn: aSourceString forSelector: aSelector
                   ifTrue: [inComment := true]
                   ifFalse: [
                     (self source: aSourceString hasSendOf: key at: i)
-                      ifTrue: [sites add: (self storeInEffectAt: i in: stores)]]]]].
+                      ifTrue: [
+                        | spanKey |
+                        spanKey := self pythonSpanKeyAt: i in: spans.
+                        (spanKey isNil or: [(seen includes: spanKey) not]) ifTrue: [
+                          spanKey ifNotNil: [seen add: spanKey].
+                          sites add: (self storeInEffectAt: i in: stores)]]]]]].
     i := i + 1].
   ^sites
 %
@@ -503,6 +523,104 @@ method: McpGrailToolset
 grailDirectory
   "The Grail checkout this deployment configured, or nil. See class>>declaredOptionNames."
   ^self optionNamed: 'grailDirectory' ifAbsent: [nil]
+%
+category: 'private'
+method: McpGrailToolset
+grailPositionSpansIn: aSourceString
+  "Every span Grail's ___GRAILPOS___ trailer records for aSourceString, as an OrderedCollection of
+   {startIndex. endIndex. beginLine. beginColumn. endLine. endColumn} in trailer order -- the first
+   two being 1-based INCLUSIVE indices into aSourceString, the last four the Python range that
+   stretch of generated code came from. Empty when aSourceString carries no trailer.
+
+   WHY IT IS READ. A send's position comes from the nearest ___curPos___ store above it, and that is
+   one store per STATEMENT -- which stopped being one store per Python CALL SITE when Grail began
+   wrapping every call to a builtin in a runtime global-shadow probe (de439ecb, 6efa71bb).
+   CallAst>>printGlobalShadowProbeOn:name:then: prints the arguments once per branch on purpose, so
+   `iter(self._dict())` generates the text `(self _dict)` twice under one store and a scan keyed on
+   the store alone reports one Python call twice. The trailer is what tells the two apart: probe
+   twins carry the SAME Python span, while two genuine calls in one statement carry different
+   columns. It is also what Grail itself derives positions from
+   (BaseException class>>___pythonLineForMethod___:ip:), so reading it outlasts any particular shape
+   of the probe.
+
+   TRAILERS INSIDE STRING LITERALS ARE NOT THIS SOURCE'S. A module's generated `initialize` builds
+   its classes by compiling each method FROM A SOURCE STRING, so every inner method -- its own
+   trailer included -- sits inside a quoted literal, with indices counted from that inner source.
+   Measured on `_grail_session>>initialize`: 14 trailers, of which 13 are embedded and one is the
+   method's own, and an embedded `246 257` addresses `age helpers.` in the outer source rather than
+   any call. So this walks the string tracking literal state and reads only the trailers it meets
+   outside one, by the same quote and comment rules #callSitesIn:forSelector: walks by."
+  | spans size i c inString commentStart |
+  spans := OrderedCollection new.
+  size := aSourceString size.
+  i := 1.
+  inString := false.
+  commentStart := nil.
+  [i <= size] whileTrue: [
+    c := aSourceString at: i.
+    inString
+      ifTrue: [
+        c = $' ifTrue: [
+          "A doubled quote is one quote INSIDE the literal, not the end of it."
+          (i < size and: [(aSourceString at: i + 1) = $'])
+            ifTrue: [i := i + 1]
+            ifFalse: [inString := false]]]
+      ifFalse: [
+        commentStart
+          ifNil: [
+            c = $' ifTrue: [inString := true].
+            c = $" ifTrue: [commentStart := i + 1]]
+          ifNotNil: [
+            c = $" ifTrue: [
+              commentStart <= (i - 1) ifTrue: [
+                spans addAll: (self grailSpansFromComment:
+                  (aSourceString copyFrom: commentStart to: i - 1))].
+              commentStart := nil]]].
+    i := i + 1].
+  ^spans
+%
+category: 'private'
+method: McpGrailToolset
+grailSpansFromComment: aCommentString
+  "The 6-tuples one ___GRAILPOS___ comment body holds, or empty for any other comment.
+
+   The trailer is the marker followed by whitespace-separated non-negative integers, six per entry:
+   startIndex, endIndex, beginLine, beginColumn, endLine, endColumn. Measured over every generated
+   method reachable on a working image, each trailer's token count is a multiple of six and no token
+   holds anything but digits.
+
+   ANYTHING ELSE ANSWERS EMPTY, deliberately. A trailer carrying a token this cannot read is a
+   trailer whose shape has changed, and `no spans` degrades to exactly the behaviour that was
+   correct before the trailer was read at all -- which beats spans mis-grouped by six, since those
+   would silently collapse call sites that are not the same call."
+  | marker nums spans digits i size c |
+  marker := '___GRAILPOS___'.
+  spans := OrderedCollection new.
+  aCommentString size < marker size ifTrue: [^spans].
+  (aCommentString copyFrom: 1 to: marker size) = marker ifFalse: [^spans].
+  nums := OrderedCollection new.
+  digits := nil.
+  i := marker size + 1.
+  size := aCommentString size.
+  [i <= size] whileTrue: [
+    c := aCommentString at: i.
+    c isDigit
+      ifTrue: [
+        digits := digits isNil
+          ifTrue: [c digitValue]
+          ifFalse: [digits * 10 + c digitValue]]
+      ifFalse: [
+        c isSeparator ifFalse: [^OrderedCollection new].
+        digits ifNotNil: [nums add: digits. digits := nil]].
+    i := i + 1].
+  digits ifNotNil: [nums add: digits].
+  (nums size > 0 and: [nums size \\ 6 = 0]) ifFalse: [^OrderedCollection new].
+  1 to: nums size by: 6 do: [:k |
+    | span |
+    span := Array new: 6.
+    1 to: 6 do: [:n | span at: n put: (nums at: k + n - 1)].
+    ((span at: 1) > 0 and: [(span at: 1) <= (span at: 2)]) ifTrue: [spans add: span]].
+  ^spans
 %
 category: 'private'
 method: McpGrailToolset
@@ -1148,6 +1266,33 @@ pythonSourceRootsIncludingTests: aBoolean
   add value: 'src/python/stdlib' value: dir , '/src/python/stdlib'.
   aBoolean ifTrue: [add value: 'tests/python' value: dir , '/tests/python'].
   ^roots
+%
+category: 'private'
+method: McpGrailToolset
+pythonSpanKeyAt: anIndex in: aSpanCollection
+  "The Python range the generated code at anIndex came from, as a comparable String key
+   ('61:20-61:32'), or nil when no span covers anIndex.
+
+   THE NARROWEST covering span is the answer. The trailer records a span per AST node, so a call
+   sits inside its own span, inside its statement's, and -- when it is an argument to a probed
+   builtin -- inside the whole probe expression's. Only the innermost identifies the call, and it is
+   the one the probe's two branches agree on.
+
+   A String rather than the Array itself because the caller keeps these in a Set: a String's
+   equality and hash are its characters in every version this files into."
+  | best bestWidth |
+  best := nil.
+  bestWidth := nil.
+  aSpanCollection do: [:span |
+    ((span at: 1) <= anIndex and: [anIndex <= (span at: 2)]) ifTrue: [
+      | width |
+      width := (span at: 2) - (span at: 1).
+      (best isNil or: [width < bestWidth]) ifTrue: [
+        best := span.
+        bestWidth := width]]].
+  best isNil ifTrue: [^nil].
+  ^(best at: 3) printString , ':' , (best at: 4) printString , '-'
+    , (best at: 5) printString , ':' , (best at: 6) printString
 %
 category: 'private'
 method: McpGrailToolset
