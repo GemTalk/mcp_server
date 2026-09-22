@@ -1629,7 +1629,7 @@ plus `McpConcurrentEditTest` (18), `McpExternalSessionTest` (5), `McpTransaction
 `McpWorkerDeadlineTest` (4) — **452 tests**,
 which is the whole suite on a base install. Where the optional groups are installed the runner picks
 their suites up automatically: plus `McpAuthTest` (28) and `McpAuthConformanceTest` (25) — **505
-tests** — and **554 with the 49 in `McpGrailToolsetTest`** on a Grail image.
+tests** — and **557 with the 52 in `McpGrailToolsetTest`** on a Grail image.
 
 Seven suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
 `McpAuthConformanceTest` commit a throwaway JWT user and spawn real worker gems; they are in the
