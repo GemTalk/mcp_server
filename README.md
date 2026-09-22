@@ -725,15 +725,12 @@ worked example for configuring your own.
   **tool execution error** (`isError: true`, with `structuredContent.error.kind =
   "invalidParams"`), because that is the form a model can read and self-correct from. A malformed
   request — no tool name — and an unknown tool remain JSON-RPC **protocol** errors (`-32602`).
-- **No class is off limits to the tool layer.** There was a kernel-class guard here until
-  2026-09-21 — the mutation tools refused any class `Globals` bound under its own name, with
-  `kind = "refused"`. It went the way read-only mode went, and for the same reason: it was a refusal
-  issued *inside* the process it claimed to bound, so `execute_code`, a test body or a Python call
-  reached past it in the next request, and its real cost was making a privileged session look
-  restrained. The stone has always held this line properly — kernel classes live in
-  `SystemObjectSecurityPolicy` (#1: *owner SystemUser write, world read*), so a worker gem whose
-  GemStone user lacks the `ObjectSecurityPolicyProtection` privilege is refused **at the write** with
-  `SecurityError` 2257, whichever tool asked. Configure that, not a list of class names:
+- **No class is off limits to the tool layer.** Nothing here decides who may change what — that is
+  the stone's, and it holds for every session whichever tool the write arrived through. Kernel
+  classes live in `SystemObjectSecurityPolicy` (#1: *owner SystemUser write, world read*), so a
+  worker gem whose GemStone user lacks the `ObjectSecurityPolicyProtection` privilege is refused
+  **at the write** with `SecurityError` 2257; a user that holds it (`DataCurator` does) may edit
+  `Object`. Configure the user, not a list of class names:
   [Browsing-only deployments](#browsing-only-deployments-the-worker-gems-gemstone-user) below, and
   [docs/ReadOnly_User.md](docs/ReadOnly_User.md), which measures it.
 - **Structured error kinds** — when a tool raises, the `isError` result keeps the human-readable
@@ -743,15 +740,8 @@ worked example for configuring your own.
 
 ## Browsing-only deployments: the worker gem's GemStone user
 
-**There is no read-only mode.** There was one until the release after 0.8.0 — a per-router flag plus a
-`readOnlySafeToolNames` allow-list — and it was removed rather than extended, because a list of
-"safe" tools could never be a boundary: `execute_code` evaluates arbitrary Smalltalk, `run_test_class`
-runs arbitrary test bodies, and a tool that compiles can be followed by one that runs. Worse, it
-*looked* like a boundary in exactly the place that mattered — an administrator starting
-`MCP_READONLY=1 ./run-server.sh` on a privileged user, believing the image was holding the line.
-
-What holds the line is the **GemStone user the worker gem logs in as**, enforced in the stone on
-every operation:
+What bounds a client is the **GemStone user the worker gem logs in as**, enforced in the stone on
+every operation — there is no read-only mode and no tool-level gate to configure:
 
 ```bash
 ./setup-read-only-user.sh                      # provision McpReadOnly (once)
@@ -777,9 +767,7 @@ resource consumption is bounded only by session lifetime). Read it before pointi
 client at this.
 
 `McpAuthRouter` **refuses** `workerUserId:` — there each worker logs in as the user its bearer token
-names, so restricting an analyst means giving *that* GemStone user a restricted profile. (It had a
-`writeScope` that downgraded a scope-less token to a reduced tool list; that went with the rest of
-the gate.)
+names, so restricting an analyst means giving *that* GemStone user a restricted profile.
 
 Choosing a shorter `toolsetNames` list is still worth doing — it narrows what a model is *offered*,
 and a smaller surface is a clearer one. It is not a security control.
