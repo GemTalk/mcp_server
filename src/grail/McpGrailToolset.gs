@@ -1057,27 +1057,38 @@ pythonMethodNamesOf: aClass
   names isEmpty ifFalse: [^names asArray].
   "No usable body order: fall back to whatever declares methods."
   sigs ifNotNil: [^sigs keys asSortedCollection asArray collect: [:k | k asString]].
-  ^((aClass selectorsForEnvironment: 1) collect: [:s | self pythonNameOfSelector: s])
-    asSortedCollection asArray reject: [:n | self isGrailInternalName: n]
+  "Last resort: decode the selector pool. The nil reject is not optional -- a selector Grail
+   declines to decode would otherwise reach asSortedCollection and fail comparing nil with a String
+   -- and it subsumes the #isGrailInternalName: screen this line used to carry, because every
+   ___like_this___ slot is exactly what Grail declines."
+  ^(((aClass selectorsForEnvironment: 1) collect: [:s | self pythonNameOfSelector: s])
+    reject: [:n | n isNil]) asSortedCollection asArray
 %
 category: 'private'
 method: McpGrailToolset
 pythonNameOfSelector: aSelector
-  "The Python name a Smalltalk env-1 selector was generated from.
+  "The Python name a Smalltalk env-1 selector was generated from, or NIL when no Python name could
+   have produced it.
 
-   The encoding: a fixed-arity call is `name:` then `_:` per further argument (`__setitem__:_:` is
-   two arguments); a call with *args/**kwargs is `_name:kw:`, with one underscore ADDED, so a Python
-   name already starting with _ gains another. Recognise the whole thing -- never truncate at the
-   first colon, which is a documented way to manufacture attributes that do not exist."
-  | s firstColon head |
-  s := aSelector asString.
-  firstColon := s indexOf: $:.
-  firstColon = 0 ifTrue: [^s].
-  head := s copyFrom: 1 to: firstColon - 1.
-  "The varargs form is exactly `head:kw:` -- a fixed 2-argument selector would read `head:_:`."
-  (s = (head , ':kw:') and: [head size > 1])
-    ifTrue: [^head copyFrom: 2 to: head size].
-  ^head
+   DECODING, NOT ENCODING, remains the design -- #selector:callsPythonName: carries the argument for
+   it, and it is why nothing here needs importlib's own #pythonSelectorMaxSearchedArity. What
+   changed is who owns the rule: Grail now publishes it (GemTalk/Grail#884, category
+   `Grail-Selector Mangling` on importlib class), so this is the single private front door onto
+   Grail's decoder rather than a second copy of the encoding that has to be kept in step with it.
+
+   NIL IS A REAL ANSWER, and it is why this cannot simply be inlined at the call sites. Grail
+   rejects anything its mangling could not have emitted, where the hand-rolled decoder always
+   answered a String and so invented names: `head:kw:` read as `ead`, because a leading character
+   was stripped without checking it was the ADDED underscore, and `at:put:` -- a plain Smalltalk
+   selector that no Python call compiles to -- read as `at`. Grail also rejects its own
+   ___like_this___ slots at every arity (measured: `___pySlotIndexFor___:` and `___zzz___` alike),
+   which on a real class is the whole of the nil population and makes a separate
+   #isGrailInternalName: screen redundant on this path.
+
+   Every caller that COLLECTS decoded names rejects nil -- #pythonMethodNamesOf:,
+   #pythonReferencesOfName:in: and #pythonSendersOfName:in:. Those that COMPARE need nothing: nil is
+   equal to no String."
+  ^importlib pythonNameOfSelector: aSelector
 %
 category: 'private'
 method: McpGrailToolset
@@ -1120,8 +1131,11 @@ pythonReferencesOfName: aName in: aClass
   (aClass selectorsForEnvironment: 1) asSortedCollection do: [:sel |
     | src ownName stores |
     src := [aClass sourceCodeAt: sel environmentId: 1] on: Error do: [:ex | nil].
-    src ifNotNil: [
-      ownName := self pythonNameOfSelector: sel.
+    ownName := self pythonNameOfSelector: sel.
+    "A selector Grail will not decode is one of its own ___like_this___ slots, not a method the
+     Python programmer wrote, so it is not searched -- a hit inside one could only be labelled with
+     a name that appears in no source."
+    (src notNil and: [ownName notNil]) ifTrue: [
       stores := self positionStoresIn: src.
       markers do: [:marker |
         | at |
@@ -1233,8 +1247,11 @@ pythonSendersOfName: aName in: aClass
   (aClass selectorsForEnvironment: 1) asSortedCollection do: [:sel |
     | meth ownName pool |
     meth := [aClass compiledMethodAt: sel environmentId: 1] on: Error do: [:ex | nil].
-    meth ifNotNil: [
-      ownName := self pythonNameOfSelector: sel.
+    ownName := self pythonNameOfSelector: sel.
+    "Undecodable means a Grail internal slot rather than a Python method -- skipped for the reason
+     given in #pythonReferencesOfName:in:. It also keeps the glue test below honest: that test asks
+     whether ownName is the very name being searched for, which nil could never be."
+    (meth notNil and: [ownName notNil]) ifTrue: [
       pool := [meth _selectorPool] on: Error do: [:ex | #()].
       pool do: [:sent |
         (self selector: sent callsPythonName: aName) ifTrue: [
@@ -1578,9 +1595,13 @@ selector: aSelector callsPythonName: aName
    nobody has: a Python name has as many fixed-arity selectors as it has call sites with differing
    argument counts, so the candidate list has no upper bound, and a search that stops at some arity
    misses every call above it SILENTLY -- the failure this tool exists to remove. Decoding each
-   selector a method actually sends is exact, needs no arity, and reuses the single rule this class
-   already states (#pythonNameOfSelector:) instead of maintaining its inverse. Grail publishes
-   neither direction; see GemTalk/Grail#884.
+   selector a method actually sends is exact, needs no arity, and asks Grail's own decoder through
+   #pythonNameOfSelector: instead of maintaining its inverse.
+
+   Grail now publishes BOTH directions (GemTalk/Grail#884): importlib's #pythonSelectorsForName:-
+   arity: would generate the candidates. It is not used, and the reason is the one above rather
+   than inertia -- it is bounded by #pythonSelectorMaxSearchedArity, currently 16, so adopting it
+   would reintroduce exactly the silent arity ceiling this method was written to avoid.
 
    A SYMBOL IS NOT A STRING HERE: GemStone answers false for #abs = 'abs' (measured), so both sides
    are compared as Strings. String>>= is case-SENSITIVE, which is what Python names need -- several
@@ -1593,7 +1614,14 @@ method: McpGrailToolset
 selectorDerivedSignatureFor: aMethodName on: aClass
   "A signature worked out from the generated selectors alone, for a class with no signature table.
    Answers `name(*args, **kwargs)` when only the varargs form exists, and otherwise `name(a1, ...)`
-   with one placeholder per argument -- arity is all a selector carries."
+   with one placeholder per argument -- arity is all a selector carries.
+
+   The `:kw:` and colon-count tests stay hand-rolled deliberately. importlib's
+   #pythonSelectorsForName:arity: answers which selectors a name COULD compile to at an arity
+   already known; the question here is the inverse -- which arity a selector that exists carries --
+   so it would have to be probed 0 to #pythonSelectorMaxSearchedArity and intersected to learn what
+   one #colonCountIn: already says. The nil answers from #pythonNameOfSelector: need no guard: the
+   comparison below is against a name, and nil equals no name."
   | sels fixed varargs n |
   sels := [(aClass selectorsForEnvironment: 1) asArray] on: Error do: [:ex | #()].
   fixed := nil.

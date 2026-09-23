@@ -17,6 +17,16 @@ reasoning has nowhere better to live, not that the entry should grow.
 
 ## Unreleased
 
+* **The Python browsing and search tools decode selectors through Grail.**
+  `McpGrailToolset>>pythonNameOfSelector:` now delegates to `importlib pythonNameOfSelector:`
+  ([GemTalk/Grail#884](https://github.com/GemTalk/Grail/issues/884)) instead of reimplementing the
+  mangling rule. Grail's decoder answers **nil** where nothing its mangling emits could have
+  produced the selector, which the local one could not say, so two invented names are gone:
+  `find_python_senders` for `at` no longer matches the plain Smalltalk selector `at:put:`, and a
+  Grail-internal slot such as `___pyCallValue___:kw:` no longer decodes to a two-underscore name
+  that slipped past the internals screen and into a method listing. No tool, option or schema
+  changed.
+
 * **`eval_python`'s stderr capture now reaches warm-bound modules.** Nothing in this server
   changed: Grail moved `sys`'s standard streams into session state
   ([GemTalk/Grail#979](https://github.com/GemTalk/Grail/pull/979)), so a module warm-bound from a
