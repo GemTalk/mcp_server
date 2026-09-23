@@ -17,6 +17,17 @@ reasoning has nowhere better to live, not that the entry should grow.
 
 ## Unreleased
 
+* **`find_python_senders` searches nested and function-local classes.** Its compiled-shape scope
+  now comes from `importlib pythonClasses`
+  ([GemTalk/Grail#885](https://github.com/GemTalk/Grail/issues/885)) instead of the
+  `GrailCanonicalClasses` registry, which records module-scope class statements only. A call from
+  `Outer.Inner` or from a class defined inside a function used to be answered `no senders`. It is
+  now found and labelled as Python prints it (`mod.Outer.Inner.probe`). The Smalltalk-defined bases
+  Grail answers with it are searched too, labelled `builtins.int` and so on. The class count in the
+  trailer is now a total rather than a floor, and the trailer names the one new gap Grail reports:
+  after a Grail install resets the registry, a committed module's classes are missing until it is
+  imported again. No tool, option or schema changed.
+
 * **The Python browsing and search tools decode selectors through Grail.**
   `McpGrailToolset>>pythonNameOfSelector:` now delegates to `importlib pythonNameOfSelector:`
   ([GemTalk/Grail#884](https://github.com/GemTalk/Grail/issues/884)) instead of reimplementing the
