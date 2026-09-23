@@ -17,6 +17,15 @@ reasoning has nowhere better to live, not that the entry should grow.
 
 ## Unreleased
 
+* **`eval_python`'s stderr capture now reaches warm-bound modules.** Nothing in this server
+  changed: Grail moved `sys`'s standard streams into session state
+  ([GemTalk/Grail#979](https://github.com/GemTalk/Grail/pull/979)), so a module warm-bound from a
+  committed canonical instance — which hands out the *committing* session's `sys`, not this one's —
+  now resolves `stderr` to the stream this tool installs. What such a module wrote used to be
+  accepted, counted and dropped into a `PyConsoleStream` nobody reads; it now comes back in the
+  `[stderr]` block. The README's and the method comment's account of that limitation is deleted,
+  and a test holds the tool to the new behaviour.
+
 * **Breaking: the kernel-class guard is gone.** `McpServer>>assertMutableClass:` /
   `assertRemovableDictionaryNamed:` / `isProtectedClass:` / `protectedDictionaryNames`, the
   `McpToolset` forwarders of the first two, and `McpFixtureServer`'s hardened override are all

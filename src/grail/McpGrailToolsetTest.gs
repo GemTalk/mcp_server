@@ -363,6 +363,37 @@ testEvalPython
 %
 category: 'tests'
 method: McpGrailToolsetTest
+testEvalPythonCapturesStderrWrittenThroughASecondSysInstance
+  "The redirect swaps sys.stdout and sys.stderr on the `sys` THIS session imports. A .py module
+   keeps the module-global `sys` it was executed with, so a module warm-bound from a committed
+   canonical instance used to hand out the `sys` of whichever session committed it -- a different
+   object from this session's, and one the redirect never touched. Everything such a module wrote
+   to stderr was lost rather than misrouted: the default PyConsoleStream in a netldi-forked,
+   detached worker gem accepts the bytes, counts them, answers the count and writes to a sink
+   nobody reads, so the loss raised nothing (GemTalk/Grail issue 924).
+
+   Grail now keeps the standard streams in SESSION state rather than on the instance, so every sys
+   instance a session can reach answers the same stderr. This states that where it is load-bearing
+   here: what this tool reports has to include what a warm-bound module wrote.
+
+   Staged with a SECOND sys instance handed straight to the scope, rather than by committing a
+   module and warm-binding it from a second session. It is the same object graph -- a sys the
+   redirect did not touch -- for none of the cost, and staging it the other way would mean a commit
+   and therefore movesTheSessionView. Grail's own SysStreamSessionResolutionTestCase covers the
+   mechanism; this covers the tool."
+  | out |
+  out := self withFreshScopeDo: [ | ts |
+    ts := self mcp.
+    ts pythonScope at: #other put: sys new.
+    ts tool_eval_python: (self oneArg: 'code' value: 'other.stderr.write("from a sys the redirect never touched\n")
+other is sys')].
+  "the write reached the capture buffer, labelled like any other stderr line"
+  self assert: (self includesCS: '[stderr] from a sys the redirect never touched' in: out).
+  "and it really was a different sys object, or the assertion above would prove nothing"
+  self assert: (self includesCS: '=> False' in: out)
+%
+category: 'tests'
+method: McpGrailToolsetTest
 testEvalPythonCapturesWhatWasPrinted
   "Printed output used to be DISCARDED: eval_python answered only the last value, so `print(x)`
    answered 'None' and the thing the caller asked to see was gone -- and most real Python prints.

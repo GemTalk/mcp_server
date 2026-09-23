@@ -609,36 +609,6 @@ worked example for configuring your own.
 > line. Uncaptured, stderr went to a `PyConsoleStream` — and a worker gem is forked by the netldi
 > and detached, so nothing reads that sink: the bytes were accepted, counted and gone.
 >
-> **What the redirect does not always reach** ([GemTalk/Grail#924](https://github.com/GemTalk/Grail/issues/924))**.** It swaps the streams on the `sys` *this session*
-> imports. A `.py` module keeps the module-global `sys` it was executed with, so a module
-> **warm-bound** from a committed canonical instance hands out the `sys` of whichever session
-> committed it — a different object, and not the one the redirect touched.
->
-> Reproduced deliberately in plain Grail (`86d29a7`), with none of this server involved. Starting
-> from an empty canonical registry:
->
-> | fresh session evaluates | `traceback.sys is sys` | captured `print_exc()` |
-> |---|---|---|
-> | `import traceback` (cold) | `True` | the traceback |
-> | …after one session committed that import | `False` | `''` — **lost** |
->
-> `traceback.sys.modules is sys.modules` stays `True` in both: the two module objects share their
-> session-resolved state but not their `stdout`/`stderr` attributes, which is the asymmetry behind
-> it. Native modules are never affected — Grail's `warnings` among them — and passing the stream
-> explicitly, `traceback.print_exc(file=sys.stderr)`, is captured either way.
->
-> **Diagnosing it:** `python_module_state` reading `canonical: yes, COMMITTED (deployed)` does not
-> on its own predict the loss. When Grail has been installed since the last deploy, the generation
-> guard drops the whole registry on first touch, so the import is really cold and the redirect works
-> while the registry still reads deployed. Compare `GrailRuntimeGeneration` with
-> `GrailCanonicalDeployGeneration`, not the label.
->
-> This is not worked around here: reaching a warm-bound module's `sys` means assigning into globals
-> that are committed state shared with every other session, and evaluating an expression must not
-> write that. It belongs in Grail, and is filed there as
-> [GemTalk/Grail#924](https://github.com/GemTalk/Grail/issues/924) — a warm-bound module should see
-> the importing session's `sys`, as it already sees its `modules` and `path`.
->
 > **`get_python_source` exists because the image loses this.** A compiled `def`'s `__doc__` reads
 > `None` and `inspect.getsource` answers an *empty string* — not an error, the wrong answer quietly.
 > What is reliable is `__code__`: its `co_filename` / `co_firstlineno` are correct, and the `.py`
@@ -1629,7 +1599,7 @@ plus `McpConcurrentEditTest` (18), `McpExternalSessionTest` (5), `McpTransaction
 `McpWorkerDeadlineTest` (4) — **452 tests**,
 which is the whole suite on a base install. Where the optional groups are installed the runner picks
 their suites up automatically: plus `McpAuthTest` (28) and `McpAuthConformanceTest` (25) — **505
-tests** — and **557 with the 52 in `McpGrailToolsetTest`** on a Grail image.
+tests** — and **559 with the 54 in `McpGrailToolsetTest`** on a Grail image.
 
 Seven suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
 `McpAuthConformanceTest` commit a throwaway JWT user and spawn real worker gems; they are in the
