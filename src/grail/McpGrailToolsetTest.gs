@@ -636,7 +636,9 @@ testFindPythonSendersAnswersEveryShapeAndSaysWhatItDidNotSearch
   self assert: (self includesCS: 'pass includeNative: true' in: compiled).
   "A shape not asked for is NAMED, not silently empty."
   self assert: (self includesCS: 'the .py files on disk -- not among the shapes asked for' in: compiled).
-  self assert: (self includesCS: 'GemTalk/Grail#885' in: compiled).
+  "Eval-scope FUNCTIONS are still a gap; nested classes no longer are, so they are not named."
+  self assert: (self includesCS: 'functions defined in an eval scope' in: compiled).
+  self deny: (self includesCS: 'nested classes' in: compiled).
   "With the source shape in, the .py trees are searched and reported as such."
   out := ts tool_find_python_senders: (Dictionary new
     at: 'name' put: '_dict'; at: 'shapes' put: #( 'source' ); at: 'limit' put: 0; yourself).
@@ -675,6 +677,47 @@ testFindPythonSendersMatchesWholeNamesOnDiskAndSearchSourceDoesNot
   self deny: (ts line: 'x = _dictionary' hasWholeName: '_dict').
   "...but a Python annotation colon is not a boundary violation, unlike a Smalltalk keyword."
   self assert: (ts line: '_dict: int = None' hasWholeName: '_dict')
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testFindPythonSendersReachesNestedAndFunctionLocalClasses
+  "The coverage this toolset could not have before Grail enumerated its own classes.
+
+   The search scope used to come from GrailCanonicalClasses, which records what a MODULE-SCOPE
+   class statement bound, so a call from a nested class or from a class defined inside a function
+   was invisible -- and the tool answered `no senders` for it. importlib pythonClasses closes the
+   subclass registry, which Grail writes at class CREATION, so both are now searched, and each is
+   labelled the way Python prints its qualified name.
+
+   Asserted by inclusion rather than by count: the subclass registry is session-local and outlives
+   the fresh scope, so a second run in the same session adds a second pair of identically-named
+   classes, each a real sender."
+  | checkout ts out |
+  checkout := self grailCheckoutOrNil.
+  checkout isNil ifTrue: [^self assert: true].
+  ts := self grailToolsetOn: checkout.
+  self withFreshScopeDo: [
+    ts ensureGrailConfigured.
+    ts evaluatePython: 'class McpProbeOuter:
+    class McpProbeInner:
+        def mcp_nested_probe_target(self):
+            return 1
+        def probe(self):
+            return self.mcp_nested_probe_target()
+def mcp_probe_maker():
+    class McpProbeLocal:
+        def mcp_nested_probe_target(self):
+            return 2
+        def probe(self):
+            return self.mcp_nested_probe_target()
+    return McpProbeLocal
+mcp_probe_maker()'].
+  out := ts tool_find_python_senders: (Dictionary new
+    at: 'name' put: 'mcp_nested_probe_target'; at: 'shapes' put: #( 'compiled' ); yourself).
+  self assert: (self includesCS: '__main__.McpProbeOuter.McpProbeInner.probe' in: out).
+  self assert: (self includesCS: '(McpProbeInner>>probe env 1)' in: out).
+  self assert: (self includesCS: '__main__.mcp_probe_maker.<locals>.McpProbeLocal.probe' in: out).
+  self assert: (self includesCS: 'return self.mcp_nested_probe_target()' in: out)
 %
 category: 'tests'
 method: McpGrailToolsetTest
@@ -1370,6 +1413,12 @@ testSearchScopeEnumeratesWhatCanBeSearchedAndNamesItInPython
    search its module class (`_grail_session`, where a module-level def lives) and its module-scope
    class (`_grail_session.SessionDict`).
 
+   The Smalltalk-defined base a user class was rooted at is IN the scope, labelled as Python names
+   it: `class X(int)` brings in AbstractPyInt as `builtins.int`. That is a design decision -- Grail
+   answers those bases on purpose and filtering them would shrink coverage -- and the label is only
+   right if it is read through Python, since AbstractPyInt does not understand #__module__ in
+   environment 1.
+
    Grail's 47 native modules are excluded by default and included on request: they are hand-written
    Smalltalk, so a Python-name search over them reports an implementation rather than a call site.
 
@@ -1381,10 +1430,14 @@ testSearchScopeEnumeratesWhatCanBeSearchedAndNamesItInPython
   ts := self grailToolsetOn: checkout.
   self withFreshScopeDo: [
     ts ensureGrailConfigured.
-    ts canonicalClassNamed: '_grail_session.SessionDict'].
+    ts canonicalClassNamed: '_grail_session.SessionDict'.
+    ts evaluatePython: 'class McpScopeProbeInt(int):
+    pass'].
   labels := (ts pythonSearchScopeIncludingNative: false) collect: [:e | e at: 1].
   self assert: (labels includes: '_grail_session').
   self assert: (labels includes: '_grail_session.SessionDict').
+  self assert: (labels includes: '__main__.McpScopeProbeInt').
+  self assert: (labels includes: 'builtins.int').
   self deny: (labels includes: 'os').
   "No class is listed twice, however many sources reach it."
   classes := (ts pythonSearchScopeIncludingNative: false) collect: [:e | e at: 2].
@@ -1426,6 +1479,30 @@ testSelectorMatchesAPythonNameByDecodingRatherThanEncoding
    `ead`. Nil is equal to no String, so the comparison needs no guard of its own."
   self deny: (ts selector: #at:put: callsPythonName: 'at').
   self deny: (ts selector: #'head:kw:' callsPythonName: 'ead')
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testSenderCoverageNamesAResetClassRegistry
+  "After ./install.sh in the Grail checkout, Grail drops its committed class registry, and the
+   classes of a module warm-bound from an earlier session are unreachable until it is imported
+   again. importlib pythonClassCensus says so (#canonicalRegistryPresent false), and the trailer
+   names that gap -- only then, because a gap reported when it is not there teaches a reader to
+   skip the trailer.
+
+   Driven with a hand-built census rather than by removing the registry, which is a persistent
+   global this suite has no business touching."
+  | ts shapes present reset |
+  ts := self mcp.
+  shapes := Set with: 'compiled'.
+  present := ts senderCoverageFor: shapes classCount: 3
+    census: (IdentityKeyValueDictionary new at: #canonicalRegistryPresent put: true; yourself)
+    roots: #() includeNative: false includeTests: false.
+  reset := ts senderCoverageFor: shapes classCount: 3
+    census: (IdentityKeyValueDictionary new at: #canonicalRegistryPresent put: false; yourself)
+    roots: #() includeNative: false includeTests: false.
+  self deny: (self includesCS: 'Grail was last installed' in: present).
+  self assert: (self includesCS: 'Grail was last installed' in: reset).
+  self assert: (self includesCS: 'searched: 3 compiled classes' in: reset)
 %
 category: 'tests'
 method: McpGrailToolsetTest

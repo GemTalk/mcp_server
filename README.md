@@ -468,15 +468,23 @@ worked example for configuring your own.
 > module that has one, each labelled — and `scope` narrows at a dot boundary, so `flask` does not
 > select `flask_login`.
 >
-> **What it cannot see, it says.** Grail registers module-scope class statements only, so a nested
-> class is not enumerable; a function defined in an `eval` scope compiles to a block with no
-> selector pool; a module whose `.py` nothing has imported has nothing compiled to search; and under
+> **The classes it searches are Grail's own enumeration.** `importlib pythonClasses`
+> ([GemTalk/Grail#885](https://github.com/GemTalk/Grail/issues/885)) answers every Python class the
+> session can reach, recorded when each class is created, so a nested class and one defined inside a
+> function are searched as well, each labelled the way Python prints it
+> (`mod.Outer.Inner.method`, `mod.f.<locals>.Local.method`). The Smalltalk-defined bases a user
+> class was rooted at come with it, labelled as Python names them (`builtins.int`), because
+> filtering them out would shrink coverage. Matching a Python name against a generated selector is
+> Grail's published rule too ([#884](https://github.com/GemTalk/Grail/issues/884)), not this
+> server's reading of it.
+>
+> **What it cannot see, it says.** A function defined in an `eval` scope compiles to a block with no
+> selector pool; a module whose `.py` nothing has imported has nothing compiled to search; after
+> `./install.sh` in the Grail checkout, the classes of a module committed earlier are missing until
+> it is imported again, and the trailer says so when that is the state; and under
 > `GRAIL_IR_CODEGEN` a method carries the user's Python with no position store, so a hit's line
-> reads `?` rather than a guess. Two public interfaces that would close these gaps are filed as
-> [GemTalk/Grail#883](https://github.com/GemTalk/Grail/issues/883) and
-> [#885](https://github.com/GemTalk/Grail/issues/885). A third,
-> [#884](https://github.com/GemTalk/Grail/issues/884), has landed: matching a Python name against a
-> generated selector is Grail's own published rule now rather than this server's reading of it.
+> reads `?` rather than a guess. The public interface that would position those hits is filed as
+> [GemTalk/Grail#883](https://github.com/GemTalk/Grail/issues/883).
 >
 > **`tests/python` is excluded by default** — a relevance choice, not a cost one. The stdlib is
 > 1,412 files and 426,131 lines and reads in 248 ms; the fixtures would add about 75 ms. What they
@@ -1600,7 +1608,7 @@ plus `McpConcurrentEditTest` (18), `McpExternalSessionTest` (5), `McpTransaction
 `McpWorkerDeadlineTest` (4) — **452 tests**,
 which is the whole suite on a base install. Where the optional groups are installed the runner picks
 their suites up automatically: plus `McpAuthTest` (28) and `McpAuthConformanceTest` (25) — **505
-tests** — and **559 with the 54 in `McpGrailToolsetTest`** on a Grail image.
+tests** — and **561 with the 56 in `McpGrailToolsetTest`** on a Grail image.
 
 Seven suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
 `McpAuthConformanceTest` commit a throwaway JWT user and spawn real worker gems; they are in the

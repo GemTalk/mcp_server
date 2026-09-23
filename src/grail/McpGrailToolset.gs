@@ -1021,6 +1021,32 @@ pythonAttribute: anAttrName of: anObject
 %
 category: 'private'
 method: McpGrailToolset
+pythonLabelOfClass: aClass
+  "The dotted Python name a search reports for aClass: `module.qualname`, so a nested class labels
+   as `mod.Outer.Inner` and a function-local one as `mod.f.<locals>.Local`, exactly as Python would
+   print it.
+
+   READ THROUGH PYTHON, not through the class-side env-1 selector #pyAttr:of:default: sends. The
+   two disagree on Grail's own Smalltalk-defined bases: AbstractPyInt does not understand
+   #__module__ in environment 1, but Python's attribute lookup answers `builtins`, so only this way
+   does `class MyInt(int)` put `builtins.int` in the scope rather than a bare Smalltalk name.
+
+   EITHER HALF CAN BE MISSING, and the label degrades rather than the class being dropped. Measured
+   on Grail: some Python classes raise AttributeError for __module__ in Python itself
+   (enum.EnumCheck, json.JSONEncoder), where CPython always answers one. Such a class labels by its
+   qualname alone -- still searched, just not selectable by a module scope -- and a class with no
+   readable qualname falls back to its Smalltalk name."
+  | read module qualname |
+  read := [:attr | | v |
+    v := [aClass perform: #__getattribute__: env: 1 withArguments: (Array with: attr)]
+      on: Error, BaseException do: [:ex | nil].
+    (v isString and: [v notEmpty]) ifTrue: [v asString] ifFalse: [nil]].
+  qualname := (read value: '__qualname__') ifNil: [aClass name asString].
+  module := read value: '__module__'.
+  ^module isNil ifTrue: [qualname] ifFalse: [module , '.' , qualname]
+%
+category: 'private'
+method: McpGrailToolset
 pythonMessageFor: anException
   "The one-line 'Class: detail' for a Python exception -- the fallback when no traceback could be
    built, and what withPythonErrorsAsMcpError: reports.
@@ -1179,29 +1205,35 @@ pythonSearchScopeIncludingNative: aBoolean
    Python class is anonymous.
 
    THREE SOURCES, AND NONE OF THEM IS THE IMAGE. Grail creates every Python class with
-   `inDictionary: nil`, so no symbol dictionary names one and ClassOrganizer cannot find them --
-   Grail says so itself in importlib class>>___subclassRegistry___ (`that is not a small gap: it is
-   every user class in the system`). What can be enumerated is:
+   `inDictionary: nil`, so no symbol dictionary names one and ClassOrganizer cannot find them.
+   What can be enumerated is:
 
      PythonModules -- the module classes, where a module-level def lives. Its own name is a key in
        it, mapping to the dictionary rather than a class, so values are filtered by Behavior.
-     GrailCanonicalClasses -- the module-scope class statements, keyed `module.Class`, which is the
-       label wanted anyway. A class decorator may have bound something that is not a class, so this
-       is filtered by Behavior too.
+       importlib pythonClasses holds none of these, so this leg stays.
+     importlib pythonClasses -- Grail's own enumeration of every Python class this session can
+       reach. It closes the subclass registry, which is written at CREATION, so a nested class and
+       a function-local one are in it, which the committed registry this used to read could never
+       be. Labelled from the class itself (#pythonLabelOfClass:) and sorted by label, because an
+       IdentitySet has no order and a tool answer should not reshuffle between calls.
      the Python dictionary -- Grail's 47 hand-written NATIVE modules (os, sys, math, builtins ...),
        only when aBoolean. They are Smalltalk, not generated, so a Python-name search over them
        reports the implementation rather than a call site; useful sometimes, noise by default.
 
-   WHAT THIS CANNOT REACH, and what the caller must therefore report as not searched: a nested class
-   (the registry records module-scope statements only), a module with a .py that nothing has imported
-   in this session (nothing is compiled to search), and a function defined in an eval scope, which
-   compiles to a block with no selector pool. An enumeration that answers honestly for all of them
-   is asked for in GemTalk/Grail#885; until there is one, a count from here is a floor and is
-   reported as one.
+   THE SMALLTALK BASES ARE KEPT. pythonClasses is deliberately unfiltered, so it answers the
+   Smalltalk-defined classes a user class was rooted at -- `class MyInt(int)` brings in
+   AbstractPyInt, labelled `builtins.int`. They are searched like any other class rather than
+   screened out: filtering shrinks coverage, which is the opposite of what the coverage trailer is
+   for, and the cost is small -- measured, five such bases carried 61 env-1 selectors between them
+   and no hit for `len` or `append`. `scope` narrows them away like anything else.
 
-   Deduplicated by class IDENTITY: a module-scope class reachable from both the registry and a
-   module attribute must be searched once, or every hit in it is reported twice."
-  | scope seen add pm reg |
+   WHAT THIS CANNOT REACH, and what the caller must therefore report as not searched: a module with
+   a .py that nothing has imported in this session (nothing is compiled to search), and a function
+   defined in an eval scope, which compiles to a block with no selector pool.
+
+   Deduplicated by class IDENTITY, so a class reachable from two legs is searched once and no hit
+   in it is reported twice."
+  | scope seen add pm |
   scope := OrderedCollection new.
   seen := IdentitySet new.
   add := [:label :value |
@@ -1211,9 +1243,9 @@ pythonSearchScopeIncludingNative: aBoolean
   pm := self dictNamed: 'PythonModules'.
   pm ifNotNil: [
     [pm keysAndValuesDo: [:k :v | add value: k value: v]] on: Error do: [:ex | nil]].
-  reg := System myUserProfile objectNamed: #GrailCanonicalClasses.
-  reg ifNotNil: [
-    [reg keysAndValuesDo: [:k :v | add value: k value: v]] on: Error do: [:ex | nil]].
+  ((importlib pythonClasses collect: [:c | Array with: (self pythonLabelOfClass: c) with: c])
+    asSortedCollection: [:a :b | (a at: 1) <= (b at: 1)])
+      do: [:e | add value: (e at: 1) value: (e at: 2)].
   aBoolean ifTrue: [
     (self dictNamed: 'Python') ifNotNil: [:d |
       [d keysAndValuesDo: [:k :v |
@@ -1640,7 +1672,7 @@ selectorDerivedSignatureFor: aMethodName on: aClass
 %
 category: 'private'
 method: McpGrailToolset
-senderCoverageFor: aShapeSet classCount: aCount roots: aRootCollection includeNative: nativeBool includeTests: testsBool
+senderCoverageFor: aShapeSet classCount: aCount census: aCensus roots: aRootCollection includeNative: nativeBool includeTests: testsBool
   "The two lines every answer ends with: what was searched, and what was not.
 
    THIS IS THE POINT OF THE TOOL, not decoration on it. The failure being replaced is a confident
@@ -1649,9 +1681,13 @@ senderCoverageFor: aShapeSet classCount: aCount roots: aRootCollection includeNa
    is stated whether or not anything was found, the counts say what they are, and every gap names
    the argument that closes it where one exists.
 
-   The class count is a FLOOR and is not dressed up as a total: Grail registers module-scope class
-   statements only, so a nested class is not in it, and there is no enumeration of Python classes to
-   compare against (GemTalk/Grail#885)."
+   The class count is a TOTAL of what this session can reach, not a floor: the Python classes come
+   from Grail's own enumeration (#pythonSearchScopeIncludingNative:). aCensus is
+   importlib pythonClassCensus, and it is read for one thing the count cannot say --
+   #canonicalRegistryPresent false means an install reset the committed registry, so the classes of
+   a module warm-bound from an earlier session are missing until it is re-imported. That is exactly
+   the state an operator is in after ./install.sh in the Grail checkout, so it is named when true
+   rather than folded into a smaller number."
   | searched not |
   searched := OrderedCollection new.
   not := OrderedCollection new.
@@ -1670,7 +1706,9 @@ senderCoverageFor: aShapeSet classCount: aCount roots: aRootCollection includeNa
   (aShapeSet includes: 'source') ifFalse: [not add: 'the .py files on disk -- not among the shapes asked for'].
   (aShapeSet includes: 'compiled') ifFalse: [not add: 'compiled call sites -- not among the shapes asked for'].
   not add: 'modules whose .py nothing has imported in this session, which have nothing compiled to search'.
-  not add: 'nested classes, and functions defined in an eval scope, which compile to blocks with no selector pool (GemTalk/Grail#885)'.
+  ((aCensus at: #canonicalRegistryPresent otherwise: true) == false) ifTrue: [
+    not add: 'classes of modules committed before Grail was last installed: the install reset its class registry, and each comes back when its module is imported again'].
+  not add: 'functions defined in an eval scope, which compile to blocks with no selector pool'.
   "One gap per line. As a comma list this ran to four clauses on one line and stopped being read,
    which defeats the only thing it is for."
   ^'searched: ' , (self commaListOf: searched) , Character lf asString
@@ -2400,7 +2438,8 @@ tool_find_python_senders: args
   ^self capResult: (self page: lines args: args defaultLimit: 50)
     , 'compiled ' , compiledCount printString , ', references ' , refCount printString
     , ', .py text ' , sourceCount printString , Character lf asString
-    , (self senderCoverageFor: shapes classCount: classes size roots: roots
+    , (self senderCoverageFor: shapes classCount: classes size
+         census: importlib pythonClassCensus roots: roots
          includeNative: includeNative includeTests: includeTests)
 %
 category: 'tools - python'
