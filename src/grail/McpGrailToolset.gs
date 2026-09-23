@@ -2262,34 +2262,6 @@ tool_eval_python: args
    contextlib.redirect_stdout within a single call was never affected: it restores before the call
    ends.
 
-   WHAT THE REDIRECT DOES NOT ALWAYS REACH -- GemTalk/Grail issue 924. It swaps the streams on the
-   `sys` THIS session imports. A .py module keeps the module-global `sys` it was executed with, so
-   a module WARM-BOUND from a committed canonical instance hands out the `sys` of whichever session
-   committed it -- a different object from this session's, and the one the redirect did not touch.
-
-   Reproduced deliberately in plain Grail (86d29a7), with no part of this toolset involved. With
-   the canonical registry empty, a fresh session that evaluates `import traceback`, redirects
-   sys.stderr to a StringIO and calls print_exc() answers `(traceback.sys is sys, repr(captured))`
-   = (true, the traceback). Let ONE session commit after that import, and the next fresh session
-   answers (false, ''). Throughout, `traceback.sys.modules is sys.modules` stays TRUE: the two
-   module objects share their session-resolved state but not their stdout/stderr attributes, which
-   is the asymmetry behind this.
-
-   DIAGNOSING IT. python_module_state reading `canonical: yes, COMMITTED (deployed)` does NOT on
-   its own predict the loss, which is a trap worth knowing. When Grail has been installed since the
-   last deploy, the generation guard drops the whole registry on first touch, so the import is
-   really COLD and the redirect works while the registry still reads deployed. Compare
-   GrailRuntimeGeneration with GrailCanonicalDeployGeneration, not the label.
-
-   Native modules are never affected, Grail's `warnings` among them, since they resolve the stream
-   through the live session. Passing the stream explicitly -- print_exc(file=sys.stderr) -- is
-   captured either way.
-
-   Not worked around here. Reaching a warm-bound module's `sys` means assigning into globals that
-   are committed state shared with every other session, and evaluating an expression must not write
-   that. It belongs in Grail, and is filed there: a warm-bound module should see the importing
-   session's `sys`, the way it already sees its `modules` and `path`.
-
    Python errors become #pythonError (withPythonErrorsAsMcpError:) carrying the traceback where one
    could be built and the one-line message otherwise -- so this degrades to the old behavior rather
    than failing if Grail's internals move."
