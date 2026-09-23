@@ -17,6 +17,13 @@ reasoning has nowhere better to live, not that the entry should grow.
 
 ## Unreleased
 
+* **`find_python_senders` finds first-class references in methods compiled direct to IR.** The
+  `references` shape matched markers in generated Smalltalk, which an IR method does not have, so
+  `g = self.helper` there answered nothing without saying it could not look. It now reads the
+  method's literal frame, where each referenced name survives as a Symbol and stores, keyword names
+  and strings stay Strings. Each such method is reported once, as
+  `line ?  [compiled to IR: no call-site positions]`.
+
 * **`find_python_senders` says when a method was compiled direct to IR, and stops losing its
   recursive calls.** Under `GRAIL_IR_CODEGEN` a method carries no call-site positions, and the
   search now asks Grail which kind of method it is instead of reading the Python as generated

@@ -654,6 +654,61 @@ testFindPythonSendersAnswersEveryShapeAndSaysWhatItDidNotSearch
 %
 category: 'tests'
 method: McpGrailToolsetTest
+testFindPythonSendersFindsAReferenceInAMethodCompiledToIR
+  "The references shape on the same class compiled both ways, and the answer has to agree.
+
+   AS TEXT, a first-class reference is found by its marker in the generated Smalltalk:
+   `g = self.mcp_ir_target` at line 11, the same load inside a lambda at line 20, `g = abs` at
+   line 23.
+
+   DIRECT TO IR, there is no generated Smalltalk, so no marker ever matched and the search answered
+   nothing, with nothing in the answer to say it could not look. The names survive in the literal
+   frame as Symbols, which is what is read now: the same methods are found, once each, flagged
+   #irSource in place of a line.
+
+   THE NEGATIVES ARE THE POINT of reading a literal frame. `mcp_ir_writer` stores the attribute,
+   deletes it, passes it as a keyword and as a string -- every one of which leaves the name as a
+   String literal, never a Symbol -- so it must not be found in either compilation. The methods
+   that CALL the target are the compiled shape's, and must not be counted twice here. And every
+   builtin load carries `Python at: #builtins`, whose key must not read as a reference to
+   `builtins`. Skips where Grail cannot build IR."
+  | checkout ts |
+  checkout := self grailCheckoutOrNil.
+  checkout isNil ifTrue: [^self assert: true].
+  importlib ___irCodegenSupported___ ifFalse: [^self assert: true].
+  ts := self grailToolsetOn: checkout.
+  ts ensureGrailConfigured.
+  self withIrProbeClassesDo: [:classes |
+    | textClass irClass kindOf shapeOf out |
+    textClass := classes at: 1.
+    irClass := classes at: 2.
+    kindOf := [:cls :sel |
+      BaseException pythonPositionKindForMethod: (cls compiledMethodAt: sel environmentId: 1)].
+    self assert: (kindOf value: textClass value: #mcp_ir_holder) equals: #curPos.
+    self assert: (kindOf value: irClass value: #mcp_ir_holder) equals: #irSource.
+    self assert: (kindOf value: irClass value: #mcp_ir_writer:) equals: #irSource.
+    shapeOf := [:name :cls |
+      ((ts pythonReferencesOfName: name in: cls)
+        collect: [:h | Array with: (h at: 1) with: (h at: 3) with: (h at: 5)]) asArray].
+    "As text: each reference placed by its marker."
+    self assert: (shapeOf value: 'mcp_ir_target' value: textClass)
+      equals: #( #('mcp_ir_holder' 11 nil) #('mcp_ir_lambda' 20 nil) ).
+    self assert: (shapeOf value: 'abs' value: textClass) equals: #( #('mcp_ir_global' 23 nil) ).
+    self assert: (shapeOf value: 'builtins' value: textClass) equals: #().
+    "Direct to IR: the same methods, once each, saying why they have no line."
+    self assert: (shapeOf value: 'mcp_ir_target' value: irClass)
+      equals: #( #('mcp_ir_holder' nil #irSource) #('mcp_ir_lambda' nil #irSource) ).
+    self assert: (shapeOf value: 'abs' value: irClass) equals: #( #('mcp_ir_global' nil #irSource) ).
+    self assert: (shapeOf value: 'builtins' value: irClass) equals: #().
+    "And the tool prints the reason on the line, under the method's own selector."
+    out := ts tool_find_python_senders: (Dictionary new
+      at: 'name' put: 'mcp_ir_target'; at: 'shapes' put: #( 'references' );
+      at: 'scope' put: 'mcp_grail_ir_probe'; yourself).
+    self assert: (self includesCS: 'mcp_grail_ir_probe.McpIrProbe.mcp_ir_holder  line ?  [compiled to IR: no call-site positions]  (McpIrProbe>>mcp_ir_holder env 1)' in: out).
+    self assert: (self includesCS: 'references 2,' in: out)]
+%
+category: 'tests'
+method: McpGrailToolsetTest
 testFindPythonSendersMatchesWholeNamesOnDiskAndSearchSourceDoesNot
   "The two tools search the same files by different rules, and the reason is the question each
    answers.
@@ -1876,6 +1931,11 @@ withIrProbeClassesDo: aBlock
    seam and registry selectors are Grail's test fixtures, not its public API; a test may lean on
    them where the toolset may not.
 
+   TWO HALVES OF ONE CLASS. The first two methods CALL the target and are what the compiled shape
+   is tested on; the rest never call it, only REFER to it or write it, so they add nothing to that
+   shape's counts and are what the references shape is tested on. They come after, so the
+   compiled test's line numbers do not move.
+
    Both imports are rolled back by Grail's snapshot and restore, not by an abort, so the caller's
    transaction is left where it was. Nothing here commits."
   | path f snap textClass irClass |
@@ -1890,6 +1950,22 @@ withIrProbeClassesDo: aBlock
 
     def mcp_ir_caller(self):
         return self.mcp_ir_target(1) + self.mcp_ir_target(2)
+
+    def mcp_ir_holder(self):
+        g = self.mcp_ir_target
+        return g
+
+    def mcp_ir_writer(self, o):
+        o.mcp_ir_target = 1
+        del o.mcp_ir_target
+        return o.f(mcp_ir_target=1, s="mcp_ir_target")
+
+    def mcp_ir_lambda(self):
+        return lambda: self.mcp_ir_target
+
+    def mcp_ir_global(self):
+        g = abs
+        return g
 '; close.
   snap := importlib ___canonicalRegistrySnapshot___.
   ^[importlib ___irCodegenForce___: false.
