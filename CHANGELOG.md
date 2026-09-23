@@ -24,6 +24,11 @@ reasoning has nowhere better to live, not that the entry should grow.
   and strings stay Strings. Each such method is reported once, as
   `line ?  [compiled to IR: no call-site positions]`.
 
+* **A `find_python_senders` reference hit names the method it is in.** Its `(Class>>… env 1)`
+  suffix printed the generated-code marker the hit was found by (`___pyAttrLoad___:`), which names
+  no method, so `get_method_source` could not open it. It now prints the containing method's
+  selector, as a compiled hit always has.
+
 * **`find_python_senders` says when a method was compiled direct to IR, and stops losing its
   recursive calls.** Under `GRAIL_IR_CODEGEN` a method carries no call-site positions, and the
   search now asks Grail which kind of method it is instead of reading the Python as generated

@@ -671,7 +671,11 @@ testFindPythonSendersFindsAReferenceInAMethodCompiledToIR
    String literal, never a Symbol -- so it must not be found in either compilation. The methods
    that CALL the target are the compiled shape's, and must not be counted twice here. And every
    builtin load carries `Python at: #builtins`, whose key must not read as a reference to
-   `builtins`. Skips where Grail cannot build IR."
+   `builtins`.
+
+   EITHER WAY A HIT NAMES ITS METHOD'S SELECTOR, so the `(Class>>selector env 1)` it prints opens
+   the method. A text hit used to print the marker it was found by (`McpIrProbe>>___pyAttrLoad___:`),
+   which names no method. Skips where Grail cannot build IR."
   | checkout ts |
   checkout := self grailCheckoutOrNil.
   checkout isNil ifTrue: [^self assert: true].
@@ -689,23 +693,30 @@ testFindPythonSendersFindsAReferenceInAMethodCompiledToIR
     self assert: (kindOf value: irClass value: #mcp_ir_writer:) equals: #irSource.
     shapeOf := [:name :cls |
       ((ts pythonReferencesOfName: name in: cls)
-        collect: [:h | Array with: (h at: 1) with: (h at: 3) with: (h at: 5)]) asArray].
+        collect: [:h | Array with: (h at: 1) with: (h at: 2) with: (h at: 3) with: (h at: 5)]) asArray].
     "As text: each reference placed by its marker."
     self assert: (shapeOf value: 'mcp_ir_target' value: textClass)
-      equals: #( #('mcp_ir_holder' 11 nil) #('mcp_ir_lambda' 20 nil) ).
-    self assert: (shapeOf value: 'abs' value: textClass) equals: #( #('mcp_ir_global' 23 nil) ).
+      equals: #( #('mcp_ir_holder' #mcp_ir_holder 11 nil) #('mcp_ir_lambda' #mcp_ir_lambda 20 nil) ).
+    self assert: (shapeOf value: 'abs' value: textClass)
+      equals: #( #('mcp_ir_global' #mcp_ir_global 23 nil) ).
     self assert: (shapeOf value: 'builtins' value: textClass) equals: #().
     "Direct to IR: the same methods, once each, saying why they have no line."
     self assert: (shapeOf value: 'mcp_ir_target' value: irClass)
-      equals: #( #('mcp_ir_holder' nil #irSource) #('mcp_ir_lambda' nil #irSource) ).
-    self assert: (shapeOf value: 'abs' value: irClass) equals: #( #('mcp_ir_global' nil #irSource) ).
+      equals: #( #('mcp_ir_holder' #mcp_ir_holder nil #irSource) #('mcp_ir_lambda' #mcp_ir_lambda nil #irSource) ).
+    self assert: (shapeOf value: 'abs' value: irClass)
+      equals: #( #('mcp_ir_global' #mcp_ir_global nil #irSource) ).
     self assert: (shapeOf value: 'builtins' value: irClass) equals: #().
-    "And the tool prints the reason on the line, under the method's own selector."
+    "And the tool prints each line under the method's own selector, the IR one with its reason."
     out := ts tool_find_python_senders: (Dictionary new
       at: 'name' put: 'mcp_ir_target'; at: 'shapes' put: #( 'references' );
       at: 'scope' put: 'mcp_grail_ir_probe'; yourself).
     self assert: (self includesCS: 'mcp_grail_ir_probe.McpIrProbe.mcp_ir_holder  line ?  [compiled to IR: no call-site positions]  (McpIrProbe>>mcp_ir_holder env 1)' in: out).
-    self assert: (self includesCS: 'references 2,' in: out)]
+    self assert: (self includesCS: 'references 2,' in: out).
+    out := ts tool_find_python_senders: (Dictionary new
+      at: 'name' put: 'mcp_ir_target'; at: 'shapes' put: #( 'references' );
+      at: 'scope' put: 'mcp_grail_text_probe'; yourself).
+    self assert: (self includesCS: 'mcp_grail_text_probe.McpIrProbe.mcp_ir_holder  line 11  g = self.mcp_ir_target  (McpIrProbe>>mcp_ir_holder env 1)' in: out).
+    self deny: (self includesCS: '>>___pyAttrLoad___:' in: out)]
 %
 category: 'tests'
 method: McpGrailToolsetTest

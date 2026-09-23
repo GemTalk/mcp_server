@@ -1188,8 +1188,9 @@ category: 'private'
 method: McpGrailToolset
 pythonReferencesOfName: aName in: aClass
   "Every reference to the Python name aName from aClass's env-1 methods that is NOT a resolvable
-   call, as an OrderedCollection of {containingPythonName. markerOrSelector. lineOrNil.
-   callSiteTextOrNil. whyNoLineOrNil} -- the shape #pythonSendersOfName:in: answers.
+   call, as an OrderedCollection of {containingPythonName. smalltalkSelector. lineOrNil.
+   callSiteTextOrNil. whyNoLineOrNil} -- the shape #pythonSendersOfName:in: answers, so the
+   selector is the containing method's, which is what get_method_source needs to open it.
 
    A first-class reference (`g = abs`, `f = helper`) compiles to a Symbol literal after one of
    #pythonReferenceMarkers, and there is no selector anywhere to find it by -- so this shape cannot
@@ -1200,7 +1201,7 @@ pythonReferencesOfName: aName in: aClass
    A METHOD COMPILED DIRECT TO IR HAS NO GENERATED SMALLTALK TO MATCH: its source is the user's
    Python, so no marker ever occurs and the text path answered a confident nothing. Whether it
    refers to aName is read from its literal frame instead (#irMethod:refersToName:), and it is
-   reported once, carrying its own selector and #irSource as the reason it has no line -- the way
+   reported once, with #irSource as the reason it has no line -- the way
    #pythonSendersOfName:in: reports an IR sender."
   | hits markers |
   hits := OrderedCollection new.
@@ -1232,7 +1233,7 @@ pythonReferencesOfName: aName in: aClass
                 (sym notNil and: [sym = aName asString]) ifTrue: [
                   | pos |
                   pos := self storeInEffectAt: at in: stores.
-                  hits add: (Array with: ownName with: marker with: (pos at: 1) with: (pos at: 2)
+                  hits add: (Array with: ownName with: sel with: (pos at: 1) with: (pos at: 2)
                     with: nil)].
                 at := src findString: marker startingAt: after]]]]]].
   ^hits
