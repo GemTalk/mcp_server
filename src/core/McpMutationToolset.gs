@@ -32,11 +32,23 @@ dictionary added to or removed from the user''s symbol list.
 A deployment that does not want these tools offered leaves this toolset out of its
 McpRouter>>toolsetNames -- which hides them, and nothing more: execute_code, and any test body, can
 still do everything they do. Only the gem''s GemStone user decides what a session can actually
-change (docs/ReadOnly_User.md). Every handler passes through the inherited kernel guard
-(self assertMutableClass: / self assertRemovableDictionaryNamed:, see McpToolset) before it changes
-anything, so even a read-write session cannot modify a protected class. That guard FORWARDS to the
-server, which is where the policy lives and where a subclass overrides it: what counts as protected
-is one answer per deployment, not one per tool pack.'
+change (docs/ReadOnly_User.md).
+
+NOTHING HERE PROTECTS A CLASS FROM BEING EDITED (changed 2026-09-21). Every handler used to pass its
+target through a kernel guard first -- a server-level list of protected dictionaries, Globals by
+default, so that no mutation tool would touch a base class. It is gone, for the reason read-only
+mode went before it: it read as an access-control boundary while sitting entirely inside the process
+it was meant to bound. It stopped nothing execute_code or a test body could not do in the next
+request, and it made a session look bounded when only its GemStone user bounds it.
+
+GemStone has enforced this in the stone all along, which is why the guard was never what was holding
+the line. Kernel classes live in SystemObjectSecurityPolicy (#1): owner SystemUser write, world
+read. A UserProfile without the ObjectSecurityPolicyProtection privilege therefore gets READ there,
+and compiling a method onto Object raises SecurityError 2257 -- measured on this project''s own
+read-only user, which edits its own classes in UserGlobals in the same breath. A developer''s user
+holds that privilege, which is why the kernel looks unprotected from a session that has it.
+Restricting a client means giving its worker gem a user that is restricted; see
+docs/ReadOnly_User.md.'
 %
 expectvalue /Class
 doit
@@ -211,8 +223,9 @@ tool_compile_class_definition: args
    parser that used to recover the class name goes with it.
 
    The superclass may be any class that resolves, kernel classes included: subclassing Object is
-   the normal case, and nothing about it modifies the superclass. The kernel guard applies to the
-   class being REDEFINED, which is where the damage would be.
+   the normal case, and nothing about it modifies the superclass. REDEFINING a kernel class is the
+   case that would do damage, and nothing here refuses it either -- what a session may redefine is
+   its GemStone user's to say (docs/ReadOnly_User.md), not this tool's.
 
    On a shape-changing redefinition of an existing class -- which drops every method -- the prior
    version's methods are recompiled onto the new one by default, read from the old class AS RESOLVED
@@ -223,7 +236,6 @@ tool_compile_class_definition: args
   name := (args at: 'className') asString.
   recompile := (args at: 'recompileMethods' ifAbsent: [true]) ~~ false.
   existing := self resolveClass: name.
-  existing ifNotNil: [:c | self assertMutableClass: c].
   superclass := self resolveClass: (args at: 'superclassName' ifAbsent: ['Object']).
   superclass isNil ifTrue: [
     ^'Superclass not found: ' , (args at: 'superclassName' ifAbsent: ['Object']) asString].
@@ -275,7 +287,6 @@ tool_compile_method: args
   ^cls isNil
     ifTrue: ['Class not found: ' , (args at: 'className')]
     ifFalse: [
-      self assertMutableClass: cls.
       meta := (args at: 'meta' ifAbsent: [false]) == true.
       target := meta ifTrue: [cls class] ifFalse: [cls].
       "Which method is this? The source carries the selector, and only the compiler knows for sure,
@@ -317,7 +328,6 @@ tool_delete_class: args
   ^cls isNil
     ifTrue: ['Class not found: ' , (args at: 'className')]
     ifFalse: [
-      self assertMutableClass: cls.
       arr := System myUserProfile dictionaryAndSymbolOf: cls.
       arr isNil
         ifTrue: ['Class is not resident in a dictionary: ' , (args at: 'className')]
@@ -338,7 +348,6 @@ tool_delete_method: args
   ^cls isNil
     ifTrue: ['Class not found: ' , (args at: 'className')]
     ifFalse: [
-      self assertMutableClass: cls.
       target := ((args at: 'meta' ifAbsent: [false]) == true) ifTrue: [cls class] ifFalse: [cls].
       sel := (args at: 'selector') asSymbol.
       (target selectors includes: sel)
@@ -364,7 +373,7 @@ tool_remove_dictionary: args
   dict := self dictNamed: name.
   ^dict isNil
     ifTrue: ['Dictionary not found: ' , name]
-    ifFalse: [self assertRemovableDictionaryNamed: name.
+    ifFalse: [
       self requireRead: (self dictionaryKeyFor: name)
         subject: 'the contents of dictionary ' , name asString
         tool: 'remove_dictionary'
@@ -381,7 +390,6 @@ tool_set_class_comment: args
   | cls |
   cls := self resolveClass: (args at: 'className').
   ^cls isNil ifTrue: ['Class not found: ' , (args at: 'className')] ifFalse: [
-    self assertMutableClass: cls.
     "Creation is never blind: a class with no comment yet has nothing to discard."
     ((cls comment ifNil: ['']) isEmpty) ifFalse: [
       self requireRead: (self commentKeyFor: cls name)

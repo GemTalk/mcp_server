@@ -188,24 +188,24 @@ testToolErrorIsAnnotatedToo
   "A tool that RAISED is exactly when pending work most needs reporting -- the call the model just
    made did not do what it asked, and it has to decide what to do with what it already had. The
    error envelope's structuredContent is left alone, so a client branching on the kind is
-   unaffected by prose meant for the model."
-  | response text |
+   unaffected by prose meant for the model.
+   The raiser is execute_code 1/0 because it needs no fixture and cannot succeed. It used to be
+   compile_method on a kernel class, which stopped raising when the kernel guard was removed."
+  | response text err |
   System abortTransaction.
   UserGlobals at: #McpDispatcherTxnProbe put: 'planted'.
   response := self dispatch: (self request: 'tools/call' params:
     (Dictionary new
-      at: 'name' put: 'compile_method';
-      at: 'arguments' put: (Dictionary new
-        at: 'className' put: 'Object';
-        at: 'source' put: 'mcpProbeSelector ^1';
-        yourself);
+      at: 'name' put: 'execute_code';
+      at: 'arguments' put: (Dictionary new at: 'code' put: '1/0'; yourself);
       yourself)).
   self assert: ((response at: 'result') at: 'isError').
   text := self resultTextOf: response.
-  self assert: (text includesString: 'Refused').
+  self assert: (text includesString: 'ZeroDivide').
   self assert: (text includesString: '[session] You have uncommitted changes').
-  self assert: ((((response at: 'result') at: 'structuredContent') at: 'error') at: 'kind')
-    equals: 'refused'
+  err := ((response at: 'result') at: 'structuredContent') at: 'error'.
+  self assert: (err includesKey: 'kind').
+  self deny: ((err at: 'message') includesString: '[session]')
 %
 category: 'tests'
 method: McpDispatcherTest

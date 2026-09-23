@@ -139,6 +139,14 @@ recompileInKernel: aSelectorString body: aBodyString
 %
 category: 'helpers'
 method: McpBlindWriteTest
+server
+  "ONE server for the whole test, as a worker gem has one -- the ledgers live on it, so this is what
+   makes a read through one toolset license a write through another."
+  sharedServer isNil ifTrue: [sharedServer := McpServer new].
+  ^sharedServer
+%
+category: 'helpers'
+method: McpBlindWriteTest
 staleNoteForKeys: aCollectionOfKeys
   "The [session] line the dispatcher produces when exactly aCollectionOfKeys have gone stale. The
    keys name classes and dictionaries that do not exist, so they stamp as absent; a stamp planted as
@@ -147,14 +155,6 @@ staleNoteForKeys: aCollectionOfKeys
   aCollectionOfKeys do: [:k | self server readLedger at: k put: 'moved'].
   self server revalidateReadLedger.
   ^self dispatchStatusText
-%
-category: 'helpers'
-method: McpBlindWriteTest
-server
-  "ONE server for the whole test, as a worker gem has one -- the ledgers live on it, so this is what
-   makes a read through one toolset license a write through another."
-  sharedServer isNil ifTrue: [sharedServer := McpServer new].
-  ^sharedServer
 %
 category: 'running'
 method: McpBlindWriteTest
@@ -167,6 +167,31 @@ tearDown
   UserGlobals removeKey: #McpBwFixture ifAbsent: [nil].
   UserGlobals removeKey: #McpBwProbeGlobal ifAbsent: [nil].
   System commitTransaction
+%
+category: 'tests - view moves'
+method: McpBlindWriteTest
+testAbortClearsTheWritesAndReChecksTheReads
+  "An abort takes a new view AND discards the work, so no pending write is licensed any more. The
+   reads are not forgotten but re-checked: here nothing exists behind either key before or after, so
+   neither has changed and both stay. (Until 2026-09-02 both ledgers were simply cleared.)"
+  self server noteRead: 'A>>x'; noteWrite: 'A>>y'.
+  self server noteAborted.
+  self assert: (self server hasRead: 'A>>x').
+  self assert: self server writeLedger isEmpty.
+  self assert: self server staleReadKeys isEmpty
+%
+category: 'tests - re-validation'
+method: McpBlindWriteTest
+testAbortKeepsAReadNobodyChanged
+  "Through the real tools: read a method, abort with nothing changed underneath, and the read still
+   licenses the write -- because what was read is still exactly what is there."
+  self fixtureClass.
+  self readMethod: 'alpha'.
+  System abortTransaction.
+  self server noteAborted.
+  self assert: (self server hasRead: (McpServer methodKeyFor: 'McpBwFixture' selector: 'alpha' meta: false)).
+  self assert: self server staleReadKeys isEmpty.
+  self assert: (self includes: 'Compiled' in: (self writeMethod: 'alpha' body: '^99'))
 %
 category: 'tests - re-validation'
 method: McpBlindWriteTest
@@ -218,31 +243,6 @@ testACommitKeepsThisSessionsOwnWrites
 %
 category: 'tests - view moves'
 method: McpBlindWriteTest
-testAbortClearsTheWritesAndReChecksTheReads
-  "An abort takes a new view AND discards the work, so no pending write is licensed any more. The
-   reads are not forgotten but re-checked: here nothing exists behind either key before or after, so
-   neither has changed and both stay. (Until 2026-09-02 both ledgers were simply cleared.)"
-  self server noteRead: 'A>>x'; noteWrite: 'A>>y'.
-  self server noteAborted.
-  self assert: (self server hasRead: 'A>>x').
-  self assert: self server writeLedger isEmpty.
-  self assert: self server staleReadKeys isEmpty
-%
-category: 'tests - re-validation'
-method: McpBlindWriteTest
-testAbortKeepsAReadNobodyChanged
-  "Through the real tools: read a method, abort with nothing changed underneath, and the read still
-   licenses the write -- because what was read is still exactly what is there."
-  self fixtureClass.
-  self readMethod: 'alpha'.
-  System abortTransaction.
-  self server noteAborted.
-  self assert: (self server hasRead: (McpServer methodKeyFor: 'McpBwFixture' selector: 'alpha' meta: false)).
-  self assert: self server staleReadKeys isEmpty.
-  self assert: (self includes: 'Compiled' in: (self writeMethod: 'alpha' body: '^99'))
-%
-category: 'tests - view moves'
-method: McpBlindWriteTest
 testAFailedCommitKeepsBoth
   "A failed commit does NOT move the view (measured; docs/blind-write-guardrail.md, V), so every
    read in the window is still current and every pending write is still licensed. The transaction
@@ -251,6 +251,22 @@ testAFailedCommitKeepsBoth
   self server noteCommitFailed.
   self assert: (self server hasRead: 'A>>x').
   self assert: (self server writeLedger includes: 'A>>y')
+%
+category: 'tests - re-validation'
+method: McpBlindWriteTest
+testAnAbortedWriteNeedsAFreshRead
+  "Read, write, abort: the abort restored the old content, and what this session last knew of the
+   method is the version it just discarded. The read is dropped and named -- even though nobody else
+   touched anything -- because the stamp a write records is of the content as written."
+  | key |
+  self fixtureClass.
+  self readMethod: 'alpha'.
+  self writeMethod: 'alpha' body: '^99'.
+  System abortTransaction.
+  self server noteAborted.
+  key := McpServer methodKeyFor: 'McpBwFixture' selector: 'alpha' meta: false.
+  self deny: (self server hasRead: key).
+  self assert: self server staleReadKeys equals: (Array with: key)
 %
 category: 'tests - class definition'
 method: McpBlindWriteTest
@@ -277,22 +293,6 @@ testARefreshThatFailsClearsTheWritesAndReChecksTheReads
   self server noteRefreshed: false.
   self assert: (self server hasRead: 'A>>x').
   self assert: self server writeLedger isEmpty
-%
-category: 'tests - re-validation'
-method: McpBlindWriteTest
-testAnAbortedWriteNeedsAFreshRead
-  "Read, write, abort: the abort restored the old content, and what this session last knew of the
-   method is the version it just discarded. The read is dropped and named -- even though nobody else
-   touched anything -- because the stamp a write records is of the content as written."
-  | key |
-  self fixtureClass.
-  self readMethod: 'alpha'.
-  self writeMethod: 'alpha' body: '^99'.
-  System abortTransaction.
-  self server noteAborted.
-  key := McpServer methodKeyFor: 'McpBwFixture' selector: 'alpha' meta: false.
-  self deny: (self server hasRead: key).
-  self assert: self server staleReadKeys equals: (Array with: key)
 %
 category: 'tests - view moves'
 method: McpBlindWriteTest
@@ -428,8 +428,8 @@ testExportLicensesEveryMethod
 category: 'tests - class definition'
 method: McpBlindWriteTest
 testKernelClassesMayBeSubclassed
-  "The kernel guard is about the class being REDEFINED, not what it inherits from: subclassing
-   Object is the normal case and every Mcp class does it."
+  "Subclassing Object is the normal case and every Mcp class does it -- nothing about a superclass
+   modifies it, and nothing in the tool layer has an opinion about which classes may be named."
   self assert: (self includes: 'Compiled class' in:
     (self mutationTools tool_compile_class_definition: (Dictionary new
       at: 'className' put: 'McpBwFixture';
@@ -571,27 +571,6 @@ testTheClassDefinitionReadLicensesARedefinition
 %
 category: 'tests - stale note'
 method: McpBlindWriteTest
-testTheStaleNoteIsReportedOnceAndNamesTheReads
-  "What the client is told, and how often. The result of the call that moved the view carries one
-   line naming the dropped reads in proportion to the whole; the next result does not carry it
-   again. Driven through the dispatcher wired to THIS server, as a worker gem's is, because the note
-   is the dispatcher's."
-  | first second |
-  self fixtureClass.
-  self readMethod: 'alpha'. self readMethod: 'beta'.
-  self recompileInKernel: 'alpha' body: '^#changed'.
-  self server revalidateReadLedger.
-  first := self dispatchStatusText.
-  self assert: (self includes: '[session] The view moved: 1 of 2 earlier reads is stale' in: first)
-    description: first.
-  self assert: (self includes: 'McpBwFixture>>alpha' in: first).
-  self assert: (self includes: '[session] You have uncommitted changes' in: first)
-    description: 'the transaction-state line must still be there, before the stale line'.
-  second := self dispatchStatusText.
-  self deny: (self includes: 'The view moved' in: second) description: second
-%
-category: 'tests - stale note'
-method: McpBlindWriteTest
 testTheStaleNoteCollapsesManyClasses
   "More than four classes and the names give way to a count: at that point the honest advice is to
    re-check everything one depends on, not to tick off a list."
@@ -619,6 +598,27 @@ testTheStaleNoteGroupsByClass
   text := self staleNoteForKeys: #( 'McpBwGhostB>>a' 'McpBwGhostB>>b' 'McpBwGhostB>>c' 'McpBwGhostB>>d' 'McpBwGhostA>>one' '#McpBwGhostDict' ).
   self assert: (self includes: 'before writing to them: McpBwGhostA>>one, 4 methods from McpBwGhostB, McpBwGhostDict (dictionary).' in: text)
     description: text
+%
+category: 'tests - stale note'
+method: McpBlindWriteTest
+testTheStaleNoteIsReportedOnceAndNamesTheReads
+  "What the client is told, and how often. The result of the call that moved the view carries one
+   line naming the dropped reads in proportion to the whole; the next result does not carry it
+   again. Driven through the dispatcher wired to THIS server, as a worker gem's is, because the note
+   is the dispatcher's."
+  | first second |
+  self fixtureClass.
+  self readMethod: 'alpha'. self readMethod: 'beta'.
+  self recompileInKernel: 'alpha' body: '^#changed'.
+  self server revalidateReadLedger.
+  first := self dispatchStatusText.
+  self assert: (self includes: '[session] The view moved: 1 of 2 earlier reads is stale' in: first)
+    description: first.
+  self assert: (self includes: 'McpBwFixture>>alpha' in: first).
+  self assert: (self includes: '[session] You have uncommitted changes' in: first)
+    description: 'the transaction-state line must still be there, before the stale line'.
+  second := self dispatchStatusText.
+  self deny: (self includes: 'The view moved' in: second) description: second
 %
 category: 'tests - stale note'
 method: McpBlindWriteTest

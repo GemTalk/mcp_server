@@ -3407,8 +3407,9 @@ category: 'worker class'
 method: McpRouter
 workerClassName
   "The McpServer subclass this router's workers instantiate, or nil for McpServer itself. Subclassing
-   is for changing BEHAVIOR (kernel guards, the worker entry, dispatcher wiring); to add tools, write
-   a toolset instead (see McpToolset) -- but a subclass is only ever used if it is NAMED here."
+   is for changing BEHAVIOR (the worker entry, dispatcher wiring, the advertised identity); to add
+   tools, write a toolset instead (see McpToolset) -- but a subclass is only ever used if it is
+   NAMED here."
   ^workerClassName
 %
 category: 'worker class'

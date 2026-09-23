@@ -21,7 +21,7 @@ McpServer comment:
 JSON-RPC dispatcher; parses a JSON-RPC request and answers the JSON response string via
 handleJsonString:. The tools themselves -- schemas AND handlers -- belong to the toolsets it
 registers (McpToolset), not to this class; what stays here is what a server decides for every tool:
-the kernel guards and the advertised identity.
+the blind-write guardrail''s read and write ledgers, and the advertised identity.
 
 One instance runs in each per-client worker gem -- built lazily and cached in SessionTemps by the
 class-side handleJsonString:, and driven by the front end McpRouter over a GsTsExternalSession.
@@ -33,9 +33,15 @@ instances (see McpToolset), so a deployment -- or a vendor shipping only their o
 surface. The front end resolves both the worker class and the toolset list per session and pushes them
 into the worker gem in one call
 (prepareWorkerWithToolsets:options:serverName:title:version:frontEnd:cacheName:), so a
-worker never decides what it is. Subclass this to change BEHAVIOR (the kernel guards, the worker
-entry, dispatcher wiring, the advertised identity); write a toolset to add tools. A subclass is used
-only when it is NAMED in the router''s workerClassName config.
+worker never decides what it is. Subclass this to change BEHAVIOR (the worker entry, dispatcher
+wiring, the advertised identity); write a toolset to add tools. A subclass is used only when it is
+NAMED in the router''s workerClassName config.
+
+WHAT A SERVER DOES NOT DECIDE is who may change what. There was a kernel guard here until
+2026-09-21 -- protectedDictionaryNames / isProtectedClass: / assertMutableClass: -- and it is gone
+for the reason read-only mode went before it: it looked like an access-control boundary while
+sitting inside the process it was meant to bound. GemStone enforces authorization in the stone, on
+every session, whichever tool the write arrived through. See docs/ReadOnly_User.md.
 
 To start the server, see McpRouter (runOnPort: / forkOnPort:).'
 %
@@ -431,36 +437,6 @@ allToolNames
   toolsets do: [:ts | names addAll: ts toolNames].
   ^names asArray
 %
-category: 'guards'
-method: McpServer
-assertMutableClass: aClass
-  "Refuse (signal McpError kind:#refused, naming the class, reason, and remedy) if aClass is a
-   protected/kernel class. Called by every mutation tool before it changes anything. NB: this
-   guards the structured mutation tools only -- execute_code is the deliberate escape hatch, and is
-   deliberately not guarded here. What bounds execute_code is the WORKER GEM'S GEMSTONE USER, not
-   this server: see McpRouter>>workerUserId."
-  | where |
-  (self isProtectedClass: aClass) ifFalse: [^aClass].
-  where := self protectedDictionaryNames
-    detect: [:dictName | (self dictNamed: dictName)
-      ifNil: [false]
-      ifNotNil: [:d | (d at: aClass name asSymbol ifAbsent: [nil]) == aClass]]
-    ifNone: ['no user dictionary'].
-  ^McpError signalKind: #refused message:
-    'Refused: ' , aClass name asString , ' is a protected class (home dictionary ' , where
-      , '); MCP mutation tools do not modify kernel/system classes. Remedy: target one of your own '
-      , 'classes in a user dictionary (e.g. UserGlobals), or use execute_code if you truly intend a '
-      , 'system change.'
-%
-category: 'guards'
-method: McpServer
-assertRemovableDictionaryNamed: aName
-  "Refuse (signal McpError kind:#refused) if aName is a protected system dictionary."
-  (self protectedDictionaryNames includes: aName asString) ifTrue: [
-    ^McpError signalKind: #refused message:
-      'Refused: ' , aName asString , ' is a protected system dictionary and cannot be removed.'].
-  ^aName
-%
 category: 'blind-write guardrail'
 method: McpServer
 behaviorForScope: aScopeString
@@ -504,7 +480,7 @@ category: 'private'
 method: McpServer
 dictNamed: aName
   "See McpToolset class>>dictNamed:, the single implementation both roles share. Kept here because
-   the kernel guards ask the protected dictionaries by name."
+   the blind-write guardrail stamps a symbol dictionary by name (stampForDictionaryKey:)."
   ^McpToolset dictNamed: aName
 %
 category: 'view hygiene'
@@ -606,23 +582,6 @@ initializeWithToolsetNames: anArrayOfNames toolsetOptions: aDictOrNil
       options: (aDictOrNil isNil ifTrue: [nil] ifFalse: [aDictOrNil at: n asString ifAbsent: [nil]])].
   self registerToolsets.
   ^self
-%
-category: 'guards'
-method: McpServer
-isProtectedClass: aClass
-  "True if aClass is a kernel/system class that mutation tools must not modify: a protected dictionary
-   (protectedDictionaryNames) binds this very class under its own name. A class no dictionary in the
-   symbol list binds at all is treated as protected (conservative).
-   Deliberately NOT judged by dictionaryAndSymbolOf:, which answers the FIRST dictionary in the symbol
-   list binding the name -- in a Grail image the Python dictionary also binds Object and precedes
-   Globals, so that test reported Object as UNPROTECTED and the mutation tools would have modified
-   kernel classes. Asking the protected dictionaries directly cannot be fooled by symbol-list order."
-  | name |
-  name := aClass name asSymbol.
-  self protectedDictionaryNames do: [:dictName |
-    (self dictNamed: dictName) ifNotNil: [:d |
-      (d at: name ifAbsent: [nil]) == aClass ifTrue: [^true]]].
-  ^(System myUserProfile dictionaryAndSymbolOf: aClass) isNil
 %
 category: 'session lifetime'
 method: McpServer
@@ -767,14 +726,6 @@ ownCommitsBehind
    needs for a worker's, and is why this exists here as well as there. Used only to put a number in
    the note that tells the client its view was refreshed; a nil simply leaves the number out."
   ^[(System descriptionOfSession: System session) at: 16] on: Error do: [:ex | nil]
-%
-category: 'guards'
-method: McpServer
-protectedDictionaryNames
-  "Names of the kernel/system symbol dictionaries that mutation tools must not touch: only Globals,
-   which holds the base classes. Everything else is freely mutable -- UserGlobals (the DEFAULT home
-   for new user-created classes) and any application dictionary such as Mcp or Published."
-  ^#('Globals')
 %
 category: 'blind-write guardrail'
 method: McpServer

@@ -15,12 +15,12 @@ expectvalue /Class
 doit
 McpContractTest comment: 
 'Contract / property tests over the MCP tool surface, driven through McpDispatcher>>handle: (the
-real JSON-RPC envelope). Covers the schema-strictness, argument-validation, structured-error, and
-kernel-guard behaviors: every tool schema is closed; a raised error carries a structured kind; and
-mutating a kernel class is refused. Also pins the MCP 2025-11-25 split between the two tools/call
-failure envelopes -- arguments that violate a tool''s own inputSchema are TOOL EXECUTION errors
-(isError:true, so the model can self-correct), while a malformed request (no tool name) and an
-unknown tool stay PROTOCOL errors (-32602). Read-only properties are added as those phases land.'
+real JSON-RPC envelope). Covers the schema-strictness, argument-validation and structured-error
+behaviors: every tool schema is closed; a raised error carries a structured kind; and nothing in the
+tool layer refuses a mutation for what class it targets. Also pins the MCP 2025-11-25 split between
+the two tools/call failure envelopes -- arguments that violate a tool''s own inputSchema are TOOL
+EXECUTION errors (isError:true, so the model can self-correct), while a malformed request (no tool
+name) and an unknown tool stay PROTOCOL errors (-32602).'
 %
 expectvalue /Class
 doit
@@ -84,15 +84,6 @@ request: methodName params: paramsDict
   paramsDict ifNotNil: [d at: 'params' put: paramsDict].
   ^d
 %
-category: 'tests - guard'
-method: McpContractTest
-testAssertMutableClassRaisesRefused
-  "#2: the guard signals an McpError kinded #refused (and mutates nothing)."
-  | kind |
-  kind := [McpServer new assertMutableClass: Object. #noRaise]
-    on: McpError do: [:e | e kind].
-  self assert: kind equals: #refused
-%
 category: 'tests - toolsets'
 method: McpContractTest
 testDefaultToolsetSurfaceIsTheCoreSevenOnly
@@ -145,36 +136,30 @@ testEveryToolIsListed
 %
 category: 'tests - guard'
 method: McpContractTest
-testKernelGuardIgnoresShadowingDictionary
-  "#2: the guard must not be fooled by symbol-list ORDER. A dictionary earlier in the symbol list that
-   also binds a kernel name (exactly what Grail's Python dictionary does with Object) once made
-   dictionaryAndSymbolOf: answer that dictionary, so Object read as unprotected and the mutation tools
-   would have modified kernel classes. Simulates the shadow, so this holds in any image.
-   No commit and no dispatcher here -- a tools/call would abort the transaction and undo the fixture."
-  | up shadow |
-  up := System myUserProfile.
-  shadow := SymbolDictionary new.
-  shadow at: #Object put: Object.
-  shadow at: #McpShadowProbe put: 42.
-  up insertDictionary: shadow at: 1.
-  [self assert: (up dictionaryAndSymbolOf: Object) first == shadow.  "the shadow really does win"
-   self assert: (McpServer new isProtectedClass: Object)]            "...and the guard still refuses"
-    ensure: [up removeDictionaryAt: (up symbolList indexOf: shadow)]
-%
-category: 'tests - guard'
-method: McpContractTest
-testKernelMutationRefusedThroughEnvelope
-  "#2 end-to-end: compile_method on a kernel class is refused as an isError result with kind
-   #refused, and adds no method to the kernel class."
+testKernelClassMutationIsNotRefusedByTheToolLayer
+  "NOTHING IN THE TOOL LAYER REFUSES A CLASS ANY MORE (changed 2026-09-21). A server-level list of
+   protected dictionaries -- Globals by default -- used to make every mutation tool refuse a kernel
+   class with kind #refused. It is gone: authorization is the stone's, and the stone applies it to
+   execute_code, a test body and a Python call alike, which a tool-layer list never could.
+
+   Written so it holds whichever GemStone user runs the suite, because that user is now the whole
+   answer. A developer's user (ObjectSecurityPolicyProtection) compiles the method and the result is
+   not an error; a user without that privilege is refused BY THE STONE, and what proves the guard is
+   gone is that the refusal is not kind #refused -- it is a SecurityError 2257 naming
+   SystemObjectSecurityPolicy, measured on this project's own read-only user.
+   Uncommitted either way: the method is removed in an ensure, and the dispatcher's abort before the
+   next tool would undo it regardless."
   | result |
-  result := (self dispatch: (self toolCall: 'compile_method' args:
+  [result := (self dispatch: (self toolCall: 'compile_method' args:
     (Dictionary new
       at: 'className' put: 'Object';
       at: 'source' put: 'mcpKernelGuardProbe ^1';
       yourself))) at: 'result'.
-  self assert: (result at: 'isError').
-  self assert: (((result at: 'structuredContent') at: 'error') at: 'kind') equals: 'refused'.
-  self deny: (Object canUnderstand: #mcpKernelGuardProbe)
+   (result at: 'isError')
+     ifTrue: [self deny: (((result at: 'structuredContent') at: 'error') at: 'kind') = 'refused']
+     ifFalse: [self assert: (Object selectors includes: #mcpKernelGuardProbe)]]
+    ensure: [(Object selectors includes: #mcpKernelGuardProbe)
+      ifTrue: [Object removeSelector: #mcpKernelGuardProbe]]
 %
 category: 'tests - validation'
 method: McpContractTest
@@ -239,21 +224,6 @@ testPrepareWorkerBuildsNamedSurfaceAndCaches
     "and the configured identity is what initialize reports"
     self assert: (self includesCS: 'acme-db-mcp'
       in: (McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'))]
-%
-category: 'tests - guard'
-method: McpContractTest
-testProtectedClassPredicate
-  "#2: a class whose home dictionary is Globals (the base classes) is protected; a class in a user
-   dictionary is not. Uses a throwaway class created in UserGlobals (per the McpToolTest fixture
-   convention)."
-  | s probe |
-  s := McpServer new.
-  self assert: (s isProtectedClass: Object).
-  probe := Object subclass: 'McpProtectedProbe'
-    instVarNames: #() classVars: #() classInstVars: #()
-    poolDictionaries: #() inDictionary: UserGlobals options: #().
-  [self deny: (s isProtectedClass: probe)]
-    ensure: [UserGlobals removeKey: #McpProtectedProbe ifAbsent: [nil]]
 %
 category: 'tests - errors'
 method: McpContractTest
@@ -330,35 +300,6 @@ testSyntaxErrorClassifiedAsCompileError
     (Dictionary new at: 'code' put: '1 +'; yourself))) at: 'result'.
   self assert: (result at: 'isError').
   self assert: (((result at: 'structuredContent') at: 'error') at: 'kind') equals: 'compileError'
-%
-category: 'tests - guard'
-method: McpContractTest
-testToolsetGuardFailsClosedWithNoServer
-  "FAIL-CLOSED: a toolset built with no server cannot ask which classes are protected, so it refuses
-   to mutate rather than assuming it may -- and says so as an ordinary #refused, the same kind the
-   server's own guard raises, so a client sees no new error shape."
-  | ts classKind dictKind |
-  ts := McpMutationToolset new.
-  classKind := [ts assertMutableClass: Object. #noRaise] on: McpError do: [:e | e kind].
-  dictKind := [ts assertRemovableDictionaryNamed: 'UserGlobals'. #noRaise]
-    on: McpError do: [:e | e kind].
-  self assert: classKind equals: #refused.
-  self assert: dictKind equals: #refused
-%
-category: 'tests - guard'
-method: McpContractTest
-testToolsetGuardForwardsToTheServer
-  "A toolset's guard is a forward, not a second opinion: with a server attached it answers exactly
-   what that server's policy says -- refusing a kernel class, passing a user class through."
-  | ts probe |
-  ts := McpMutationToolset on: McpServer new.
-  self assert: ([ts assertMutableClass: Object. #noRaise] on: McpError do: [:e | e kind])
-    equals: #refused.
-  probe := Object subclass: 'McpGuardForwardProbe'
-    instVarNames: #() classVars: #() classInstVars: #()
-    poolDictionaries: #() inDictionary: UserGlobals options: #().
-  [self assert: (ts assertMutableClass: probe) == probe]
-    ensure: [UserGlobals removeKey: #McpGuardForwardProbe ifAbsent: [nil]]
 %
 category: 'tests - registry'
 method: McpContractTest

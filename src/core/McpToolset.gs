@@ -46,8 +46,9 @@ that refuses to start. Values must be JSON-safe: they travel to the worker as JS
 
 The schema builders and the image-lookup helpers every toolset needs (resolveClass:, dictNamed:,
 linesFrom:, capResult:, page:args:defaultLimit:) are BOTH class- and instance-side: the class-side methods are the single
-implementation -- McpServer''s kernel guards reach dictNamed: that way, so the lookup has one home --
-and the instance-side ones let a registerOn: or handler body read as `self objectSchema: ...` /
+implementation -- McpServer''s blind-write guardrail reaches dictNamed: that way, so the lookup has
+one home -- and the instance-side ones let a registerOn: or handler body read as
+`self objectSchema: ...` /
 `self resolveClass: ...`.
 
 PAGING. A tool that answers a LIST pages it: declare its schema with #pagedSchema:required:defaultLimit:
@@ -57,14 +58,18 @@ result, so these arguments are the only paging a tool result can have; see
 #page:args:defaultLimit:complete: for why, and for what a tool that cannot count its own results
 should say instead of guessing.
 
-NB the `server` reference: a toolset''s handlers own their own work, but the POLICY question ''may this
-be modified at all?'' is one answer per deployment, not per tool pack -- so it stays on McpServer
-(protectedDictionaryNames / isProtectedClass:), which is what a subclass overrides to change
-behavior, and the guards here forward to it. A mutating handler writes `self assertMutableClass: cls`
-exactly as it writes `self resolveClass:`; see McpMutationToolset. A toolset is free to impose a
-STRICTER guard of its own on top -- what it must not do is answer the deployment''s question
-differently. Handlers that need no policy never touch `server` at all (McpGrailToolset and
-McpFixtureToolset are examples).'
+NB the `server` reference: a toolset''s handlers own their own work, but what a WRITE is checked
+against -- what this session has already read in the current view window -- is one answer per
+session, not per tool pack, so it stays on McpServer (the blind-write guardrail: readLedger /
+requireRead: / noteWrite:) and the helpers here forward to it. A mutating handler writes
+`self requireRead: ...` exactly as it writes `self resolveClass:`; see McpMutationToolset. Handlers
+that need nothing from the server never touch it at all (McpGrailToolset and McpFixtureToolset are
+examples).
+
+WHAT A TOOLSET DOES NOT DECIDE is who may change what. A protected-class policy lived here until
+2026-09-21 (assertMutableClass: / assertRemovableDictionaryNamed:, forwarding to
+McpServer>>isProtectedClass:); it is gone, because authorization belongs to the stone, which applies
+it to every session whatever tool the write came through. See docs/ReadOnly_User.md.'
 %
 expectvalue /Class
 doit
@@ -237,8 +242,8 @@ objectSchema: propsDict required: requiredArray
 category: 'instance creation'
 classmethod: McpToolset
 on: aServer
-  "A toolset for aServer, the McpServer whose registry it registers on (and whose server-level policy
-   -- the kernel guards -- its handlers consult; see the class comment). No deployment options; see
+  "A toolset for aServer, the McpServer whose registry it registers on (and whose per-session read
+   and write ledgers its handlers consult; see the class comment). No deployment options; see
    on:options:."
   ^self on: aServer options: nil
 %
@@ -444,35 +449,6 @@ stringArrayProperty: aDescription
   ^d
 %
 ! ------------------- Instance methods for McpToolset
-category: 'guards'
-method: McpToolset
-assertMutableClass: aClass
-  "Answer aClass, or refuse (signal McpError kind:#refused) if it is a protected/kernel class. Every
-   handler that changes a class should pass through here FIRST -- structured mutation never modifies
-   kernel/system classes; execute_code is the deliberate escape hatch, and a deployment that wants
-   even that closed simply does not register McpExecutionToolset.
-   The answer comes from the SERVER, because what counts as protected is one policy per deployment
-   (McpServer>>isProtectedClass:, overridable in a subclass) and two toolsets must not disagree about
-   it. FAIL-CLOSED when there is no server: a toolset that cannot consult the policy refuses to mutate
-   rather than assuming it may."
-  server isNil ifTrue: [
-    ^McpError signalKind: #refused message:
-      'Refused: cannot modify ' , aClass name asString , ' -- this toolset has no server to ask which '
-        , 'classes are protected. Build it with McpToolset class>>on: so it can consult the '
-        , 'deployment''s kernel guard.'].
-  ^server assertMutableClass: aClass
-%
-category: 'guards'
-method: McpToolset
-assertRemovableDictionaryNamed: aName
-  "Answer aName, or refuse (McpError kind:#refused) if it names a protected system dictionary. Same
-   forward-and-fail-closed rule as assertMutableClass:, for removing a symbol dictionary."
-  server isNil ifTrue: [
-    ^McpError signalKind: #refused message:
-      'Refused: cannot remove dictionary ' , aName asString , ' -- this toolset has no server to ask '
-        , 'which dictionaries are protected. Build it with McpToolset class>>on:.'].
-  ^server assertRemovableDictionaryNamed: aName
-%
 category: 'schema building'
 method: McpToolset
 boolProperty: aDescription
@@ -715,8 +691,8 @@ category: 'blind-write guardrail'
 method: McpToolset
 requireRead: aKey subject: aSubjectString tool: aToolName hint: aHintString
   "Refuse a blind write -- a change to something this session has not read since its view last moved.
-   FAIL-CLOSED when there is no server, for the same reason assertMutableClass: is: a toolset that
-   cannot consult the ledger refuses to mutate rather than assuming it may."
+   FAIL-CLOSED when there is no server: a toolset that cannot consult the ledger refuses to mutate
+   rather than assuming it may."
   server isNil ifTrue: [
     ^McpError signalKind: #blindWrite message:
       aToolName , ' refused: this toolset has no server, so it cannot tell whether ' , aSubjectString
@@ -782,8 +758,9 @@ selectorOfSource: aSourceString for: aBehavior
 category: 'accessing'
 method: McpToolset
 server
-  "The McpServer this toolset registers on, and the home of the server-level policy a handler must
-   respect -- the kernel guards. nil for a toolset built without one (see the class comment)."
+  "The McpServer this toolset registers on, and the home of the per-session state a mutating handler
+   must consult -- the blind-write ledgers. nil for a toolset built without one (see the class
+   comment)."
   ^server
 %
 category: 'initialization'

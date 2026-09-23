@@ -16,7 +16,8 @@ doit
 McpBrowsingToolset comment: 
 'The class-browsing tools: describe a class, export its source, read its definition, walk its
 hierarchy, read one method''s source, list its selectors by category. Nothing here can persist a
-change, so none of these handlers needs the server''s kernel guard.'
+change; what these handlers do reach the server for is the other side of the blind-write guardrail
+-- each one records what it showed the client (noteRead:), which is what later licenses a write.'
 %
 expectvalue /Class
 doit
