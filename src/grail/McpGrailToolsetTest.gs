@@ -829,11 +829,12 @@ testGrailPositionSpansIgnoreTrailersInsideStringLiterals
    The fixture is that shape in miniature, with the embedded trailer deliberately carrying the
    numbers measured from SessionDict>>__iter__.
 
-   NB the site's LINE is not asserted. #positionStoresIn: scans the raw text for ___curPos___ and
-   does not track literals, so on a source like this it can answer a store from the embedded method
-   -- a separate limitation of the store scan, not of the span scan this test is about, and one no
-   caller has reached in practice because the doubled hits are what over-reported."
-  | ts src spans |
+   THE SITE'S LINE is asserted here too, and it is the OUTER store's. #positionStoresIn: once
+   scanned the raw text with no notion of a literal, so this same fixture answered the embedded
+   method's line 43; that half of the defect is pinned by
+   #testPositionStoresIgnoreStoresInsideStringLiterals, and asserting it here as well is what stops
+   the two scans drifting apart on one source."
+  | ts src spans sites |
   ts := McpGrailToolset new.
   src := 'initialize
 <grailPython>
@@ -853,8 +854,12 @@ ___curPos___ := #(43 15 43 27 ''''        return self._dict()'''').
   spans := ts grailPositionSpansIn: src.
   self assert: spans size equals: 1.
   self assert: (spans at: 1) equals: #( 267 278 30 16 30 26 ).
-  "One send is outside the literal; the one inside it was never a send to begin with."
-  self assert: (ts callSitesIn: src forSelector: #'_dict') size equals: 1.
+  "One send is outside the literal; the one inside it was never a send to begin with -- and it is
+   positioned from the outer store rather than from the embedded one lying between them."
+  sites := ts callSitesIn: src forSelector: #'_dict'.
+  self assert: sites size equals: 1.
+  self assert: ((sites at: 1) at: 1) equals: 30.
+  self assert: ((sites at: 1) at: 2) equals: 'class Holder:'.
   "A comment that is not a trailer contributes nothing, and a malformed trailer is refused whole
    rather than mis-grouped by six."
   self assert: (ts grailSpansFromComment: 'just a comment') isEmpty.
@@ -938,6 +943,84 @@ testListPythonMethodsPagesButKeepsWhatNamesTheClass
   self assert: firstSigs size equals: 2.
   self assert: secondSigs size equals: 2.
   firstSigs do: [:sig | self deny: (secondSigs includes: sig)]
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testPositionStoresIgnoreStoresInsideStringLiterals
+  "A ___curPos___ store inside a string literal counts lines in a DIFFERENT function.
+
+   A module's generated `initialize` builds its classes by compiling each method FROM A SOURCE
+   STRING, so every inner method's stores sit inside a quoted literal. Read those as the outer
+   method's and a send in the module body is positioned from whichever inner method was embedded
+   most recently -- the hit real, the method right, the LINE belonging to another function.
+   Measured on `_grail_session>>initialize`: 17 stores raw, of which 2 are the module body's own,
+   and both sends of `new` in the body reported line 81, the last line of `_grail_session.py`,
+   inside `SessionDict.items()`, where the true line is 21. This is the store-scan half of what
+   #testGrailPositionSpansIgnoreTrailersInsideStringLiterals pins for the trailer scan.
+
+   WHICH MODULE IT BIT WAS PLACEMENT, not a rule the scan knew, so both shapes are here. Measured on
+   the same image, `gemdb>>initialize` keeps its own stores interleaved among its class builds (122
+   raw, 25 outside literals), so the store in effect after a build is an outer one either way and
+   its module-scope call at `gemdb/__init__.py:415` was always reported correctly. The second
+   fixture is that shape, and it pins the fix as leaving the module that was already right alone.
+
+   A STORE INSIDE A COMMENT IS KEPT, which is the third fixture and the reason this scan tracks
+   comment state rather than skipping comments the way the send scan does. LambdaAst restores the
+   enclosing store as a Smalltalk comment (AbstractNode>>___emitCurPosRestoreCommentFor___:on:)
+   precisely so that a backwards text scan sees it, so it is a real position: drop it and a send
+   after the lambda takes the lambda body's line instead of the statement's."
+  | ts embedded interleaved restored stores sites |
+  ts := McpGrailToolset new.
+  "_grail_session's shape: every outer store lies AHEAD of the class build."
+  embedded := 'initialize
+| ___curPos___ |
+___curPos___ := #(1 0 1 16 ''Session helpers.'').
+___curPos___ := #(21 0 21 18 ''class SessionDict:'').
+SessionDict @env0:compileMethod: ''items
+| ___curPos___ |
+___curPos___ := #(81 15 81 33 ''''        return self._dict().items()'''').
+^ ((self _dict) items).
+''.
+^ (Holder new).'.
+  stores := ts positionStoresIn: embedded.
+  self assert: stores size equals: 2.
+  self assert: ((stores at: 1) at: 2) equals: 1.
+  self assert: ((stores at: 2) at: 2) equals: 21.
+  self assert: ((stores at: 2) at: 3) equals: 'class SessionDict:'.
+  sites := ts callSitesIn: embedded forSelector: #new.
+  self assert: sites size equals: 1.
+  self assert: ((sites at: 1) at: 1) equals: 21.
+  self assert: ((sites at: 1) at: 2) equals: 'class SessionDict:'.
+  "gemdb's shape: an outer store AFTER the build, so the body was already right."
+  interleaved := 'initialize
+| ___curPos___ |
+___curPos___ := #(21 0 21 18 ''class SessionDict:'').
+SessionDict @env0:compileMethod: ''items
+| ___curPos___ |
+___curPos___ := #(81 15 81 33 ''''        return self._dict().items()'''').
+^ ((self _dict) items).
+''.
+___curPos___ := #(415 4 415 25 ''    getattr(_self, _name)'').
+^ (Holder new).'.
+  stores := ts positionStoresIn: interleaved.
+  self assert: stores size equals: 2.
+  sites := ts callSitesIn: interleaved forSelector: #new.
+  self assert: sites size equals: 1.
+  self assert: ((sites at: 1) at: 1) equals: 415.
+  self assert: ((sites at: 1) at: 2) equals: '    getattr(_self, _name)'.
+  "A lambda''s restored store is a comment, and it is a position like any other."
+  restored := 'run
+| ___curPos___ |
+___curPos___ := #(7 4 7 20 ''f = lambda: g()'').
+f := [ :a | | ___curPos___ | ___curPos___ := #(16 11 16 14 ''g()''). (g value) ] "___curPos___ := #(7 4 7 20 ''f = lambda: g()'')" .
+^ (Holder new).'.
+  stores := ts positionStoresIn: restored.
+  self assert: stores size equals: 3.
+  self assert: ((stores at: 3) at: 2) equals: 7.
+  self assert: ((stores at: 3) at: 3) equals: 'f = lambda: g()'.
+  sites := ts callSitesIn: restored forSelector: #new.
+  self assert: sites size equals: 1.
+  self assert: ((sites at: 1) at: 1) equals: 7
 %
 category: 'tests'
 method: McpGrailToolsetTest

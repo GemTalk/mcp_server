@@ -937,16 +937,54 @@ positionStoresIn: aSourceString
 
    Collected in ONE pass and reused for every send, rather than re-scanning backwards from each:
    a generated module method can hold hundreds of statements, and this is the whole cost of a
-   compiled-shape hit."
-  | marker stores at |
+   compiled-shape hit.
+
+   STORES INSIDE STRING LITERALS ARE NOT THIS SOURCE'S. A module's generated `initialize` builds its
+   classes by compiling each method FROM A SOURCE STRING, so every inner method -- its stores
+   included -- sits inside a quoted literal, counting lines in a DIFFERENT function. Measured on
+   `_grail_session>>initialize`: 17 stores, of which only the two ahead of the class build are the
+   module body's own, and the last embedded one put both sends of `new` in the body at line 81 --
+   the last line of `_grail_session.py`, inside `SessionDict.items()`, where the true line is 21.
+   Dropping the embedded ones can only move a hit from another function's line onto its own: a send
+   inside a literal is not counted as a send either (rule 2 of #callSitesIn:forSelector:), so an
+   embedded store can never be the position of anything reported. Which module this bit was luck,
+   not a rule the scan knew -- `gemdb` keeps its own stores interleaved among its class builds and
+   was already right, and only a body that runs out of outer stores first takes an inner line.
+
+   A STORE INSIDE A COMMENT IS KEPT, and that is why this tracks comment state rather than skipping
+   comments the way #callSitesIn:forSelector: does. LambdaAst restores the enclosing store as a
+   Smalltalk comment (AbstractNode>>___emitCurPosRestoreCommentFor___:on:) precisely so that a
+   backwards text scan sees it, so it is a real position; comment state is here only so that a
+   quote inside one -- the restored literal's own -- cannot open a literal that is not there."
+  | marker stores size i c inString inComment |
   marker := '___curPos___ := '.
   stores := OrderedCollection new.
-  at := aSourceString findString: marker startingAt: 1.
-  [at > 0] whileTrue: [
-    | parsed |
-    parsed := self positionLiteralAt: at + marker size in: aSourceString.
-    stores add: (Array with: at with: (parsed at: 1) with: (parsed at: 2)).
-    at := aSourceString findString: marker startingAt: at + marker size].
+  size := aSourceString size.
+  i := 1.
+  inString := false.
+  inComment := false.
+  [i <= size] whileTrue: [
+    c := aSourceString at: i.
+    inString
+      ifTrue: [
+        c = $' ifTrue: [
+          "A doubled quote is one quote INSIDE the literal, not the end of it."
+          (i < size and: [(aSourceString at: i + 1) = $'])
+            ifTrue: [i := i + 1]
+            ifFalse: [inString := false]]]
+      ifFalse: [
+        (c = marker first and: [self source: aSourceString hasMarker: marker at: i])
+          ifTrue: [
+            | parsed |
+            parsed := self positionLiteralAt: i + marker size in: aSourceString.
+            stores add: (Array with: i with: (parsed at: 1) with: (parsed at: 2))]
+          ifFalse: [
+            inComment
+              ifTrue: [c = $" ifTrue: [inComment := false]]
+              ifFalse: [
+                c = $' ifTrue: [inString := true].
+                c = $" ifTrue: [inComment := true]]]].
+    i := i + 1].
   ^stores
 %
 category: 'private'
@@ -1721,6 +1759,17 @@ signatureFor: aMethodName from: aSigTableOrNil on: aClass
   parts do: [:t | any ifTrue: [s nextPutAll: ', ']. s nextPutAll: t. any := true].
   s nextPut: $).
   ^s contents
+%
+category: 'private'
+method: McpGrailToolset
+source: aSourceString hasMarker: aMarker at: anIndex
+  "Whether aMarker occurs at anIndex, plainly -- and unlike #source:hasSendOf:at: with no identifier
+   boundary on either side. The one marker asked about here, the position store's `___curPos___ := `,
+   is generated punctuation rather than a name, and nothing longer can contain it."
+  | endIndex |
+  endIndex := anIndex + aMarker size - 1.
+  endIndex > aSourceString size ifTrue: [^false].
+  ^(aSourceString copyFrom: anIndex to: endIndex) = aMarker
 %
 category: 'private'
 method: McpGrailToolset
