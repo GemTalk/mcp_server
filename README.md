@@ -481,10 +481,12 @@ worked example for configuring your own.
 > **What it cannot see, it says.** A function defined in an `eval` scope compiles to a block with no
 > selector pool; a module whose `.py` nothing has imported has nothing compiled to search; after
 > `./install.sh` in the Grail checkout, the classes of a module committed earlier are missing until
-> it is imported again, and the trailer says so when that is the state; and under
-> `GRAIL_IR_CODEGEN` a method carries the user's Python with no position store, so a hit's line
-> reads `?` rather than a guess. The public interface that would position those hits is filed as
-> [GemTalk/Grail#883](https://github.com/GemTalk/Grail/issues/883).
+> it is imported again, and the trailer says so when that is the state; and a method compiled
+> direct to IR (`GRAIL_IR_CODEGEN`) carries the user's Python with no position in it, which Grail
+> reports, so its hit reads `line ?  [compiled to IR: no call-site positions]` rather than a guess,
+> and stands for every call that method makes. The public interface that would position those
+> hits, and retire the reading of generated text behind every other hit, is filed as
+> [GemTalk/Grail#1137](https://github.com/GemTalk/Grail/issues/1137).
 >
 > **`tests/python` is excluded by default** — a relevance choice, not a cost one. The stdlib is
 > 1,412 files and 426,131 lines and reads in 248 ms; the fixtures would add about 75 ms. What they

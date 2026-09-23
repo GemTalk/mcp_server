@@ -34,6 +34,24 @@ searched in order, so an old `Published.McpServer` shadows the new `Mcp.McpServe
 filed in afterwards binds to the old class, and the install looks clean while being wrong. This is
 why `install.sh` sweeps the names it is about to define out of every other dictionary first.
 
+**Reinstalling Grail leaves mcp_server bound to Grail's old classes.** A compiled method holds the
+association its global resolved to when it was compiled, not the name. Grail's `install.sh`
+creates new class objects under new associations, so an mcp_server installed *before* it keeps
+referring to the old ones. The visible symptom is Python exceptions escaping handlers written for
+them. `on: Error, BaseException` names the old `BaseException`, and a Grail `AttributeError` or
+`ModuleNotFoundError` no longer matches it. Measured on 2026-09-23 after moving `gs400a2c` to
+Grail `add51089`: 17 of `McpGrailToolsetTest`'s 58 tests failed, and `pythonLabelOfClass:`'s
+`BaseException` literal answered false for both `value == BaseException` and identity with the
+current association. The running server had the same broken handlers. Nothing reports it at
+install time, and CI never meets it because it always installs fresh. After installing a new
+Grail under an existing mcp_server:
+
+1. `importlib resetSessionForReinstall`, for any long-lived session. It refreshes the view and
+   evicts the cached Python modules, and commits nothing.
+2. `./install.sh --grail`, which recompiles mcp_server against the new classes.
+3. `./stop-server.sh && ./run-server.sh`, the only way to be certain a running server is off the
+   old bindings (see `.claude/CLAUDE.md` for when each gem picks up a recompile).
+
 **A view refresh before a write launders a stale-write conflict.** GemStone's optimistic check is
 write-write *against the view* and does not track what a session read. So if S1 reads X, S2 commits
 a change to X, and S1 then refreshes (`continueTransaction` or `abortTransaction`) before writing X,

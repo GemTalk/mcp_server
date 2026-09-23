@@ -174,12 +174,17 @@ callSitesIn: aSourceString forSelector: aSelector
    a trailer this cannot read -- is kept, which is the behaviour that was correct before the trailer
    was read at all. See #grailPositionSpansIn:.
 
-   WHY IT READS TEXT AT ALL, AND WHERE THAT STOPS. Grail publishes no way to ask a method for its
-   call sites: both readers that do it properly are private and ip-keyed, which is asked about in
-   GemTalk/Grail#883. Two limits follow, and each reports an ABSENT position rather than a wrong
-   one -- the literal layout is an assumption, and a direct-to-IR method (GRAIL_IR_CODEGEN set)
-   carries the user's Python with no store in it at all. A hit whose line is nil still names the
-   method it is in, which is the part a caller can get nowhere else."
+   WHY IT READS TEXT AT ALL, AND WHERE THAT STOPS. Grail now publishes the positions a method
+   carries (BaseException pythonPositionsForMethod:, GemTalk/Grail#883), but not WHERE in the
+   generated source each one sits, and a position for a send found at an index is exactly what this
+   needs. Those entries also include the stores embedded in a module body's string literals, so they
+   could not stand in for #positionStoresIn: even taken in order. So the store in effect and the
+   trailer span are still read from the text, and both layouts are still an assumption; the public
+   call that would retire the reading is asked for in GemTalk/Grail#1137. What the assumption costs
+   is an ABSENT position rather than a wrong one, and a hit whose line is nil still names the method
+   it is in, which is the part a caller can get nowhere else. A method compiled direct to IR never
+   reaches this: its source is the user's Python, none of these rules apply to it, and
+   #pythonSendersOfName:in: asks Grail for the method's kind before calling this."
   | stores spans seen key sites i size c inString inComment |
   stores := self positionStoresIn: aSourceString.
   spans := self grailPositionSpansIn: aSourceString.
@@ -1144,7 +1149,8 @@ category: 'private'
 method: McpGrailToolset
 pythonReferencesOfName: aName in: aClass
   "Every reference to the Python name aName from aClass's env-1 methods that is NOT a resolvable
-   call, as an OrderedCollection of {containingPythonName. marker. lineOrNil. callSiteTextOrNil}.
+   call, as an OrderedCollection of {containingPythonName. marker. lineOrNil. callSiteTextOrNil.
+   whyNoLineOrNil} -- the shape #pythonSendersOfName:in: answers, whose last slot is always nil here.
 
    A first-class reference (`g = abs`, `f = helper`) compiles to a Symbol literal after one of
    #pythonReferenceMarkers, and there is no selector anywhere to find it by -- so this shape cannot
@@ -1174,7 +1180,8 @@ pythonReferencesOfName: aName in: aClass
           (sym notNil and: [sym = aName asString]) ifTrue: [
             | pos |
             pos := self storeInEffectAt: at in: stores.
-            hits add: (Array with: ownName with: marker with: (pos at: 1) with: (pos at: 2))].
+            hits add: (Array with: ownName with: marker with: (pos at: 1) with: (pos at: 2)
+              with: nil)].
           at := src findString: marker startingAt: after]]]].
   ^hits
 %
@@ -1257,14 +1264,15 @@ category: 'private'
 method: McpGrailToolset
 pythonSendersOfName: aName in: aClass
   "Every call to the Python name aName from aClass's env-1 methods, as an OrderedCollection of
-   {containingPythonName. smalltalkSelector. lineOrNil. callSiteTextOrNil} -- one entry per call
-   site, so a method calling aName twice is reported twice.
+   {containingPythonName. smalltalkSelector. lineOrNil. callSiteTextOrNil. whyNoLineOrNil} -- one
+   entry per call site, so a method calling aName twice is reported twice. The exception is a
+   method compiled direct to IR, which gets one entry per selector it sends, for the reason below.
 
    THE SELECTOR POOL DECIDES WHETHER, THE SOURCE DECIDES WHERE. A method's pool is the exact set of
    selectors it sends, so decoding each one (#selector:callsPythonName:) answers the question
    `is this a sender` without parsing anything. Only then is the source read, to say where.
 
-   GRAIL COMPILES EACH DEF TWICE, and the difference is why the last clause is here. A def gets a
+   GRAIL COMPILES EACH DEF TWICE, and the difference is why the glue clause is here. A def gets a
    fixed-arity fast path holding the body (`__contains__:`) and a varargs entry point that checks
    the argument count and delegates to it (`___contains__:kw:`) -- so `__dict:kw:` genuinely sends
    `_dict`, and every Python name would otherwise be reported as calling itself once. That
@@ -1273,31 +1281,46 @@ pythonSendersOfName: aName in: aClass
    call has a store above it and is reported. Measured on `_grail_session.SessionDict`: 12 real
    senders of `_dict`, plus exactly one glue send from `__dict:kw:`.
 
+   A METHOD COMPILED DIRECT TO IR IS NOT READ AS TEXT. Under GRAIL_IR_CODEGEN a def's method carries
+   the user's Python as its source, with no position store and no generated Smalltalk, and Grail
+   says which kind a method is: BaseException pythonPositionKindForMethod: answers #irSource. The
+   rules #callSitesIn:forSelector: applies are Smalltalk's, so on Python text they find a call only
+   by luck, find a def line along with it, and place neither. So such a method is reported once per
+   selector it sends, with #irSource as the reason it has no line -- and it is exempt from the glue
+   clause, which dropped a recursive call there for having no position. The glue itself is never
+   IR-compiled: its kind is nil. The position that would locate these calls is asked for in
+   GemTalk/Grail#1137.
+
    Nothing here imports, resolves or compiles: it reads compiled methods and their source."
   | hits |
   hits := OrderedCollection new.
   (aClass selectorsForEnvironment: 1) asSortedCollection do: [:sel |
-    | meth ownName pool |
+    | meth ownName pool ir |
     meth := [aClass compiledMethodAt: sel environmentId: 1] on: Error do: [:ex | nil].
     ownName := self pythonNameOfSelector: sel.
     "Undecodable means a Grail internal slot rather than a Python method -- skipped for the reason
      given in #pythonReferencesOfName:in:. It also keeps the glue test below honest: that test asks
      whether ownName is the very name being searched for, which nil could never be."
     (meth notNil and: [ownName notNil]) ifTrue: [
+      ir := (BaseException pythonPositionKindForMethod: meth) == #irSource.
       pool := [meth _selectorPool] on: Error do: [:ex | #()].
       pool do: [:sent |
         (self selector: sent callsPythonName: aName) ifTrue: [
-          | src sites |
-          src := [aClass sourceCodeAt: sel environmentId: 1] on: Error do: [:ex | nil].
-          sites := src isNil
-            ifTrue: [OrderedCollection new]
-            ifFalse: [self callSitesIn: src forSelector: sent].
-          "The pool proved the send; a source that cannot be read or located still reports it,
-           without a position."
-          sites isEmpty ifTrue: [sites := OrderedCollection with: (Array with: nil with: nil)].
-          sites do: [:site |
-            ((site at: 1) isNil and: [ownName = aName]) ifFalse: [
-              hits add: (Array with: ownName with: sel with: (site at: 1) with: (site at: 2))]]]]]].
+          ir
+            ifTrue: [hits add: (Array with: ownName with: sel with: nil with: nil with: #irSource)]
+            ifFalse: [
+              | src sites |
+              src := [aClass sourceCodeAt: sel environmentId: 1] on: Error do: [:ex | nil].
+              sites := src isNil
+                ifTrue: [OrderedCollection new]
+                ifFalse: [self callSitesIn: src forSelector: sent].
+              "The pool proved the send; a source that cannot be read or located still reports
+               it, without a position."
+              sites isEmpty ifTrue: [sites := OrderedCollection with: (Array with: nil with: nil)].
+              sites do: [:site |
+                ((site at: 1) isNil and: [ownName = aName]) ifFalse: [
+                  hits add: (Array with: ownName with: sel with: (site at: 1) with: (site at: 2)
+                    with: nil)]]]]]]].
   ^hits
 %
 category: 'private'
@@ -1724,11 +1747,18 @@ senderLineFor: aHit shape: aShapeLabel label: aLabel class: aClass
    _grail_session.SessionDict`), because that is the address the reader thinks in, and then the
    Smalltalk identity in parentheses so get_method_source remains a way in when the Python answer
    is not enough. An absent line number is printed as `line ?` rather than omitted: the column
-   staying put is what lets a reader scan the answer, and the reason it is absent is in the tool's
-   own comment."
+   staying put is what lets a reader scan the answer.
+
+   WHEN THE REASON IS KNOWN, THE LINE SAYS IT, in the slot the call-site text would take. A method
+   compiled direct to IR (#irSource, see #pythonSendersOfName:in:) reads
+   `line ?  [compiled to IR: no call-site positions]`, because that absence is a fact about the
+   method, is not this tool failing to read something, and means the entry stands for every call
+   the method makes rather than for one. Any other absent line is a source this could not read or
+   place, and stays a bare `line ?`."
   | line text |
   line := aHit at: 3.
   text := aHit at: 4.
+  (aHit at: 5) == #irSource ifTrue: [text := '[compiled to IR: no call-site positions]'].
   ^(self shapeTag: aShapeLabel) , aLabel , '.' , (aHit at: 1)
     , '  line ' , (line isNil ifTrue: ['?'] ifFalse: [line printString])
     , (text isNil ifTrue: [''] ifFalse: ['  ' , (self trimmedLine: text)])

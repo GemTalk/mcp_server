@@ -380,12 +380,18 @@ testEvalPythonCapturesStderrWrittenThroughASecondSysInstance
    module and warm-binding it from a second session. It is the same object graph -- a sys the
    redirect did not touch -- for none of the cost, and staging it the other way would mean a commit
    and therefore movesTheSessionView. Grail's own SysStreamSessionResolutionTestCase covers the
-   mechanism; this covers the tool."
+   mechanism; this covers the tool.
+
+   `sys` IS IMPORTED, NOT ASSUMED. The snippet used a bare `sys` without importing it, which
+   resolved only because an eval scope could see Grail's implementation classes by name. Since
+   Grail 9022ed03 it cannot -- a NameError, as in CPython -- so the snippet imports the module it
+   means."
   | out |
   out := self withFreshScopeDo: [ | ts |
     ts := self mcp.
     ts pythonScope at: #other put: sys new.
-    ts tool_eval_python: (self oneArg: 'code' value: 'other.stderr.write("from a sys the redirect never touched\n")
+    ts tool_eval_python: (self oneArg: 'code' value: 'import sys
+other.stderr.write("from a sys the redirect never touched\n")
 other is sys')].
   "the write reached the capture buffer, labelled like any other stderr line"
   self assert: (self includesCS: '[stderr] from a sys the redirect never touched' in: out).
@@ -755,6 +761,56 @@ testFindPythonSendersRefusesWhatItCannotDoRatherThanAnsweringNothing
   self assert: kind equals: #unknown.
   self assert: (self includesCS: 'grailDirectory' in: msg).
   self assert: (self includesCS: 'find_python_senders' in: msg)
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testFindPythonSendersSaysAMethodCompiledToIRHasNoPositions
+  "One Python class, compiled both ways, and the answer has to be right for each.
+
+   AS TEXT, every call is placed: `mcp_ir_caller` calls the target twice in one statement, so twice
+   at line 8, and the recursive call is at line 4.
+
+   DIRECT TO IR, a method carries the user's Python with no position store, and Grail says so
+   (pythonPositionKindForMethod: answers #irSource). Before that was asked, the search read the
+   Python as though it were generated Smalltalk: it found the two calls in `mcp_ir_caller` by luck
+   and without a line, and it DROPPED the recursive call, because a call with no position in a
+   method of the very name searched for is the rule that recognises arity glue. Now each IR method
+   is one entry per selector it sends, says why its line is absent, and is never taken for glue --
+   the glue itself (`_mcp_ir_target:kw:`) is not IR-compiled, which is asserted too, because the
+   exemption is only safe while that holds.
+
+   The seam must really produce IR here, or the second half passes for the wrong reason, so the
+   kinds are asserted before anything that depends on them. Skips where Grail cannot build IR."
+  | checkout ts |
+  checkout := self grailCheckoutOrNil.
+  checkout isNil ifTrue: [^self assert: true].
+  importlib ___irCodegenSupported___ ifFalse: [^self assert: true].
+  ts := self grailToolsetOn: checkout.
+  ts ensureGrailConfigured.
+  self withIrProbeClassesDo: [:classes |
+    | textClass irClass kindOf hits out |
+    textClass := classes at: 1.
+    irClass := classes at: 2.
+    kindOf := [:cls :sel |
+      BaseException pythonPositionKindForMethod: (cls compiledMethodAt: sel environmentId: 1)].
+    self assert: (kindOf value: textClass value: #mcp_ir_caller) equals: #curPos.
+    self assert: (kindOf value: irClass value: #mcp_ir_caller) equals: #irSource.
+    self assert: (kindOf value: irClass value: #mcp_ir_target:) equals: #irSource.
+    self assert: (kindOf value: irClass value: #'_mcp_ir_target:kw:') equals: nil.
+    "As text: three call sites, each placed, none flagged."
+    hits := ts pythonSendersOfName: 'mcp_ir_target' in: textClass.
+    self assert: (hits collect: [:h | Array with: (h at: 1) with: (h at: 3) with: (h at: 5)]) asArray
+      equals: #( #('mcp_ir_caller' 8 nil) #('mcp_ir_caller' 8 nil) #('mcp_ir_target' 4 nil) ).
+    "Direct to IR: one entry per sending method, the recursive one included, each saying why."
+    hits := ts pythonSendersOfName: 'mcp_ir_target' in: irClass.
+    self assert: (hits collect: [:h | Array with: (h at: 1) with: (h at: 3) with: (h at: 5)]) asArray
+      equals: #( #('mcp_ir_caller' nil #irSource) #('mcp_ir_target' nil #irSource) ).
+    "And the tool prints the reason on the line."
+    out := ts tool_find_python_senders: (Dictionary new
+      at: 'name' put: 'mcp_ir_target'; at: 'shapes' put: #( 'compiled' );
+      at: 'scope' put: 'mcp_grail_ir_probe'; yourself).
+    self assert: (self includesCS: 'mcp_grail_ir_probe.McpIrProbe.mcp_ir_target  line ?  [compiled to IR: no call-site positions]  (McpIrProbe>>mcp_ir_target: env 1)' in: out).
+    self assert: (self includesCS: 'compiled 2,' in: out)]
 %
 category: 'tests'
 method: McpGrailToolsetTest
@@ -1506,6 +1562,25 @@ testSenderCoverageNamesAResetClassRegistry
 %
 category: 'tests'
 method: McpGrailToolsetTest
+testSenderLineSaysWhyALineIsAbsentOnlyWhenItKnows
+  "The rendering rule on its own, with no import: a hit whose method was compiled to IR says so in
+   the text column, and any other absent line stays a bare `line ?` -- a source this could not read
+   or place is not a fact about the method, and must not be dressed up as one."
+  | ts ir unplaced placed |
+  ts := McpGrailToolset new.
+  ir := ts senderLineFor: (Array with: 'f' with: #f with: nil with: nil with: #irSource)
+    shape: 'compiled' label: 'm.C' class: Object.
+  self assert: ir equals: (ts shapeTag: 'compiled')
+    , 'm.C.f  line ?  [compiled to IR: no call-site positions]  (Object>>f env 1)'.
+  unplaced := ts senderLineFor: (Array with: 'f' with: #f with: nil with: nil with: nil)
+    shape: 'compiled' label: 'm.C' class: Object.
+  self assert: unplaced equals: (ts shapeTag: 'compiled') , 'm.C.f  line ?  (Object>>f env 1)'.
+  placed := ts senderLineFor: (Array with: 'f' with: #f with: 3 with: '    return g()' with: nil)
+    shape: 'compiled' label: 'm.C' class: Object.
+  self assert: placed equals: (ts shapeTag: 'compiled') , 'm.C.f  line 3  return g()  (Object>>f env 1)'
+%
+category: 'tests'
+method: McpGrailToolsetTest
 testSignatureCarriesEveryParameterKind
   "Every parameter kind reaches the rendered signature: `*args`, `**kwargs`, the `/` that closes a
    positional-only group and the bare `*` that opens a keyword-only one.
@@ -1787,6 +1862,52 @@ withFreshScopeDo: aBlock
     saved isNil
       ifTrue: [SessionTemps current removeKey: #McpGrailScope ifAbsent: [nil]]
       ifFalse: [SessionTemps current at: #McpGrailScope put: saved]]
+%
+category: 'helpers'
+method: McpGrailToolsetTest
+withIrProbeClassesDo: aBlock
+  "Import one small Python class twice -- once compiled as text, once direct to IR -- and answer
+   aBlock valued with {textClass. irClass}, removing every trace of both imports afterwards.
+
+   A FILE AND AN IMPORT, because nothing else reaches the IR path: Grail compiles an eval'd class as
+   text whatever the seam says, and only a module import consults it. The seam is forced rather
+   than inherited from GRAIL_IR_CODEGEN, the way Grail's own PythonCallSitePositionsTestCase does
+   it, since a worker starts with it off and an inherited run would test only the text half. Those
+   seam and registry selectors are Grail's test fixtures, not its public API; a test may lean on
+   them where the toolset may not.
+
+   Both imports are rolled back by Grail's snapshot and restore, not by an abort, so the caller's
+   transaction is left where it was. Nothing here commits."
+  | path f snap textClass irClass |
+  path := '/tmp/mcp_grail_ir_probe.py'.
+  f := GsFile openWriteOnServer: path.
+  self assert: f notNil.
+  f nextPutAll: 'class McpIrProbe:
+    def mcp_ir_target(self, n):
+        if n:
+            return self.mcp_ir_target(n - 1)
+        return 0
+
+    def mcp_ir_caller(self):
+        return self.mcp_ir_target(1) + self.mcp_ir_target(2)
+'; close.
+  snap := importlib ___canonicalRegistrySnapshot___.
+  ^[importlib ___irCodegenForce___: false.
+    textClass := (importlib loadModuleFromPath: path name: 'mcp_grail_text_probe')
+      perform: #__getattribute__: env: 1 withArguments: #('McpIrProbe').
+    importlib ___irCodegenForce___: true.
+    irClass := (importlib loadModuleFromPath: path name: 'mcp_grail_ir_probe')
+      perform: #__getattribute__: env: 1 withArguments: #('McpIrProbe').
+    importlib ___irCodegenEnabledInvalidate___.
+    aBlock value: (Array with: textClass with: irClass)]
+      ensure: [
+        importlib ___irCodegenEnabledInvalidate___.
+        #( #mcp_grail_text_probe #mcp_grail_ir_probe ) do: [:m |
+          (importlib @env1:modules) removeKey: m ifAbsent: [nil]].
+        importlib ___canonicalRegistryRestore___: snap.
+        importlib ___forgetCanonicalModule___: 'mcp_grail_text_probe'.
+        importlib ___forgetCanonicalModule___: 'mcp_grail_ir_probe'.
+        GsFile removeServerFile: path]
 %
 category: 'helpers'
 method: McpGrailToolsetTest
