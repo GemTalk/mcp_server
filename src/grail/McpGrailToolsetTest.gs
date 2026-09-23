@@ -1104,11 +1104,16 @@ testPythonNameOfSelectorDecodesTheWholeEncoding
   "The selector encoding, pinned. Grail generates `name:` plus `_:` per further argument for a fixed
    call, and `_name:kw:` -- one underscore ADDED -- for one taking *args/**kwargs.
 
-   The last two assertions are the ones that matter. Truncating a selector at its first colon is a
-   documented way to invent Python attributes that do not exist (it manufactured `perform`, `value`
-   and `with` on 40 of 42 subjects in Grail's own dir() census), and `_x:kw:` must decode as varargs
-   `x` while `_x:_:` stays the two-argument `_x` -- the `kw:` keyword is the only thing telling them
-   apart."
+   The decoding itself is Grail's since GemTalk/Grail#884; these assertions pin the contract this
+   server depends on rather than an implementation it owns. Truncating a selector at its first colon
+   is a documented way to invent Python attributes that do not exist (it manufactured `perform`,
+   `value` and `with` on 40 of 42 subjects in Grail's own dir() census), and `_x:kw:` must decode as
+   varargs `x` while `_x:_:` stays the two-argument `_x` -- the `kw:` keyword is the only thing
+   telling them apart.
+
+   THE NIL BLOCK IS THE NEW HALF. A decoder that always answers a String has no way to say `no
+   Python name compiles to this`, and every name it invents to avoid saying so can reach a listing
+   or a search result."
   | ts |
   ts := McpGrailToolset new.
   self assert: (ts pythonNameOfSelector: #keys) equals: 'keys'.
@@ -1120,7 +1125,25 @@ testPythonNameOfSelectorDecodesTheWholeEncoding
   self assert: (ts pythonNameOfSelector: #'___getitem__:kw:') equals: '__getitem__'.
   "...but a fixed-arity selector that merely starts with _ keeps its name"
   self assert: (ts pythonNameOfSelector: #'_dict:_:') equals: '_dict'.
-  "and a Grail-internal ___name___ is recognised as such, while a Python dunder is not"
+  "`head:kw:` has no underscore to give back, so it is not the varargs encoding of anything. The
+   decoder this replaced answered `ead` -- it took the first character off without looking at it."
+  self assert: (ts pythonNameOfSelector: #'head:kw:') isNil.
+  "A multi-keyword Smalltalk selector is not a Python call: the fixed-arity form is `name:_:_:`,
+   every keyword after the first being `_:`. The old decoder answered `at`, so a search for the
+   Python name `at` matched #at:put:."
+  self assert: (ts pythonNameOfSelector: #at:put:) isNil.
+  self assert: (ts pythonNameOfSelector: #'x:y:') isNil.
+  "Grail declines its own ___like_this___ slots at every arity, which is what keeps them out of the
+   collecting callers now that #isGrailInternalName: no longer screens decoded names.
+   `___pyCallValue___:kw:` is the case that made this load-bearing: it used to decode to
+   `__pyCallValue___`, which has only TWO leading underscores and so walked straight past that
+   screen."
+  self assert: (ts pythonNameOfSelector: #'___pyCallValue___:kw:') isNil.
+  self assert: (ts pythonNameOfSelector: #'___pySlotIndexFor___:') isNil.
+  self assert: (ts pythonNameOfSelector: #'___pyHasSlots___') isNil.
+  "and a Grail-internal ___name___ is recognised as such, while a Python dunder is not.
+   #isGrailInternalName: still screens the names Grail hands over in ___classBodyOrder___, which are
+   Python names and never went through the decoder."
   self assert: (ts isGrailInternalName: '___methodCodeTable___').
   self deny: (ts isGrailInternalName: '__init__')
 %
@@ -1397,7 +1420,12 @@ testSelectorMatchesAPythonNameByDecodingRatherThanEncoding
   self deny: (ts selector: #'Copyfile:' callsPythonName: 'copyfile').
   self deny: (ts selector: #'copyfile2:' callsPythonName: 'copyfile').
   self deny: (ts selector: #'_copyfile:_:' callsPythonName: 'copyfile').
-  self assert: (ts selector: #'_copyfile:_:' callsPythonName: '_copyfile')
+  self assert: (ts selector: #'_copyfile:_:' callsPythonName: '_copyfile').
+  "A selector that decodes to nothing matches no name at all. Both of these used to match, because
+   the decoder answered a String whatever it was given: #at:put: read as `at` and #head:kw: as
+   `ead`. Nil is equal to no String, so the comparison needs no guard of its own."
+  self deny: (ts selector: #at:put: callsPythonName: 'at').
+  self deny: (ts selector: #'head:kw:' callsPythonName: 'ead')
 %
 category: 'tests'
 method: McpGrailToolsetTest

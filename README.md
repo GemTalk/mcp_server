@@ -472,10 +472,11 @@ worked example for configuring your own.
 > class is not enumerable; a function defined in an `eval` scope compiles to a block with no
 > selector pool; a module whose `.py` nothing has imported has nothing compiled to search; and under
 > `GRAIL_IR_CODEGEN` a method carries the user's Python with no position store, so a hit's line
-> reads `?` rather than a guess. Three public interfaces that would close these gaps are filed as
-> [GemTalk/Grail#883](https://github.com/GemTalk/Grail/issues/883),
-> [#884](https://github.com/GemTalk/Grail/issues/884) and
-> [#885](https://github.com/GemTalk/Grail/issues/885).
+> reads `?` rather than a guess. Two public interfaces that would close these gaps are filed as
+> [GemTalk/Grail#883](https://github.com/GemTalk/Grail/issues/883) and
+> [#885](https://github.com/GemTalk/Grail/issues/885). A third,
+> [#884](https://github.com/GemTalk/Grail/issues/884), has landed: matching a Python name against a
+> generated selector is Grail's own published rule now rather than this server's reading of it.
 >
 > **`tests/python` is excluded by default** — a relevance choice, not a cost one. The stdlib is
 > 1,412 files and 426,131 lines and reads in 248 ms; the fixtures would add about 75 ms. What they
