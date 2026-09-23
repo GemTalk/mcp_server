@@ -650,6 +650,45 @@ _mcp_il.import_module(_mcp_mod_name)']
 %
 category: 'private'
 method: McpGrailToolset
+irMethod: aMethod refersToName: aName
+  "Does aMethod, compiled direct to IR, refer to the Python name aName other than by calling it?
+
+   THE LITERAL FRAME, BECAUSE THERE IS NO TEXT. An IR method's source is the user's Python, so the
+   markers #pythonReferencesOfName:in: matches in generated Smalltalk never occur -- but the names
+   survive as Symbol literals: `g = self.target` leaves #target beside ___pyAttrLoad___:, `g = abs`
+   leaves #abs, `os.path.isdir(p)` leaves #os, #path and #isdir. Measured on 4.0.0.a2 by importing
+   one class both ways and comparing each method's literals with what the text path reports, a
+   Symbol literal that is not a selector the method sends is the same set of names, with ONE
+   exception, excluded below.
+
+   WHAT IS NOT A SYMBOL, and so cannot over-match: an attribute store (`o.x = 1` leaves the String
+   'x' for __setattr__:_:), a `del o.x`, a keyword name (`f(x=1)` leaves 'x' as a PyDict key), a
+   string literal, and a local variable, which leaves nothing at all. A nested def, a lambda and a
+   comprehension compile into the enclosing method's literal frame, so a reference inside one is
+   found, as the text path finds it.
+
+   WHAT IS EXCLUDED. A Symbol in the selector pool is a call, and belongs to the compiled shape
+   (#pythonSendersOfName:in:). And every builtin load looks its module up as `Python at: #builtins`,
+   so #builtins directly after the Python dictionary's association is that lookup's key, not a
+   name the programmer wrote -- `import builtins` is still found, because it loads #builtins from
+   the module instead.
+
+   This answers WHETHER, never where or how often: the literal frame keeps no positions, and a
+   name loaded twice may be stored once or twice."
+  | pool lits python |
+  pool := [aMethod _selectorPool] on: Error do: [:ex | #()].
+  lits := aMethod literals.
+  python := self dictNamed: 'Python'.
+  lits doWithIndex: [:lit :i |
+    ((lit isKindOf: Symbol) and: [lit asString = aName asString]) ifTrue: [
+      ((pool includes: lit)
+        or: [i > 1 and: [((lits at: i - 1) isKindOf: Association)
+          and: [(lits at: i - 1) value == python]]])
+            ifFalse: [^true]]].
+  ^false
+%
+category: 'private'
+method: McpGrailToolset
 isGrailInternalName: aName
   "Whether aName is one of Grail's own ___like_this___ slots rather than something the Python
    programmer wrote. Three underscores each end is the convention, and it matters that the test is
@@ -1149,40 +1188,54 @@ category: 'private'
 method: McpGrailToolset
 pythonReferencesOfName: aName in: aClass
   "Every reference to the Python name aName from aClass's env-1 methods that is NOT a resolvable
-   call, as an OrderedCollection of {containingPythonName. marker. lineOrNil. callSiteTextOrNil.
-   whyNoLineOrNil} -- the shape #pythonSendersOfName:in: answers, whose last slot is always nil here.
+   call, as an OrderedCollection of {containingPythonName. smalltalkSelector. lineOrNil.
+   callSiteTextOrNil. whyNoLineOrNil} -- the shape #pythonSendersOfName:in: answers, so the
+   selector is the containing method's, which is what get_method_source needs to open it.
 
    A first-class reference (`g = abs`, `f = helper`) compiles to a Symbol literal after one of
    #pythonReferenceMarkers, and there is no selector anywhere to find it by -- so this shape cannot
    be answered from the selector pool the way #pythonSendersOfName:in: answers a call. It is text
    matching, and it is bounded by matching the marker first and then parsing the Symbol literal
-   that follows: the name is compared as a whole Symbol, so `absolute` is not a reference to `abs`."
+   that follows: the name is compared as a whole Symbol, so `absolute` is not a reference to `abs`.
+
+   A METHOD COMPILED DIRECT TO IR HAS NO GENERATED SMALLTALK TO MATCH: its source is the user's
+   Python, so no marker ever occurs and the text path answered a confident nothing. Whether it
+   refers to aName is read from its literal frame instead (#irMethod:refersToName:), and it is
+   reported once, with #irSource as the reason it has no line -- the way
+   #pythonSendersOfName:in: reports an IR sender."
   | hits markers |
   hits := OrderedCollection new.
   markers := self pythonReferenceMarkers.
   (aClass selectorsForEnvironment: 1) asSortedCollection do: [:sel |
-    | src ownName stores |
-    src := [aClass sourceCodeAt: sel environmentId: 1] on: Error do: [:ex | nil].
+    | meth src ownName stores |
+    meth := [aClass compiledMethodAt: sel environmentId: 1] on: Error do: [:ex | nil].
     ownName := self pythonNameOfSelector: sel.
     "A selector Grail will not decode is one of its own ___like_this___ slots, not a method the
      Python programmer wrote, so it is not searched -- a hit inside one could only be labelled with
      a name that appears in no source."
-    (src notNil and: [ownName notNil]) ifTrue: [
-      stores := self positionStoresIn: src.
-      markers do: [:marker |
-        | at |
-        at := src findString: marker startingAt: 1.
-        [at > 0] whileTrue: [
-          | after sym |
-          after := at + marker size.
-          [after <= src size and: [(src at: after) isSeparator]] whileTrue: [after := after + 1].
-          sym := self symbolLiteralAt: after in: src.
-          (sym notNil and: [sym = aName asString]) ifTrue: [
-            | pos |
-            pos := self storeInEffectAt: at in: stores.
-            hits add: (Array with: ownName with: marker with: (pos at: 1) with: (pos at: 2)
-              with: nil)].
-          at := src findString: marker startingAt: after]]]].
+    (meth notNil and: [ownName notNil]) ifTrue: [
+      (BaseException pythonPositionKindForMethod: meth) == #irSource
+        ifTrue: [
+          (self irMethod: meth refersToName: aName) ifTrue: [
+            hits add: (Array with: ownName with: sel with: nil with: nil with: #irSource)]]
+        ifFalse: [
+          src := [aClass sourceCodeAt: sel environmentId: 1] on: Error do: [:ex | nil].
+          src notNil ifTrue: [
+            stores := self positionStoresIn: src.
+            markers do: [:marker |
+              | at |
+              at := src findString: marker startingAt: 1.
+              [at > 0] whileTrue: [
+                | after sym |
+                after := at + marker size.
+                [after <= src size and: [(src at: after) isSeparator]] whileTrue: [after := after + 1].
+                sym := self symbolLiteralAt: after in: src.
+                (sym notNil and: [sym = aName asString]) ifTrue: [
+                  | pos |
+                  pos := self storeInEffectAt: at in: stores.
+                  hits add: (Array with: ownName with: sel with: (pos at: 1) with: (pos at: 2)
+                    with: nil)].
+                at := src findString: marker startingAt: after]]]]]].
   ^hits
 %
 category: 'private'
@@ -1750,11 +1803,11 @@ senderLineFor: aHit shape: aShapeLabel label: aLabel class: aClass
    staying put is what lets a reader scan the answer.
 
    WHEN THE REASON IS KNOWN, THE LINE SAYS IT, in the slot the call-site text would take. A method
-   compiled direct to IR (#irSource, see #pythonSendersOfName:in:) reads
-   `line ?  [compiled to IR: no call-site positions]`, because that absence is a fact about the
-   method, is not this tool failing to read something, and means the entry stands for every call
-   the method makes rather than for one. Any other absent line is a source this could not read or
-   place, and stays a bare `line ?`."
+   compiled direct to IR (#irSource, see #pythonSendersOfName:in: and #pythonReferencesOfName:in:)
+   reads `line ?  [compiled to IR: no call-site positions]`, because that absence is a fact about
+   the method, is not this tool failing to read something, and means the entry stands for every
+   call or reference of that kind the method makes rather than for one. Any other absent line is a
+   source this could not read or place, and stays a bare `line ?`."
   | line text |
   line := aHit at: 3.
   text := aHit at: 4.
