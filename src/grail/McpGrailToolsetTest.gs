@@ -380,12 +380,18 @@ testEvalPythonCapturesStderrWrittenThroughASecondSysInstance
    module and warm-binding it from a second session. It is the same object graph -- a sys the
    redirect did not touch -- for none of the cost, and staging it the other way would mean a commit
    and therefore movesTheSessionView. Grail's own SysStreamSessionResolutionTestCase covers the
-   mechanism; this covers the tool."
+   mechanism; this covers the tool.
+
+   `sys` IS IMPORTED, NOT ASSUMED. The snippet used a bare `sys` without importing it, which
+   resolved only because an eval scope could see Grail's implementation classes by name. Since
+   Grail 9022ed03 it cannot -- a NameError, as in CPython -- so the snippet imports the module it
+   means."
   | out |
   out := self withFreshScopeDo: [ | ts |
     ts := self mcp.
     ts pythonScope at: #other put: sys new.
-    ts tool_eval_python: (self oneArg: 'code' value: 'other.stderr.write("from a sys the redirect never touched\n")
+    ts tool_eval_python: (self oneArg: 'code' value: 'import sys
+other.stderr.write("from a sys the redirect never touched\n")
 other is sys')].
   "the write reached the capture buffer, labelled like any other stderr line"
   self assert: (self includesCS: '[stderr] from a sys the redirect never touched' in: out).
