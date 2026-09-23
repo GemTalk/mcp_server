@@ -17,6 +17,15 @@ reasoning has nowhere better to live, not that the entry should grow.
 
 ## Unreleased
 
+* **`find_python_senders` says when a method was compiled direct to IR, and stops losing its
+  recursive calls.** Under `GRAIL_IR_CODEGEN` a method carries no call-site positions, and the
+  search now asks Grail which kind of method it is instead of reading the Python as generated
+  Smalltalk. Such a method is reported once per name it calls, as
+  `line ?  [compiled to IR: no call-site positions]`. A recursive call in one was previously
+  dropped as arity glue. A bare `line ?` now means only that a text-compiled source could not be
+  read or placed. The public position lookup that would place IR hits is filed as
+  [GemTalk/Grail#1137](https://github.com/GemTalk/Grail/issues/1137).
+
 * **`find_python_senders` searches nested and function-local classes.** Its compiled-shape scope
   now comes from `importlib pythonClasses`
   ([GemTalk/Grail#885](https://github.com/GemTalk/Grail/issues/885)) instead of the
