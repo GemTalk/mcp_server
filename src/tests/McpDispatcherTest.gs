@@ -286,19 +286,27 @@ method: McpDispatcherTest
 testUncommittedWorkWarningNamesTheDeadlineWhenOneIsKnown
   "The warning is worth more when it says WHICH deadline is coming and how long is left, and only
    the front end knows that -- so it arrives with the request and the worker renders it. Without one
-   the warning keeps its unqualified form rather than guessing."
-  | srv text |
+   the warning keeps its unqualified form rather than guessing.
+
+   The deadline is an instant and the worker subtracts the clock from it when it renders, so the
+   pass that sets it and reads the warning back is repeated until it fits inside one second of
+   System timeGmt; otherwise 240 seconds ahead reads back as 239 seconds, not 4 minutes."
+  | srv text now attempts |
   System abortTransaction.
   srv := McpServer new.
   UserGlobals at: #McpDispatcherTxnProbe put: 'planted'.
   text := ((((McpDispatcher withToolRegistry: srv toolRegistry server: srv) handle:
     (self toolCall: 'status')) at: 'result') at: 'content') first at: 'text'.
   self assert: (text includesString: 'lost if this session ends first').
-  srv handleJsonString: '{"jsonrpc":"2.0","method":"notifications/initialized"}'
-    lifetimeBounds: (Array with: System timeGmt + 240 with: 'your access credential'
-      with: nil with: nil).
-  text := ((((McpDispatcher withToolRegistry: srv toolRegistry server: srv) handle:
-    (self toolCall: 'status')) at: 'result') at: 'content') first at: 'text'.
+  attempts := 0.
+  [attempts := attempts + 1.
+   now := System timeGmt.
+   srv handleJsonString: '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+     lifetimeBounds: (Array with: now + 240 with: 'your access credential'
+       with: nil with: nil).
+   text := ((((McpDispatcher withToolRegistry: srv toolRegistry server: srv) handle:
+     (self toolCall: 'status')) at: 'result') at: 'content') first at: 'text'.
+   System timeGmt = now or: [attempts >= 5]] whileFalse.
   self assert: (text includesString: 'lost when this session ends: 4 minutes left on your access credential')
 %
 category: 'tests'
