@@ -17,6 +17,13 @@ reasoning has nowhere better to live, not that the entry should grow.
 
 ## Unreleased
 
+* **`eval_python` runs as `__main__`** ([#50](https://github.com/GemTalk/mcp_server/issues/50)).
+  Its namespace was empty, so `__name__` was a `NameError` and a class from `type()` or
+  `Enum('F', 'A B')` had no `__module__` (`repr` read `<class 'T'>`). The toolset is the launcher,
+  as `python -c` or the REPL is in CPython, so a fresh namespace now holds `__name__ = '__main__'`.
+  The `__module__` half needs a Grail that reads `__name__` from the caller's globals
+  (GemTalk/Grail#1134).
+
 * **`find_python_senders` places each reference in a method compiled direct to IR**
   ([#48](https://github.com/GemTalk/mcp_server/issues/48)). A `references` hit there read
   `line ?  [compiled to IR: no call-site positions]`, once per method. Each reference now gets its

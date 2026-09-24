@@ -601,7 +601,8 @@ worked example for configuring your own.
 > visible to the next — `counter = 41`, then `counter + 1` → `42` — because the toolset keeps one
 > module scope per worker gem, and a worker gem is one client. Before that, every call was a blank
 > slate *while imports persisted* (`sys.modules` is session-local), so the surface looked stateful
-> and was not.
+> and was not. A fresh namespace holds `__name__ = '__main__'`, as it would under `python -c`, so
+> `if __name__ == '__main__':` runs and a class from `type()` or `Enum()` belongs to `__main__`.
 >
 > It reports four things rather than one, because they answer different questions: what the code
 > printed to **stdout** (discarding it meant `print(x)` answered `None` and the output was simply

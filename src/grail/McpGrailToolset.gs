@@ -1410,6 +1410,14 @@ pythonScope
    SessionTemps for the life of the worker gem. Per gem means per CLIENT (each MCP session gets its
    own worker), so no client can see or disturb another's bindings.
 
+   It is created holding __name__ = '__main__', because this toolset is the launcher. CPython never
+   assumes code is __main__: `python -c`, the REPL and runpy each run it in a __main__ module whose
+   globals already hold that name, and bare globals get nothing. Grail follows the same rule --
+   type() and the Enum functional API read __module__ from the caller's globals and stamp nothing
+   when there is no __name__ -- so without the seed `print(__name__)` was a NameError and a class
+   from type() had no __module__. A class statement answered '__main__' regardless, from a
+   compile-time default in Grail, which is why only the inferred paths looked broken.
+
    NB the explicit nil test rather than at:otherwise:, whose second argument is a VALUE and not a
    block: written that way this minted a fresh dictionary on every send and stored it, so the
    namespace was destroyed by the very method that was supposed to keep it -- twice per evaluation,
@@ -1418,6 +1426,7 @@ pythonScope
   scope := SessionTemps current at: #McpGrailScope otherwise: nil.
   scope isNil ifTrue: [
     scope := SymbolDictionary new.
+    scope at: #'__name__' put: '__main__'.
     SessionTemps current at: #McpGrailScope put: scope].
   ^scope
 %
