@@ -544,21 +544,29 @@ testLifetimeNoteCountsDownFromAnInstantAndOrdersByWhatComesFirst
    tool call cannot leave it promising time that has already gone. And it puts the nearer bound
    first -- which is not a fixed order, because it inverts: a 33-minute credential outlasts a
    30-minute idle rule when a request arrives and undercuts it six minutes later. Both are always
-   reported, since only one of them fires whatever the client does next."
-  | srv now note |
+   reported, since only one of them fires whatever the client does next.
+
+   System timeGmt counts whole seconds and lifetimeNote reads it again to render, so a second
+   boundary crossed between the two reads leaves 1979 seconds rather than 33 minutes -- and
+   phraseForSeconds: says exactly that. Each pass is repeated until one fits inside a single second;
+   a pass takes milliseconds, so the bound on attempts only ends a runaway."
+  | srv now attempts firstNote laterNote |
   srv := McpServer new.
-  now := System timeGmt.
-  srv handleJsonString: '{"jsonrpc":"2.0","method":"notifications/initialized"}'
-    lifetimeBounds: (Array with: now + 1980 with: 'your access credential'
-      with: 1800 with: 'of inactivity').
-  note := srv lifetimeNote.
-  self assert: (self includesCS: '30 minutes of inactivity, or 33 minutes left' in: note).
-  "the same session six minutes into a call: the credential is now the nearer of the two"
-  srv handleJsonString: '{"jsonrpc":"2.0","method":"notifications/initialized"}'
-    lifetimeBounds: (Array with: now + 1620 with: 'your access credential'
-      with: 1800 with: 'of inactivity').
-  note := srv lifetimeNote.
-  self assert: (self includesCS: '27 minutes left on your access credential, or 30 minutes of inactivity' in: note)
+  attempts := 0.
+  [attempts := attempts + 1.
+   now := System timeGmt.
+   srv handleJsonString: '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+     lifetimeBounds: (Array with: now + 1980 with: 'your access credential'
+       with: 1800 with: 'of inactivity').
+   firstNote := srv lifetimeNote.
+   "the same session six minutes into a call: the credential is now the nearer of the two"
+   srv handleJsonString: '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+     lifetimeBounds: (Array with: now + 1620 with: 'your access credential'
+       with: 1800 with: 'of inactivity').
+   laterNote := srv lifetimeNote.
+   System timeGmt = now or: [attempts >= 5]] whileFalse.
+  self assert: (self includesCS: '30 minutes of inactivity, or 33 minutes left' in: firstNote).
+  self assert: (self includesCS: '27 minutes left on your access credential, or 30 minutes of inactivity' in: laterNote)
 %
 category: 'tools - session'
 method: McpToolTest

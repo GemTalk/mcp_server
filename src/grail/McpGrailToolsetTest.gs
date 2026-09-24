@@ -752,6 +752,61 @@ testFindPythonSendersMatchesWholeNamesOnDiskAndSearchSourceDoesNot
 %
 category: 'tests'
 method: McpGrailToolsetTest
+testFindPythonSendersPlacesEachCallInAMethodCompiledToIR
+  "One Python class, compiled both ways, and the answer has to be the SAME for each:
+   `mcp_ir_caller` calls the target twice in one statement, so twice at line 8, and the recursive
+   call is at line 4.
+
+   AS TEXT, each call is placed from the position store above it. DIRECT TO IR, a method carries the
+   user's Python with no position store, and Grail says so (pythonPositionKindForMethod: answers
+   #irSource), so each call is placed from the kernel's send offsets instead -- see
+   #irCallSitesIn:forSelector:. Before that, an IR method was one unplaced entry per selector it
+   sent, which folded the two calls on line 8 into one; and before THAT, reading its Python as
+   generated Smalltalk dropped the recursive call, because a call with no position in a method of
+   the very name searched for is the rule that recognises arity glue. IR methods are exempt from
+   that rule, which is only safe while the glue itself (`_mcp_ir_target:kw:`) is not IR-compiled --
+   asserted too.
+
+   The seam must really produce IR here, or the second half passes for the wrong reason, so the
+   kinds are asserted before anything that depends on them. Skips where Grail cannot build IR."
+  | checkout ts |
+  checkout := self grailCheckoutOrNil.
+  checkout isNil ifTrue: [^self assert: true].
+  importlib ___irCodegenSupported___ ifFalse: [^self assert: true].
+  ts := self grailToolsetOn: checkout.
+  ts ensureGrailConfigured.
+  self withIrProbeClassesDo: [:classes |
+    | textClass irClass kindOf expected hits out |
+    textClass := classes at: 1.
+    irClass := classes at: 2.
+    kindOf := [:cls :sel |
+      BaseException pythonPositionKindForMethod: (cls compiledMethodAt: sel environmentId: 1)].
+    self assert: (kindOf value: textClass value: #mcp_ir_caller) equals: #curPos.
+    self assert: (kindOf value: irClass value: #mcp_ir_caller) equals: #irSource.
+    self assert: (kindOf value: irClass value: #mcp_ir_target:) equals: #irSource.
+    self assert: (kindOf value: irClass value: #'_mcp_ir_target:kw:') equals: nil.
+    expected := #( #('mcp_ir_caller' 8 nil) #('mcp_ir_caller' 8 nil) #('mcp_ir_target' 4 nil) ).
+    "As text: three call sites, each placed, none flagged."
+    hits := ts pythonSendersOfName: 'mcp_ir_target' in: textClass.
+    self assert: (hits collect: [:h | Array with: (h at: 1) with: (h at: 3) with: (h at: 5)]) asArray
+      equals: expected.
+    "Direct to IR: the same three, the recursive one included, with the Python line as their text."
+    hits := ts pythonSendersOfName: 'mcp_ir_target' in: irClass.
+    self assert: (hits collect: [:h | Array with: (h at: 1) with: (h at: 3) with: (h at: 5)]) asArray
+      equals: expected.
+    self assert: (hits at: 1) equals: (hits at: 2).
+    self assert: ((hits at: 1) at: 4) equals: '        return self.mcp_ir_target(1) + self.mcp_ir_target(2)'.
+    self assert: ((hits at: 3) at: 4) equals: '            return self.mcp_ir_target(n - 1)'.
+    "And the tool prints the IR hits placed, with no reason attached."
+    out := ts tool_find_python_senders: (Dictionary new
+      at: 'name' put: 'mcp_ir_target'; at: 'shapes' put: #( 'compiled' );
+      at: 'scope' put: 'mcp_grail_ir_probe'; yourself).
+    self assert: (self includesCS: 'mcp_grail_ir_probe.McpIrProbe.mcp_ir_target  line 4  return self.mcp_ir_target(n - 1)  (McpIrProbe>>mcp_ir_target: env 1)' in: out).
+    self deny: (self includesCS: 'compiled to IR' in: out).
+    self assert: (self includesCS: 'compiled 3,' in: out)]
+%
+category: 'tests'
+method: McpGrailToolsetTest
 testFindPythonSendersReachesNestedAndFunctionLocalClasses
   "The coverage this toolset could not have before Grail enumerated its own classes.
 
@@ -830,56 +885,6 @@ testFindPythonSendersRefusesWhatItCannotDoRatherThanAnsweringNothing
 %
 category: 'tests'
 method: McpGrailToolsetTest
-testFindPythonSendersSaysAMethodCompiledToIRHasNoPositions
-  "One Python class, compiled both ways, and the answer has to be right for each.
-
-   AS TEXT, every call is placed: `mcp_ir_caller` calls the target twice in one statement, so twice
-   at line 8, and the recursive call is at line 4.
-
-   DIRECT TO IR, a method carries the user's Python with no position store, and Grail says so
-   (pythonPositionKindForMethod: answers #irSource). Before that was asked, the search read the
-   Python as though it were generated Smalltalk: it found the two calls in `mcp_ir_caller` by luck
-   and without a line, and it DROPPED the recursive call, because a call with no position in a
-   method of the very name searched for is the rule that recognises arity glue. Now each IR method
-   is one entry per selector it sends, says why its line is absent, and is never taken for glue --
-   the glue itself (`_mcp_ir_target:kw:`) is not IR-compiled, which is asserted too, because the
-   exemption is only safe while that holds.
-
-   The seam must really produce IR here, or the second half passes for the wrong reason, so the
-   kinds are asserted before anything that depends on them. Skips where Grail cannot build IR."
-  | checkout ts |
-  checkout := self grailCheckoutOrNil.
-  checkout isNil ifTrue: [^self assert: true].
-  importlib ___irCodegenSupported___ ifFalse: [^self assert: true].
-  ts := self grailToolsetOn: checkout.
-  ts ensureGrailConfigured.
-  self withIrProbeClassesDo: [:classes |
-    | textClass irClass kindOf hits out |
-    textClass := classes at: 1.
-    irClass := classes at: 2.
-    kindOf := [:cls :sel |
-      BaseException pythonPositionKindForMethod: (cls compiledMethodAt: sel environmentId: 1)].
-    self assert: (kindOf value: textClass value: #mcp_ir_caller) equals: #curPos.
-    self assert: (kindOf value: irClass value: #mcp_ir_caller) equals: #irSource.
-    self assert: (kindOf value: irClass value: #mcp_ir_target:) equals: #irSource.
-    self assert: (kindOf value: irClass value: #'_mcp_ir_target:kw:') equals: nil.
-    "As text: three call sites, each placed, none flagged."
-    hits := ts pythonSendersOfName: 'mcp_ir_target' in: textClass.
-    self assert: (hits collect: [:h | Array with: (h at: 1) with: (h at: 3) with: (h at: 5)]) asArray
-      equals: #( #('mcp_ir_caller' 8 nil) #('mcp_ir_caller' 8 nil) #('mcp_ir_target' 4 nil) ).
-    "Direct to IR: one entry per sending method, the recursive one included, each saying why."
-    hits := ts pythonSendersOfName: 'mcp_ir_target' in: irClass.
-    self assert: (hits collect: [:h | Array with: (h at: 1) with: (h at: 3) with: (h at: 5)]) asArray
-      equals: #( #('mcp_ir_caller' nil #irSource) #('mcp_ir_target' nil #irSource) ).
-    "And the tool prints the reason on the line."
-    out := ts tool_find_python_senders: (Dictionary new
-      at: 'name' put: 'mcp_ir_target'; at: 'shapes' put: #( 'compiled' );
-      at: 'scope' put: 'mcp_grail_ir_probe'; yourself).
-    self assert: (self includesCS: 'mcp_grail_ir_probe.McpIrProbe.mcp_ir_target  line ?  [compiled to IR: no call-site positions]  (McpIrProbe>>mcp_ir_target: env 1)' in: out).
-    self assert: (self includesCS: 'compiled 2,' in: out)]
-%
-category: 'tests'
-method: McpGrailToolsetTest
 testFindsTheRealSendersOfAPythonMethodNotGrailsArityGlue
   "The measurement the whole tool exists for, against a module in Grail's own stdlib.
 
@@ -895,6 +900,12 @@ testFindsTheRealSendersOfAPythonMethodNotGrailsArityGlue
    The counts are exact on purpose: 12 hits, every one carrying a position, is what says the scan
    neither missed a call nor invented one. An earlier substring-matching version of this reported
    27 for the same class (see #testCallSitesIgnoreLiteralsCommentsAndLongerNames).
+
+   It holds on EITHER codegen path, and this test does not choose one: the module is compiled the
+   way Grail compiles it by default, which since GemTalk/Grail#1087 is direct to IR. On that path
+   `iter(self._dict())` sends `_dict` twice at one offset -- the builtin's global-shadow probe -- so
+   the exact count also says that twin is one call there, as the ___GRAILPOS___ trailer makes it one
+   on the text path. #testFindPythonSendersPlacesEachCallInAMethodCompiledToIR forces each path.
 
    And `_dict` must NOT be among the senders. Grail compiles each def twice -- a fixed-arity fast
    path holding the body, and a varargs entry point that checks the argument count and delegates --
@@ -912,10 +923,9 @@ testFindsTheRealSendersOfAPythonMethodNotGrailsArityGlue
   names := (hits collect: [:h | h at: 1]) asSortedCollection asArray.
   self assert: names equals: #( '__contains__' '__delitem__' '__getitem__' '__iter__' '__len__'
     '__setitem__' 'clear' 'get' 'items' 'keys' 'pop' 'values' ).
-  "Every one is positioned -- nothing degraded to an unplaced hit on a module Grail compiles from
-   text."
+  "Every one is positioned -- nothing degraded to an unplaced hit, whichever path compiled it."
   self assert: (hits select: [:h | (h at: 3) isNil]) isEmpty.
-  "The Python line and the call-site text come from the position literal, not from the .py."
+  "The Python line and the call-site text come from what the method carries, not from the .py."
   contains := hits detect: [:h | (h at: 1) = '__contains__'].
   self assert: (contains at: 3) equals: 55.
   self assert: (contains at: 4) equals: '        return key in self._dict()'.
@@ -1080,6 +1090,24 @@ testGrailToolsetIsExposedOnlyWhenNamed
   self assert: ((McpRouter new toolsetNames: McpServer defaultToolsetNames , #('McpGrailToolset'))
     effectiveToolsetNames includes: 'McpGrailToolset').
   self assert: (self grailServer allToolNames includes: 'eval_python')
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testIrCallSitesDoNotGuessALineGrailDoesNotVouchFor
+  "A send the kernel locates, on a line Grail's public positions do not name, is reported UNPLACED
+   rather than at the line the offset was counted to -- the fallback for an IR source whose layout
+   is not the one #irCallSitesIn:forSelector: expects.
+
+   A plain Smalltalk method stands in for that source, with no import: the kernel answers its send
+   offsets as for any method, and Grail answers no positions for a method that is not Python. One
+   entry per distinct offset, and none for a selector the method does not send."
+  | ts meth sites |
+  ts := McpGrailToolset new.
+  meth := McpGrailToolset compiledMethodAt: #shapeTag:.
+  sites := ts irCallSitesIn: meth forSelector: #nextPutAll:.
+  self assert: sites asArray equals: #( #(nil nil) ).
+  sites := ts irCallSitesIn: meth forSelector: #noSuchSelectorSentHere.
+  self assert: sites isEmpty
 %
 category: 'tests'
 method: McpGrailToolsetTest
