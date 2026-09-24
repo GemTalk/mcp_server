@@ -70,7 +70,7 @@ testBootstrapBuildsTheNamedSubclassWithItsNamedToolsets
   self withFreshWorkerCacheDo: [ | note out |
     note := McpFixtureServer
       prepareWorkerWithToolsets: #('McpFixtureToolset') options: nil
-      serverName: nil title: nil version: nil frontEnd: nil cacheName: nil.
+      serverName: nil title: nil version: nil instructions: nil frontEnd: nil cacheName: nil.
     self assert: (self includesCS: 'McpFixtureServer ready' in: note).
     out := McpFixtureServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'.
     self assert: (self includesCS: 'fixture_echo' in: out).
@@ -83,10 +83,11 @@ testBootstrapBuildsTheNamedSubclassWithItsNamedToolsets
   self withFreshWorkerCacheDo: [ | out |
     McpFixtureServer prepareWorkerWithToolsets: #('McpFixtureToolset') options: nil
       serverName: 'billing-mcp' title: 'Billing - staging' version: '1.1.1'
-      frontEnd: nil cacheName: nil.
+      instructions: 'Billing tools only.' frontEnd: nil cacheName: nil.
     out := McpFixtureServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'.
     self assert: (self includesCS: 'billing-mcp' in: out).
     self assert: (self includesCS: 'Billing - staging' in: out).
+    self assert: (self includesCS: '"instructions":"Billing tools only."' in: out).
     self deny: (self includesCS: 'fixture-mcp' in: out)]
 %
 category: 'tests - composition'
@@ -200,6 +201,27 @@ testOptionsSurviveTheConfigRoundTripAndTheForkString
   self assert: (self includesCS: 'options: ' in: expr).
   self assert: (self includesCS: 'echoPrefix' in: expr).
   self assert: (self includesCS: 'thru> ' in: expr)
+%
+category: 'tests - worker class'
+method: McpExtensionTest
+testRouterCarriesInstructionsToTheSessionAsOneLiteral
+  "Instructions are the one bootstrap argument that is PROSE -- several paragraphs, apostrophes
+   included -- so they are where a quoting mistake would show: an unescaped quote closes the literal
+   and the rest of the text is compiled as code in the worker. Evaluating the literal the expression
+   carries must give back the text exactly, line feeds and all."
+  | r sess text expr start literal |
+  text := 'Acme''s label database.' , (String with: Character lf) , 'It''s read-only.'.
+  r := McpRouter new.
+  r toolsetNames: #('McpFixtureToolset'); serverInstructions: text.
+  sess := r openSessionCreating: [:id | McpStubSession new].
+  expr := sess workerBootstrapExpression.
+  literal := text printString.
+  self assert: (self includesCS: ' instructions: ' , literal , ' frontEnd: ' in: expr).
+  start := (expr indexOfSubCollection: ' instructions: ') + ' instructions: ' size.
+  self assert: (expr copyFrom: start to: start + literal size - 1) evaluate equals: text.
+  "unconfigured, nil travels -- the worker's own default, not an empty text"
+  sess := McpRouter new openSessionCreating: [:id | McpStubSession new].
+  self assert: (self includesCS: ' instructions: nil ' in: sess workerBootstrapExpression)
 %
 category: 'tests - worker class'
 method: McpExtensionTest

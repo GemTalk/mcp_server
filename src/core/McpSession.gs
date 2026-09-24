@@ -6,12 +6,12 @@ Object subclass: 'McpSession'
   instVarNames: #( id worker workerMutex
                     lastActivitySeconds userId workerClassName toolsetNames
                     toolsetOptions serverName serverTitle serverVersion
-                    workerPid workerStoneSession outbox startedAtSeconds
-                    expiresAtSeconds quietProbes unansweredProbes streamlessPasses
-                    passesSinceProbe streamClosedByClient requestTimeoutSeconds workerAbandoned
-                    inFlightRequestId cancelRequested waitAction commitsBehind
-                    maintenanceCallTimeoutSeconds stuckViewPasses stuckViewReason pinnedViewPasses
-                    viewReleaseRequested)
+                    serverInstructions workerPid workerStoneSession outbox
+                    startedAtSeconds expiresAtSeconds quietProbes unansweredProbes
+                    streamlessPasses passesSinceProbe streamClosedByClient requestTimeoutSeconds
+                    workerAbandoned inFlightRequestId cancelRequested waitAction
+                    commitsBehind maintenanceCallTimeoutSeconds stuckViewPasses stuckViewReason
+                    pinnedViewPasses viewReleaseRequested)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -849,6 +849,12 @@ secondsUntilExpiry
 %
 category: 'accessing'
 method: McpSession
+serverInstructions: aStringOrNil
+  "The initialize instructions this worker should send (nil = the worker's own default, '' = none)."
+  serverInstructions := aStringOrNil
+%
+category: 'accessing'
+method: McpSession
 serverName: aStringOrNil
   "The serverInfo name this worker should advertise (nil = the worker's own default)."
   serverName := aStringOrNil
@@ -1054,8 +1060,10 @@ workerBootstrapExpression
    named, so the worker instantiates what it is told rather than choosing for itself. Names are plain
    identifiers (McpRouter validated them when the router was configured) and the strings are embedded
    via printString, so this cannot smuggle anything into the worker's compiler. That printString is
-   load-bearing for the title in particular: unlike a name or a version it is free-form operator prose,
-   so quotes in it must be doubled rather than closing the literal.
+   load-bearing for the title and the instructions in particular: unlike a name or a version they are
+   free-form operator prose, so quotes in them must be doubled rather than closing the literal. The
+   instructions are also the one argument long enough to meet the compiler's limit on a single string
+   literal (about 100,000 characters), which is why McpRouter>>serverInstructions: caps them.
 
    The toolset options travel as ONE printString-quoted JSON string, which the worker parses
    (McpServer class>>prepareWorkerWithToolsets:options:...). They are the only argument here whose
@@ -1074,6 +1082,7 @@ workerBootstrapExpression
     , ' serverName: ' , (serverName isNil ifTrue: ['nil'] ifFalse: [serverName printString])
     , ' title: ' , (serverTitle isNil ifTrue: ['nil'] ifFalse: [serverTitle printString])
     , ' version: ' , (serverVersion isNil ifTrue: ['nil'] ifFalse: [serverVersion printString])
+    , ' instructions: ' , (serverInstructions isNil ifTrue: ['nil'] ifFalse: [serverInstructions printString])
     , ' frontEnd: ' , System session printString
     , ' cacheName: ' , self workerCacheName printString
 %

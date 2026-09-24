@@ -17,6 +17,14 @@ reasoning has nowhere better to live, not that the entry should grow.
 
 ## Unreleased
 
+* **A deployment can replace the server's `instructions`.** The stock `initialize` instructions
+  name the transaction tools, so a router whose `toolsetNames` leave those tools out told the model
+  about tools it did not have. They are now router config: `McpRouter>>serverInstructions:` (or
+  `MCP_INSTRUCTIONS_FILE` in `run-server.sh` / `run-auth-server.sh`). The value replaces the class
+  default, `''` sends none, and anything over 32,768 characters is refused where it is configured.
+  **Breaking:** the worker bootstrap selector is now
+  `prepareWorkerWithToolsets:options:serverName:title:version:instructions:frontEnd:cacheName:`.
+
 * **`find_python_senders` finds first-class references in methods compiled direct to IR.** The
   `references` shape matched markers in generated Smalltalk, which an IR method does not have, so
   `g = self.helper` there answered nothing without saying it could not look. It now reads the

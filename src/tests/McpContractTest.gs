@@ -212,7 +212,7 @@ testPrepareWorkerBuildsNamedSurfaceAndCaches
   self withFreshWorkerCacheDo: [ | note listed |
     note := McpServer
       prepareWorkerWithToolsets: #('McpBrowsingToolset') options: nil
-      serverName: 'acme-db-mcp' title: 'Acme Labels - sandbox' version: '2.5.0'
+      serverName: 'acme-db-mcp' title: 'Acme Labels - sandbox' version: '2.5.0' instructions: nil
       frontEnd: nil cacheName: nil.
     self assert: (self includesCS: 'McpServer ready' in: note).
     listed := (((McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
@@ -289,6 +289,27 @@ testServerInfoFollowsDeploymentConfig
   info := ((dsp handle: (self request: 'initialize' params: Dictionary new)) at: 'result')
     at: 'serverInfo'.
   self deny: (info includesKey: 'title')
+%
+category: 'tests - identity'
+method: McpContractTest
+testServerInstructionsFollowDeploymentConfig
+  "The initialize instructions take the same precedence as serverInfo: a deployment's text replaces
+   the class default, and nil brings the default back. The third state is the one serverInfo has no
+   counterpart for -- an EMPTY text means send none, and none is an ABSENT key, never an empty or
+   null one. Asked through a dispatcher built before the text is set, so this also pins that it asks
+   rather than caching."
+  | s dsp result |
+  s := McpServer new.
+  dsp := McpDispatcher withToolRegistry: s toolRegistry server: s.
+  s serverInstructions: 'Acme label database. Read-only.'.
+  result := (dsp handle: (self request: 'initialize' params: Dictionary new)) at: 'result'.
+  self assert: (result at: 'instructions') equals: 'Acme label database. Read-only.'.
+  s serverInstructions: ''.
+  result := (dsp handle: (self request: 'initialize' params: Dictionary new)) at: 'result'.
+  self deny: (result includesKey: 'instructions').
+  s serverInstructions: nil.
+  result := (dsp handle: (self request: 'initialize' params: Dictionary new)) at: 'result'.
+  self assert: (result at: 'instructions') equals: McpServer defaultServerInstructions
 %
 category: 'tests - errors'
 method: McpContractTest

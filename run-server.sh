@@ -101,6 +101,13 @@
 #                     "GemStone - staging (gs64stone)". Empty means no title at all: the key is
 #                     omitted and clients display the server name. Use this -- not a relabeled
 #                     serverName -- to tell two deployments of the same software apart.
+#   MCP_INSTRUCTIONS_FILE - a UTF-8 text file whose contents REPLACE the initialize instructions
+#                     (McpRouter>>serverInstructions:). Unset sends the stock text, which explains
+#                     the transaction and names the tools that manage it -- so set this when
+#                     MCP_TOOLSETS narrows the surface past those tools. An EMPTY file (or /dev/null)
+#                     sends no instructions at all. Capped at 32768 characters
+#                     (McpRouter class>>maxServerInstructionsSize). A relative path is taken from the
+#                     directory you ran this script in.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -114,6 +121,7 @@ MCP_TOOLSETS="${MCP_TOOLSETS:-}"
 MCP_GRAIL_DIR="${MCP_GRAIL_DIR:-}"
 MCP_TOOLSET_OPTIONS="${MCP_TOOLSET_OPTIONS:-}"
 MCP_TITLE="${MCP_TITLE:-}"
+MCP_INSTRUCTIONS_FILE="${MCP_INSTRUCTIONS_FILE:-}"
 MCP_TRACE="${MCP_TRACE:-0}"
 MCP_TRACE_LIMIT="${MCP_TRACE_LIMIT:-}"
 
@@ -218,6 +226,20 @@ fi
 if [ -n "$MCP_TITLE" ]; then
   CONFIG="$CONFIG
 r serverTitle: '$(printf '%s' "$MCP_TITLE" | sed "s/'/''/g")'."
+fi
+# Instructions come from a FILE, not a variable: they run to paragraphs, and pasted into the heredoc
+# below, any line holding a lone % would end the run block. The launching gem reads the file, and the
+# text then travels in the fork string like every other setting -- no front end or worker reads it.
+# The script has cd'd to its own directory, so a relative path is resolved against the caller's.
+if [ -n "$MCP_INSTRUCTIONS_FILE" ]; then
+  case "$MCP_INSTRUCTIONS_FILE" in /*) ;; *) MCP_INSTRUCTIONS_FILE="$OLDPWD/$MCP_INSTRUCTIONS_FILE" ;; esac
+  if [ -d "$MCP_INSTRUCTIONS_FILE" ] || [ ! -r "$MCP_INSTRUCTIONS_FILE" ]; then
+    echo "error: MCP_INSTRUCTIONS_FILE=$MCP_INSTRUCTIONS_FILE is not a readable file." >&2
+    exit 1
+  fi
+  CONFIG="$CONFIG
+r serverInstructions: (GsFile getContentsOfServerFile: '$(printf '%s' "$MCP_INSTRUCTIONS_FILE" | sed "s/'/''/g")')
+  decodeFromUTF8ToUnicode."
 fi
 if [ -n "$MCP_WORKER_USER" ]; then
   # Doubled quotes rather than rejected characters: a userId is an identifier, but this is the same

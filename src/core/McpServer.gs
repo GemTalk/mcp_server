@@ -4,9 +4,9 @@ expectvalue /Class
 doit
 McpBase subclass: 'McpServer'
   instVarNames: #( dispatcher toolRegistry toolsets
-                    serverName serverTitle serverVersion lifetimeBounds
-                    readLedger writeLedger staleReadKeys frontEndRefreshedView
-                    frontEndDoomedSubjects)
+                    serverName serverTitle serverVersion serverInstructions
+                    lifetimeBounds readLedger writeLedger staleReadKeys
+                    frontEndRefreshedView frontEndDoomedSubjects)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -32,7 +32,7 @@ Which tools a server offers is NOT fixed by its class: each server registers a l
 instances (see McpToolset), so a deployment -- or a vendor shipping only their own tools -- chooses the
 surface. The front end resolves both the worker class and the toolset list per session and pushes them
 into the worker gem in one call
-(prepareWorkerWithToolsets:options:serverName:title:version:frontEnd:cacheName:), so a
+(prepareWorkerWithToolsets:options:serverName:title:version:instructions:frontEnd:cacheName:), so a
 worker never decides what it is. Subclass this to change BEHAVIOR (the worker entry, dispatcher
 wiring, the advertised identity); write a toolset to add tools. A subclass is used only when it is
 NAMED in the router''s workerClassName config.
@@ -88,8 +88,9 @@ currentServer
 category: 'identity'
 classmethod: McpServer
 defaultServerInstructions
-  "The `instructions` a stock GemStone MCP server sends in its initialize result, and the hook A
-   PRODUCT OVERRIDES to describe its own surface. MCP calls this a hint to the model rather than
+  "The `instructions` a stock GemStone MCP server sends in its initialize result when its deployment
+   configures none (McpRouter>>serverInstructions:), and the hook A PRODUCT OVERRIDES to describe its
+   own surface. MCP calls this a hint to the model rather than
    documentation for a person, so it says the things a model cannot work out by reading tool
    descriptions one at a time: what a session IS here, and which of its properties outlive a call.
 
@@ -98,6 +99,10 @@ defaultServerInstructions
    part that spans calls, because no single tool's description is the right place to explain that a
    change made by one call is still there for the next -- and the terse '[session]' line the server
    appends to results (McpDispatcher>>transactionNote) is unintelligible without it.
+
+   It NAMES TOOLS -- commit, abort, refresh and the image-changing ones -- so it is true only of a
+   surface that offers them. A deployment that narrows its toolset list past them should configure
+   instructions of its own rather than let the model be told about tools it does not have.
 
    Kept short on purpose: it is prepended to the model's context for the whole conversation, so
    every sentence competes with the client's own prompt for attention."
@@ -254,7 +259,7 @@ newWithToolsetNames: anArrayOfNames toolsetOptions: aDictOrNil
 %
 category: 'worker'
 classmethod: McpServer
-prepareWorkerWithToolsets: anArrayOfNames options: anOptionsJsonOrNil serverName: aNameOrNil title: aTitleOrNil version: aVersionOrNil frontEnd: aFrontEndSessionOrNil cacheName: aCacheNameOrNil
+prepareWorkerWithToolsets: anArrayOfNames options: anOptionsJsonOrNil serverName: aNameOrNil title: aTitleOrNil version: aVersionOrNil instructions: anInstructionsOrNil frontEnd: aFrontEndSessionOrNil cacheName: aCacheNameOrNil
   "Prepare THIS worker gem for one client, in the single call the front end makes at session open
    (McpSession>>prepareWorker). Sent to the class the front end NAMED, so `self` is the server class to
    build -- a worker never chooses.
@@ -275,6 +280,9 @@ prepareWorkerWithToolsets: anArrayOfNames options: anOptionsJsonOrNil serverName
    as JSON cannot travel, which is exactly the constraint the fork string needs anyway. nil means no
    toolset was configured, which is the ordinary case.
 
+   anInstructionsOrNil is the deployment's initialize `instructions`: nil for the class default, an
+   empty string for none (see serverInstructions).
+
    aCacheNameOrNil is what this gem calls itself in the shared cache, built by the front end
    (McpSession>>workerCacheName) because it names the front end and the client. Applied FIRST, before
    anything that can fail: a bootstrap that dies on an unresolvable toolset is exactly when an
@@ -286,7 +294,8 @@ prepareWorkerWithToolsets: anArrayOfNames options: anOptionsJsonOrNil serverName
   SessionTemps current at: #McpFrontEndSession put: aFrontEndSessionOrNil.
   srv := self newWithToolsetNames: anArrayOfNames
     toolsetOptions: (anOptionsJsonOrNil isNil ifTrue: [nil] ifFalse: [self parseBody: anOptionsJsonOrNil]).
-  srv serverName: aNameOrNil; serverTitle: aTitleOrNil; serverVersion: aVersionOrNil.
+  srv serverName: aNameOrNil; serverTitle: aTitleOrNil; serverVersion: aVersionOrNil;
+    serverInstructions: anInstructionsOrNil.
   SessionTemps current at: #McpServer put: srv.
   ^self name asString , ' ready: ' , srv toolRegistry descriptors size printString , ' tool(s)'
 %
@@ -851,11 +860,25 @@ revalidateReadLedger
 category: 'identity'
 method: McpServer
 serverInstructions
-  "The instructions to send in the initialize result, or nil to send none. Answers the class
-   default (defaultServerInstructions), which is where a product overrides them -- there is no
-   router-config path for these the way there is for serverName/serverTitle, because they describe
-   how the SOFTWARE behaves rather than which instance this is."
-  ^self class defaultServerInstructions
+  "The instructions to send in the initialize result, or nil to send none.
+   Same precedence as serverName: a DEPLOYMENT's router config (the ivar, set by the worker bootstrap
+   through serverInstructions:) beats the class default, and a product describes its own surface by
+   overriding that default (defaultServerInstructions) -- so a subclass's text stays replaceable per
+   deployment. Config has to be able to win because the instructions depend on the TOOL SURFACE, and
+   the deployment is what chooses that (McpRouter>>toolsetNames:): the stock text names tools a
+   narrowed surface may not offer.
+   An EMPTY string in config means send none. It is the one way to say so, since nil already means
+   'the default', and an empty `instructions` would tell a client nothing -- so the key is omitted
+   instead, exactly as it is for a nil default (McpDispatcher>>initializeResultFor:)."
+  serverInstructions isNil ifTrue: [^self class defaultServerInstructions].
+  ^serverInstructions isEmpty ifTrue: [nil] ifFalse: [serverInstructions]
+%
+category: 'identity'
+method: McpServer
+serverInstructions: aStringOrNil
+  "This deployment's initialize instructions, pushed by the worker bootstrap from router config:
+   nil for the class default, an empty string for none. See serverInstructions."
+  serverInstructions := aStringOrNil
 %
 category: 'identity'
 method: McpServer
