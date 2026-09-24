@@ -187,7 +187,15 @@ jobs:
   all-checks-passed:
     name: "All Checks Passed"
     needs: [lint-workflows, test]
+    # This is the only check the ruleset requires, and GitHub counts a skipped required check as
+    # passing. Without always() a failed dependency skips this job and the merge queue merges anyway.
+    if: always()
     runs-on: ubuntu-latest
     steps:
+      - name: Fail unless every needed job succeeded
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: |
+          echo "lint-workflows: ${{ needs.lint-workflows.result }}, test: ${{ needs.test.result }}"
+          exit 1
       - name: Success
         run: echo "All required checks have completed successfully!"
