@@ -17,6 +17,14 @@ reasoning has nowhere better to live, not that the entry should grow.
 
 ## Unreleased
 
+* **`find_python_senders` places each call in a method compiled direct to IR.** IR became Grail's
+  default in [GemTalk/Grail#1087](https://github.com/GemTalk/Grail/pull/1087), which turned most
+  compiled hits into `line ?  [compiled to IR: no call-site positions]`, one per name a method
+  called, so two calls on one line read as one. Each call now gets its own hit with its Python line
+  and text, the same answer the text path gives. The line comes from the kernel's send offsets,
+  checked against `BaseException pythonPositionsForMethod:`. A reference hit in an IR method still
+  has no position.
+
 * **`find_python_senders` finds first-class references in methods compiled direct to IR.** The
   `references` shape matched markers in generated Smalltalk, which an IR method does not have, so
   `g = self.helper` there answered nothing without saying it could not look. It now reads the
@@ -30,13 +38,11 @@ reasoning has nowhere better to live, not that the entry should grow.
   selector, as a compiled hit always has.
 
 * **`find_python_senders` says when a method was compiled direct to IR, and stops losing its
-  recursive calls.** Under `GRAIL_IR_CODEGEN` a method carries no call-site positions, and the
+  recursive calls.** Under `GRAIL_IR_CODEGEN` a method carries no position store, and the
   search now asks Grail which kind of method it is instead of reading the Python as generated
-  Smalltalk. Such a method is reported once per name it calls, as
-  `line ?  [compiled to IR: no call-site positions]`. A recursive call in one was previously
-  dropped as arity glue. A bare `line ?` now means only that a text-compiled source could not be
-  read or placed. The public position lookup that would place IR hits is filed as
-  [GemTalk/Grail#1137](https://github.com/GemTalk/Grail/issues/1137).
+  Smalltalk; its calls are now placed (see above). A recursive call in one was previously dropped
+  as arity glue. A bare `line ?` now means only that a text-compiled source could not be read or
+  placed.
 
 * **`find_python_senders` searches nested and function-local classes.** Its compiled-shape scope
   now comes from `importlib pythonClasses`

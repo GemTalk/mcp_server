@@ -184,7 +184,8 @@ callSitesIn: aSourceString forSelector: aSelector
    is an ABSENT position rather than a wrong one, and a hit whose line is nil still names the method
    it is in, which is the part a caller can get nowhere else. A method compiled direct to IR never
    reaches this: its source is the user's Python, none of these rules apply to it, and
-   #pythonSendersOfName:in: asks Grail for the method's kind before calling this."
+   #pythonSendersOfName:in: asks Grail for the method's kind and sends such a method to
+   #irCallSitesIn:forSelector: instead."
   | stores spans seen key sites i size c inString inComment |
   stores := self positionStoresIn: aSourceString.
   spans := self grailPositionSpansIn: aSourceString.
@@ -647,6 +648,59 @@ importPythonModuleNamed: aName
     self evaluatePython: 'import importlib as _mcp_il
 _mcp_il.import_module(_mcp_mod_name)']
     on: Error, BaseException do: [:ex | nil]
+%
+category: 'private'
+method: McpGrailToolset
+irCallSitesIn: aMethod forSelector: aSelector
+  "Where the sends of aSelector are in aMethod, a method compiled direct to IR, as an
+   OrderedCollection of {pythonLineOrNil. callSiteTextOrNil} -- one entry per Python call, in source
+   order. The same answer #callSitesIn:forSelector: gives for a method Grail compiled as text.
+
+   THE KERNEL ALREADY KNOWS WHERE EACH SEND IS. GsNMethod>>_sourceOffsetsOfSends answers an
+   {offset. selector} pair for every send site, blocks included, from the debug info the debugger
+   highlights a step with. In a text-compiled method that offset is into generated Smalltalk; an IR
+   method's attached source IS the user's Python, so there it lands in the Python, on the call's
+   opening parenthesis. Measured on `_grail_session.SessionDict` (4.0.0.a2, Grail 9f46b86c): all 12
+   `self._dict()` calls land on the lines the .py has them on.
+
+   THE LINE IS GRAIL'S ANSWER, not a count alone. Grail pads an IR method's source with a newline
+   for every line above the def, so the line an offset falls on is its module line -- but that
+   padding is Grail's layout, not its interface. What Grail publishes is BaseException
+   pythonPositionsForMethod:, which for an #irSource method answers {line. nil. nil. nil. text} for
+   each non-blank line. So the offset's line is counted and then looked up there. A match gives the
+   line and its text from the public answer; no match -- a layout this does not expect -- gives an
+   unplaced site rather than a wrong line. GemTalk/Grail#1137 asks for a position by source index
+   and leaves the IR path out of it; this is why the IR path does not need one.
+
+   ONE SITE PER OFFSET. A Python call Grail compiles into more than one send of the same selector
+   has one site, and every copy of the send carries that site's offset, while two calls in one
+   statement carry two offsets. So a repeated offset is one call -- the job the ___GRAILPOS___
+   trailer does for the text path.
+
+   WHAT THIS DOES NOT DECIDE is whether a send is a Python call at all. The argument checks Grail
+   compiles into a def send `size`, `at:` and the like in environment 0, all at the def's own
+   offset, so a search for such a name reports the def line. That is GemTalk/mcp_server#38, on both
+   paths, and it waits on GemTalk/Grail#1155."
+  | src sends lines offsets sites |
+  sites := OrderedCollection new.
+  src := [aMethod sourceString] on: Error do: [:ex | nil].
+  sends := [aMethod _sourceOffsetsOfSends] on: Error do: [:ex | nil].
+  (src isNil or: [sends isNil]) ifTrue: [^sites].
+  lines := Dictionary new.
+  ([BaseException pythonPositionsForMethod: aMethod] on: Error, BaseException do: [:ex | #()])
+    do: [:p | lines at: (p at: 1) put: (p at: 5)].
+  offsets := Set new.
+  1 to: sends size - 1 by: 2 do: [:i |
+    | off |
+    off := sends at: i.
+    ((sends at: i + 1) = aSelector and: [(off isKindOf: Integer) and: [off > 0]]) ifTrue: [offsets add: off]].
+  offsets asSortedCollection do: [:off |
+    | line |
+    line := ((src copyFrom: 1 to: (off min: src size)) occurrencesOf: Character lf) + 1.
+    sites add: ((lines includesKey: line)
+      ifTrue: [Array with: line with: (lines at: line)]
+      ifFalse: [Array with: nil with: nil])].
+  ^sites
 %
 category: 'private'
 method: McpGrailToolset
@@ -1318,8 +1372,7 @@ method: McpGrailToolset
 pythonSendersOfName: aName in: aClass
   "Every call to the Python name aName from aClass's env-1 methods, as an OrderedCollection of
    {containingPythonName. smalltalkSelector. lineOrNil. callSiteTextOrNil. whyNoLineOrNil} -- one
-   entry per call site, so a method calling aName twice is reported twice. The exception is a
-   method compiled direct to IR, which gets one entry per selector it sends, for the reason below.
+   entry per call site, so a method calling aName twice is reported twice, on either codegen path.
 
    THE SELECTOR POOL DECIDES WHETHER, THE SOURCE DECIDES WHERE. A method's pool is the exact set of
    selectors it sends, so decoding each one (#selector:callsPythonName:) answers the question
@@ -1334,15 +1387,16 @@ pythonSendersOfName: aName in: aClass
    call has a store above it and is reported. Measured on `_grail_session.SessionDict`: 12 real
    senders of `_dict`, plus exactly one glue send from `__dict:kw:`.
 
-   A METHOD COMPILED DIRECT TO IR IS NOT READ AS TEXT. Under GRAIL_IR_CODEGEN a def's method carries
-   the user's Python as its source, with no position store and no generated Smalltalk, and Grail
-   says which kind a method is: BaseException pythonPositionKindForMethod: answers #irSource. The
-   rules #callSitesIn:forSelector: applies are Smalltalk's, so on Python text they find a call only
-   by luck, find a def line along with it, and place neither. So such a method is reported once per
-   selector it sends, with #irSource as the reason it has no line -- and it is exempt from the glue
-   clause, which dropped a recursive call there for having no position. The glue itself is never
-   IR-compiled: its kind is nil. The position that would locate these calls is asked for in
-   GemTalk/Grail#1137.
+   A METHOD COMPILED DIRECT TO IR IS NOT READ AS SMALLTALK. Under GRAIL_IR_CODEGEN -- Grail's default
+   since GemTalk/Grail#1087 -- a def's method carries the user's Python as its source, with no
+   position store and no generated Smalltalk, and Grail says which kind a method is: BaseException
+   pythonPositionKindForMethod: answers #irSource. The rules #callSitesIn:forSelector: applies are
+   Smalltalk's, so on Python text they find a call only by luck, find a def line along with it, and
+   place neither. Such a method goes to #irCallSitesIn:forSelector:, which places each call from
+   the kernel's own record of where its send is. It is exempt from the glue clause, which would drop
+   a recursive call there if it could not be placed; the glue itself is never IR-compiled: its kind
+   is nil. A send the pool proves but that cannot be placed is still reported, with #irSource as the
+   reason it has no line.
 
    Nothing here imports, resolves or compiles: it reads compiled methods and their source."
   | hits |
@@ -1360,7 +1414,13 @@ pythonSendersOfName: aName in: aClass
       pool do: [:sent |
         (self selector: sent callsPythonName: aName) ifTrue: [
           ir
-            ifTrue: [hits add: (Array with: ownName with: sel with: nil with: nil with: #irSource)]
+            ifTrue: [
+              | sites |
+              sites := self irCallSitesIn: meth forSelector: sent.
+              sites isEmpty ifTrue: [sites := OrderedCollection with: (Array with: nil with: nil)].
+              sites do: [:site |
+                hits add: (Array with: ownName with: sel with: (site at: 1) with: (site at: 2)
+                  with: ((site at: 1) isNil ifTrue: [#irSource] ifFalse: [nil]))]]
             ifFalse: [
               | src sites |
               src := [aClass sourceCodeAt: sel environmentId: 1] on: Error do: [:ex | nil].
@@ -1802,11 +1862,12 @@ senderLineFor: aHit shape: aShapeLabel label: aLabel class: aClass
    is not enough. An absent line number is printed as `line ?` rather than omitted: the column
    staying put is what lets a reader scan the answer.
 
-   WHEN THE REASON IS KNOWN, THE LINE SAYS IT, in the slot the call-site text would take. A method
-   compiled direct to IR (#irSource, see #pythonSendersOfName:in: and #pythonReferencesOfName:in:)
-   reads `line ?  [compiled to IR: no call-site positions]`, because that absence is a fact about
-   the method, is not this tool failing to read something, and means the entry stands for every
-   call or reference of that kind the method makes rather than for one. Any other absent line is a
+   WHEN THE REASON IS KNOWN, THE LINE SAYS IT, in the slot the call-site text would take. A hit from a
+   method compiled direct to IR that carries no position (#irSource: every reference hit in one, see
+   #pythonReferencesOfName:in:, and a send #irCallSitesIn:forSelector: could not place) reads
+   `line ?  [compiled to IR: no call-site positions]`, because that absence is a fact about the
+   method, is not this tool failing to read something, and means the entry stands for every call or
+   reference of that kind the method makes rather than for one. Any other absent line is a
    source this could not read or place, and stays a bare `line ?`."
   | line text |
   line := aHit at: 3.

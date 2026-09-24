@@ -481,11 +481,14 @@ worked example for configuring your own.
 > **What it cannot see, it says.** A function defined in an `eval` scope compiles to a block with no
 > selector pool; a module whose `.py` nothing has imported has nothing compiled to search; after
 > `./install.sh` in the Grail checkout, the classes of a module committed earlier are missing until
-> it is imported again, and the trailer says so when that is the state; and a method compiled
-> direct to IR (`GRAIL_IR_CODEGEN`) carries the user's Python with no position in it, which Grail
-> reports, so its hit reads `line ?  [compiled to IR: no call-site positions]` rather than a guess,
-> and stands for every call that method makes. The public interface that would position those
-> hits, and retire the reading of generated text behind every other hit, is filed as
+> it is imported again, and the trailer says so when that is the state; and a *reference* in a
+> method compiled direct to IR (Grail's default since
+> [GemTalk/Grail#1087](https://github.com/GemTalk/Grail/pull/1087)) has no position to read, so its
+> hit reads `line ?  [compiled to IR: no call-site positions]` rather than a guess, and stands for
+> every such reference that method makes. A *call* in one is placed: an IR method's source is the
+> user's Python, so the kernel's offset for each send lands on the call, and the line is checked
+> against the positions Grail publishes for the method. On the text path the store in effect is
+> still read from generated Smalltalk; the public lookup that would retire that reading is filed as
 > [GemTalk/Grail#1137](https://github.com/GemTalk/Grail/issues/1137).
 >
 > **`tests/python` is excluded by default** — a relevance choice, not a cost one. The stdlib is
