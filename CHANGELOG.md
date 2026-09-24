@@ -17,19 +17,26 @@ reasoning has nowhere better to live, not that the entry should grow.
 
 ## Unreleased
 
+* **`find_python_senders` places each reference in a method compiled direct to IR**
+  ([#48](https://github.com/GemTalk/mcp_server/issues/48)). A `references` hit there read
+  `line ?  [compiled to IR: no call-site positions]`, once per method. Each reference now gets its
+  own hit with its Python line, from the same kernel send offsets that place calls, so
+  `(helper, helper)` is two hits. A store to a module global (`helper = 2`, `+=`, `for helper in`,
+  `:=`), which the literal frame had reported as a reference, is no longer one. A method where no
+  send lands on the name (`del helper`, `with … as helper`) is still reported once, unplaced.
+
 * **`find_python_senders` places each call in a method compiled direct to IR.** IR became Grail's
   default in [GemTalk/Grail#1087](https://github.com/GemTalk/Grail/pull/1087), which turned most
   compiled hits into `line ?  [compiled to IR: no call-site positions]`, one per name a method
   called, so two calls on one line read as one. Each call now gets its own hit with its Python line
   and text, the same answer the text path gives. The line comes from the kernel's send offsets and
-  its text from `BaseException pythonPositionsForMethod:`. A reference hit in an IR method still
-  has no position.
+  its text from `BaseException pythonPositionsForMethod:`.
 
 * **`find_python_senders` finds first-class references in methods compiled direct to IR.** The
   `references` shape matched markers in generated Smalltalk, which an IR method does not have, so
   `g = self.helper` there answered nothing without saying it could not look. It now reads the
-  method's literal frame, where each referenced name survives as a Symbol and stores, keyword names
-  and strings stay Strings. Each such method is reported once, as
+  method's literal frame, where each referenced name survives as a Symbol and attribute stores,
+  keyword names and strings stay Strings. Each such method is reported once, as
   `line ?  [compiled to IR: no call-site positions]`.
 
 * **A `find_python_senders` reference hit names the method it is in.** Its `(Class>>… env 1)`

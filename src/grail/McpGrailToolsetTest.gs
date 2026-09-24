@@ -658,13 +658,14 @@ testFindPythonSendersFindsAReferenceInAMethodCompiledToIR
   "The references shape on the same class compiled both ways, and the answer has to agree.
 
    AS TEXT, a first-class reference is found by its marker in the generated Smalltalk:
-   `g = self.mcp_ir_target` at line 11, the same load inside a lambda at line 20, `g = abs` at
-   line 23.
+   `g = self.mcp_ir_target` at line 11, the same load inside a lambda at line 20, two in one tuple
+   at line 27, `g = abs` at line 23.
 
-   DIRECT TO IR, there is no generated Smalltalk, so no marker ever matched and the search answered
-   nothing, with nothing in the answer to say it could not look. The names survive in the literal
-   frame as Symbols, which is what is read now: the same methods are found, once each, flagged
-   #irSource in place of a line.
+   DIRECT TO IR, there is no generated Smalltalk, so no marker ever matched. The literal frame says
+   WHETHER a method refers to the name, and the kernel's send offsets say WHERE: each load's send is
+   on the name, so the answer is the text path's, line for line, and the tuple is two hits, not one
+   -- see #irReferenceSitesIn:toName:. Before that, each IR method was one hit flagged #irSource
+   with no line.
 
    THE NEGATIVES ARE THE POINT of reading a literal frame. `mcp_ir_writer` stores the attribute,
    deletes it, passes it as a keyword and as a string -- every one of which leaves the name as a
@@ -683,7 +684,7 @@ testFindPythonSendersFindsAReferenceInAMethodCompiledToIR
   ts := self grailToolsetOn: checkout.
   ts ensureGrailConfigured.
   self withIrProbeClassesDo: [:classes |
-    | textClass irClass kindOf shapeOf out |
+    | textClass irClass kindOf shapeOf targets out |
     textClass := classes at: 1.
     irClass := classes at: 2.
     kindOf := [:cls :sel |
@@ -691,27 +692,31 @@ testFindPythonSendersFindsAReferenceInAMethodCompiledToIR
     self assert: (kindOf value: textClass value: #mcp_ir_holder) equals: #curPos.
     self assert: (kindOf value: irClass value: #mcp_ir_holder) equals: #irSource.
     self assert: (kindOf value: irClass value: #mcp_ir_writer:) equals: #irSource.
+    self assert: (kindOf value: irClass value: #mcp_ir_pair) equals: #irSource.
     shapeOf := [:name :cls |
       ((ts pythonReferencesOfName: name in: cls)
         collect: [:h | Array with: (h at: 1) with: (h at: 2) with: (h at: 3) with: (h at: 5)]) asArray].
+    targets := #( #('mcp_ir_holder' #mcp_ir_holder 11 nil) #('mcp_ir_lambda' #mcp_ir_lambda 20 nil)
+      #('mcp_ir_pair' #mcp_ir_pair 27 nil) #('mcp_ir_pair' #mcp_ir_pair 27 nil) ).
     "As text: each reference placed by its marker."
-    self assert: (shapeOf value: 'mcp_ir_target' value: textClass)
-      equals: #( #('mcp_ir_holder' #mcp_ir_holder 11 nil) #('mcp_ir_lambda' #mcp_ir_lambda 20 nil) ).
+    self assert: (shapeOf value: 'mcp_ir_target' value: textClass) equals: targets.
     self assert: (shapeOf value: 'abs' value: textClass)
       equals: #( #('mcp_ir_global' #mcp_ir_global 23 nil) ).
     self assert: (shapeOf value: 'builtins' value: textClass) equals: #().
-    "Direct to IR: the same methods, once each, saying why they have no line."
-    self assert: (shapeOf value: 'mcp_ir_target' value: irClass)
-      equals: #( #('mcp_ir_holder' #mcp_ir_holder nil #irSource) #('mcp_ir_lambda' #mcp_ir_lambda nil #irSource) ).
+    "Direct to IR: the same references, on the same lines, with the Python line as their text."
+    self assert: (shapeOf value: 'mcp_ir_target' value: irClass) equals: targets.
     self assert: (shapeOf value: 'abs' value: irClass)
-      equals: #( #('mcp_ir_global' #mcp_ir_global nil #irSource) ).
+      equals: #( #('mcp_ir_global' #mcp_ir_global 23 nil) ).
     self assert: (shapeOf value: 'builtins' value: irClass) equals: #().
-    "And the tool prints each line under the method's own selector, the IR one with its reason."
+    self assert: ((ts pythonReferencesOfName: 'mcp_ir_target' in: irClass) first at: 4)
+      equals: '        g = self.mcp_ir_target'.
+    "And the tool prints each line under the method's own selector, the IR one placed like the text."
     out := ts tool_find_python_senders: (Dictionary new
       at: 'name' put: 'mcp_ir_target'; at: 'shapes' put: #( 'references' );
       at: 'scope' put: 'mcp_grail_ir_probe'; yourself).
-    self assert: (self includesCS: 'mcp_grail_ir_probe.McpIrProbe.mcp_ir_holder  line ?  [compiled to IR: no call-site positions]  (McpIrProbe>>mcp_ir_holder env 1)' in: out).
-    self assert: (self includesCS: 'references 2,' in: out).
+    self assert: (self includesCS: 'mcp_grail_ir_probe.McpIrProbe.mcp_ir_holder  line 11  g = self.mcp_ir_target  (McpIrProbe>>mcp_ir_holder env 1)' in: out).
+    self deny: (self includesCS: 'compiled to IR' in: out).
+    self assert: (self includesCS: 'references 4,' in: out).
     out := ts tool_find_python_senders: (Dictionary new
       at: 'name' put: 'mcp_ir_target'; at: 'shapes' put: #( 'references' );
       at: 'scope' put: 'mcp_grail_text_probe'; yourself).
@@ -882,6 +887,52 @@ testFindPythonSendersRefusesWhatItCannotDoRatherThanAnsweringNothing
   self assert: kind equals: #unknown.
   self assert: (self includesCS: 'grailDirectory' in: msg).
   self assert: (self includesCS: 'find_python_senders' in: msg)
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testFindPythonSendersTellsAGlobalStoreFromALoadUnderIR
+  "A module global, `mcp_ir_shared`, read, stored and deleted in one class compiled both ways.
+
+   AS TEXT, only the loads are references: `mcp_ir_shared = mcp_ir_shared + 1` once at line 39, and
+   the `<=` and `==` comparisons twice at line 40.
+
+   DIRECT TO IR, every one of those methods leaves #mcp_ir_shared in its literal frame, stores and
+   all, and a global store's send is on the name just as a load's is -- `mcp_ir_shared = 1`,
+   `+= 1`, `for mcp_ir_shared in xs:` and `(mcp_ir_shared := y)` each put dynamicInstVarAt:put:
+   there. So the text beside the name decides (#pythonNameFrom:to:isStoreIn:), and the answer is
+   the text path's: `mcp_ir_shared_store` is not a reference at all, and the comparisons stay loads
+   although `<=` and `==` end in `=`.
+
+   `del mcp_ir_shared` IS THE ONE DIFFERENCE, and it is kept on purpose. It puts no send on the name,
+   so nothing can say load or store, and the method is reported as the literal frame alone would
+   report it: once, unplaced, #irSource. Skips where Grail cannot build IR."
+  | checkout ts |
+  checkout := self grailCheckoutOrNil.
+  checkout isNil ifTrue: [^self assert: true].
+  importlib ___irCodegenSupported___ ifFalse: [^self assert: true].
+  ts := self grailToolsetOn: checkout.
+  ts ensureGrailConfigured.
+  self withIrProbeClassesDo: [:classes |
+    | textClass irClass shapeOf loads out |
+    textClass := classes at: 1.
+    irClass := classes at: 2.
+    self assert: (BaseException pythonPositionKindForMethod:
+      (irClass compiledMethodAt: #mcp_ir_shared_store: environmentId: 1)) equals: #irSource.
+    self assert: (ts irMethod: (irClass compiledMethodAt: #mcp_ir_shared_store: environmentId: 1)
+      refersToName: 'mcp_ir_shared').
+    shapeOf := [:cls |
+      ((ts pythonReferencesOfName: 'mcp_ir_shared' in: cls)
+        collect: [:h | Array with: (h at: 1) with: (h at: 3) with: (h at: 5)]) asArray].
+    loads := #( #('mcp_ir_shared_read' 39 nil) #('mcp_ir_shared_read' 40 nil)
+      #('mcp_ir_shared_read' 40 nil) ).
+    self assert: (shapeOf value: textClass) equals: loads.
+    self assert: (shapeOf value: irClass)
+      equals: (#( #('mcp_ir_shared_del' nil #irSource) ) , loads).
+    out := ts tool_find_python_senders: (Dictionary new
+      at: 'name' put: 'mcp_ir_shared'; at: 'shapes' put: #( 'references' );
+      at: 'scope' put: 'mcp_grail_ir_probe'; yourself).
+    self assert: (self includesCS: 'mcp_grail_ir_probe.McpIrProbe.mcp_ir_shared_del  line ?  [compiled to IR: no call-site positions]  (McpIrProbe>>mcp_ir_shared_del env 1)' in: out).
+    self deny: (self includesCS: 'mcp_ir_shared_store' in: out)]
 %
 category: 'tests'
 method: McpGrailToolsetTest
@@ -1339,6 +1390,25 @@ testPythonNameOfSelectorDecodesTheWholeEncoding
    Python names and never went through the decoder."
   self assert: (ts isGrailInternalName: '___methodCodeTable___').
   self deny: (ts isGrailInternalName: '__init__')
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testPythonNameStoreCheckReadsTheTextBesideTheName
+  "The rule #irReferenceSitesIn:toName: separates a global store from a load with, driven directly
+   on one line of Python each, with `x` at columns 1 or 5. An assignment after the name is a store,
+   plain, walrus or augmented; a comparison ending in `=` is not; `for` before it is, and a longer
+   word ending in `for` is not."
+  | ts storeAt |
+  ts := McpGrailToolset new.
+  storeAt := [:src :col | ts pythonNameFrom: col to: col isStoreIn: src].
+  #( 'x = 1' 'x=1' 'x := 1' 'x += 1' 'x //= 2' 'x **= 2' 'x >>= 1' 'x <<= 1' 'x @= m' 'x |= s' )
+    do: [:src | self assert: (storeAt value: src value: 1) description: src].
+  #( 'x == 1' 'x <= 1' 'x >= 1' 'x != 1' 'x < 1' 'x + 1' 'x' 'x)' 'x.y = 1' )
+    do: [:src | self deny: (storeAt value: src value: 1) description: src].
+  self assert: (storeAt value: 'for x in xs:' value: 5).
+  self assert: (storeAt value: 'for  x in xs:' value: 6).
+  self deny: (storeAt value: 'afor x' value: 6).
+  self deny: (storeAt value: 'f(x)' value: 3)
 %
 category: 'tests'
 method: McpGrailToolsetTest
@@ -1957,7 +2027,7 @@ withFreshScopeDo: aBlock
       ifTrue: [SessionTemps current removeKey: #McpGrailScope ifAbsent: [nil]]
       ifFalse: [SessionTemps current at: #McpGrailScope put: saved]]
 %
-category: 'helpers'
+category: 'private'
 method: McpGrailToolsetTest
 withIrProbeClassesDo: aBlock
   "Import one small Python class twice -- once compiled as text, once direct to IR -- and answer
@@ -1973,7 +2043,8 @@ withIrProbeClassesDo: aBlock
    TWO HALVES OF ONE CLASS. The first two methods CALL the target and are what the compiled shape
    is tested on; the rest never call it, only REFER to it or write it, so they add nothing to that
    shape's counts and are what the references shape is tested on. They come after, so the
-   compiled test's line numbers do not move.
+   compiled test's line numbers do not move. The last three read, store and delete a module
+   global, `mcp_ir_shared`, the one kind of store whose send lands on the name.
 
    Both imports are rolled back by Grail's snapshot and restore, not by an abort, so the caller's
    transaction is left where it was. Nothing here commits."
@@ -2005,6 +2076,26 @@ withIrProbeClassesDo: aBlock
     def mcp_ir_global(self):
         g = abs
         return g
+
+    def mcp_ir_pair(self):
+        return (self.mcp_ir_target, self.mcp_ir_target)
+
+    def mcp_ir_shared_store(self, xs):
+        global mcp_ir_shared
+        mcp_ir_shared = 1
+        mcp_ir_shared += 1
+        for mcp_ir_shared in xs:
+            pass
+        return [y for y in xs if (mcp_ir_shared := y)]
+
+    def mcp_ir_shared_read(self):
+        global mcp_ir_shared
+        mcp_ir_shared = mcp_ir_shared + 1
+        return mcp_ir_shared <= 2 or mcp_ir_shared == 3
+
+    def mcp_ir_shared_del(self):
+        global mcp_ir_shared
+        del mcp_ir_shared
 '; close.
   snap := importlib ___canonicalRegistrySnapshot___.
   ^[importlib ___irCodegenForce___: false.

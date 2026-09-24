@@ -481,14 +481,16 @@ worked example for configuring your own.
 > **What it cannot see, it says.** A function defined in an `eval` scope compiles to a block with no
 > selector pool; a module whose `.py` nothing has imported has nothing compiled to search; after
 > `./install.sh` in the Grail checkout, the classes of a module committed earlier are missing until
-> it is imported again, and the trailer says so when that is the state; and a *reference* in a
-> method compiled direct to IR (Grail's default since
-> [GemTalk/Grail#1087](https://github.com/GemTalk/Grail/pull/1087)) has no position to read, so its
-> hit reads `line ?  [compiled to IR: no call-site positions]` rather than a guess, and stands for
-> every such reference that method makes. A *call* in one is placed: an IR method's source is the
-> user's Python, so the kernel's offset for each send lands on the call. The line's text comes from
-> the positions Grail publishes for the method, which list every line and so cannot locate a call
-> themselves; a counted line they do not list is reported as `line ?` rather than guessed. On the text path the store in effect is
+> it is imported again, and the trailer says so when that is the state. In a method compiled direct
+> to IR (Grail's default since [GemTalk/Grail#1087](https://github.com/GemTalk/Grail/pull/1087)),
+> calls and references are both placed: an IR method's source is the user's Python, so the kernel's
+> offset for each send lands on the call's `(` or on the referenced name. A store to a module global
+> lands on the name too, and is told from a load by the text beside it (`=`, `+=`, `:=`, `for`).
+> Where no send lands on the name at all (`del helper`, a tuple target, an `as` target) the method
+> is reported once, as `line ?  [compiled to IR: no call-site positions]`, rather than guessed. The
+> line's text comes from the positions Grail publishes for the method, which list every line and so
+> cannot locate a call themselves; a counted line they do not list is reported as `line ?` rather
+> than guessed. On the text path the store in effect is
 > still read from generated Smalltalk; the public lookup that would retire that reading is filed as
 > [GemTalk/Grail#1137](https://github.com/GemTalk/Grail/issues/1137).
 >
@@ -1614,7 +1616,7 @@ plus `McpConcurrentEditTest` (18), `McpExternalSessionTest` (5), `McpTransaction
 `McpWorkerDeadlineTest` (4) — **452 tests**,
 which is the whole suite on a base install. Where the optional groups are installed the runner picks
 their suites up automatically: plus `McpAuthTest` (28) and `McpAuthConformanceTest` (25) — **505
-tests** — and **561 with the 56 in `McpGrailToolsetTest`** on a Grail image.
+tests** — and **567 with the 62 in `McpGrailToolsetTest`** on a Grail image.
 
 Seven suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
 `McpAuthConformanceTest` commit a throwaway JWT user and spawn real worker gems; they are in the
