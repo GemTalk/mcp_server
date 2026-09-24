@@ -17,13 +17,28 @@ reasoning has nowhere better to live, not that the entry should grow.
 
 ## Unreleased
 
+* **A deployment can replace the server's `instructions`.** The stock `initialize` instructions
+  name the transaction tools, so a router whose `toolsetNames` leave those tools out told the model
+  about tools it did not have. They are now router config: `McpRouter>>serverInstructions:` (or
+  `MCP_INSTRUCTIONS_FILE` in `run-server.sh` / `run-auth-server.sh`). The value replaces the class
+  default, `''` sends none, and anything over 32,768 characters is refused where it is configured.
+  **Breaking:** the worker bootstrap selector is now
+  `prepareWorkerWithToolsets:options:serverName:title:version:instructions:frontEnd:cacheName:`.
+
+* **The stock `instructions` are shorter, and tell the model how to search a production database.**
+  The transaction text is tightened throughout. A new paragraph steers the model away from a loop
+  over application objects, which can take hours, and toward the application's own collections, their
+  indexes and a selection block.
+
 * **`find_python_senders` places each call in a method compiled direct to IR.** IR became Grail's
   default in [GemTalk/Grail#1087](https://github.com/GemTalk/Grail/pull/1087), which turned most
   compiled hits into `line ?  [compiled to IR: no call-site positions]`, one per name a method
   called, so two calls on one line read as one. Each call now gets its own hit with its Python line
-  and text, the same answer the text path gives. The line comes from the kernel's send offsets and
-  its text from `BaseException pythonPositionsForMethod:`. A reference hit in an IR method still
-  has no position.
+  and text, the same answer the text path gives. The line comes from the kernel's send offsets,
+  rebased to a module line by `BaseException pythonPositionsForMethod:`, which also supplies its
+  text; that rebase is what keeps it working since
+  [GemTalk/Grail#1164](https://github.com/GemTalk/Grail/pull/1164) stopped padding an IR method's
+  source. A reference hit in an IR method still has no position.
 
 * **`find_python_senders` finds first-class references in methods compiled direct to IR.** The
   `references` shape matched markers in generated Smalltalk, which an IR method does not have, so

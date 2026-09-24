@@ -117,7 +117,7 @@ testInitializeCarriesTransactionInstructions
   result := (self dispatch: (self request: 'initialize' params: Dictionary new)) at: 'result'.
   self assert: (result includesKey: 'instructions').
   text := result at: 'instructions'.
-  self assert: (text includesString: 'Only the `commit` tool commits').
+  self assert: (text includesString: 'NOTHING COMMITS FOR YOU').
   self assert: (text includesString: '[session]').
   self assert: (text includesString: 'abort')
 %

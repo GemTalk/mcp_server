@@ -7,12 +7,13 @@ McpBase subclass: 'McpRouter'
                     serverSocket sessions allowedOriginHosts tlsCertificateFile
                     tlsPrivateKeyFile workerUserId workerClassName toolsetNames
                     toolsetOptions serverName serverTitle serverVersion
-                    pendingRequests pendingMutex serverRequestCounter sessionIdleTimeoutSeconds
-                    streamlessIdleTimeoutSeconds livenessProbeIntervalSeconds reaperIntervalSeconds maxSessionLifetimeSeconds
-                    reapOnFailedProbe streamLossGraceSeconds messageTrace messageTraceLimit
-                    requestTimeoutSeconds callChannels callMutex callCounter
-                    frontEndTransactionMode maxCommitsBehind sessionAccessWarned maintenanceCallTimeoutSeconds
-                    stuckViewGraceSeconds pinnedViewGraceSeconds maxSessions sessionsOpening)
+                    serverInstructions pendingRequests pendingMutex serverRequestCounter
+                    sessionIdleTimeoutSeconds streamlessIdleTimeoutSeconds livenessProbeIntervalSeconds reaperIntervalSeconds
+                    maxSessionLifetimeSeconds reapOnFailedProbe streamLossGraceSeconds messageTrace
+                    messageTraceLimit requestTimeoutSeconds callChannels callMutex
+                    callCounter frontEndTransactionMode maxCommitsBehind sessionAccessWarned
+                    maintenanceCallTimeoutSeconds stuckViewGraceSeconds pinnedViewGraceSeconds maxSessions
+                    sessionsOpening)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -95,6 +96,12 @@ An empty list is legal and means a server offering no tools at all. serverName s
 this is, so it is set here (a different product), not to distinguish deployments:
     (McpRouter new toolsetNames: #(''AcmeDbToolset''); serverName: ''acme-db-mcp''; serverVersion: ''2.5.0'')
       forkOnPort: 8000
+The stock initialize instructions describe the transaction tools, so a surface without them should say
+what it IS instead -- replace the text, add to it, or send none with an empty string:
+    (McpRouter new toolsetNames: #(''AcmeDbToolset''); serverInstructions: ''Acme label database. ...'')
+      forkOnPort: 8000
+    (McpRouter new serverInstructions: McpServer defaultServerInstructions , ''...'') forkOnPort: 8000
+    (McpRouter new toolsetNames: #(''AcmeDbToolset''); serverInstructions: '''') forkOnPort: 8000
 Name an McpServer subclass for the workers (nothing auto-detects one -- subclass to change BEHAVIOR;
 to add tools write an McpToolset instead):
     (McpRouter new workerClassName: ''AcmeDbServer'') forkOnPort: 8000
@@ -349,6 +356,21 @@ loopbackAddress
    lives; McpAuthRouter seeds its configurable bindAddress from it too."
   ^'127.0.0.1'
 %
+category: 'worker identity'
+classmethod: McpRouter
+maxServerInstructionsSize
+  "The longest initialize instructions a router accepts, in characters: 32768. The instructions
+   travel to the child gem inside the fork string's config JSON and to each worker as a string
+   literal in its bootstrap expression, and the GemStone compiler refuses a single string literal of
+   about 100,000 characters (measured on 4.0.0.a2: 99,997 compiles, 100,000 does not). Past that the
+   failure would be a CompileError in a DETACHED gem -- a port that never opens, the reason in a log
+   -- so the cap refuses it where it is configured, well short of the limit so the rest of the config
+   has room beside it.
+   Not a tuning knob: text this long is almost certainly a mistake, since the instructions sit in the
+   model's context for the whole conversation (McpServer class>>defaultServerInstructions is about
+   3,000)."
+  ^32768
+%
 category: 'instance creation'
 classmethod: McpRouter
 new
@@ -476,6 +498,10 @@ applyConfig: aConfigDict
   serverName := aConfigDict at: 'serverName' ifAbsent: [serverName].
   serverTitle := aConfigDict at: 'serverTitle' ifAbsent: [serverTitle].
   serverVersion := aConfigDict at: 'serverVersion' ifAbsent: [serverVersion].
+  "Through the SETTER: it is capped, and a config that exceeds the cap must fail in the child gem
+   rather than reach a worker's compiler."
+  (aConfigDict includesKey: 'serverInstructions')
+    ifTrue: [self serverInstructions: (aConfigDict at: 'serverInstructions')].
   requestTimeoutSeconds := aConfigDict at: 'requestTimeoutSeconds' ifAbsent: [requestTimeoutSeconds].
   sessionIdleTimeoutSeconds := aConfigDict at: 'sessionIdleTimeoutSeconds' ifAbsent: [sessionIdleTimeoutSeconds].
   streamlessIdleTimeoutSeconds := aConfigDict at: 'streamlessIdleTimeoutSeconds' ifAbsent: [streamlessIdleTimeoutSeconds].
@@ -688,6 +714,7 @@ configDict
   d at: 'serverName' put: serverName.
   d at: 'serverTitle' put: serverTitle.
   d at: 'serverVersion' put: serverVersion.
+  d at: 'serverInstructions' put: serverInstructions.
   d at: 'requestTimeoutSeconds' put: requestTimeoutSeconds.
   d at: 'sessionIdleTimeoutSeconds' put: sessionIdleTimeoutSeconds.
   d at: 'streamlessIdleTimeoutSeconds' put: streamlessIdleTimeoutSeconds.
@@ -1094,6 +1121,7 @@ initialize
   serverName := nil.       "nil = the worker's own default (McpServer class>>defaultServerName)"
   serverTitle := nil.
   serverVersion := nil.
+  serverInstructions := nil.  "nil = the worker's own default (McpServer class>>defaultServerInstructions)"
   "The mode a DETACHED front-end gem puts itself in (#applyFrontEndTransactionMode). Seeded rather
    than left nil, because nil could only mean 'keep whatever STN_GEM_INITIAL_TRANSACTION_MODE gave
    this gem at login', and that is the pinned-view behaviour this default exists to end."
@@ -1699,6 +1727,7 @@ openSessionCreating: aOneArgBlock
       serverName: self serverName;
       serverTitle: self serverTitle;
       serverVersion: self serverVersion;
+      serverInstructions: self serverInstructions;
       requestTimeoutSeconds: self requestTimeoutSeconds;
       maintenanceCallTimeoutSeconds: self maintenanceCallTimeoutSeconds;
       prepareWorker.
@@ -2632,6 +2661,33 @@ servePost: req on: conn
       progressToken: (self progressTokenFor: parsed accepting: req)
       sessionId: (self sessionIdOf: req)
       on: conn
+%
+category: 'worker identity'
+method: McpRouter
+serverInstructions
+  "The initialize instructions this router's workers send: nil for the worker's own default
+   (McpServer class>>defaultServerInstructions), an empty string for none -- see
+   McpServer>>serverInstructions."
+  ^serverInstructions
+%
+category: 'worker identity'
+method: McpRouter
+serverInstructions: aStringOrNil
+  "Replace the initialize instructions this router's workers send. The stock text is about the
+   transaction and names the tools that manage it, so it is true only of a surface that offers them:
+   a deployment that narrows toolsetNames: past those tools, or serves its own, says here what its
+   server is instead. To ADD to the stock text rather than replace it, compose it, as with the
+   toolset list:
+
+     McpRouter new serverInstructions: McpServer defaultServerInstructions , '...'
+
+   nil restores the default and an empty string sends none. Refused past maxServerInstructionsSize,
+   HERE, because a longer value would fail later in a gem nobody is watching."
+  (aStringOrNil notNil and: [aStringOrNil size > self class maxServerInstructionsSize])
+    ifTrue: [^self error: 'serverInstructions is ' , aStringOrNil size printString
+      , ' characters; the most a router accepts is ' , self class maxServerInstructionsSize printString
+      , ' (McpRouter class>>maxServerInstructionsSize).'].
+  serverInstructions := aStringOrNil
 %
 category: 'worker identity'
 method: McpRouter

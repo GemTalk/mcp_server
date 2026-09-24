@@ -918,7 +918,7 @@ tools itself (those run in the per-client `McpServer` workers):
 - **`initialize`** → the front end opens a `McpSession` (a `GsTsExternalSession` worker gem,
   logged in via a one-time password as `workerUserId` — the front end's own user unless a
   restricted one is configured), **prepares** it with a single
-  `prepareWorkerWithToolsets:options:serverName:title:version:frontEnd:cacheName:` call —
+  `prepareWorkerWithToolsets:options:serverName:title:version:instructions:frontEnd:cacheName:` call —
   which names the worker's gem in the shared cache, resolves the
   named toolsets, applies the advertised identity, and pre-builds the server so the client's first
   request has no registration to do — assigns a server-side id, and returns it in the
@@ -1346,6 +1346,34 @@ There is **no default title**: class-side `defaultServerTitle` answers `nil` and
 then left out of `serverInfo` entirely (not sent as `null` or `''`). A title being present therefore
 means a human deliberately labeled that instance. A product that wants its own display name overrides
 `defaultServerTitle`; per-box labeling stays the operator's `serverTitle`.
+
+### Server instructions
+
+The `initialize` result also carries `instructions`, which MCP defines as a hint for the model. The
+stock text (class-side `McpServer defaultServerInstructions`) explains the session's transactions
+and the `[session]` line, and how to search a production database's objects without a scan that runs
+for hours. It names the tools that manage the transaction: `commit`, `abort`, `refresh` and the tools
+that change the image. It is accurate only for a surface that offers those tools. A deployment that
+narrows `toolsetNames` past them, or serves only its own toolsets, should say what its server is
+instead. Precedence is the same as for `serverName`: router config wins over the
+class default, and a product sets its own text by overriding the class-side default.
+
+```smalltalk
+"replace the text"
+(McpRouter new toolsetNames: #('AcmeDbToolset');
+   serverInstructions: 'Acme label database. Every tool is read-only.') forkOnPort: 8000
+"add to the stock text"
+(McpRouter new serverInstructions: McpServer defaultServerInstructions , '...') forkOnPort: 8000
+"send none: the key is left out of the result"
+(McpRouter new toolsetNames: #('AcmeDbToolset'); serverInstructions: '') forkOnPort: 8000
+```
+
+`nil` (the default) sends the stock text. From the scripts, set `MCP_INSTRUCTIONS_FILE` to a UTF-8
+file whose contents replace the stock text; an empty file sends none. The text is limited to
+`McpRouter maxServerInstructionsSize` (32,768 characters) and a longer value is refused when it is
+set. The limit exists because the text reaches the child gem and each worker inside a Smalltalk
+string literal, and the compiler refuses a single literal of about 100,000 characters. Without the
+check, an oversized value would fail inside a detached gem instead of where it was configured.
 
 > **Where your classes must live:** a worker gem may log in as a *different user* than the front end
 > (under `McpAuthRouter`, as the token's own GemStone user), so your toolsets and any worker subclass
