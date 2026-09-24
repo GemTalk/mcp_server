@@ -1350,11 +1350,12 @@ means a human deliberately labeled that instance. A product that wants its own d
 ### Server instructions
 
 The `initialize` result also carries `instructions`, which MCP defines as a hint for the model. The
-stock text (class-side `McpServer defaultServerInstructions`) explains the long-running transaction
-and the `[session]` line, and it names the tools that manage the transaction: `commit`, `abort`,
-`refresh` and the tools that change the image. It is accurate only for a surface that offers those
-tools. A deployment that narrows `toolsetNames` past them, or serves only its own toolsets, should say
-what its server is instead. Precedence is the same as for `serverName`: router config wins over the
+stock text (class-side `McpServer defaultServerInstructions`) explains the session's transactions
+and the `[session]` line, and how to search a production database's objects without a scan that runs
+for hours. It names the tools that manage the transaction: `commit`, `abort`, `refresh` and the tools
+that change the image. It is accurate only for a surface that offers those tools. A deployment that
+narrows `toolsetNames` past them, or serves only its own toolsets, should say what its server is
+instead. Precedence is the same as for `serverName`: router config wins over the
 class default, and a product sets its own text by overriding the class-side default.
 
 ```smalltalk

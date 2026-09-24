@@ -25,6 +25,11 @@ reasoning has nowhere better to live, not that the entry should grow.
   **Breaking:** the worker bootstrap selector is now
   `prepareWorkerWithToolsets:options:serverName:title:version:instructions:frontEnd:cacheName:`.
 
+* **The stock `instructions` are shorter, and tell the model how to search a production database.**
+  The transaction text is tightened throughout. A new paragraph steers the model away from a loop
+  over application objects, which can take hours, and toward the application's own collections, their
+  indexes and a selection block.
+
 * **`find_python_senders` places each call in a method compiled direct to IR.** IR became Grail's
   default in [GemTalk/Grail#1087](https://github.com/GemTalk/Grail/pull/1087), which turned most
   compiled hits into `line ?  [compiled to IR: no call-site positions]`, one per name a method
