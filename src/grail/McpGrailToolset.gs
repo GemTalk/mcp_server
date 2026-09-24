@@ -668,11 +668,11 @@ irCallSitesIn: aMethod forSelector: aSelector
    publishes is BaseException pythonPositionsForMethod:, which for an #irSource method answers
    {line. nil. nil. nil. text} for every non-blank line, in module lines: a superset of the call
    sites that cannot say which line holds which call, so it cannot stand in for the offsets. It
-   does three smaller things. Its first entry is the slice's first line -- the def or its first
-   decorator, never blank -- so that entry's line, less one, turns a slice line into a module line.
-   The line's text is taken from it, so that comes from a public answer. And a line it does not list
-   gives an unplaced site rather than a wrong line. That last check is LOOSE: it confirms only that
-   the count lands on some non-blank line of the method.
+   does three smaller things, all in #irSitesAt:in:. Its first entry is the slice's first line --
+   the def or its first decorator, never blank -- so that entry's line, less one, turns a slice line
+   into a module line. The line's text is taken from it, so that comes from a public answer. And a
+   line it does not list gives an unplaced site rather than a wrong line. That last check is LOOSE:
+   it confirms only that the count lands on some non-blank line of the method.
 
    The rebase is taken from the public answer rather than from Grail's layout because the layout
    has already moved once: until GemTalk/Grail#1164 the slice was padded with a newline for every
@@ -691,27 +691,15 @@ irCallSitesIn: aMethod forSelector: aSelector
    compiles into a def send `size`, `at:` and the like in environment 0, all at the def's own
    offset, so a search for such a name reports the def line. That is GemTalk/mcp_server#38, on both
    paths, and it waits on GemTalk/Grail#1155."
-  | src sends positions lines base offsets sites |
-  sites := OrderedCollection new.
-  src := [aMethod sourceString] on: Error do: [:ex | nil].
+  | sends offsets |
   sends := [aMethod _sourceOffsetsOfSends] on: Error do: [:ex | nil].
-  (src isNil or: [sends isNil]) ifTrue: [^sites].
-  positions := [BaseException pythonPositionsForMethod: aMethod] on: Error, BaseException do: [:ex | #()].
-  lines := Dictionary new.
-  positions do: [:p | lines at: (p at: 1) put: (p at: 5)].
-  base := positions isEmpty ifTrue: [1] ifFalse: [(positions at: 1) at: 1].
+  sends isNil ifTrue: [^OrderedCollection new].
   offsets := Set new.
   1 to: sends size - 1 by: 2 do: [:i |
     | off |
     off := sends at: i.
     ((sends at: i + 1) = aSelector and: [(off isKindOf: Integer) and: [off > 0]]) ifTrue: [offsets add: off]].
-  offsets asSortedCollection do: [:off |
-    | line |
-    line := ((src copyFrom: 1 to: (off min: src size)) occurrencesOf: Character lf) + base.
-    sites add: ((lines includesKey: line)
-      ifTrue: [Array with: line with: (lines at: line)]
-      ifFalse: [Array with: nil with: nil])].
-  ^sites
+  ^self irSitesAt: offsets in: aMethod
 %
 category: 'private'
 method: McpGrailToolset
@@ -732,6 +720,11 @@ irMethod: aMethod refersToName: aName
    comprehension compile into the enclosing method's literal frame, so a reference inside one is
    found, as the text path finds it.
 
+   WHAT DOES OVER-MATCH is a store to a module global: after `global helper`, `helper = 2`,
+   `del helper` and `with cm as helper:` all leave #helper, which the text path does not report.
+   The literal frame cannot tell them from a load; #irReferenceSitesIn:toName: separates the ones
+   whose send is on the name.
+
    WHAT IS EXCLUDED. A Symbol in the selector pool is a call, and belongs to the compiled shape
    (#pythonSendersOfName:in:). And every builtin load looks its module up as `Python at: #builtins`,
    so #builtins directly after the Python dictionary's association is that lookup's key, not a
@@ -751,6 +744,82 @@ irMethod: aMethod refersToName: aName
           and: [(lits at: i - 1) value == python]]])
             ifFalse: [^true]]].
   ^false
+%
+category: 'private'
+method: McpGrailToolset
+irReferenceSitesIn: aMethod toName: aName
+  "Where aMethod, compiled direct to IR, loads the Python name aName other than to call it, as the
+   sites #irSitesAt:in: answers -- one {pythonLineOrNil. lineTextOrNil} per reference, in source
+   order -- or nil when no send in it is on the name at all.
+
+   A LOAD'S SEND IS ON THE NAME. Each first-class reference compiles to at least one send whose
+   offset (GsNMethod>>_sourceOffsetsOfSends) is on the name in the Python, or on the `.` just before
+   it: `g = self.target` on `.target`, `g = abs` on `abs`, `(helper, helper)` at two offsets. A load
+   compiled to several sends puts them all at one offset, so a repeated offset is one reference. A
+   call's offset is on its `(`, an attribute store's on its receiver and a keyword's on the call's
+   `(`, so none of them is on the name. This reads the Python at the offset rather than which
+   selectors Grail emits, because a module-scope name read under IR sends none of the text path's
+   #pythonReferenceMarkers, and the text does not change with codegen. Measured on 4.0.0.a2,
+   Grail 9f46b86c.
+
+   A GLOBAL STORE'S SEND IS ON THE NAME TOO. After `global helper`, `helper = 2` sends
+   dynamicInstVarAt:put: at `helper`, and so do `helper += 1`, `for helper in xs:` and
+   `(helper := y)`. #pythonNameFrom:to:isStoreIn: tells them apart by the text either side, so
+   `helper = helper + 1` is one reference, at the second `helper` -- the text path's answer too.
+
+   NIL IS NOT EMPTY. Some stores put no send on the name at all -- `del helper`,
+   `a, helper = 1, 2`, and every `as` target (`with`, `import`, `except`) -- so nothing here can say
+   whether such a method loads the name, and nil hands the caller back to the literal frame's single
+   unplaced answer. Empty means every send on the name was a store: no reference."
+  | src sends onName loads |
+  src := [aMethod sourceString] on: Error do: [:ex | nil].
+  sends := [aMethod _sourceOffsetsOfSends] on: Error do: [:ex | nil].
+  (src isNil or: [sends isNil]) ifTrue: [^nil].
+  onName := false.
+  loads := Set new.
+  1 to: sends size - 1 by: 2 do: [:i |
+    | off start stop |
+    off := sends at: i.
+    ((off isKindOf: Integer) and: [off between: 1 and: src size]) ifTrue: [
+      start := (src at: off) == $. ifTrue: [off + 1] ifFalse: [off].
+      stop := start + aName size - 1.
+      (stop <= src size
+        and: [(src copyFrom: start to: stop) = aName asString
+        and: [(start = 1 or: [(self isIdentifierCharacter: (src at: start - 1)) not])
+        and: [stop = src size or: [(self isIdentifierCharacter: (src at: stop + 1)) not]]]])
+          ifTrue: [
+            onName := true.
+            (self pythonNameFrom: start to: stop isStoreIn: src) ifFalse: [loads add: off]]]].
+  onName ifFalse: [^nil].
+  ^self irSitesAt: loads in: aMethod
+%
+category: 'private'
+method: McpGrailToolset
+irSitesAt: offsets in: aMethod
+  "Each send offset in offsets placed in aMethod, a method compiled direct to IR, as an
+   OrderedCollection of {pythonLineOrNil. lineTextOrNil} -- one per offset, in source order. The
+   step #irCallSitesIn:forSelector: and #irReferenceSitesIn:toName: share.
+
+   The line is counted from the offset within the def's slice of the module, and rebased to a
+   module line by BaseException pythonPositionsForMethod:, whose first entry is the slice's first
+   line; its text is taken from the same answer, and a line that answer does not list is left
+   unplaced. Why the count locates and Grail's list only rebases and vouches, and how loose that
+   check is, is on #irCallSitesIn:forSelector:."
+  | src positions lines base sites |
+  sites := OrderedCollection new.
+  src := [aMethod sourceString] on: Error do: [:ex | nil].
+  src isNil ifTrue: [^sites].
+  positions := [BaseException pythonPositionsForMethod: aMethod] on: Error, BaseException do: [:ex | #()].
+  lines := Dictionary new.
+  positions do: [:p | lines at: (p at: 1) put: (p at: 5)].
+  base := positions isEmpty ifTrue: [1] ifFalse: [(positions at: 1) at: 1].
+  offsets asSortedCollection do: [:off |
+    | line |
+    line := ((src copyFrom: 1 to: (off min: src size)) occurrencesOf: Character lf) + base.
+    sites add: ((lines includesKey: line)
+      ifTrue: [Array with: line with: (lines at: line)]
+      ifFalse: [Array with: nil with: nil])].
+  ^sites
 %
 category: 'private'
 method: McpGrailToolset
@@ -1201,6 +1270,31 @@ pythonMethodNamesOf: aClass
 %
 category: 'private'
 method: McpGrailToolset
+pythonNameFrom: start to: stop isStoreIn: aSource
+  "Whether the name at start..stop in aSource, which is Python, is the target of a store rather
+   than a load: followed by an assignment -- `=` but not `==`, `:=`, or an augmented `+=`, `//=`,
+   `>>=` and the rest -- or preceded by `for`. A comparison is a load, so `<=`, `>=`, `!=` and `==`
+   are not assignments though each ends in `=`.
+
+   One token either side, not a parse. It is asked only about a name a send offset is already on
+   (#irReferenceSitesIn:toName:), which leaves only the stores whose send lands on the name:
+   `helper = 2`, `helper += 1`, `for helper in xs:` and `(helper := y)`, all measured on 4.0.0.a2.
+   A store whose send lands elsewhere never gets here."
+  | at next |
+  at := stop + 1.
+  [at <= aSource size and: [(aSource at: at) == $  or: [(aSource at: at) == Character tab]]]
+    whileTrue: [at := at + 1].
+  next := aSource copyFrom: at to: (at + 2 min: aSource size).
+  #( ':=' '+=' '-=' '*=' '/=' '%=' '&=' '|=' '^=' '@=' '//=' '**=' '>>=' '<<=' ) do: [:op |
+    (next size >= op size and: [(next copyFrom: 1 to: op size) = op]) ifTrue: [^true]].
+  (next notEmpty and: [(next at: 1) == $=]) ifTrue: [^next size < 2 or: [(next at: 2) ~~ $=]].
+  at := start - 1.
+  [at >= 1 and: [(aSource at: at) isSeparator]] whileTrue: [at := at - 1].
+  ^at >= 3 and: [(aSource copyFrom: at - 2 to: at) = 'for'
+    and: [at = 3 or: [(self isIdentifierCharacter: (aSource at: at - 3)) not]]]
+%
+category: 'private'
+method: McpGrailToolset
 pythonNameOfSelector: aSelector
   "The Python name a Smalltalk env-1 selector was generated from, or NIL when no Python name could
    have produced it.
@@ -1264,10 +1358,11 @@ pythonReferencesOfName: aName in: aClass
    that follows: the name is compared as a whole Symbol, so `absolute` is not a reference to `abs`.
 
    A METHOD COMPILED DIRECT TO IR HAS NO GENERATED SMALLTALK TO MATCH: its source is the user's
-   Python, so no marker ever occurs and the text path answered a confident nothing. Whether it
-   refers to aName is read from its literal frame instead (#irMethod:refersToName:), and it is
-   reported once, with #irSource as the reason it has no line -- the way
-   #pythonSendersOfName:in: reports an IR sender."
+   Python, so no marker ever occurs. Whether it refers to aName is read from its literal frame
+   instead (#irMethod:refersToName:), and where from the kernel's send offsets
+   (#irReferenceSitesIn:toName:), one hit per reference, as the text path reports them. When no
+   send is on the name at all, the method is reported once, with #irSource as the reason it has no
+   line -- the way #pythonSendersOfName:in: reports an IR sender it cannot place."
   | hits markers |
   hits := OrderedCollection new.
   markers := self pythonReferenceMarkers.
@@ -1282,7 +1377,12 @@ pythonReferencesOfName: aName in: aClass
       (BaseException pythonPositionKindForMethod: meth) == #irSource
         ifTrue: [
           (self irMethod: meth refersToName: aName) ifTrue: [
-            hits add: (Array with: ownName with: sel with: nil with: nil with: #irSource)]]
+            | sites |
+            sites := self irReferenceSitesIn: meth toName: aName.
+            sites isNil ifTrue: [sites := OrderedCollection with: (Array with: nil with: nil)].
+            sites do: [:site |
+              hits add: (Array with: ownName with: sel with: (site at: 1) with: (site at: 2)
+                with: ((site at: 1) isNil ifTrue: [#irSource] ifFalse: [nil]))]]]
         ifFalse: [
           src := [aClass sourceCodeAt: sel environmentId: 1] on: Error do: [:ex | nil].
           src notNil ifTrue: [
@@ -1874,9 +1974,9 @@ senderLineFor: aHit shape: aShapeLabel label: aLabel class: aClass
    staying put is what lets a reader scan the answer.
 
    WHEN THE REASON IS KNOWN, THE LINE SAYS IT, in the slot the call-site text would take. A hit from a
-   method compiled direct to IR that carries no position (#irSource: every reference hit in one, see
-   #pythonReferencesOfName:in:, and a send #irCallSitesIn:forSelector: could not place) reads
-   `line ?  [compiled to IR: no call-site positions]`, because that absence is a fact about the
+   method compiled direct to IR that carries no position (#irSource: a reference
+   #irReferenceSitesIn:toName: could not place, and a send #irCallSitesIn:forSelector: could not)
+   reads `line ?  [compiled to IR: no call-site positions]`, because that absence is a fact about the
    method, is not this tool failing to read something, and means the entry stands for every call or
    reference of that kind the method makes rather than for one. Any other absent line is a
    source this could not read or place, and stays a bare `line ?`."

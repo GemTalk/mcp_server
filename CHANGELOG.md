@@ -17,6 +17,14 @@ reasoning has nowhere better to live, not that the entry should grow.
 
 ## Unreleased
 
+* **`find_python_senders` places each reference in a method compiled direct to IR**
+  ([#48](https://github.com/GemTalk/mcp_server/issues/48)). A `references` hit there read
+  `line ?  [compiled to IR: no call-site positions]`, once per method. Each reference now gets its
+  own hit with its Python line, from the same kernel send offsets that place calls, so
+  `(helper, helper)` is two hits. A store to a module global (`helper = 2`, `+=`, `for helper in`,
+  `:=`), which the literal frame had reported as a reference, is no longer one. A method where no
+  send lands on the name (`del helper`, `with … as helper`) is still reported once, unplaced.
+
 * **A deployment can replace the server's `instructions`.** The stock `initialize` instructions
   name the transaction tools, so a router whose `toolsetNames` leave those tools out told the model
   about tools it did not have. They are now router config: `McpRouter>>serverInstructions:` (or
@@ -38,13 +46,13 @@ reasoning has nowhere better to live, not that the entry should grow.
   rebased to a module line by `BaseException pythonPositionsForMethod:`, which also supplies its
   text; that rebase is what keeps it working since
   [GemTalk/Grail#1164](https://github.com/GemTalk/Grail/pull/1164) stopped padding an IR method's
-  source. A reference hit in an IR method still has no position.
+  source.
 
 * **`find_python_senders` finds first-class references in methods compiled direct to IR.** The
   `references` shape matched markers in generated Smalltalk, which an IR method does not have, so
   `g = self.helper` there answered nothing without saying it could not look. It now reads the
-  method's literal frame, where each referenced name survives as a Symbol and stores, keyword names
-  and strings stay Strings. Each such method is reported once, as
+  method's literal frame, where each referenced name survives as a Symbol and attribute stores,
+  keyword names and strings stay Strings. Each such method is reported once, as
   `line ?  [compiled to IR: no call-site positions]`.
 
 * **A `find_python_senders` reference hit names the method it is in.** Its `(Class>>… env 1)`
