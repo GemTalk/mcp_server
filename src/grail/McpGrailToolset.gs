@@ -663,14 +663,19 @@ irCallSitesIn: aMethod forSelector: aSelector
    opening parenthesis. Measured on `_grail_session.SessionDict` (4.0.0.a2, Grail 9f46b86c): all 12
    `self._dict()` calls land on the lines the .py has them on.
 
-   THE LINE IS GRAIL'S ANSWER, not a count alone. Grail pads an IR method's source with a newline
-   for every line above the def, so the line an offset falls on is its module line -- but that
-   padding is Grail's layout, not its interface. What Grail publishes is BaseException
-   pythonPositionsForMethod:, which for an #irSource method answers {line. nil. nil. nil. text} for
-   each non-blank line. So the offset's line is counted and then looked up there. A match gives the
-   line and its text from the public answer; no match -- a layout this does not expect -- gives an
-   unplaced site rather than a wrong line. GemTalk/Grail#1137 asks for a position by source index
-   and leaves the IR path out of it; this is why the IR path does not need one.
+   THE OFFSET LOCATES; GRAIL'S LIST ONLY VOUCHES. Grail pads an IR method's source with a newline
+   for every line above the def, so counting newlines up to an offset gives the call's module line
+   -- but that padding is Grail's layout, documented only on a private method. What Grail publishes
+   is BaseException pythonPositionsForMethod:, which for an #irSource method answers
+   {line. nil. nil. nil. text} for EVERY non-blank line: a superset of the call sites that cannot say
+   which line holds which call, so it cannot stand in for the offsets. It is used for two smaller
+   things. The line's text is taken from it, so that comes from a public answer; and a counted line
+   it does not list gives an unplaced site rather than a wrong line. That second check is LOOSE: it
+   confirms only that the count lands on some non-blank line of the method, so a padding change could
+   still pass it by coincidence, most easily in a method near the top of its module. It turns the
+   likely failure into an absent line, not every failure. GemTalk/Grail#1137 asks for a position by
+   source index and leaves the IR path out of it, because here the source IS the Python and an index
+   becomes a line by counting.
 
    ONE SITE PER OFFSET. A Python call Grail compiles into more than one send of the same selector
    has one site, and every copy of the send carries that site's offset, while two calls in one

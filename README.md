@@ -486,8 +486,9 @@ worked example for configuring your own.
 > [GemTalk/Grail#1087](https://github.com/GemTalk/Grail/pull/1087)) has no position to read, so its
 > hit reads `line ?  [compiled to IR: no call-site positions]` rather than a guess, and stands for
 > every such reference that method makes. A *call* in one is placed: an IR method's source is the
-> user's Python, so the kernel's offset for each send lands on the call, and the line is checked
-> against the positions Grail publishes for the method. On the text path the store in effect is
+> user's Python, so the kernel's offset for each send lands on the call. The line's text comes from
+> the positions Grail publishes for the method, which list every line and so cannot locate a call
+> themselves; a counted line they do not list is reported as `line ?` rather than guessed. On the text path the store in effect is
 > still read from generated Smalltalk; the public lookup that would retire that reading is filed as
 > [GemTalk/Grail#1137](https://github.com/GemTalk/Grail/issues/1137).
 >
