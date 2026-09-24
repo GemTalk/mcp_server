@@ -4,9 +4,9 @@ expectvalue /Class
 doit
 McpBase subclass: 'McpServer'
   instVarNames: #( dispatcher toolRegistry toolsets
-                    serverName serverTitle serverVersion lifetimeBounds
-                    readLedger writeLedger staleReadKeys frontEndRefreshedView
-                    frontEndDoomedSubjects)
+                    serverName serverTitle serverVersion serverInstructions
+                    lifetimeBounds readLedger writeLedger staleReadKeys
+                    frontEndRefreshedView frontEndDoomedSubjects)
   classVars: #()
   classInstVars: #()
   poolDictionaries: #()
@@ -32,7 +32,7 @@ Which tools a server offers is NOT fixed by its class: each server registers a l
 instances (see McpToolset), so a deployment -- or a vendor shipping only their own tools -- chooses the
 surface. The front end resolves both the worker class and the toolset list per session and pushes them
 into the worker gem in one call
-(prepareWorkerWithToolsets:options:serverName:title:version:frontEnd:cacheName:), so a
+(prepareWorkerWithToolsets:options:serverName:title:version:instructions:frontEnd:cacheName:), so a
 worker never decides what it is. Subclass this to change BEHAVIOR (the worker entry, dispatcher
 wiring, the advertised identity); write a toolset to add tools. A subclass is used only when it is
 NAMED in the router''s workerClassName config.
@@ -88,60 +88,68 @@ currentServer
 category: 'identity'
 classmethod: McpServer
 defaultServerInstructions
-  "The `instructions` a stock GemStone MCP server sends in its initialize result, and the hook A
-   PRODUCT OVERRIDES to describe its own surface. MCP calls this a hint to the model rather than
+  "The `instructions` a stock GemStone MCP server sends in its initialize result when its deployment
+   configures none (McpRouter>>serverInstructions:), and the hook A PRODUCT OVERRIDES to describe its
+   own surface. MCP calls this a hint to the model rather than
    documentation for a person, so it says the things a model cannot work out by reading tool
    descriptions one at a time: what a session IS here, and which of its properties outlive a call.
 
-   It is deliberately about the transaction and nothing else. A per-tool fact belongs in that
-   tool's description, where it is read at the moment it matters; what does not fit there is the
-   part that spans calls, because no single tool's description is the right place to explain that a
-   change made by one call is still there for the next -- and the terse '[session]' line the server
-   appends to results (McpDispatcher>>transactionNote) is unintelligible without it.
+   It carries only what no single tool's description can. A per-tool fact belongs in that tool's
+   description, where it is read at the moment it matters. Two things do not fit there. One is the
+   part that spans calls: no tool's description is the right place to explain that a change made by
+   one call is still there for the next, and the terse '[session]' line the server appends to results
+   (McpDispatcher>>transactionNote) is unintelligible without it. The other is how to search the
+   application's objects, which bears on every tool that runs code: on a production database a loop
+   over those objects can run for hours where an indexed selection block would not.
+
+   It NAMES TOOLS -- commit, abort, refresh and the image-changing ones -- so it is true only of a
+   surface that offers them. A deployment that narrows its toolset list past them should configure
+   instructions of its own rather than let the model be told about tools it does not have.
 
    Kept short on purpose: it is prepended to the model's context for the whole conversation, so
    every sentence competes with the client's own prompt for attention."
   | lf |
   lf := String with: Character lf.
-  ^'This server is one GemStone session, in one long-running database transaction, for as long as '
-    , 'the connection lasts.' , lf , lf
-    , 'YOUR VIEW IS A SNAPSHOT. You see the repository as it was at one instant. It moves when YOU '
-    , 'move it -- `commit`, `abort` and `refresh` each take a current view -- and in one other case: '
-    , 'if it falls far behind, so that it is holding the repository''s commit records open, the '
-    , 'server refreshes it for you. That happens only BETWEEN your calls, it keeps your uncommitted '
-    , 'changes, and it tells you on your next result. Either way, anything you read before the last '
-    , 'view move may since have been changed by somebody else.' , lf , lf
-    , 'THE DATABASE PROTECTS YOU FROM ACTING ON A STALE SNAPSHOT. If you change something that '
-    , 'another session has committed a change to since your view was taken, your `commit` FAILS and '
-    , 'writes nothing -- it will not silently overwrite their work. This is why the snapshot is '
-    , 'worth having, and it is also why a `refresh` in the middle of a plan is not free: refreshing '
-    , 'adopts their version as your starting point, so a change you then make on the strength of '
-    , 'what you read EARLIER will commit cleanly and erase what they did. If you read something, '
-    , 'thought about it, and are only now acting, re-read it first.' , lf , lf
-    , 'WHAT SURVIVES A CALL. Every change you make stays in your session until you commit or abort '
-    , 'it -- so you can compile a method, run its tests against what you just compiled, and only '
-    , 'then decide to keep it. Nobody else can see any of it until you commit.' , lf , lf
-    , 'NOTHING COMMITS FOR YOU. Only the `commit` tool commits. The tools that change the image '
-    , '(compile_method, compile_class_definition, delete_class, delete_method, set_class_comment, '
-    , 'add_dictionary, remove_dictionary) leave their work uncommitted. `abort` discards everything '
-    , 'uncommitted; `refresh` takes a current view and keeps your uncommitted changes.' , lf , lf
-    , 'THE [session] LINE. A result may end with one line starting "[session]". It describes your '
-    , 'session, not the tool you just called, and it appears only when there is something to do:'
+  ^'This server is one GemStone session for as long as the connection lasts, working in a sequence '
+    , 'of transactions.' , lf , lf
+    , 'YOUR VIEW IS A SNAPSHOT of the repository at one instant. `commit`, `abort` and `refresh` '
+    , 'each take a current view. The server also refreshes it for you if it falls far enough '
+    , 'behind to hold the repository''s commit records open -- only between your calls, keeping '
+    , 'your uncommitted changes, and your next result says so. Anything you read before the view '
+    , 'last moved may since have changed.' , lf , lf
+    , 'COMMITS NEVER SILENTLY OVERWRITE. If you change an object another session has committed '
+    , 'since your view was taken, your `commit` fails and writes nothing. That protection is what '
+    , 'the snapshot is for, and it is why a view move in the middle of a plan is not free: every '
+    , 'view move, yours or the server''s, adopts their version, so a change based on something you '
+    , 'read BEFORE the move commits cleanly and erases their work. Re-read before acting on '
+    , 'anything you read earlier.' , lf , lf
+    , 'NOTHING COMMITS FOR YOU. Your changes stay in your session, invisible to others, until you '
+    , '`commit` or `abort` -- so you can compile, run tests, then decide. The tools that change '
+    , 'the image (compile_method, compile_class_definition, delete_class, delete_method, '
+    , 'set_class_comment, add_dictionary, remove_dictionary) leave their work uncommitted. `abort` '
+    , 'discards it; `refresh` keeps it.' , lf , lf
+    , 'THE [session] LINE ends a result only when something needs doing, and describes your '
+    , 'session, not the tool you called:' , lf
+    , '  - uncommitted changes pending -> commit or abort them. The line says what will end the '
+    , 'session and when; if it ends, they are lost.' , lf
+    , '  - your commit FAILED, or a server refresh left your changes CONFLICTING -> nothing was '
+    , 'written, and this is the one failure you cannot retry your way out of: no commit can '
+    , 'succeed until you `abort`, which discards them. Save what you need, abort, re-read, redo.'
     , lf
-    , '  - uncommitted changes pending -> commit them or abort them. The line names what would end '
-    , 'this session first and how long that is; if it ends, they are lost. Commit anything you want '
-    , 'to keep rather than leaving it staged.' , lf
-    , '  - your last commit FAILED, or the server refreshed your view and your pending changes now '
-    , 'CONFLICT -> either way another session has changed the same objects, nothing of yours was '
-    , 'written, and your changes are still here but no commit can succeed until you call `abort`, '
-    , 'which discards them. Save anything you need, abort, re-read the current state, and redo the '
-    , 'change against it. The line says which of the two happened.' , lf
-    , '  - the server refreshed your view -> your snapshot moved, and your uncommitted changes were '
-    , 'kept. Re-read anything you are about to act on: only what you read through a tool is tracked, '
-    , 'so the line can name what it knows went stale and no more.' , lf , lf
-    , 'A failed commit is the one failure here you cannot retry your way out of, and the conflict is '
-    , 'reported per CLASS rather than per method -- two sessions compiling different methods on one '
-    , 'class still collide. If the work matters, save the source before aborting.'
+    , '  - the server refreshed your view -> your changes were kept. Re-read what you are about to '
+    , 'act on: only what you read through a tool is tracked, so the line can name what it knows '
+    , 'went stale and no more.' , lf , lf
+    , 'Compile conflicts are per CLASS, not per method: two sessions compiling different methods '
+    , 'on one class still collide.' , lf , lf
+    , 'SEARCHING THE APPLICATION''S OBJECTS. On a production database, a Smalltalk loop over '
+    , 'application objects -- `allInstances`, `listInstances:`, or `do:`/`detect:`/`select:` with '
+    , 'a square-bracket block over a large collection -- can take hours. Instead, find the '
+    , 'collection the application keeps the objects in and check it for indexes (`IndexManager '
+    , 'current getAllNSCRoots` lists every indexed collection; `aCollection equalityIndexedPaths` '
+    , 'names a collection''s indexed paths). Then query with a selection block -- curly braces, '
+    , 'and a path of instance variable names rather than message sends: `customers select: {:each '
+    , '| each.address.zipCode = ''97201''}`. It uses an index when one exists and falls back to a '
+    , 'scan when none does. Do not create an index unless the user asks.'
 %
 category: 'identity'
 classmethod: McpServer
@@ -254,7 +262,7 @@ newWithToolsetNames: anArrayOfNames toolsetOptions: aDictOrNil
 %
 category: 'worker'
 classmethod: McpServer
-prepareWorkerWithToolsets: anArrayOfNames options: anOptionsJsonOrNil serverName: aNameOrNil title: aTitleOrNil version: aVersionOrNil frontEnd: aFrontEndSessionOrNil cacheName: aCacheNameOrNil
+prepareWorkerWithToolsets: anArrayOfNames options: anOptionsJsonOrNil serverName: aNameOrNil title: aTitleOrNil version: aVersionOrNil instructions: anInstructionsOrNil frontEnd: aFrontEndSessionOrNil cacheName: aCacheNameOrNil
   "Prepare THIS worker gem for one client, in the single call the front end makes at session open
    (McpSession>>prepareWorker). Sent to the class the front end NAMED, so `self` is the server class to
    build -- a worker never chooses.
@@ -275,6 +283,9 @@ prepareWorkerWithToolsets: anArrayOfNames options: anOptionsJsonOrNil serverName
    as JSON cannot travel, which is exactly the constraint the fork string needs anyway. nil means no
    toolset was configured, which is the ordinary case.
 
+   anInstructionsOrNil is the deployment's initialize `instructions`: nil for the class default, an
+   empty string for none (see serverInstructions).
+
    aCacheNameOrNil is what this gem calls itself in the shared cache, built by the front end
    (McpSession>>workerCacheName) because it names the front end and the client. Applied FIRST, before
    anything that can fail: a bootstrap that dies on an unresolvable toolset is exactly when an
@@ -286,7 +297,8 @@ prepareWorkerWithToolsets: anArrayOfNames options: anOptionsJsonOrNil serverName
   SessionTemps current at: #McpFrontEndSession put: aFrontEndSessionOrNil.
   srv := self newWithToolsetNames: anArrayOfNames
     toolsetOptions: (anOptionsJsonOrNil isNil ifTrue: [nil] ifFalse: [self parseBody: anOptionsJsonOrNil]).
-  srv serverName: aNameOrNil; serverTitle: aTitleOrNil; serverVersion: aVersionOrNil.
+  srv serverName: aNameOrNil; serverTitle: aTitleOrNil; serverVersion: aVersionOrNil;
+    serverInstructions: anInstructionsOrNil.
   SessionTemps current at: #McpServer put: srv.
   ^self name asString , ' ready: ' , srv toolRegistry descriptors size printString , ' tool(s)'
 %
@@ -851,11 +863,25 @@ revalidateReadLedger
 category: 'identity'
 method: McpServer
 serverInstructions
-  "The instructions to send in the initialize result, or nil to send none. Answers the class
-   default (defaultServerInstructions), which is where a product overrides them -- there is no
-   router-config path for these the way there is for serverName/serverTitle, because they describe
-   how the SOFTWARE behaves rather than which instance this is."
-  ^self class defaultServerInstructions
+  "The instructions to send in the initialize result, or nil to send none.
+   Same precedence as serverName: a DEPLOYMENT's router config (the ivar, set by the worker bootstrap
+   through serverInstructions:) beats the class default, and a product describes its own surface by
+   overriding that default (defaultServerInstructions) -- so a subclass's text stays replaceable per
+   deployment. Config has to be able to win because the instructions depend on the TOOL SURFACE, and
+   the deployment is what chooses that (McpRouter>>toolsetNames:): the stock text names tools a
+   narrowed surface may not offer.
+   An EMPTY string in config means send none. It is the one way to say so, since nil already means
+   'the default', and an empty `instructions` would tell a client nothing -- so the key is omitted
+   instead, exactly as it is for a nil default (McpDispatcher>>initializeResultFor:)."
+  serverInstructions isNil ifTrue: [^self class defaultServerInstructions].
+  ^serverInstructions isEmpty ifTrue: [nil] ifFalse: [serverInstructions]
+%
+category: 'identity'
+method: McpServer
+serverInstructions: aStringOrNil
+  "This deployment's initialize instructions, pushed by the worker bootstrap from router config:
+   nil for the class default, an empty string for none. See serverInstructions."
+  serverInstructions := aStringOrNil
 %
 category: 'identity'
 method: McpServer

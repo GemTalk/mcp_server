@@ -660,22 +660,27 @@ irCallSitesIn: aMethod forSelector: aSelector
    {offset. selector} pair for every send site, blocks included, from the debug info the debugger
    highlights a step with. In a text-compiled method that offset is into generated Smalltalk; an IR
    method's attached source IS the user's Python, so there it lands in the Python, on the call's
-   opening parenthesis. Measured on `_grail_session.SessionDict` (4.0.0.a2, Grail 9f46b86c): all 12
+   opening parenthesis. Measured on `_grail_session.SessionDict` (4.0.0.a2, Grail 86eaf0be): all 12
    `self._dict()` calls land on the lines the .py has them on.
 
-   THE OFFSET LOCATES; GRAIL'S LIST ONLY VOUCHES. Grail pads an IR method's source with a newline
-   for every line above the def, so counting newlines up to an offset gives the call's module line
-   -- but that padding is Grail's layout, documented only on a private method. What Grail publishes
-   is BaseException pythonPositionsForMethod:, which for an #irSource method answers
-   {line. nil. nil. nil. text} for EVERY non-blank line: a superset of the call sites that cannot say
-   which line holds which call, so it cannot stand in for the offsets. It is used for two smaller
-   things, both in #irSitesAt:in:. The line's text is taken from it, so that comes from a public
-   answer; and a counted line it does not list gives an unplaced site rather than a wrong line.
-   That second check is LOOSE: it confirms only that the count lands on some non-blank line of the
-   method, so a padding change could still pass it by coincidence, most easily in a method near the
-   top of its module. It turns the likely failure into an absent line, not every failure.
-   GemTalk/Grail#1137 asks for a position by source index and leaves the IR path out of it, because
-   here the source IS the Python and an index becomes a line by counting.
+   THE OFFSET LOCATES; GRAIL'S LIST REBASES AND VOUCHES. The attached source is the def's slice of
+   the module, so counting newlines up to an offset gives a line WITHIN the slice. What Grail
+   publishes is BaseException pythonPositionsForMethod:, which for an #irSource method answers
+   {line. nil. nil. nil. text} for every non-blank line, in module lines: a superset of the call
+   sites that cannot say which line holds which call, so it cannot stand in for the offsets. It
+   does three smaller things, all in #irSitesAt:in:. Its first entry is the slice's first line --
+   the def or its first decorator, never blank -- so that entry's line, less one, turns a slice line
+   into a module line. The line's text is taken from it, so that comes from a public answer. And a
+   line it does not list gives an unplaced site rather than a wrong line. That last check is LOOSE:
+   it confirms only that the count lands on some non-blank line of the method.
+
+   The rebase is taken from the public answer rather than from Grail's layout because the layout
+   has already moved once: until GemTalk/Grail#1164 the slice was padded with a newline for every
+   line above the def, so a count WAS the module line, and when the padding went the count became
+   slice-relative and every IR call site went unplaced. The `# line N file PATH` comment that
+   replaced it is documented only on a private method. GemTalk/Grail#1137 asks for a position by
+   source index and leaves the IR path out of it, because here the source IS the Python and an index
+   becomes a line by counting.
 
    ONE SITE PER OFFSET. A Python call Grail compiles into more than one send of the same selector
    has one site, and every copy of the send carries that site's offset, while two calls in one
@@ -795,20 +800,22 @@ irSitesAt: offsets in: aMethod
    OrderedCollection of {pythonLineOrNil. lineTextOrNil} -- one per offset, in source order. The
    step #irCallSitesIn:forSelector: and #irReferenceSitesIn:toName: share.
 
-   The line is counted from the offset, and its text is taken from BaseException
-   pythonPositionsForMethod:; a counted line that answer does not list is left unplaced. Why the
-   count and not Grail's list locates, and how loose that check is, is on
-   #irCallSitesIn:forSelector:."
-  | src lines sites |
+   The line is counted from the offset within the def's slice of the module, and rebased to a
+   module line by BaseException pythonPositionsForMethod:, whose first entry is the slice's first
+   line; its text is taken from the same answer, and a line that answer does not list is left
+   unplaced. Why the count locates and Grail's list only rebases and vouches, and how loose that
+   check is, is on #irCallSitesIn:forSelector:."
+  | src positions lines base sites |
   sites := OrderedCollection new.
   src := [aMethod sourceString] on: Error do: [:ex | nil].
   src isNil ifTrue: [^sites].
+  positions := [BaseException pythonPositionsForMethod: aMethod] on: Error, BaseException do: [:ex | #()].
   lines := Dictionary new.
-  ([BaseException pythonPositionsForMethod: aMethod] on: Error, BaseException do: [:ex | #()])
-    do: [:p | lines at: (p at: 1) put: (p at: 5)].
+  positions do: [:p | lines at: (p at: 1) put: (p at: 5)].
+  base := positions isEmpty ifTrue: [1] ifFalse: [(positions at: 1) at: 1].
   offsets asSortedCollection do: [:off |
     | line |
-    line := ((src copyFrom: 1 to: (off min: src size)) occurrencesOf: Character lf) + 1.
+    line := ((src copyFrom: 1 to: (off min: src size)) occurrencesOf: Character lf) + base.
     sites add: ((lines includesKey: line)
       ifTrue: [Array with: line with: (lines at: line)]
       ifFalse: [Array with: nil with: nil])].
