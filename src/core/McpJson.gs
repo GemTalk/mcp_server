@@ -44,9 +44,19 @@ path, and it is the only one an application cannot route around:
     parser to fix, it is a client-side bug when it happens, and it costs the client one wrong value
     rather than corrupting anything mcp_server stores.
 Everything the kernel parser does RIGHT is therefore kept, and measured: it decodes a raw astral
-character correctly (widening its accumulator to a QuadByteString), and it launders the Unicode
-family, so a decoded body comes back as String/DoubleByteString/QuadByteString and never as a
-Unicode7 -- which on a stock image RAISES when compared to a String rather than answering false.
+character correctly (widening its accumulator to a QuadByteString), and through 4.0.0.a2 it launders
+the Unicode family, so a decoded body comes back as String/DoubleByteString/QuadByteString and never
+as a Unicode7 -- which on a stock image RAISES when compared to a String rather than answering false.
+(From 4.0.0.a3 it follows #StringConfiguration instead; McpBase class>>parseBody: says why that is
+harmless.)
+
+4.0.0.a3 FIXES 1 AND 2, and refuses 3 rather than dropping it: asJson writes the surrogate pair, and
+JsonParser decodes one. So on a3 this class no longer answers a defect. What it still does that
+asJson does not: it writes non-ASCII as raw UTF-8 rather than as escapes (asJson escapes every character
+above 0x7F, six bytes where UTF-8 needs two to four); it writes null for an
+infinite or NaN Float, where asJson writes PlusInfinity or PlusQuietNaN, which is not JSON; and it
+refuses an object it cannot render, where asJson writes {}. Those are the case for keeping it once
+3.7.x support ends, and they are weaker than the one that justified writing it.
 
 WHAT DEPENDS ON THE OUTPUT BEING A byte String, which it always is. These three held under the
 old ASCII-only policy for an incidental reason (nothing above 0x7E) and hold under this one for a

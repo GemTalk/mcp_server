@@ -7,7 +7,7 @@ defects this design routes around and the two it does not.
 
 Everything below was measured on GemStone 3.7.5 (gs64stone, Grail loaded, so
 `#StringConfiguration` is `Unicode16`), with a real socket and a real worker gem wherever the claim
-needs one. The measurements are collected in
+needs one — except [On 4.0.0.a3](#on-400a3), which says where it was measured. The measurements are collected in
 [Appendix: what was measured](#appendix-what-was-measured); the body cites them by letter.
 
 
@@ -215,6 +215,39 @@ The report gains one entry from this work, in the same family as its §5 trap:
 rather than being a bare `MessageNotUnderstood` from a class that can perfectly well hold the bytes
 in question.
 
+
+## On 4.0.0.a3
+
+GemStone 4.0.0.a3 rewrote both halves of the kernel codec, and fixed most of what this design routes
+around. Measured on gs400a3b (Grail loaded, `#StringConfiguration` `Unicode16`), 2026-09-25:
+
+| | through 4.0.0.a2 | 4.0.0.a3 |
+|---|---|---|
+| `asJson`, U+1F600 | `"\uF600"`, wrong character | `"\uD83D\uDE00"`, correct |
+| `asJson`, any character above 0x7F | `\u` escape | `\u` escape (unchanged) |
+| `asJson`, infinite / NaN Float | `PlusInfinity` / `PlusQuietNaN` | unchanged: not JSON |
+| `asJson`, an object it cannot render | `{}` | unchanged |
+| `JsonParser`, escaped surrogate pair | refused (`-32700`) | decoded |
+| `JsonParser`, lone surrogate escape | refused | refused |
+| `JsonParser`, unknown escape | silently dropped | refused |
+| `JsonParser`, trailing content | accepted | refused — **trailing whitespace too** |
+| `JsonParser`, raw bytes | one Latin-1 character per byte | unchanged: still takes characters |
+| `JsonParser`, string class, byte source | `String` | `StringConfiguration newPrintString` — `Unicode7` here |
+| `Unicode16>>decodeFromUTF8` | `MessageNotUnderstood` | unchanged |
+
+Still accepted on a3: duplicate keys (the last wins), raw control characters in a string, a missing
+comma (`[1 2]`), a trailing comma (`[1,2,]`), `1.`, and a leading zero read as a second number, so
+`[01]` parses as `[0, 1]`.
+
+One row is a regression rather than a fix: RFC 8259 §2 allows whitespace after the value, and a3
+refuses it, so a body ending in a newline — any heredoc, file or pretty-printer — was a `-32700`.
+`McpBase class>>withoutTrailingJsonWhitespace:` strips the four whitespace characters before the
+parse. The rest of `parseBody:` is unchanged: the UTF-8 decode and the leading `#asString` are
+still needed on a3, and `#combineSurrogateEscapesIn:` still is for 3.7.x.
+
+`McpJson` no longer answers a defect on a3. What it still does that `asJson` does not is in its class
+comment: raw UTF-8 instead of escapes, `null` for a non-finite Float, and a refusal for an object it
+cannot render.
 
 ## Appendix: what was measured
 
