@@ -18,8 +18,9 @@ McpJsonTest comment:
 UTF-8 decode kernel JsonParser needs and the policy on a malformed sequence -- is McpUtf8Test.
 
 THE HEADLINE TEST is #testAstralCharacterSurvivesWhereTheKernelWriterCorruptsIt, which asserts
-against the kernel side by side: Object>>asJson answers "\uF600" for U+1F600, and for U+1D800 a
-LONE SURROGATE that is not well-formed JSON at all. That defect is the entire reason this class
+against the kernel side by side: through 4.0.0.a2 Object>>asJson answers "\uF600" for U+1F600, and
+for U+1D800 a LONE SURROGATE that is not well-formed JSON at all. 4.0.0.a3 fixed it, and the test
+accepts either answer. That defect is the entire reason this class
 exists, and it is the one an application cannot route around -- by the time asJson has answered,
 the codepoint is gone (docs/kernel-json-unicode.md, defect 2 and section 7).
 
@@ -102,21 +103,31 @@ category: 'tests - the kernel defect'
 method: McpJsonTest
 testAstralCharacterSurvivesWhereTheKernelWriterCorruptsIt
   "THE DEFECT THIS CLASS EXISTS FOR, asserted against the kernel side by side so the comparison
-   cannot rot. CharacterCollection>>printJsonOn: keeps only bits 12-15 of a codepoint above U+FFFF
-   instead of emitting a surrogate pair:
+   cannot rot. Through 4.0.0.a2 CharacterCollection>>printJsonOn: keeps only bits 12-15 of a
+   codepoint above U+FFFF instead of emitting a surrogate pair:
      U+1F600 (grinning face) -> ""\uF600"", U+F600, a Private Use Area character. Silently wrong.
      U+1D800                 -> ""\uD800"", a LONE SURROGATE. Not well-formed JSON at all: a strict
                                 client may reject the document, and a lenient one holds a string it
                                 cannot encode back to UTF-8.
+   4.0.0.a3 FIXED IT, and writes the pairs \uD83D\uDE00 and \uD836\uDC00. So the kernel half
+   accepts exactly two answers, the defect or the fix, and fails on anything else. When 3.7.x
+   support ends the defect''s alternative can go -- and with it the reason this class was written.
    Writing UTF-8 does not fix that arithmetic so much as never reach it -- a surrogate pair is a
    thing only \u escapes and UTF-16 need, so there is nothing left to get wrong. Both codepoints
    come out as their four UTF-8 bytes and read back as themselves."
-  | grin astralNonChar |
+  | grin astralNonChar backslash |
   grin := self stringWith: 16r1F600.
   astralNonChar := self stringWith: 16r1D800.
-  "What the kernel does, so this test fails the day it is fixed and can then be retired."
-  self assert: grin asJson equals: '"' , (String with: (Character codePoint: 92)) , 'uF600"'.
-  self assert: astralNonChar asJson equals: '"' , (String with: (Character codePoint: 92)) , 'uD800"'.
+  backslash := String with: (Character codePoint: 92).
+  "What the kernel does: the defect through 4.0.0.a2, the surrogate pair from 4.0.0.a3."
+  self assert: ((Array
+      with: '"' , backslash , 'uF600"'
+      with: '"' , backslash , 'uD83D' , backslash , 'uDE00"')
+    includes: grin asJson asString).
+  self assert: ((Array
+      with: '"' , backslash , 'uD800"'
+      with: '"' , backslash , 'uD836' , backslash , 'uDC00"')
+    includes: astralNonChar asJson asString).
   "What McpJson does: F0 9F 98 80 and F0 9D A0 80, the correct UTF-8 for each."
   self assert: (self bytesOf: (McpJson write: grin))
     equals: #(34 16rF0 16r9F 16r98 16r80 34).
