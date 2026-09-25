@@ -145,7 +145,7 @@ jobs:
           copydbf "$GEMSTONE/bin/extent0.dbf" "$GEMSTONE/data/"
           chmod 600 "$GEMSTONE/data/extent0.dbf"
           if [ ! -f "$GEMSTONE/sys/gemstone.key" ] && [ -f "$GEMSTONE/sys/community.starter.key" ]; then
-            echo 'KEYFILE = $GEMSTONE/sys/community.starter.key;' >> "$GEMSTONE/data/system.conf"
+            echo "KEYFILE = $GEMSTONE/sys/community.starter.key;" >> "$GEMSTONE/data/system.conf"
           fi
 
       - name: Start Stone and NetLDI
