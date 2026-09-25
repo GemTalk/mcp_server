@@ -441,6 +441,24 @@ print("to stderr", file=sys.stderr)
 %
 category: 'tests'
 method: McpGrailToolsetTest
+testEvalPythonClassesFromTypeAndEnumBelongToMain
+  "type() and the Enum functional API take __module__ from the caller's globals, so they are what
+   the seeded __name__ is FOR: with bare globals each answered an AttributeError, and repr() dropped
+   the module. A class statement is asked too, as the control -- it answered '__main__' even
+   before, from a compile-time default in Grail, and must still."
+  self withFreshScopeDo: [ | ts |
+    ts := self mcp.
+    self assert: (ts tool_eval_python: (self oneArg: 'code' value: 'T = type("T", (), {})
+T.__module__')) equals: '''__main__'''.
+    self assert: (ts tool_eval_python: (self oneArg: 'code' value: 'repr(T)'))
+      equals: '"<class ''__main__.T''>"'.
+    self assert: (ts tool_eval_python: (self oneArg: 'code' value: 'import enum
+enum.Enum("F", "A B").__module__')) equals: '''__main__'''.
+    self assert: (ts tool_eval_python: (self oneArg: 'code' value: 'class C: pass
+C.__module__')) equals: '''__main__''']
+%
+category: 'tests'
+method: McpGrailToolsetTest
 testEvalPythonLabelsEveryStderrLineAndKeepsTheBlankOnes
   "Labelled per LINE rather than once per block. stderr is routinely multi-line --
    traceback.print_exc() alone is four -- and a block marked only at its head leaves every line
@@ -490,6 +508,18 @@ sys.stdout = mine
      "and that call's output went to the TOOLSET's buffer, not the client's"
      self assert: (ts evaluatePython: 'mine.getvalue()') equals: '']
       ensure: [ts evaluatePython: 'sys.stdout = _saved_console']]
+%
+category: 'tests'
+method: McpGrailToolsetTest
+testEvalPythonNamespaceIsMain
+  "A fresh namespace is __main__, as it is under `python -c` or the REPL. It was empty, so the
+   commonest idiom in a script -- `if __name__ == '__main__':` -- was a NameError."
+  self withFreshScopeDo: [ | ts |
+    ts := self mcp.
+    self assert: (ts tool_eval_python: (self oneArg: 'code' value: '__name__')) equals: '''__main__'''.
+    self assert: (ts tool_eval_python: (self oneArg: 'code' value: 'if __name__ == "__main__":
+    ran = True
+ran')) equals: 'True']
 %
 category: 'tests'
 method: McpGrailToolsetTest
