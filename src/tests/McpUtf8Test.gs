@@ -125,6 +125,22 @@ testAsciiBodyCostsNothingToDecode
 %
 category: 'tests-utf8'
 method: McpUtf8Test
+testDeeplyNestedBodyStaysInsideParseBody
+  "Nested far enough, the kernel parser runs out of stack and signals AlmostOutOfStack -- a
+   Notification, not an Error -- so parseBody: must answer from its own catch-all like any other
+   parse failure. Measured on 4.0.0.a2 at the default stack size: 700 levels parse, 1000 do not.
+   The test catches AlmostOutOfStack itself, so a regression fails here instead of halting the suite.
+   It asserts only that nothing escapes, not nil, so a kernel parser that one day copes with the
+   depth still passes."
+  | depth body escaped |
+  depth := 100000.
+  body := '{"k":' , ((String new: depth) atAllPut: $[; yourself)
+    , ((String new: depth) atAllPut: $]; yourself) , '}'.
+  escaped := [McpBase parseBody: body. false] on: AlmostOutOfStack do: [:ex | ex return: true].
+  self deny: escaped
+%
+category: 'tests-utf8'
+method: McpUtf8Test
 testEscapedSurrogatePairIsCombined
   "THE OTHER inbound defect, and the reason McpBase class>>combineSurrogateEscapesIn: exists. RFC
    8259 7 gives JSON one way to write a character above U+FFFF as an escape -- the UTF-16 surrogate

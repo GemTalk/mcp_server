@@ -17,6 +17,10 @@ reasoning has nowhere better to live, not that the entry should grow.
 
 ## Unreleased
 
+* **Every JSON parse failure is now a `-32700`.** `McpBase class>>parseBody:` caught only `Error`,
+  and not everything the kernel parser can signal is one. It now catches the kernel's `Exception`,
+  looked up through `Globals` because a Grail image binds `#Exception` to Python's class first.
+
 * **A request body ending in whitespace is no longer a parse error on GemStone 4.0.0.a3.** a3's
   `JsonParser` refuses anything after the outer value, trailing newline included, so a body sent
   from a heredoc or a file, or pretty-printed, answered `-32700` — every `test.sh` request among
