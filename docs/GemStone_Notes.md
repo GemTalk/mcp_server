@@ -636,6 +636,14 @@ image can at least detect and cover from inside, there is nothing here to test f
 exists on every version, answers a plausible Boolean, and differs only in the state it leaves
 behind.
 
+**4.0.0.a3 no longer falls back to the starter key.** A stone with no `KEYFILE` in its config looks
+for `$GEMSTONE/sys/gemstone.key`, which no download ships. Through 4.0.0.a2 it then tried the bundled
+`$GEMSTONE/sys/community.starter.key`; from a3 it does not, and `startstone` fails with `Unable to
+stat() key file .../sys/gemstone.key` before anything of ours runs. a3's own `system.conf` says the
+starter key "must be added to the configuration file", so a fresh a3 install needs
+`KEYFILE = $GEMSTONE/sys/community.starter.key;` in `$GEMSTONE/data/system.conf` (CI adds it in
+`health-check.yml`'s extent step).
+
 ## Where to look things up
 
 **The product tree ships the kernel in readable form** — grepping it beats a live-image round trip,

@@ -176,7 +176,9 @@ reasoning has nowhere better to live, not that the entry should grow.
   published. Measured on 4.0.0.a2: 560 tests across 22 suites, including all 49 of
   `McpGrailToolsetTest`, plus 126 over-the-wire checks and 15 TLS ones. The catalog keeps one alpha
   at a time, so the pinned version expires: 4.0.0.a2 replaced 4.0.0.Alpha1 on 2026-09-16 and the
-  Alpha1 directory now answers 404, and 4.0.0.a3 has since replaced a2. The `3.7.5 + Grail` leg is excluded instead, since
+  Alpha1 directory now answers 404, and 4.0.0.a3 has since replaced a2. An a3 stone no longer
+  falls back to the bundled starter key, so a fresh a3 install must name it as `KEYFILE` in
+  `system.conf` (see [GemStone_Notes.md](docs/GemStone_Notes.md#version-to-version-differences)). The `3.7.5 + Grail` leg is excluded instead, since
   Grail dropped 3.7.x on 2026-09-12 and its installer refuses the image, so the Grail toolset is
   covered on the one image that can load it rather than failing on the one that cannot.
 

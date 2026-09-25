@@ -131,11 +131,22 @@ jobs:
       # GemStone ships a pristine extent0.dbf under bin/ as a template; copydbf
       # instantiates the actual database from it. The stone also expects its
       # lock/log directories to already exist at first start.
+      #
+      # The key file: a stone with no KEYFILE configured looks for sys/gemstone.key, which no
+      # download ships. Through 4.0.0.a2 it then fell back to the bundled
+      # sys/community.starter.key; from 4.0.0.a3 it does not, and dies at startup with "Unable to
+      # stat() key file .../sys/gemstone.key" -- a3's own system.conf says the starter key "must
+      # be added to the configuration file". So name it there whenever there is no gemstone.key.
+      # Guarded by existence rather than by version: 3.7.5 takes the line too, naming the same key
+      # it would have fallen back to, and an image that ships its own key is left alone.
       - name: Create a fresh extent
         run: |
           mkdir -p "$GEMSTONE_GLOBAL_DIR/locks" "$GEMSTONE_GLOBAL_DIR/log" "$GEMSTONE/data"
           copydbf "$GEMSTONE/bin/extent0.dbf" "$GEMSTONE/data/"
           chmod 600 "$GEMSTONE/data/extent0.dbf"
+          if [ ! -f "$GEMSTONE/sys/gemstone.key" ] && [ -f "$GEMSTONE/sys/community.starter.key" ]; then
+            echo 'KEYFILE = $GEMSTONE/sys/community.starter.key;' >> "$GEMSTONE/data/system.conf"
+          fi
 
       - name: Start Stone and NetLDI
         run: |
