@@ -17,6 +17,10 @@ reasoning has nowhere better to live, not that the entry should grow.
 
 ## Unreleased
 
+* **Every JSON parse failure is now a `-32700`.** `McpBase class>>parseBody:` caught only `Error`,
+  and not everything the kernel parser can signal is one. It now catches the kernel's `Exception`,
+  looked up through `Globals` because a Grail image binds `#Exception` to Python's class first.
+
 * **A request body ending in whitespace is no longer a parse error on GemStone 4.0.0.a3.** a3's
   `JsonParser` refuses anything after the outer value, trailing newline included, so a body sent
   from a heredoc or a file, or pretty-printed, answered `-32700` — every `test.sh` request among
@@ -179,12 +183,14 @@ reasoning has nowhere better to live, not that the entry should grow.
   genuine mismatch (3.7.5 against 4.0.0.Alpha1, either way round) is still refused exactly, and still
   names the stones that would work. With this, all 463 unit tests pass on 4.0.0.Alpha1.
 
-* **GemStone 4.0.0.a2 is now tested, and it is where the Grail toolset is tested.** CI gains a
+* **GemStone 4.0.0.a3 is now tested, and it is where the Grail toolset is tested.** CI gains a
   4.0 leg — both plain and `--grail` — downloaded from `dl.gemdb.com`, where the pre-release is
-  published. Measured there: 560 tests across 22 suites, including all 49 of `McpGrailToolsetTest`,
-  plus 126 over-the-wire checks and 15 TLS ones. The catalog keeps one alpha at a time, so this
-  version will expire: 4.0.0.a2 replaced 4.0.0.Alpha1 on 2026-09-16 and the Alpha1 directory now
-  answers 404. The `3.7.5 + Grail` leg is excluded instead, since
+  published. Measured on 4.0.0.a2: 560 tests across 22 suites, including all 49 of
+  `McpGrailToolsetTest`, plus 126 over-the-wire checks and 15 TLS ones. The catalog keeps one alpha
+  at a time, so the pinned version expires: 4.0.0.a2 replaced 4.0.0.Alpha1 on 2026-09-16 and the
+  Alpha1 directory now answers 404, and 4.0.0.a3 has since replaced a2. An a3 stone no longer
+  falls back to the bundled starter key, so a fresh a3 install must name it as `KEYFILE` in
+  `system.conf` (see [GemStone_Notes.md](docs/GemStone_Notes.md#version-to-version-differences)). The `3.7.5 + Grail` leg is excluded instead, since
   Grail dropped 3.7.x on 2026-09-12 and its installer refuses the image, so the Grail toolset is
   covered on the one image that can load it rather than failing on the one that cannot.
 

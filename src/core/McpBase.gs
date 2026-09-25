@@ -322,6 +322,10 @@ parseBody: aString
    Cross-version: 3.7.x''s JsonParser raises on bad input, but 3.6.2''s (PetitParser-based) returns a
    PPFailure instead of raising -- so reject any non-Dictionary result, not just exceptions. The
    catch-all stays because turning every rejection into one -32700 is this method''s job.
+   The catch-all is Exception rather than Error, because not every failure inside the parse is an
+   Error: a deeply nested body signals AlmostOutOfStack, which is a Notification. It is looked up in
+   Globals because a Grail image binds #Exception to Python''s class ahead of the kernel''s in the
+   installing user''s symbol list, and a handler for that one catches no Smalltalk exception at all.
 
    BOTH class- and instance-side, with the class-side as the single implementation, because the
    worker bootstrap that parses the deployment''s toolset options
@@ -333,7 +337,7 @@ parseBody: aString
        (self combineSurrogateEscapesIn:
          (self withoutTrailingJsonWhitespace: aString asString) decodeFromUTF8 asString).
      (parsed isKindOf: Dictionary) ifTrue: [parsed] ifFalse: [nil] ]
-   on: Error do: [:ex | nil]
+   on: (Globals at: #Exception) do: [:ex | nil]
 %
 category: 'private'
 classmethod: McpBase
