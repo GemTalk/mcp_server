@@ -48,7 +48,7 @@ jobs:
         # contributor runs. This doubles with every version added -- add an `exclude:` entry for a
         # version with no Grail support (see docs/Development.md's version matrix) rather than
         # letting that leg fail.
-        gemstone-version: ['3.7.5', '4.0.0.a2']
+        gemstone-version: ['3.7.5', '4.0.0.a3']
         grail: [false, true]
         include:
           # Where each version's Linux build is published. These differ, and the difference is not
@@ -61,14 +61,15 @@ jobs:
           #
           # THE ALPHA DIRECTORY IS NOT AN ARCHIVE. dl.gemdb.com keeps one alpha at a time: on
           # 2026-09-16 4.0.0.a2 replaced 4.0.0.Alpha1 and the Alpha1 directory began answering 404,
-          # which breaks this leg at the download rather than at anything testable. So a stale
-          # version here is not merely old, and bumping it is not optional. Note the spelling
-          # changed too -- `Alpha1` to a lowercase `a2` -- so the next one cannot be guessed by
-          # incrementing this one; read it off the catalog.
+          # which breaks this leg at the download rather than at anything testable, and 4.0.0.a3
+          # has since replaced a2 the same way. So a stale version here is not merely old, and
+          # bumping it is not optional. Note the spelling changed too -- `Alpha1` to a lowercase
+          # `a2` -- so the next one cannot be guessed by incrementing this one; read it off the
+          # catalog.
           - gemstone-version: '3.7.5'
             download-base: 'https://downloads.gemtalksystems.com/pub/GemStone64/3.7.5'
-          - gemstone-version: '4.0.0.a2'
-            download-base: 'https://dl.gemdb.com/4.0.0.a2'
+          - gemstone-version: '4.0.0.a3'
+            download-base: 'https://dl.gemdb.com/4.0.0.a3'
         exclude:
           # Grail dropped 3.7.x on 2026-09-12, and its own install_base.sh now refuses the image
           # before anything of ours runs: "Error: GemStone 3.7.5 is not supported. Grail requires

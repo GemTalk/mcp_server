@@ -159,7 +159,7 @@ Expected failures are real signal, not noise:
 
 ## Version support
 
-**Supported: 3.7.5, 3.7.6+ and 4.0.0.a2.** The server's view handling relies on those images'
+**Supported: 3.7.5, 3.7.6+ and 4.0.0.a3.** The server's view handling relies on those images'
 implementation of `System continueTransaction`; earlier ones differ below the Smalltalk, in ways
 nothing in `src/` can detect or work around. Whether the floor settles at 3.7.5 or 3.7.6 is not yet
 decided. The 4.0 ceiling is now held by CI rather than by assumption — every suite runs there,
@@ -171,7 +171,7 @@ including the Grail toolset, which 4.0 alone can load.
 | 3.7.2 | **no** | no — no kernel JWT classes | dropped 2026-09-10: `System continueTransaction` differs below the image in two ways nothing in `src/` can detect or cover, and it carries #51438 |
 | 3.7.5 | yes | yes, against a local IdP | **no Grail**: Grail dropped 3.7.x on 2026-09-12 and requires 4.0 |
 | 3.7.6+ | yes | yes, including an external OIDC IdP | ditto |
-| 4.0.0.a2 | yes | yes | **in CI**, and the only image that can carry Grail |
+| 4.0.0.a3 | yes | yes | **in CI**, and the only image that can carry Grail |
 
 **Grail is tested on 4.0 and nowhere else, because nowhere else can run it.** Grail's own
 `install_base.sh` refuses anything before 4.0, so CI excludes `3.7.5 + Grail` and runs the Grail leg
@@ -186,7 +186,7 @@ what users actually have.
 
 **That catalog keeps one alpha at a time, so the pinned version expires.** 4.0.0.a2 replaced
 4.0.0.Alpha1 on 2026-09-16 and the Alpha1 directory now answers 404, which takes the leg down at the
-download step. When that happens the fix is to read the current name off `https://dl.gemdb.com` and
+download step; 4.0.0.a3 has since replaced a2 the same way. When that happens the fix is to read the current name off `https://dl.gemdb.com` and
 bump both the `gemstone-version` entry and its `download-base` — the spelling is not predictable
 (`Alpha1` became a lowercase `a2`), so it cannot be derived from the previous one.
 
