@@ -247,6 +247,11 @@ parseBody: aString
    body is below 256 whatever the bytes go on to mean, so the narrowing always lands on String. A
    genuinely wide string would narrow to DoubleByteString and raise the same MNU -- mcp_server never
    hands one here, and a decoder rather than a narrowing send would be the answer if it ever did.
+   #withoutTrailingJsonWhitespace: FIRST, because 4.0.0.a3''s JsonParser refuses anything after the
+   outer value, whitespace included, and so refused every body a heredoc, a file read or a
+   pretty-printer ends with a newline -- a -32700 for a well-formed request. See that method. It runs
+   on the raw bytes, before the decode, where the four characters it strips cannot be part of a
+   sequence.
    #decodeFromUTF8, because JSON is UTF-8 on the wire (RFC 8259 8.1) while JsonParser takes a
    CHARACTER string, with nothing in its API to say which of the two it wants. Without the decode
    every byte was read as one Latin-1 character: a pound sign or a degree sign arrived as two
@@ -266,8 +271,12 @@ parseBody: aString
    accumulates values as Unicode32 -- so what comes out is whatever went in, and narrowing has to
    happen BEFORE the parse, which is where it is. Nothing downstream should have to reason about a
    kernel parser''s accumulator to know what family it is holding.
-   (An earlier version of this comment claimed the parser always answered legacy strings. It does
-   for a byte source, which is every ASCII body, and that is why the claim survived so long.)
+   (An earlier version of this comment claimed the parser always answered legacy strings. Through
+   4.0.0.a2 it does for a byte source, which is every ASCII body, and that is why the claim survived
+   so long. From 4.0.0.a3 it does not even then: every string it builds starts as
+   `StringConfiguration newPrintString`, so where #StringConfiguration is Unicode16 a byte source
+   comes back as Unicode7 too. That is harmless for the reason the next paragraph gives -- the same
+   setting installs unicode-aware #= -- and on a stock image newPrintString is a String.)
    The trap is also narrower than it looks, which is why the answer is a narrowing send and not a
    decoder: #StringConfiguration drives BOTH halves of it. Set to Unicode16, it makes strings widen
    to Unicode16 AND has GsCurrentSession>>initialize install unicode-aware #= for String and the
@@ -291,16 +300,20 @@ parseBody: aString
    Unicode16. The front-end parse is unaffected, since McpHttpConnection hands it the byte String
    it read off the socket -- so the failure appears only past the worker boundary, and there only
    for a body that actually needs decoding.
-   #combineSurrogateEscapesIn:, because JsonParser sends `Character codePoint:` to each \uXXXX
-   escape on its own and 3.7.x refuses a surrogate, so an emoji ESCAPED as a surrogate pair failed
+   #combineSurrogateEscapesIn:, because JsonParser through 4.0.0.a2 sends `Character codePoint:` to
+   each \uXXXX escape on its own and 3.7.x refuses a surrogate, so an emoji ESCAPED as a surrogate pair failed
    the whole request with a -32700. Python''s json.dumps escapes by default, so that is a real
    client, not a hypothetical one. See that method for why forty lines at the edge can answer an
    inbound defect where the outbound one needed a writer. Its fast path is one primitive search, so
-   a body with no escape in it pays 0.05ms per 63KB.
-   WHAT THE KERNEL PARSER STILL GETS WRONG, left alone on purpose: an escape it does not recognize
-   is silently dropped rather than refused, and trailing content, duplicate keys and raw control
-   characters are all accepted. Those need a real parser to fix, they are measured in the kernel
-   JSON Unicode report and awaiting a kernel fix, and none of them corrupts text -- the worst a
+   a body with no escape in it pays 0.05ms per 63KB. 4.0.0.a3''s parser decodes a pair itself, so
+   there the repair finds nothing the parser would have refused; it stays for 3.7.x.
+   WHAT THE KERNEL PARSER STILL GETS WRONG, left alone on purpose. Through 4.0.0.a2 an escape it does
+   not recognize is silently dropped rather than refused, and trailing content, duplicate keys and
+   raw control characters are all accepted. 4.0.0.a3 refuses the unknown escape and the trailing
+   content, and still accepts duplicate keys (the last wins) and raw control characters -- and,
+   measured there, a missing comma ([1 2]), a trailing comma ([1,2,]) and a bare 1., and it reads a
+   leading zero as a second number, so [01] parses as [0, 1]. Those need a real parser to fix, the
+   3.7.x ones are measured in the kernel JSON Unicode report and awaiting a kernel fix, and none of them corrupts text -- the worst a
    client gets is one wrong value from a request its own encoder built wrong. The codec that did
    answer them all is preserved in this repository''s history, at fb2559b.
    Unicode16>>decodeFromUTF8 belongs in that report as well: a class that can hold the bytes in
@@ -317,9 +330,30 @@ parseBody: aString
   (aString isNil or: [aString isEmpty]) ifTrue: [^nil].
   ^[ | parsed |
      parsed := JsonParser parse:
-       (self combineSurrogateEscapesIn: aString asString decodeFromUTF8 asString).
+       (self combineSurrogateEscapesIn:
+         (self withoutTrailingJsonWhitespace: aString asString) decodeFromUTF8 asString).
      (parsed isKindOf: Dictionary) ifTrue: [parsed] ifFalse: [nil] ]
    on: Error do: [:ex | nil]
+%
+category: 'private'
+classmethod: McpBase
+withoutTrailingJsonWhitespace: aString
+  "Answer aString without the JSON whitespace at its end -- space, tab, LF and CR, the four
+   characters RFC 8259 2 allows around any value -- and the RECEIVER ITSELF when there is none,
+   which costs one comparison for nearly every body.
+   4.0.0.a3''s JsonParser refuses anything after the outer value, whitespace included, so a body
+   ending in a newline -- curl sending a heredoc or a file, a pretty-printer, anything that ends its
+   output with a line -- was a -32700 there. Every earlier version accepted any trailing content at
+   all. Leading whitespace needs nothing: every version skips it.
+   Not #trimSeparators: #isSeparator answers true for every ISO control and for U+00A0, which is
+   wider than the grammar, and on the raw body #parseBody: hands this, 16r80-16rA0 are UTF-8
+   continuation bytes. These four codepoints are ASCII, so they can never be part of a sequence."
+  | end |
+  end := aString size.
+  [end > 0 and: [#(32 9 10 13) includes: (aString at: end) codePoint]]
+    whileTrue: [end := end - 1].
+  end = aString size ifTrue: [^aString].
+  ^aString copyFrom: 1 to: end
 %
 ! ------------------- Instance methods for McpBase
 category: 'private'

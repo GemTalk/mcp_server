@@ -32,10 +32,14 @@ sequence and kept the call. Refusing tells a client with a broken encoder that i
 instead of storing text nobody meant.
 
 WHAT THE KERNEL PARSER STILL GETS WRONG, and is deliberately not covered here, because mcp_server does
-not work around it: an escape the parser does not recognize is silently dropped rather than refused,
-and trailing content, duplicate keys and raw control characters are all accepted. Those need a real
-parser to fix, they are measured in the kernel JSON Unicode report, and testing them here would only
-pin defects this code does not own.
+not work around it: through 4.0.0.a2 an escape the parser does not recognize is silently dropped
+rather than refused, and trailing content, duplicate keys and raw control characters are all
+accepted; 4.0.0.a3 refuses the first two and still accepts the rest (McpBase class>>parseBody: has
+the a3 list). Those need a real parser to fix, they are measured in the kernel JSON Unicode report,
+and testing them here would only pin defects this code does not own.
+The one a3 change mcp_server DOES answer is trailing WHITESPACE: a3 refuses it along with any other
+trailing content, RFC 8259 allows it, and #parseBody: strips it --
+#testTrailingWhitespaceIsNotAParseError is the regression.
 Note the two that are NO LONGER on that list, because both halves of the emoji problem are answered
 now. Outbound, an astral codepoint went out as one wrong escape -- the defect an application could
 not route around -- and mcp_server answers it by writing UTF-8 instead of escapes (McpJson). Inbound, an
@@ -219,14 +223,55 @@ testParsedKeysCompareWithStringLiterals
   "THE Unicode TRAP, and why #asString follows #decodeFromUTF8. `'code' decodeFromUTF8` answers a
    Unicode7, and on a stock image comparing one to a String RAISES rather than answering false --
    so a body decoded but not narrowed could make every `args at: 'code'` in every toolset raise.
-   A parsed body must come back with keys a byte-String literal can find, on every image."
+   A parsed body must come back with keys a byte-String literal can find, on every image.
+   The check is the comparison, in both directions, and not the key''s class. Through 4.0.0.a2 the
+   key is a String. From 4.0.0.a3 JsonParser builds every string as `StringConfiguration
+   newPrintString`, which is a Unicode7 wherever #StringConfiguration is Unicode16 -- and that
+   setting is exactly the one that installs unicode-aware #=, so the key still compares. On a stock
+   image, where comparing a Unicode7 to a String raises, the comparison fails where a class check
+   would."
   | parsed |
   parsed := McpBase parseBody: (self bodyOfBytes:
     #(123 34 99 111 100 101 34 58 34 120 16rC3 16rA9 34 44 34 110 34 58 49 125)).
   self assert: (parsed at: 'code' ifAbsent: ['MISSING']) size equals: 2.
   self assert: (parsed at: 'n' ifAbsent: [0]) equals: 1.
   self assert: (parsed keys detect: [:k | k = 'code'] ifNone: [nil]) notNil.
-  parsed keysAndValuesDo: [:k :v | self assert: k class equals: String]
+  parsed keysDo: [:k |
+    self assert: ('code' = k or: ['n' = k]).
+    self assert: (k = 'code' or: [k = 'n'])]
+%
+category: 'tests-utf8'
+method: McpUtf8Test
+testTrailingWhitespaceIsNotAParseError
+  "RFC 8259 2 allows whitespace around any value, and 4.0.0.a3''s JsonParser refuses everything after
+   the outer one -- so a body ending in a newline, which is how curl sends a heredoc or a file and how
+   most pretty-printers finish, was a -32700 there, where every earlier version accepted it.
+   #parseBody: strips the four whitespace characters from the end before the parse. Each of them is
+   tried alone and mixed, and a pretty-printed body. Whitespace INSIDE a string value is content and
+   survives, and a body that is nothing but whitespace is still refused."
+  | tails parsed |
+  tails := #(#(10) #(13 10) #(32 32) #(9) #(10 32 9 13 10)).
+  tails do: [:tail |
+    parsed := McpBase parseBody: (self bodyOfBytes: #(123 34 105 100 34 58 49 125) , tail).
+    self assert: (parsed isKindOf: Dictionary).
+    self assert: (parsed at: 'id' ifAbsent: [nil]) equals: 1].
+  parsed := McpBase parseBody: (self bodyOfBytes:
+    #(123 10 32 32 34 105 100 34 58 32 49 10 125 10)).
+  self assert: (parsed at: 'id' ifAbsent: [nil]) equals: 1.
+  parsed := McpBase parseBody: (self bodyOfBytes: #(123 34 107 34 58 34 97 32 9 34 125 10)).
+  self assert: (parsed at: 'k' ifAbsent: ['MISSING']) size equals: 3.
+  self assert: (McpBase parseBody: (self bodyOfBytes: #(10 32 13 10))) isNil
+%
+category: 'tests-utf8'
+method: McpUtf8Test
+testTrailingWhitespaceTrimCostsNothingWithoutWhitespace
+  "The trim runs on every request, and almost none of them end in whitespace, so for those it must
+   answer the body itself -- no copy -- the same guarantee #testAsciiBodyCostsNothingToDecode makes
+   for the decode."
+  | body |
+  body := self bodyOfBytes: #(123 34 105 100 34 58 49 125).
+  self assert: (McpBase withoutTrailingJsonWhitespace: body) == body.
+  self assert: (McpBase withoutTrailingJsonWhitespace: String new) isEmpty
 %
 category: 'tests-worker-hop'
 method: McpUtf8Test

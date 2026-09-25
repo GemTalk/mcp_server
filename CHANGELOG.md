@@ -17,6 +17,14 @@ reasoning has nowhere better to live, not that the entry should grow.
 
 ## Unreleased
 
+* **A request body ending in whitespace is no longer a parse error on GemStone 4.0.0.a3.** a3's
+  `JsonParser` refuses anything after the outer value, trailing newline included, so a body sent
+  from a heredoc or a file, or pretty-printed, answered `-32700` — every `test.sh` request among
+  them. `McpBase class>>parseBody:` now strips trailing JSON whitespace (RFC 8259 §2 allows it)
+  before the parse. Two unit tests that pinned a2-era kernel behaviour now accept a3's: the kernel
+  writer's corrected surrogate pair, and parsed keys that are `Unicode7` where
+  `#StringConfiguration` is `Unicode16`.
+
 * **`eval_python` runs as `__main__`** ([#50](https://github.com/GemTalk/mcp_server/issues/50)).
   Its namespace was empty, so `__name__` was a `NameError` and a class from `type()` or
   `Enum('F', 'A B')` had no `__module__` (`repr` read `<class 'T'>`). The toolset is the launcher,
