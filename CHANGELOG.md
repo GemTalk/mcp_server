@@ -17,6 +17,15 @@ reasoning has nowhere better to live, not that the entry should grow.
 
 ## Unreleased
 
+* **The server is now a Rowan project, `Mcp`, in Tonel.** **Breaking:** installing needs a stone on a
+  Rowan 3 extent (`extent0.rowan3.dbf`); `install.sh` refuses one without Rowan. The packages
+  (`Mcp-Core`, `Mcp-Tests`, `Mcp-Auth`, `Mcp-Auth-Tests`, `Mcp-Grail`, `Mcp-Grail-Tests`) live under
+  `src/`, the specs and the `Core`, `Auth` and optional `Grail` components under `rowan/`, and the
+  `.gs` groups and their loaders are gone. Changes are made in the image and written out with the new
+  `./write-project.sh`. `install.sh` migrates an image installed from `.gs`. `--grail` now loads the
+  `Grail` component, which needs a 4.0 image with both Grail and Rowan — no 4.0 release ships a Rowan
+  extent yet. Not yet covered by CI, which still runs the stock extent.
+
 * **Every JSON parse failure is now a `-32700`.** `McpBase class>>parseBody:` caught only `Error`,
   and not everything the kernel parser can signal is one. It now catches the kernel's `Exception`,
   looked up through `Globals` because a Grail image binds `#Exception` to Python's class first.

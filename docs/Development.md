@@ -7,14 +7,16 @@ attached.
 
 ## Setting up
 
-You need a GemStone/S 64 Bit product tree, a running stone, and — for anything that forks a gem — a
-netldi. Everything else the scripts discover.
+You need a GemStone/S 64 Bit product tree, a running stone **on a Rowan 3 extent**, and — for
+anything that forks a gem — a netldi. Everything else the scripts discover. The project is the Rowan
+project `Mcp`, so the stone has to be started on `$GEMSTONE/bin/extent0.rowan3.dbf` (3.7.6 ships
+it), not on the stock `extent0.dbf`; `install.sh` refuses an image without Rowan.
 
 ```bash
 cp .setenv.example .setenv     # edit for your machine; .setenv is gitignored
 source .setenv
 ./install.sh --check           # resolve and report the environment without installing
-./install.sh                   # file the classes in and commit
+./install.sh                   # load the Rowan project and commit
 ./run-unit-tests.sh            # verify
 ```
 
@@ -41,14 +43,14 @@ on their next request.
 
 ## The per-change loop
 
-1. **Make the change** — edit the `.gs` file directly, or `compile_method` through the MCP tools.
-   Note that an MCP compile **commits immediately** in the live image.
-2. **File each changed class out canonically** to its `.gs` file — see below. Do this *after*
-   compiling into the image; the file-out reflects what is committed there.
-3. **Verify the methods landed.** `errorcount` is not sufficient: a `"` inside a method comment
-   silently drops the method, and topaz still reports success. Compare the file's `^test` count
-   against the suite's reported test count, or the file's selectors against the class's.
+1. **Make the change in the image** — `compile_method` / `define_class` through the MCP tools, or
+   topaz — and **commit** it there.
+2. **Write the project out** — `./write-project.sh`. Rowan writes the packages under `src/Mcp-*`
+   from what is committed in the image; see below. Never edit the Tonel by hand.
+3. **Review `git diff src/`.** It is the change, as Rowan sees it. A file you did not expect to
+   change, or a class missing from it, means the image is not what you thought.
 4. **Run the unit suite** — `./install.sh && ./run-unit-tests.sh`. Exit 0 means all green.
+   Reinstalling from the checkout is what proves the written project loads on its own.
 5. **Run `./test.sh`** if you touched a tool schema, a guardrail, or `McpMutationToolset`. It is the
    only check that exercises the tools over the wire; a break there is otherwise silent until
    somebody runs it. It forks its own server on port 8011, so it does not disturb a live one.
@@ -56,62 +58,45 @@ on their next request.
 
 Do not bump the server version as part of an ordinary change — see [Releases](#releases).
 
-### Canonical file-outs
+### The Rowan project
 
-The source tree is plain topaz `.gs` file-outs — `Class>>fileOutClass` output, the same string the
-`export_class_source` tool returns. Every file in `src/` is a verified fixed point: install from the
-tree, file the image back out, byte-identical. That makes a regenerated-vs-repo diff a trustworthy
-signal, and it is worth keeping.
-
-Have topaz write the file-out **straight to the file**. Do not transcribe tool output by hand — a
-real file-out emits things an editor normalises away (a trailing space after `Foo comment: `), so
-transcription drifts.
+The repository is the Rowan project `Mcp`:
 
 ```
-"$GEMSTONE/bin/topaz" -l <<'TPZ'
-set gemstone <stone>
-set username <user>
-set password <pass>
-login
-run
-| s f |
-s := McpAuthTest fileOutClass.
-f := GsFile openWriteOnServer: '/abs/path/src/auth/McpAuthTest.gs'.   "NB: no mode: argument"
-f isNil ifTrue: [^'CANNOT OPEN'].
-f nextPutAll: s.
-f close.
-'wrote ' , s size printString , ' bytes'
-%
-logout
-exit
-TPZ
+rowan/project.ston          project spec: Tonel, RowanHybrid convention, packages under src/
+rowan/specs/Mcp.ston        load spec: components Core + Auth, symbol dictionary Mcp
+rowan/components/Core.ston  Mcp-Core, Mcp-Tests
+rowan/components/Auth.ston  Mcp-Auth, Mcp-Auth-Tests
+rowan/components/Grail.ston Mcp-Grail, Mcp-Grail-Tests  (optional: install.sh --grail)
+src/Mcp-*/                  the Tonel packages, one .class.st per class
 ```
 
-* Log into the stone where the change is **committed**.
-* `openWriteOnServer:mode:` does not exist — `openWriteOnServer:` alone truncates and creates.
-* Filing several classes in one `run` block: do all the writes and return **one** summary value as
-  the block's last expression. Do not `displayNl` between them — an error there aborts the whole
-  doit, and the first file gets written while the second silently does not.
-* `fileOutClass` sorts selectors **case-insensitively**.
-* Verify no whitespace drift: `git diff --shortstat` should equal
-  `git diff --ignore-all-space --shortstat`.
-* **Never judge a regenerated file by reading its diff.** Method-block reordering produces hundreds
-  of lines that can hide a real change. Compare method blocks as a *set* — parse both files into
-  `{(method: line, selector) -> body}` and assert nothing was lost, gained or altered.
+**The Tonel is written by Rowan, never by hand.** Rowan's writer puts methods in the order its
+reader expects; hand-inserted methods have broken a whole load before (a 3.7.6-era Rowan refuses
+Tonel whose methods are not in canonical order). Every file under `src/Mcp-*` is a verified fixed
+point: load the project, write it back out, byte-identical. That makes `git diff src/` after
+`./write-project.sh` a trustworthy signal, and it is worth keeping.
 
-### The loaders
+What `write-project.sh` relies on, measured on 3.7.6:
 
-`src/{core,tests,auth,grail}/` each have a `load.gs`; `load.gs` at the root composes them, and
-`install.sh` files that in, then gates on a sentinel block that asks the image which classes it
-actually got — a topaz file-in reports compile errors and carries on, so exit status alone lets a
-partial load pass for success.
+* **A method compiled into a class the project manages joins that class's package** on its own —
+  `compile_method` and topaz alike — and a removed method leaves it.
+* **A new class does not.** One created with the kernel's `subclass:` messages (which `define_class`
+  sends) belongs to no package, and Rowan would leave it out of the write without a word. The script
+  adopts every such `Mcp*` class into the package its **class category** names — so a new class's
+  category must be one of the four package names.
+* **A deleted class is not dropped either.** `delete_class` unbinds the class, but its package still
+  lists it, and a write would put the file back. The project's audit reports exactly this, and the
+  script refuses to write until the audit is clean.
+* It writes only `src/Mcp-*`. `rowan/` is the project's definition and changes only when the project
+  does — a new package, a new component — which is a Rowan API change in the image, not an edit.
 
-**Every group loader must pre-declare its class names before filing anything in.** The classes name
-each other in both directions, so no file order puts every class ahead of its first mention. Each
-loader opens by binding each name to `nil` in the `Mcp` dictionary; the compiler binds a global by
-its *association*, and the class definition later fills that same association in, so a method
-compiled before its referent still ends up pointing at the real class. If you add a class, add its
-name to that list.
+**The `Grail` component loads only on a 4.0 image that has both Grail and Rowan — and no 4.0
+release ships a Rowan extent yet.** Until one does, such an image has to be built: Rowan bootstrapped
+into a stock 4.0 extent from the product's own `upgrade/bootstrap` files, then Grail installed on top.
+On the 4.0 alphas that also needs Rowan's version parse to accept `4.0.0.aN`, which Rowan commit
+`c327a8d4` fixes and no alpha ships yet. `write-project.sh` run on any other image leaves
+`src/Mcp-Grail*` alone, because it writes only the packages that image has loaded.
 
 ## Testing
 
@@ -175,7 +160,7 @@ including the Grail toolset, which 4.0 alone can load.
 
 **Grail is tested on 4.0 and nowhere else, because nowhere else can run it.** Grail's own
 `install_base.sh` refuses anything before 4.0, so CI excludes `3.7.5 + Grail` and runs the Grail leg
-on the 4.0 alpha instead — which is what keeps `src/grail` and `McpGrailToolsetTest` covered rather
+on the 4.0 alpha instead — which is what keeps the `Grail` component and `McpGrailToolsetTest` covered rather
 than the exclusion quietly dropping them.
 
 **The 4.0 alpha is downloaded from `dl.gemdb.com`, not from the public download server**, because it
@@ -192,8 +177,8 @@ bump both the `gemstone-version` entry and its `download-base` — the spelling 
 
 Anything present in **3.7.5** may be referenced directly, with no existence guard; the live concern
 is only what is newer than that. Genuinely optional things (Grail) still use an `objectNamed:`
-guard. `src/auth` is detected rather than asked about, because loading `McpAuthRouter` is inert;
-`src/grail` is inert too (`McpGrailToolset` is not in the default tool surface — a router has to
+guard. The `Auth` component is detected rather than asked about, because loading `McpAuthRouter` is inert;
+The `Grail` component is inert too (`McpGrailToolset` is not in the default tool surface — a router has to
 name it), but stays opt-in at install because it cannot be detected the same way: `ModuleAst`
 present does not mean the Grail these tools were written against, and a group that cannot compile
 takes the file-in down with it. See
@@ -233,7 +218,10 @@ changelog entry go in the **same** pull request, so a reviewer sees the new numb
 it makes, and `main` never carries one without the other.
 
 1. Cut `release/<version>` from an up-to-date `main`.
-2. Bump `McpServer class>>defaultServerVersion` — the single home for the literal.
+2. Bump `McpServer class>>defaultServerVersion` — the source of the literal — and make the Rowan
+   project's `projectVersion` (`rowan/project.ston`) match it, set through Rowan rather than by hand:
+   `resolved := (Rowan projectNamed: 'Mcp') _loadedProject asDefinition.`
+   `resolved projectVersion: McpServer defaultServerVersion; exportProjectSpecification.`
    `McpContractTest` asserts `initialize`'s `serverInfo.version` equals that selector's answer, so a
    bump does not break tests. Deployments can relabel per instance, so this is the *product*
    version.
@@ -243,17 +231,11 @@ it makes, and `main` never carries one without the other.
 
 Never bump unilaterally: someone may be running a server against a published version.
 
-### Resolving a `.gs` conflict
+### Resolving a conflict in `src/Mcp-*`
 
-Conflicts in file-outs are usually **unions** — each side added a different method at the same
-alphabetical spot — so the resolution is to keep both. That is exactly where the trap is: the `%`
-that terminated the first side's method commonly sits *after* the `>>>>>>>` marker as trailing
-context, so concatenating both sides drops it, and the next method's header and body get swallowed
-into the previous method's source. The compiler then reports `[1034] unexpected token` under
-perfectly good lines much further down, and `install.sh` fails naming a method that is not the
-problem. It reads like a version incompatibility.
+Do not hand-merge Tonel. Resolve by **loading and rewriting**: take either side, `./install.sh`,
+re-apply the other side's change in the image (it is usually a method or two), commit, and
+`./write-project.sh`. Rowan's writer then puts every method back where its reader expects it, which a
+hand merge cannot promise — and a Tonel file with methods out of canonical order is refused by a
+3.7.6-era Rowan for the whole load, not just that file.
 
-**After resolving any `.gs` conflict, check that every `category:` line is preceded by `%`** (or by
-the `! ---` banner). Ordering inside the resolution does not matter — the canonical file-out
-re-sorts everything — but a missing `%` is not recoverable that way, because the file will not file
-in at all.

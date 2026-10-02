@@ -1,0 +1,18 @@
+RwLoadSpecificationV2 {
+	#projectName : 'Mcp',
+	#gitUrl : 'https://github.com/GemTalk/mcp_server.git',
+	#revision : 'main',
+	#projectSpecFile : 'rowan/project.ston',
+	#componentNames : [
+		'Core',
+		'Auth'
+	],
+	#platformProperties : {
+		'gemstone' : {
+			'allusers' : {
+				#defaultSymbolDictName : 'Mcp'
+			}
+		}
+	},
+	#comment : 'Loads the MCP server (Core) and its OAuth/OIDC front end (Auth) into the Mcp symbol dictionary.'
+}

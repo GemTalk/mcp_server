@@ -12,7 +12,7 @@ Nothing here is machine-specific. Facts about *your* stones, netldis, IdP and ho
 ## Reference documents
 
 * [docs/Development.md](../docs/Development.md) — the contributor process: environment, the
-  per-change loop, canonical file-outs, branches, releases, what to run before a PR.
+  per-change loop, the Rowan project and writing it out, branches, releases, what to run before a PR.
 * [docs/GemStone_Notes.md](../docs/GemStone_Notes.md) — image and kernel behaviour that has bitten
   this project. **Read the "silent" section before your first file-in.**
 * [docs/MCP_Client_Notes.md](../docs/MCP_Client_Notes.md) — measured client behaviour and the
@@ -49,13 +49,16 @@ lookups by name are fine. `McpRouter`'s class comment says so too.
 
 ## Before you commit
 
-1. **File the class out canonically.** Never hand-edit method blocks into a `.gs` file and never
-   transcribe `export_class_source`. See
-   [docs/Development.md](../docs/Development.md#canonical-file-outs) for the topaz recipe. The tree
-   round-trips byte-exact, so a regenerated-vs-repo diff is a trustworthy signal — keep it that way.
-2. **Verify the methods actually landed.** A `"` inside a method comment, or a lost `%` after a
-   merge, drops a method with `errorcount` still reading 0. Compare the file's selectors against the
-   image's, or the suite's test count against `grep -c '^test' <file>`.
+1. **Commit in the image, then `./write-project.sh`.** This is a Rowan project: the Tonel under
+   `src/Mcp-*` is what Rowan writes, and is never edited by hand — hand-placed methods break a
+   3.7.6-era Rowan load outright. The script runs in its own session, so it sees only committed
+   code. See [docs/Development.md](../docs/Development.md#the-rowan-project). The tree round-trips
+   byte-exact, so `git diff src/` is a trustworthy signal — keep it that way.
+2. **Give a new class a package's name as its category** (`Mcp-Core`, `Mcp-Tests`, `Mcp-Auth`,
+   `Mcp-Auth-Tests`, `Mcp-Grail`, `Mcp-Grail-Tests`). `define_class` makes a class no package owns; `write-project.sh` adopts it by
+   category, and leaves out — with a report, not an error — one whose category names no package.
+   A class removed with `delete_class` stays in its package, so the audit fails and the script
+   refuses to write: that refusal is the signal, not a bug.
 3. **Run the unit suite** — `./install.sh && ./run-unit-tests.sh`. Exit 0 means every test passed.
    Each suite runs in its own topaz session, so a suite that blows up is reported `ABORTED` and
    listed under `COULD NOT RUN` rather than silencing the whole report. On a stone carrying the
@@ -116,5 +119,6 @@ stages a **real** second session reaches the code that runs when a commit genuin
   `up insertDictionary: (System myUserProfile objectNamed: #Mcp) at: up symbolList size + 1.`
 * **Check the running version rather than trusting a stated one** — `System gemVersionReport`
   (`gsVersion` / `gsRelease`), `System stoneName`. Stones get switched without announcement.
-* The single home for the server version literal is `McpServer class>>defaultServerVersion`.
-  Bumping it is a release act, not part of an ordinary change.
+* The server version literal comes from `McpServer class>>defaultServerVersion`; the Rowan
+  `projectVersion` in `rowan/project.ston` copies it and must be bumped with it (Development.md,
+  Releases). Bumping either is a release act, not part of an ordinary change.

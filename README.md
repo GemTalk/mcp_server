@@ -21,7 +21,7 @@ for you:
 | **3.7.5** | yes | yes, against a local IdP |
 | **3.7.6+** | yes | yes, including an external OIDC IdP |
 
-`src/auth` needs `JsonWebToken` and `JwtSecurityData` (and, to log a worker in,
+The `Auth` component needs `JsonWebToken` and `JwtSecurityData` (and, to log a worker in,
 `GsTsExternalSession>>jwtPassword:`), none of which exist before 3.7.5, so `install.sh` detects what
 the image has rather than asking. The 3.7.6 line is a separate matter: earlier releases have a bug
 connecting to an *external* OIDC IdP.
@@ -60,7 +60,7 @@ MCP_TOOLSETS="McpBrowsingToolset McpSearchToolset" ./run-server.sh   # ...only t
 MCP_WORKER_CLASS=MyMcpServer ./run-server.sh                         # ...a subclass as the worker
 
 # ...the core tools PLUS the optional Python toolset. Naming it is what turns it on: installing
-# src/grail puts McpGrailToolset in the image, and nothing more. Same shape for your own toolset.
+# --grail puts McpGrailToolset in the image, and nothing more. Same shape for your own toolset.
 MCP_TOOLSETS="McpBrowsingToolset McpExecutionToolset McpListingToolset McpMutationToolset \
   McpSearchToolset McpSessionToolset McpTestingToolset McpGrailToolset" \
   MCP_GRAIL_DIR=/path/to/Grail ./run-server.sh
@@ -70,11 +70,14 @@ MCP_TRACE=1 ./run-server.sh         # ...logging every message a client sends (s
 
 `install.sh` and the `run-*.sh` scripts use topaz; set `GEMSTONE`, `GS_STONE`, `GS_USER`,
 `GS_PASS` to match your environment — and read **Environment** below before assuming those four are
-enough, because on many machines they are not. `install.sh` files the code in with topaz, one
-group at a time: `src/core` and `src/tests` always, `src/auth` when the image can compile it, and
-`src/grail` on `--grail` (or `MCP_WITH_GRAIL=1`).
+enough, because on many machines they are not. The server is the **Rowan project `Mcp`**, so the
+stone must run on a Rowan 3 extent (`$GEMSTONE/bin/extent0.rowan3.dbf`); `install.sh` refuses an
+image without Rowan. It loads the project from this checkout through `rowan/specs/Mcp.ston`: the
+`Core` component (server and unit tests) always, the `Auth` component when the image can compile
+it, and the `Grail` component on `--grail` (or `MCP_WITH_GRAIL=1`) — which needs a 4.0 image with
+both Grail and Rowan (see **Source layout**).
 
-The two optional groups are selected differently on purpose. Loading `McpAuthRouter` is inert —
+The two optional parts are selected differently on purpose. Loading `McpAuthRouter` is inert —
 nothing instantiates it until you fork one with `run-auth-server.sh` — so it can be detected rather
 than asked about, and `install.sh` probes the image for `JsonWebToken` to decide. Loading
 `McpGrailToolset` is inert too, deliberately: it is **not** in the default tool surface
@@ -426,7 +429,7 @@ symbol list.
 
 **Python (optional — the `McpGrailToolset`)**
 
-These live in the optional `McpGrailToolset`, in its own source group (`src/grail/`) which only
+These live in the optional `McpGrailToolset`, in its own optional component (`Grail`, packages `Mcp-Grail*`) which only
 `install.sh --grail` loads — they reference `ModuleAst` and `BaseException`, so they cannot compile in
 an image without Grail. Loading it does not serve it: the toolset is **not** in the default surface,
 and a server has these tools only when its router names `McpGrailToolset` in `toolsetNames`
@@ -1224,7 +1227,7 @@ first is the one you usually want.
 Write the handlers as instance methods
 on the same class, taking the parsed argument dictionary and returning a `String`; the inherited
 `resolveClass:`, `dictNamed:`, `linesFrom:` and `capResult:` helpers cover the usual image lookups
-and output capping. `McpFixtureToolset` (in `src/tests/`) and `McpGrailToolset` are small worked
+and output capping. `McpFixtureToolset` (in `src/Mcp-Tests/`) and `McpGrailToolset` are small worked
 examples. A handler that *mutates* the image should pass through the inherited blind-write
 guardrail — `self requireRead:` before the write, `self noteWrite:` after it — so it cannot discard
 another session's work unseen; that forwards to the server, which owns the per-session ledgers.
@@ -1429,63 +1432,41 @@ Two consequences are worth knowing about, because neither applies to `Published`
 
 ## Source layout
 
-The classes live on disk as plain **topaz file-outs** — canonical `Class>>fileOutClass` output,
-grouped by area, with one loader per group:
+The repository is the **Rowan project `Mcp`**, in Tonel:
 
 ```
-src/core/    21 classes  the server itself: protocol, transport, dispatch, toolsets   (always)
-src/tests/   26 classes  the SUnit suites and their fixtures                          (always)
-src/auth/     3 classes  the OAuth/OIDC front end McpAuthRouter + its two suites      (3.7.5+)
-src/grail/    2 classes  the optional GemStone-Python toolset + its suite             (--grail)
-load.gs                  files in core + tests, then commits
+rowan/project.ston          the project spec (Tonel, RowanHybrid, packages under src/)
+rowan/specs/Mcp.ston        the load spec: components Core + Auth, symbol dictionary Mcp
+rowan/components/           Core.ston, Auth.ston, Grail.ston
+src/Mcp-Core/    21 classes  the server itself: protocol, transport, dispatch, toolsets  (Core)
+src/Mcp-Tests/   26 classes  the SUnit suites and their fixtures                         (Core)
+src/Mcp-Auth/     1 class    the OAuth/OIDC front end McpAuthRouter                      (Auth, 3.7.5+)
+src/Mcp-Auth-Tests/ 2 classes  its two suites                                           (Auth)
+src/Mcp-Grail/    1 class    the optional GemStone-Python toolset McpGrailToolset       (Grail, 4.0)
+src/Mcp-Grail-Tests/ 1 class  its suite                                                 (Grail)
 ```
 
-`install.sh` does not use `load.gs`: it composes the `input` lines for the groups it selected, so
-all four combinations of auth and Grail are reachable without a wrapper file per combination.
-`load.gs` is for the case where you are already inside a topaz session — it files in the base, and
-its header shows the one extra `input` line each optional group needs. Every group holds exactly one
-`.gs` file per class plus its `load.gs`, so the file names are the manifest: `install.sh` derives its
-post-load verification list from the directories rather than from a list kept in step by hand.
+Each package holds exactly one `.class.st` file per class, so the file names are the manifest:
+`install.sh` derives its migration and post-load verification lists from the package directories
+rather than from a list kept in step by hand. Each class's category is its package's name, which is
+what the `RowanHybrid` convention expects.
 
-Each group's `load.gs` names its files in dependency order, and every `input` path is relative to the
-**repository root** — `install.sh` `cd`s there before starting topaz, so run any loader from the root
-too. There is no package manager in the loop: a `.gs` file-out files into any image topaz can log
-into, on any GemStone version, with no Rowan and no Tonel.
+**The Tonel is written by Rowan, never by hand.** Change the code in the image, commit, and run
+`./write-project.sh`, which has Rowan write the packages back out; `git diff src/` is then the change.
+The tree round-trips byte-exact — load it, write it out, nothing moves. See
+[docs/Development.md](docs/Development.md#the-rowan-project) for what the script handles (new
+classes are adopted by category; a deleted class blocks the write until the audit is clean).
 
-Each class keeps a `category:` matching its group (`Mcp-Core`, `Mcp-Tests`, `Mcp-Auth`,
-`Mcp-Grail`) — nothing
-reads it, but it groups the classes in a browser the same way the directories group them on disk.
+**The `Grail` component needs a 4.0 image with both Grail and Rowan**, and no 4.0 release ships a
+Rowan extent yet, so for now that image has to be built — see
+[docs/Development.md](docs/Development.md#the-rowan-project). On any other image `--grail` cannot
+compile, and `write-project.sh` leaves `src/Mcp-Grail*` alone.
 
-> **Why each group loader pre-declares its class names.** The classes reference each other in both
-> directions (`McpDispatcher` asks `McpServer` for its name; `McpServer` builds an `McpDispatcher`),
-> so no file order can put every class ahead of its first mention — the compiler would report
-> `undefined symbol` and the file-in would stop. So each loader first binds its class names to `nil`
-> in `Mcp`. That is enough, because the compiler binds a global by its **association**, and
-> each class definition then fills that same association in; a method compiled before its referent
-> still ends up pointing at the real class. Existing keys are left alone, so re-installing over a
-> loaded image changes nothing.
-
-> **Migrating an image that previously loaded the Rowan project.** Filing these `.gs` files over
-> classes the Rowan `Mcp` project had loaded fails at the *first* method with *"Duplicate definition
-> of signalKind:message: in McpError"* (error 2318) — observed 2026-08-19 on a Rowan 3.5.0 + Grail
-> image, while the identical file-in into a Rowan-free image loaded every class with no compiler
-> errors. The mechanism is not pinned down (topaz's own `removeallmethods` / `removeallclassmethods`
-> do clear the class when run on their own, and a plain `compileMethod:dictionaries:category:`
-> recompiles happily), so treat it as a property of Rowan-managed classes rather than of the
-> file-outs. Install into an image that never loaded the Rowan `Mcp` project. (An ordinary,
-> non-Rowan binding of these names in another dictionary is cleared by `install.sh` itself — see
-> *The `Mcp` dictionary* above.)
-
-To regenerate a file-out after changing a class in the image, have topaz write `fileOutClass`
-straight to its file — do not transcribe an `export_class_source` result, which drifts on trailing
-whitespace:
-
-```smalltalk
-| s f |
-s := McpServer fileOutClass.
-f := GsFile openWriteOnServer: '/path/to/mcp_server/src/core/McpServer.gs'.  "no mode: argument"
-f nextPutAll: s; close.
-```
+> **Migrating an image installed from `.gs` file-outs.** Earlier releases installed these classes
+> as plain topaz file-outs, so they are bound in `Mcp` but belong to no Rowan package. `install.sh`
+> unbinds every class of these names that Rowan does not manage — in `Mcp` or anywhere else — before
+> loading, so the project defines them afresh. Measured on 3.7.6: an image installed from `.gs` and
+> then from the project passes the same 511 unit tests as a fresh install.
 
 ## Test
 

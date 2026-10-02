@@ -1,0 +1,10 @@
+RwLoadComponent {
+	#name : 'Grail',
+	#projectNames : [ ],
+	#componentNames : [ ],
+	#packageNames : [
+		'Mcp-Grail',
+		'Mcp-Grail-Tests'
+	],
+	#comment : 'The optional GemStone-Python (Grail) toolset and its suite. Loads ONLY into a Grail image (4.0): its methods reference ModuleAst and BaseException. Not in the default load spec -- install.sh --grail adds it.'
+}
