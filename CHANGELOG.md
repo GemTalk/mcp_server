@@ -61,6 +61,13 @@ reasoning has nowhere better to live, not that the entry should grow.
   compiled through the tool without the blank line before its closing `]`. Only a missing final
   newline is added; a source that already ends in one is stored as sent.
 
+* **The session-lifetime countdown says minutes**
+  ([#47](https://github.com/GemTalk/mcp_server/issues/47)). The time left on a deadline in the
+  uncommitted-work warning was phrased like a configured interval, in minutes only for an exact
+  multiple of one, so it nearly always read like "1979 seconds left". It now rounds down to whole
+  minutes from one minute up ("32 minutes left") and says seconds below that, so it never promises
+  more time than is left. The inactivity bound is phrased as before.
+
 * **Every JSON parse failure is now a `-32700`.** `McpBase class>>parseBody:` caught only `Error`,
   and not everything the kernel parser can signal is one. It now catches the kernel's `Exception`,
   looked up through `Globals` because a Grail image binds `#Exception` to Python's class first.

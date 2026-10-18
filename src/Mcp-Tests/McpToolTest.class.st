@@ -603,6 +603,25 @@ McpToolTest >> testingTools [
 ]
 
 { #category : 'tools - session' }
+McpToolTest >> testLifetimeCountdownRoundsDownToWholeMinutes [
+  "A countdown is almost never a whole number of minutes, so it cannot use phraseForSeconds:, which
+   says minutes only for an exact multiple (#47). It rounds DOWN, so it never promises time the
+   client does not have: 119 seconds left is '1 minute', not '2 minutes'. Below a minute it says
+   the seconds."
+  | srv |
+  srv := McpServer new.
+  self assert: (srv phraseForSecondsLeft: 1979) equals: '32 minutes'.
+  self assert: (srv phraseForSecondsLeft: 1980) equals: '33 minutes'.
+  self assert: (srv phraseForSecondsLeft: 120) equals: '2 minutes'.
+  self assert: (srv phraseForSecondsLeft: 119) equals: '1 minute'.
+  self assert: (srv phraseForSecondsLeft: 60) equals: '1 minute'.
+  self assert: (srv phraseForSecondsLeft: 59) equals: '59 seconds'.
+  self assert: (srv phraseForSecondsLeft: 1) equals: '1 second'.
+  self assert: (srv phraseForSecondsLeft: 0) equals: '0 seconds'
+
+]
+
+{ #category : 'tools - session' }
 McpToolTest >> testLifetimeNoteCountsDownFromAnInstantAndOrdersByWhatComesFirst [
   "The worker renders the countdown when it ANSWERS, from an instant the front end sent, so a long
    tool call cannot leave it promising time that has already gone. And it puts the nearer bound
@@ -610,25 +629,21 @@ McpToolTest >> testLifetimeNoteCountsDownFromAnInstantAndOrdersByWhatComesFirst 
    30-minute idle rule when a request arrives and undercuts it six minutes later. Both are always
    reported, since only one of them fires whatever the client does next.
 
-   System timeGmt counts whole seconds and lifetimeNote reads it again to render, so a second
-   boundary crossed between the two reads leaves 1979 seconds rather than 33 minutes -- and
-   phraseForSeconds: says exactly that. Each pass is repeated until one fits inside a single second;
-   a pass takes milliseconds, so the bound on attempts only ends a runaway."
-  | srv now attempts firstNote laterNote |
+   Each deadline is half a minute past a whole one, which the countdown rounds down, so the seconds
+   that pass between setting it and rendering it cannot change what the note says. Under the old
+   phrasing these read '2010 seconds left' and '1650 seconds left' (#47)."
+  | srv now firstNote laterNote |
   srv := McpServer new.
-  attempts := 0.
-  [attempts := attempts + 1.
-   now := System timeGmt.
-   srv handleJsonString: '{"jsonrpc":"2.0","method":"notifications/initialized"}'
-     lifetimeBounds: (Array with: now + 1980 with: 'your access credential'
-       with: 1800 with: 'of inactivity').
-   firstNote := srv lifetimeNote.
-   "the same session six minutes into a call: the credential is now the nearer of the two"
-   srv handleJsonString: '{"jsonrpc":"2.0","method":"notifications/initialized"}'
-     lifetimeBounds: (Array with: now + 1620 with: 'your access credential'
-       with: 1800 with: 'of inactivity').
-   laterNote := srv lifetimeNote.
-   System timeGmt = now or: [attempts >= 5]] whileFalse.
+  now := System timeGmt.
+  srv handleJsonString: '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+    lifetimeBounds: (Array with: now + 2010 with: 'your access credential'
+      with: 1800 with: 'of inactivity').
+  firstNote := srv lifetimeNote.
+  "the same session six minutes into a call: the credential is now the nearer of the two"
+  srv handleJsonString: '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+    lifetimeBounds: (Array with: now + 1650 with: 'your access credential'
+      with: 1800 with: 'of inactivity').
+  laterNote := srv lifetimeNote.
   self assert: (self includesCS: '30 minutes of inactivity, or 33 minutes left' in: firstNote).
   self assert: (self includesCS: '27 minutes left on your access credential, or 30 minutes of inactivity' in: laterNote)
 
