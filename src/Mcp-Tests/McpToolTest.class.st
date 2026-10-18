@@ -278,6 +278,24 @@ McpToolTest >> testCompileMethod [
 ]
 
 { #category : 'tools - mutation' }
+McpToolTest >> testCompileMethodEndsTheStoredSourceWithANewline [
+  "A client almost never ends the source with a newline, and every other way a method reaches the
+   image stores one; write-project.sh writes what is stored, so a method compiled without it lost
+   the blank line before its Tonel's closing ] (#64). Exactly one is added, after whatever other
+   whitespace the client sent, which stays."
+  | cls lf |
+  cls := self createFixtureClass.
+  lf := String with: Character lf.
+  self mutationTools tool_compile_method:
+    (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'source' put: 'answer ^42'; at: 'category' put: 'tmp'; yourself).
+  self assert: (cls sourceCodeAt: #answer) asString equals: 'answer ^42' , lf.
+  self mutationTools tool_compile_method:
+    (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'source' put: 'spaced ^42  '; at: 'category' put: 'tmp'; yourself).
+  self assert: (cls sourceCodeAt: #spaced) asString equals: 'spaced ^42  ' , lf
+
+]
+
+{ #category : 'tools - mutation' }
 McpToolTest >> testCompileMethodMeta [
   "meta=true compiles onto the class side, not the instance side."
   | out cls |
@@ -287,6 +305,19 @@ McpToolTest >> testCompileMethodMeta [
   self assert: (self includesCS: 'Compiled McpTestFixture' in: out).
   self assert: (cls class canUnderstand: #classAnswer).
   self deny: (cls canUnderstand: #classAnswer)
+
+]
+
+{ #category : 'tools - mutation' }
+McpToolTest >> testCompileMethodStoresASourceEndingInANewlineAsSent [
+  "The other half of #64: a source that already ends in a newline gains no second one, so a client
+   that sends what get_method_source showed it stores exactly that."
+  | cls source |
+  cls := self createFixtureClass.
+  source := 'answer' , (String with: Character lf) , '  ^42' , (String with: Character lf).
+  self mutationTools tool_compile_method:
+    (Dictionary new at: 'className' put: 'McpTestFixture'; at: 'source' put: source; at: 'category' put: 'tmp'; yourself).
+  self assert: (cls sourceCodeAt: #answer) asString equals: source
 
 ]
 

@@ -270,19 +270,27 @@ McpMutationToolset >> tool_compile_class_definition: args [
 
 { #category : 'tools - mutation' }
 McpMutationToolset >> tool_compile_method: args [
-  | cls target errs meta sel key |
+  | cls target errs meta sel key source |
   cls := self resolveClass: (args at: 'className').
   ^cls isNil
     ifTrue: ['Class not found: ' , (args at: 'className')]
     ifFalse: [
       meta := (args at: 'meta' ifAbsent: [false]) == true.
       target := meta ifTrue: [cls class] ifFalse: [cls].
+      "A client almost never ends the source with a newline, and every other way a method reaches
+       the image -- a topaz file-in, a Rowan load -- stores one. write-project.sh writes what is
+       stored, so without it the method's Tonel loses the blank line before its closing ] and
+       git diff src/ shows a change nobody made (#64). Only a missing final newline is added; any
+       other whitespace is the client's, and a source that already ends in one is stored as sent."
+      source := args at: 'source'.
+      (source notEmpty and: [source last == Character lf])
+        ifFalse: [source := source copyWith: Character lf].
       "Which method is this? The source carries the selector, and only the compiler knows for sure,
        so ask it -- selectorOfSource:for: compiles into a throwaway dictionary, which answers the
        real selector without touching the class or dirtying the transaction. That has to happen
        BEFORE the guardrail check, because the check needs the name, and before any real compile,
        because a refused call must have no side effect."
-      sel := self selectorOfSource: (args at: 'source') for: target.
+      sel := self selectorOfSource: source for: target.
       sel isNil ifTrue: [^'Compile errors: could not parse a method pattern from the source'].
       key := self methodKeyFor: cls name selector: sel meta: meta.
       "CREATION IS NEVER BLIND: a selector this class does not implement in the current view has no
@@ -295,7 +303,7 @@ McpMutationToolset >> tool_compile_method: args [
           hint: 'Call get_method_source(' , cls name asString , ', ' , sel asString
             , (meta ifTrue: [', meta=true'] ifFalse: ['']) , ') first.'].
       errs := target
-        compileMethod: (args at: 'source')
+        compileMethod: source
         dictionaries: System myUserProfile symbolList
         category: (args at: 'category' ifAbsent: ['mcp']).
       "A failed compileMethod: installs nothing, so there is nothing to undo -- and an abort here

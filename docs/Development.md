@@ -83,6 +83,10 @@ What `write-project.sh` relies on, measured on 3.7.6:
 
 * **A method compiled into a class the project manages joins that class's package** on its own —
   `compile_method` and topaz alike — and a removed method leaves it.
+* **A method's source ends with a newline**, as a topaz file-in and a Rowan load store it; the
+  Tonel's blank line before `]` is that newline. `compile_method` adds one when the client's source
+  lacks it ([#64](https://github.com/GemTalk/mcp_server/issues/64)), but a method compiled from
+  Smalltalk with `compileMethod:` is stored exactly as given.
 * **A new class does not.** One created with the kernel's `subclass:` messages (which `define_class`
   sends) belongs to no package, and Rowan would leave it out of the write without a word. The script
   adopts every such `Mcp*` class into the package its **class category** names — so a new class's

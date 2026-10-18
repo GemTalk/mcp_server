@@ -1648,14 +1648,14 @@ flag, so a missing suite is a skip and not an error:
 Run a single suite while a server is up via the `run_test_class` tool (e.g. `run_test_class
 McpToolTest`). `./run-unit-tests.sh` runs them all and exits 0 when every test passes: the
 socket-less suites `McpJsonTest` (12), `McpUtf8Test` (10), `McpBlindWriteTest` (41),
-`McpToolTest` (65), `McpDispatcherTest` (21), `McpSessionTest` (24), `McpOutboxTest` (9),
+`McpToolTest` (67), `McpDispatcherTest` (21), `McpSessionTest` (24), `McpOutboxTest` (9),
 `McpProgressTest` (19), `McpStreamTest` (18), `McpLifetimeTest` (56), `McpViewHygieneTest` (46),
 `McpTransportTest` (49), `McpContractTest` (22), `McpExtensionTest` (13) and `McpGemNameTest` (16),
 plus `McpConcurrentEditTest` (18), `McpExternalSessionTest` (5), `McpTransactionTest` (10),
-`McpWorkerDeadlineTest` (4) and `McpWorkerLoginTest` (9) — **467 tests**,
+`McpWorkerDeadlineTest` (4) and `McpWorkerLoginTest` (9) — **469 tests**,
 which is the whole suite on a base install. Where the optional groups are installed the runner picks
-their suites up automatically: plus `McpAuthTest` (28) and `McpAuthConformanceTest` (25) — **520
-tests** — and **579 with the 59 in `McpGrailToolsetTest`** on a Grail image.
+their suites up automatically: plus `McpAuthTest` (28) and `McpAuthConformanceTest` (25) — **522
+tests** — and **581 with the 59 in `McpGrailToolsetTest`** on a Grail image.
 
 Eight suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
 `McpAuthConformanceTest` commit a throwaway JWT user and spawn real worker gems; they are in the
