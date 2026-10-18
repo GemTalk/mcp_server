@@ -50,7 +50,8 @@ This README is the reference for what the server is and how to run it. Alongside
 export GEMSTONE=/path/to/GemStone64Bit3.7.x   # product dir
 
 ./install.sh --check                # verify the environment and report what would be installed
-./install.sh                        # file in the classes and commit; auth included if the image can
+./install.sh                        # load the Rowan project and commit; auth included if the image can
+./install.sh --from-gs mcp_server.gs  # ...or, with no Rowan, file in the topaz file-out (see below)
 ./install.sh --auth                 # ...and fail loudly if it cannot, instead of quietly skipping
 ./install.sh --no-auth              # ...or leave the auth group out of an image that could take it
 ./install.sh --grail                # ...plus the optional Grail/Python toolset (Grail image only)
@@ -70,12 +71,20 @@ MCP_TRACE=1 ./run-server.sh         # ...logging every message a client sends (s
 
 `install.sh` and the `run-*.sh` scripts use topaz; set `GEMSTONE`, `GS_STONE`, `GS_USER`,
 `GS_PASS` to match your environment — and read **Environment** below before assuming those four are
-enough, because on many machines they are not. The server is the **Rowan project `Mcp`**, so the
-stone must run on a Rowan 3 extent (`$GEMSTONE/bin/extent0.rowan3.dbf`); `install.sh` refuses an
-image without Rowan. It loads the project from this checkout through `rowan/specs/Mcp.ston`: the
-`Core` component (server and unit tests) always, the `Auth` component when the image can compile
-it, and the `Grail` component on `--grail` (or `MCP_WITH_GRAIL=1`) — which needs a 4.0 image with
-both Grail and Rowan (see **Source layout**).
+enough, because on many machines they are not. The server is the **Rowan project `Mcp`**, and there
+are two ways to install it:
+
+* **Through Rowan** — the default, and how the project is developed. The stone must run on a Rowan
+  3 extent (`$GEMSTONE/bin/extent0.rowan3.dbf`, which 3.7.5, 3.7.6 and 4.0.0.a5 all ship);
+  without `--from-gs`, `install.sh` refuses an image without Rowan. It loads the project from this
+  checkout through `rowan/specs/Mcp.ston`: the `Core` component (server and unit tests) always, the
+  `Auth` component when the image can compile it, and the `Grail` component on `--grail` (or
+  `MCP_WITH_GRAIL=1`) — which needs a 4.0 image with both Grail and Rowan (see **Source layout**).
+* **From a topaz file-out** — for a 3.7.x installation on the stock `extent0.dbf`, with no Rowan.
+  `./export-gs.sh` writes the whole of `Core` + `Auth` as one `mcp_server.gs`, using GemStone's own
+  Rowan exporter from any 3.7.5-or-later product tree; it reads the Tonel from disk and needs no
+  stone. `./install.sh --from-gs mcp_server.gs` then files it into the stone you name. The file is
+  generated, never committed; CI exports and installs it on 3.7.5 and 3.7.6 for every pull request.
 
 The two optional parts are selected differently on purpose. Loading `McpAuthRouter` is inert —
 nothing instantiates it until you fork one with `run-auth-server.sh` — so it can be detected rather
@@ -1457,16 +1466,20 @@ The tree round-trips byte-exact — load it, write it out, nothing moves. See
 [docs/Development.md](docs/Development.md#the-rowan-project) for what the script handles (new
 classes are adopted by category; a deleted class blocks the write until the audit is clean).
 
-**The `Grail` component needs a 4.0 image with both Grail and Rowan**, and no 4.0 release ships a
-Rowan extent yet, so for now that image has to be built — see
-[docs/Development.md](docs/Development.md#the-rowan-project). On any other image `--grail` cannot
-compile, and `write-project.sh` leaves `src/Mcp-Grail*` alone.
+**The `Grail` component needs a 4.0 image with both Grail and Rowan.** 4.0.0.a5 is the first 4.0
+release to ship a Rowan extent (`extent0.rowan3.dbf`); start the stone on it, install Grail, then
+`./install.sh --grail`. On any other image `--grail` cannot compile, and `write-project.sh` leaves
+`src/Mcp-Grail*` alone.
+
+**The topaz file-out is generated from this same Tonel**, by `./export-gs.sh` — see **Install &
+run**. It is never committed and never edited: the Tonel stays the one source.
 
 > **Migrating an image installed from `.gs` file-outs.** Earlier releases installed these classes
-> as plain topaz file-outs, so they are bound in `Mcp` but belong to no Rowan package. `install.sh`
-> unbinds every class of these names that Rowan does not manage — in `Mcp` or anywhere else — before
-> loading, so the project defines them afresh. Measured on 3.7.6: an image installed from `.gs` and
-> then from the project passes the same 511 unit tests as a fresh install.
+> as plain topaz file-outs, and `install.sh --from-gs` still does, so they are bound in `Mcp` but
+> belong to no Rowan package. A Rowan install unbinds every class of these names that Rowan does not
+> manage — in `Mcp` or anywhere else — before loading, so the project defines them afresh. Measured
+> on 3.7.6: an image installed from `.gs` and then from the project passes the same 511 unit tests
+> as a fresh install. The reverse is refused: `--from-gs` cannot file in over classes Rowan manages.
 
 ## Test
 

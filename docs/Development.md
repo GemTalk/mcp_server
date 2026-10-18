@@ -9,8 +9,10 @@ attached.
 
 You need a GemStone/S 64 Bit product tree, a running stone **on a Rowan 3 extent**, and — for
 anything that forks a gem — a netldi. Everything else the scripts discover. The project is the Rowan
-project `Mcp`, so the stone has to be started on `$GEMSTONE/bin/extent0.rowan3.dbf` (3.7.6 ships
-it), not on the stock `extent0.dbf`; `install.sh` refuses an image without Rowan.
+project `Mcp`, so the stone has to be started on `$GEMSTONE/bin/extent0.rowan3.dbf` (3.7.5, 3.7.6
+and 4.0.0.a5 ship it), not on the stock `extent0.dbf`; `install.sh` refuses an image without Rowan.
+The stock extent is for the other audience — a 3.7.x installation without Rowan, which installs the
+topaz file-out with `install.sh --from-gs` (see [Testing](#testing)) — and is not where you develop.
 
 ```bash
 cp .setenv.example .setenv     # edit for your machine; .setenv is gitignored
@@ -91,20 +93,54 @@ What `write-project.sh` relies on, measured on 3.7.6:
 * It writes only `src/Mcp-*`. `rowan/` is the project's definition and changes only when the project
   does — a new package, a new component — which is a Rowan API change in the image, not an edit.
 
-**The `Grail` component loads only on a 4.0 image that has both Grail and Rowan — and no 4.0
-release ships a Rowan extent yet.** Until one does, such an image has to be built: Rowan bootstrapped
-into a stock 4.0 extent from the product's own `upgrade/bootstrap` files, then Grail installed on top.
-On the 4.0 alphas that also needs Rowan's version parse to accept `4.0.0.aN`, which Rowan commit
-`c327a8d4` fixes and no alpha ships yet. `write-project.sh` run on any other image leaves
-`src/Mcp-Grail*` alone, because it writes only the packages that image has loaded.
+**The `Grail` component loads only on a 4.0 image that has both Grail and Rowan.** 4.0.0.a5 is the
+first 4.0 release to ship one ready-made: start the stone on its `extent0.rowan3.dbf` (Rowan 3.6.0),
+install Grail, then `./install.sh --grail`. Before a5 such an image had to be built by hand —
+Rowan bootstrapped into a stock extent, and patched to parse `4.0.0.aN` (Rowan commit `c327a8d4`).
+`write-project.sh` run on any other image leaves `src/Mcp-Grail*` alone, because it writes only the
+packages that image has loaded.
+
+### The topaz file-out
+
+The 3.7.x audience runs the stock `extent0.dbf`, which has no Rowan, so it cannot load the project.
+It installs a **topaz file-out** instead — one `.gs`, generated from the same Tonel and never
+committed:
+
+```bash
+./export-gs.sh                          # writes mcp_server.gs (gitignored); needs GEMSTONE, no stone
+./install.sh --from-gs mcp_server.gs    # files it into a stone without Rowan, and commits
+```
+
+`export-gs.sh` runs GemStone's own `rowan3/bin/exportRowanProjectAsTopaz.solo`, a solo session that
+reads the Tonel through the load spec, so it needs a Rowan-3 product tree but no running stone. The
+file is the load spec's default components, `Core` + `Auth`, unit tests included. Two properties it
+depends on, both measured 2026-10-18:
+
+* **The exporter's output does not depend on the product that runs it.** 3.7.5, 3.7.6 and 4.0.0.a5
+  wrote byte-identical files from the same Tonel. So the version that *exports* is immaterial; the
+  version it is *filed into* is what the tests decide.
+* **Every class is `inDictionary: Mcp`**, so the dictionary must exist before the first class
+  definition compiles. `install.sh` creates it first in both modes.
+
+`--from-gs` refuses an image where Rowan already manages these classes: topaz cannot file in over a
+Rowan-managed class ("Duplicate definition", error 2318). Going the other way is fine — a Rowan
+install migrates a file-out install.
 
 ## Testing
 
 `.github/workflows/health-check.yml` runs the suites below on every push to `main` and every pull
-request, as a two-entry matrix: one leg installs plain, the other clones
-[GemTalk/Grail](https://github.com/GemTalk/Grail), installs it, and installs mcp_server with
-`--grail`, so `McpGrailToolsetTest` runs there too. Locally, the suites are the whole safety net,
-and they are cheap:
+request, in four legs — one per audience and version:
+
+| leg | extent | install |
+|---|---|---|
+| 3.7.5 file-out | stock `extent0.dbf` | `export-gs.sh`, then `install.sh --from-gs` |
+| 3.7.6 file-out | stock `extent0.dbf` | ditto |
+| 4.0.0.a5 Rowan | `extent0.rowan3.dbf` | `install.sh` |
+| 4.0.0.a5 Rowan + Grail | `extent0.rowan3.dbf` | clones [GemTalk/Grail](https://github.com/GemTalk/Grail), installs it, then `install.sh --grail`, so `McpGrailToolsetTest` runs too |
+
+The file-out legs are what keep 3.7 honest between releases: they file in exactly what a release
+would publish from that commit, so a change that reaches for something newer than 3.7.5 fails in the
+pull request that made it. Locally, the suites are the whole safety net, and they are cheap:
 
 | | what it covers | needs |
 |---|---|---|
@@ -144,24 +180,24 @@ Expected failures are real signal, not noise:
 
 ## Version support
 
-**Supported: 3.7.5, 3.7.6+ and 4.0.0.a3.** The server's view handling relies on those images'
+**Supported: 3.7.5, 3.7.6+ and 4.0.0.a5.** The server's view handling relies on those images'
 implementation of `System continueTransaction`; earlier ones differ below the Smalltalk, in ways
 nothing in `src/` can detect or work around. Whether the floor settles at 3.7.5 or 3.7.6 is not yet
-decided. The 4.0 ceiling is now held by CI rather than by assumption — every suite runs there,
-including the Grail toolset, which 4.0 alone can load.
+decided. Both ends are held by CI rather than by assumption — 3.7.5 and 3.7.6 from the topaz
+file-out on a stock extent, 4.0.0.a5 through Rowan, including the Grail toolset, which 4.0 alone can
+load.
 
 | image | base server | OAuth/OIDC front end | notes |
 |---|---|---|---|
 | 3.6.2 | **no** | no | no `GsTsExternalSession` on macOS (its own header parser crashes), so no worker gems at all |
 | 3.7.2 | **no** | no — no kernel JWT classes | dropped 2026-09-10: `System continueTransaction` differs below the image in two ways nothing in `src/` can detect or cover, and it carries #51438 |
-| 3.7.5 | yes | yes, against a local IdP | **no Grail**: Grail dropped 3.7.x on 2026-09-12 and requires 4.0 |
-| 3.7.6+ | yes | yes, including an external OIDC IdP | ditto |
-| 4.0.0.a3 | yes | yes | **in CI**, and the only image that can carry Grail |
+| 3.7.5 | yes | yes, against a local IdP | **in CI**, from the file-out. **No Grail**: Grail dropped 3.7.x on 2026-09-12 and requires 4.0 |
+| 3.7.6+ | yes | yes, including an external OIDC IdP | ditto (3.7.6) |
+| 4.0.0.a5 | yes | yes | **in CI**, through Rowan, and the only image that can carry Grail |
 
 **Grail is tested on 4.0 and nowhere else, because nowhere else can run it.** Grail's own
-`install_base.sh` refuses anything before 4.0, so CI excludes `3.7.5 + Grail` and runs the Grail leg
-on the 4.0 alpha instead — which is what keeps the `Grail` component and `McpGrailToolsetTest` covered rather
-than the exclusion quietly dropping them.
+`install_base.sh` refuses anything before 4.0, so CI has no 3.7 Grail leg and runs the Grail leg on
+the 4.0 alpha instead — which is what keeps the `Grail` component and `McpGrailToolsetTest` covered.
 
 **The 4.0 alpha is downloaded from `dl.gemdb.com`, not from the public download server**, because it
 is a pre-release and is not published there. The base URL per version is matrix data in
@@ -169,9 +205,11 @@ is a pre-release and is not published there. The base URL per version is matrix 
 is the same catalog anything running this server on 4.0 installs its engine from, so the leg tests
 what users actually have.
 
-**That catalog keeps one alpha at a time, so the pinned version expires.** 4.0.0.a2 replaced
-4.0.0.Alpha1 on 2026-09-16 and the Alpha1 directory now answers 404, which takes the leg down at the
-download step; 4.0.0.a3 has since replaced a2 the same way. When that happens the fix is to read the current name off `https://dl.gemdb.com` and
+**Do not count on that catalog keeping an old alpha, so the pinned version can expire.** 4.0.0.a2
+replaced 4.0.0.Alpha1 on 2026-09-16 and the Alpha1 directory now answers 404, which takes the leg
+down at the download step; a3 replaced a2 the same way. (On 2026-10-18 it listed a3, a4 and a5
+together, so the policy may have changed — but a leg that breaks at the download says nothing about
+the code.) When that happens the fix is to read the current name off `https://dl.gemdb.com` and
 bump both the `gemstone-version` entry and its `download-base` — the spelling is not predictable
 (`Alpha1` became a lowercase `a2`), so it cannot be derived from the previous one.
 
