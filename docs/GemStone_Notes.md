@@ -177,6 +177,18 @@ SIGTERM and SIGKILL on the parent. So a leaked worker is bounded by the lifetime
 created it: a script that exits takes its gems with it, while repeated runs inside one long-lived
 gem compound until the login ceiling.
 
+**`newDefaultForGemHost: 'localhost'` pins the gem, not the stone.** The stone NRS still comes from
+`GsNetworkResourceString defaultStoneNRSFromCurrent`, and when the launching login named no host
+(topaz `set gemstone gemdb`, or `!#server!gemdb`) that fills in `currentGemHostName` —
+`System gemVersionReport at: #nodeName`, the OS's name for the machine. Every external session then
+depends on that name reaching the stone, and on one Mac it failed both ways: a name taken from the
+ISP's reverse DNS that does not resolve (`getaddrinfo failed, EAI error 8`), and a `.local` name that
+resolves to a LAN address whose connection the stone drops after accept (`NetAcceptPhaseOne failed`)
+([#56](https://github.com/GemTalk/mcp_server/issues/56)). GitHub's runners pass either way. So every
+gem this server forks starts from `McpBase class>>newLocalExternalSession`, which also sets the stone
+NRS's node to `localhost` unless the login named one. A login that did name a host keeps it; a
+forked gem's own `System stoneName` carries that host, so a gem that forks again keeps it too.
+
 **A gem forked by a NetLDI is configured through the NRS body, not through the session object.**
 `GsTsExternalSession` has no configuration hook, and a forked gem gets whatever
 `GEM_TEMPOBJ_CACHE_SIZE` and friends *its NetLDI's* environment hands out. That is not a constant to

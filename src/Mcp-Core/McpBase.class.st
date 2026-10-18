@@ -170,6 +170,47 @@ McpBase class >> hexUnitIn: aString at: anIndex [
 
 ]
 
+{ #category : 'worker login' }
+McpBase class >> localStoneNRS [
+  "The stone NRS for a gem this server forks: the stone the current session is logged in to,
+   addressed by 'localhost' unless the current login named its host.
+   WHY NOT THE KERNEL DEFAULT. GsTsExternalSession class>>newDefaultForGemHost: names the gem's host
+   but takes the STONE from GsNetworkResourceString class>>defaultStoneNRSFromCurrent, and when the
+   current login named no host -- topaz `set gemstone gemdb`, which is how run-server.sh logs in --
+   that fills in #currentGemHostName: whatever the OS calls the machine. Every gem forked here then
+   depends on that name resolving to an address the stone accepts, and on one Mac it failed both
+   ways: a name taken from the ISP's reverse DNS that does not resolve at all, and a .local name
+   that resolves to a LAN address whose connection the stone drops after accept (issue #56).
+   A stone name with no host means a stone on this machine, and every gem here is forked on this
+   machine (the gem NRS is pinned to 'localhost' too), so loopback is the one address that is always
+   right. A host the login DID name is kept, so a front end pointed at a stone elsewhere still
+   reaches it."
+  ^self localStoneNRSFrom: GsNetworkResourceString defaultStoneNRSFromCurrent
+    stoneName: System stoneName
+
+]
+
+{ #category : 'worker login' }
+McpBase class >> localStoneNRSFrom: anNRS stoneName: aStoneName [
+  "anNRS -- the stone NRS GsNetworkResourceString class>>defaultStoneNRSFromCurrent answers for a
+   login to aStoneName -- with its node replaced by 'localhost' when aStoneName names no host
+   (#localStoneNRS says why). Separate from it only so the rule can be driven with stone names this
+   session did not log in with.
+   A NAMED HOST is decided by the kernel's own parse in #defaultStoneNRSFromCurrent, so the two can
+   never disagree: an NRS of three !-separated parts whose middle part's protocol section carries an
+   @ -- '!@host#server!gemdb', '!tcp@host#server!gemdb'. A bare 'gemdb' and a host-less
+   '!#server!gemdb' are the cases it fills from #currentGemHostName, and the ones changed here."
+  | parts |
+  parts := aStoneName subStrings: $!.
+  (parts size >= 3
+    and: [(((parts at: 2) subStrings: $#) first subStrings: $@) size >= 2])
+      ifTrue: [^anNRS].
+  ^anNRS copy
+    node: 'localhost';
+    yourself
+
+]
+
 { #category : 'gem name' }
 McpBase class >> maxGemCacheNameSize [
   "The longest name the shared cache will accept: 31 characters.
@@ -213,6 +254,20 @@ McpBase class >> nameThisGem: aStringOrNil [
   label size > self maxGemCacheNameSize ifTrue: [
     label := label copyFrom: 1 to: self maxGemCacheNameSize].
   ^[System cacheName: label. label] on: Error do: [:ex | ex return: nil]
+
+]
+
+{ #category : 'worker login' }
+McpBase class >> newLocalExternalSession [
+  "A fresh, not-yet-logged-in GsTsExternalSession, logging in as the current user, whose gem is
+   forked on this machine and reaches the stone over loopback (#localStoneNRS). Every gem this server
+   starts begins here: the front end (McpRouter>>forkOnPort:), each worker
+   (McpSession>>newWorkerSession) and a Grail test gem (McpGrailToolset>>newGrailTestSession).
+   The gem host is named rather than left to #newDefault, which takes it from #currentGemHostName for
+   the same reason the stone is: that name need not resolve, or resolve to loopback."
+  ^(GsTsExternalSession newDefaultForGemHost: 'localhost')
+    stoneNRS: self localStoneNRS;
+    yourself
 
 ]
 
