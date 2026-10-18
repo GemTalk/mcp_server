@@ -250,7 +250,7 @@ r workerUserId: '$(printf '%s' "$MCP_WORKER_USER" | sed "s/'/''/g")'."
 else
   echo "Forking McpRouter onto 127.0.0.1:$MCP_PORT (detached; this script returns)..."
 fi
-"$TOPAZ" -l <<TPZ
+"$TOPAZ" -l -i <<TPZ
 set gemstone $GS_STONE
 set username $GS_USER
 set password $GS_PASS

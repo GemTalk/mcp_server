@@ -85,7 +85,7 @@ echo "  commits:     disabled at the UserProfile (every session of this user, fo
 echo "  OTP grant:   $GS_USER may mint one-time passwords for $MCP_RO_USER"
 echo "  symbol list: $([ "$MCP_COPY_SYMBOL_LIST" = "1" ] && echo "copied from $GS_USER" || echo "Mcp + profile defaults")"
 
-"$TOPAZ" -l <<TPZ
+"$TOPAZ" -l -i <<TPZ
 set gemstone $GS_STONE
 set username $GS_USER
 set password $GS_PASS

@@ -25,7 +25,7 @@ trap 'rm -f /tmp/mcp_server-alice.jwt /tmp/mcp_server-bob.jwt' EXIT
 
 echo "Verifying JWT logins against $GS_STONE ..."
 
-"$TOPAZ" -l <<TPZ
+"$TOPAZ" -l -i <<TPZ
 set gemstone $GS_STONE
 set username $GS_USER
 set password $GS_PASS

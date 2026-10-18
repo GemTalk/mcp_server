@@ -34,6 +34,11 @@ reasoning has nowhere better to live, not that the entry should grow.
   Grail. Pushing a `v<version>` tag on `main` now publishes a GitHub Release with the file-out
   attached, after testing that exact file on 3.7.5 and 3.7.6 (`release.yml`).
 
+* **The scripts no longer read a `.topazini`.** Every topaz login passes `-i`. **Breaking** for
+  anyone who kept settings for these scripts there: they belong in `.setenv`. A `.topazini` in the
+  checkout made `install.sh` report a failed load over one that had succeeded. CI now plants a hostile
+  one on every leg and fails if any topaz reads it.
+
 * **Every JSON parse failure is now a `-32700`.** `McpBase class>>parseBody:` caught only `Error`,
   and not everything the kernel parser can signal is one. It now catches the kernel's `Exception`,
   looked up through `Globals` because a Grail image binds `#Exception` to Python's class first.

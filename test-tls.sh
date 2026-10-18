@@ -101,7 +101,7 @@ echo
 
 # ---------------------------------------------------------------------------
 echo "[2/4] Forking a TLS McpRouter on $HOST:$PORT (instance TLS config; nothing committed) ..."
-"$TOPAZ" -l >"$SERVER_LOG" 2>&1 <<TPZ
+"$TOPAZ" -l -i >"$SERVER_LOG" 2>&1 <<TPZ
 set gemstone $GS_STONE
 set username $GS_USER
 set password $GS_PASS

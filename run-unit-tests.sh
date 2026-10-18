@@ -159,7 +159,7 @@ TOTAL_RUN=0
 for nm in $SUITES; do
   TMP="$(mktemp "${TMPDIR:-/tmp}/mcp-unit.XXXXXX")"
   set +e
-  "$TOPAZ" -l > "$TMP" 2>&1 <<TPZ
+  "$TOPAZ" -l -i > "$TMP" 2>&1 <<TPZ
 set gemstone $GS_STONE
 set username $GS_USER
 set password $GS_PASS

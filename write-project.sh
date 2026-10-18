@@ -42,7 +42,7 @@ gs_env_require_stone
 
 TMP="$(mktemp "${TMPDIR:-/tmp}/mcp-write.XXXXXX")"
 set +e
-"$TOPAZ" -l 2>&1 <<TPZ | tee "$TMP"
+"$TOPAZ" -l -i 2>&1 <<TPZ | tee "$TMP"
 set gemstone $GS_STONE
 set username $GS_USER
 set password $GS_PASS
