@@ -2,6 +2,8 @@
 *.out
 *.log
 certs/
+# export-gs.sh's default output: generated, never committed
+mcp_server.gs
 
 # Per-machine, per-developer
 .claude/CLAUDE.local.md

@@ -33,60 +33,71 @@ jobs:
           advanced-security: false
 
   test:
-    name: ubuntu-latest / GemStone ${{ matrix.gemstone-version }}${{ matrix.grail && ' + Grail' || '' }}
+    name: ubuntu-latest / GemStone ${{ matrix.gemstone-version }} (${{ matrix.install }})${{ matrix.grail && ' + Grail' || '' }}
     runs-on: ubuntu-latest
     # The Grail leg clones GemTalk/Grail and builds its CPython shim on top of the ordinary
-    # install; the plain leg stays fast, so give the matrix a shared ceiling generous enough for
+    # install; the other legs stay fast, so give the matrix a shared ceiling generous enough for
     # the slower one rather than branching the timeout too. Measured: plain ~1m40s, Grail ~2m20s.
     timeout-minutes: 8
     strategy:
       fail-fast: false
       matrix:
-        # Crossed with `grail` below, so each version gets both a plain job and a Grail job.
-        # `grail: true` clones GemTalk/Grail (see below) and installs mcp_server with --grail, the
-        # only way to exercise src/grail; `grail: false` is the base install every other
-        # contributor runs. This doubles with every version added -- add an `exclude:` entry for a
-        # version with no Grail support (see docs/Development.md's version matrix) rather than
-        # letting that leg fail.
-        gemstone-version: ['3.7.5', '4.0.0.a3']
-        grail: [false, true]
+        # Two audiences, two ways in -- see install.sh:
+        #
+        #   install: file-out  the 3.7.x audience, which runs the stock extent0.dbf and has no
+        #                      Rowan. The leg exports the Tonel as one topaz file-out with
+        #                      export-gs.sh -- the same file a release publishes -- and installs it
+        #                      with install.sh --from-gs into a stock extent. Both supported 3.7
+        #                      releases are covered, on every pull request, so a change that reaches
+        #                      for something newer than 3.7.5 fails where it was made rather than
+        #                      at the next release.
+        #   install: rowan     the 4.0 audience, and how the project is developed: a Rowan 3 extent
+        #                      (extent0.rowan3.dbf, which 4.0.0.a5 ships), loading the project from
+        #                      this checkout. `grail: true` clones GemTalk/Grail (see below) and adds
+        #                      --grail, the only way to exercise the Grail component -- and Grail
+        #                      needs 4.0, so the Grail leg is a 4.0 leg.
+        #
+        # Listed one leg at a time rather than crossed, because the axes are not independent: no
+        # 3.7 leg can carry Grail (Grail dropped 3.7.x on 2026-09-12 and its install_base.sh refuses
+        # one), and a 3.7 leg is the file-out leg by design.
+        #
+        # download-base is where each version's Linux build is published. These differ, and the
+        # difference is not incidental: 3.7.x is a released product on GemTalk's public download
+        # server, while a 4.0 alpha is a pre-release that is NOT there. It is published on
+        # dl.gemdb.com alongside GemDB's engine catalog, which is also where anything running this
+        # server on 4.0 gets its engine, so testing against that host tests what users actually
+        # install. Carried as matrix data rather than a `case` in the step below, so a version is
+        # one line in one place and a job cannot silently download the wrong thing.
+        #
+        # THE ALPHA DIRECTORY IS NOT AN ARCHIVE -- or was not. dl.gemdb.com kept one alpha at a
+        # time through 4.0.0.a3: on 2026-09-16 4.0.0.a2 replaced 4.0.0.Alpha1 and the Alpha1
+        # directory began answering 404, which breaks this leg at the download rather than at
+        # anything testable. a3, a4 and a5 are all listed as of 2026-10-18, but do not count on an
+        # old one staying. Note the spelling changed too -- `Alpha1` to a lowercase `a2` -- so the
+        # next one cannot be guessed by incrementing this one; read it off the catalog.
         include:
-          # Where each version's Linux build is published. These differ, and the difference is not
-          # incidental: 3.7.5 is a released product on GemTalk's public download server, while a
-          # 4.0 alpha is a pre-release that is NOT there. It is published on dl.gemdb.com
-          # alongside GemDB's engine catalog, which is also where anything running this server on
-          # 4.0 gets its engine, so testing against that host tests what users actually install.
-          # Carried as matrix data rather than a `case` in the step below, so a version is one
-          # line in one place and a job cannot silently download the wrong thing.
-          #
-          # THE ALPHA DIRECTORY IS NOT AN ARCHIVE. dl.gemdb.com keeps one alpha at a time: on
-          # 2026-09-16 4.0.0.a2 replaced 4.0.0.Alpha1 and the Alpha1 directory began answering 404,
-          # which breaks this leg at the download rather than at anything testable, and 4.0.0.a3
-          # has since replaced a2 the same way. So a stale version here is not merely old, and
-          # bumping it is not optional. Note the spelling changed too -- `Alpha1` to a lowercase
-          # `a2` -- so the next one cannot be guessed by incrementing this one; read it off the
-          # catalog.
           - gemstone-version: '3.7.5'
             download-base: 'https://downloads.gemtalksystems.com/pub/GemStone64/3.7.5'
-          - gemstone-version: '4.0.0.a3'
-            download-base: 'https://dl.gemdb.com/4.0.0.a3'
-        exclude:
-          # Grail dropped 3.7.x on 2026-09-12, and its own install_base.sh now refuses the image
-          # before anything of ours runs: "Error: GemStone 3.7.5 is not supported. Grail requires
-          # GemStone 4.0 (build 2026-07-29 or later)." Nothing in this repository can cover that.
-          #
-          # Excluded rather than pinned to Grail's last 3.7-capable commit: pinning would keep a
-          # green leg testing a Grail nobody will run again, which is worse than no leg at all.
-          # src/grail and McpGrailToolsetTest are covered by the 4.0 leg instead, which
-          # is the only image Grail still supports -- so this exclusion narrows the matrix to what
-          # can work rather than dropping coverage.
-          - gemstone-version: '3.7.5'
+            install: file-out
+            grail: false
+          - gemstone-version: '3.7.6'
+            download-base: 'https://downloads.gemtalksystems.com/pub/GemStone64/3.7.6'
+            install: file-out
+            grail: false
+          - gemstone-version: '4.0.0.a5'
+            download-base: 'https://dl.gemdb.com/4.0.0.a5'
+            install: rowan
+            grail: false
+          - gemstone-version: '4.0.0.a5'
+            download-base: 'https://dl.gemdb.com/4.0.0.a5'
+            install: rowan
             grail: true
     env:
       GEMSTONE_VERSION: ${{ matrix.gemstone-version }}
       # Through the environment rather than straight into the `run` block, so nothing from the
       # matrix is ever expanded into a shell command's text.
       GEMSTONE_DOWNLOAD_BASE: ${{ matrix.download-base }}
+      INSTALL_FROM: ${{ matrix.install }}
     steps:
       - name: Check out mcp_server
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -128,9 +139,12 @@ jobs:
           echo "GEMSTONE_GLOBAL_DIR=$GEMSTONE/global" >> "$GITHUB_ENV"
           echo "$GEMSTONE/bin" >> "$GITHUB_PATH"
 
-      # GemStone ships a pristine extent0.dbf under bin/ as a template; copydbf
-      # instantiates the actual database from it. The stone also expects its
-      # lock/log directories to already exist at first start.
+      # GemStone ships pristine extents under bin/ as templates; copydbf instantiates the actual
+      # database from one. Which one is the leg's whole point: the stock extent0.dbf for a file-out
+      # leg -- the image a 3.7.x installation without Rowan runs on -- and extent0.rowan3.dbf for a
+      # Rowan leg. Either is copied to data/extent0.dbf, the name the product's own
+      # data/system.conf gives the stone. The stone also expects its lock/log directories to
+      # already exist at first start.
       #
       # The key file: a stone with no KEYFILE configured looks for sys/gemstone.key, which no
       # download ships. Through 4.0.0.a2 it then fell back to the bundled
@@ -142,7 +156,12 @@ jobs:
       - name: Create a fresh extent
         run: |
           mkdir -p "$GEMSTONE_GLOBAL_DIR/locks" "$GEMSTONE_GLOBAL_DIR/log" "$GEMSTONE/data"
-          copydbf "$GEMSTONE/bin/extent0.dbf" "$GEMSTONE/data/"
+          case "$INSTALL_FROM" in
+            rowan)    EXTENT=extent0.rowan3.dbf ;;
+            file-out) EXTENT=extent0.dbf ;;
+            *) echo "unknown install mode '$INSTALL_FROM'" >&2; exit 1 ;;
+          esac
+          copydbf "$GEMSTONE/bin/$EXTENT" "$GEMSTONE/data/extent0.dbf"
           chmod 600 "$GEMSTONE/data/extent0.dbf"
           if [ ! -f "$GEMSTONE/sys/gemstone.key" ] && [ -f "$GEMSTONE/sys/community.starter.key" ]; then
             echo "KEYFILE = $GEMSTONE/sys/community.starter.key;" >> "$GEMSTONE/data/system.conf"
@@ -174,7 +193,19 @@ jobs:
           ./install_base.sh
           ./install.sh
 
-      - name: Install mcp_server
+      # Exported by this leg's own product tree. Which tree exports it does not matter -- 3.7.5,
+      # 3.7.6 and 4.0.0.a5 write byte-identical files from the same Tonel (export-gs.sh) -- so this
+      # is the file a release would publish from this commit.
+      - name: Export the topaz file-out
+        if: matrix.install == 'file-out'
+        run: ./export-gs.sh "$RUNNER_TEMP/mcp_server.gs"
+
+      - name: Install mcp_server from the file-out
+        if: matrix.install == 'file-out'
+        run: ./install.sh --from-gs "$RUNNER_TEMP/mcp_server.gs"
+
+      - name: Install mcp_server through Rowan
+        if: matrix.install == 'rowan'
         run: ./install.sh${{ matrix.grail && ' --grail' || '' }}
 
       - name: Run unit tests
