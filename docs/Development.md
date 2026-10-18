@@ -263,9 +263,31 @@ it makes, and `main` never carries one without the other.
    `McpContractTest` asserts `initialize`'s `serverInfo.version` equals that selector's answer, so a
    bump does not break tests. Deployments can relabel per instance, so this is the *product*
    version.
-3. Write that version's [CHANGELOG.md](../CHANGELOG.md) entry in the same branch.
-4. File out, test, commit.
+3. Write that version's [CHANGELOG.md](../CHANGELOG.md) entry in the same branch — the
+   `## Unreleased` section becomes `## <version> — <date>`. It becomes the GitHub Release's notes.
+4. Write the project out (`./write-project.sh`), test, commit.
 5. Open the pull request and merge it into `main`.
+6. **Tag the merge on `main` and push the tag:**
+   `git tag v<version> <merge commit> && git push origin v<version>`.
+
+Pushing the tag runs `.github/workflows/release.yml`, which publishes the release:
+
+* **It checks the version.** The tag must be `v` + `rowan/project.ston`'s `projectVersion`, that
+  must equal `McpServer class>>defaultServerVersion`, and the tagged commit must be on `main`.
+* **It exports the topaz file-out once** (`export-gs.sh`) and **tests that exact file** on a stock
+  3.7.5 and 3.7.6 extent — every unit suite, `test.sh` and `test-tls.sh`.
+* **Only if all of that passes, it creates the GitHub Release** `v<version>`. The notes are the
+  CHANGELOG entry plus 3.7 install instructions. The release assets are `mcp_server-<version>.gs`
+  and its `.sha256`, permanent public downloads at
+  `https://github.com/GemTalk/mcp_server/releases/download/v<version>/mcp_server-<version>.gs`.
+  GitHub attaches the tagged source as `.zip` and `.tar.gz` by itself; that archive is where a 3.7
+  user gets `install.sh` and the `run-*.sh` scripts.
+
+If the run fails, nothing is published. Fix it through an ordinary pull request, then move the tag
+to the new merge — `git push --delete origin v<version>`, re-tag, push — which is safe precisely
+because no release was made from the old one. A pull request that changes `release.yml` or
+`export-gs.sh` runs the export and test jobs as a dry run, so the workflow does not wait for a
+release to be exercised.
 
 Never bump unilaterally: someone may be running a server against a published version.
 

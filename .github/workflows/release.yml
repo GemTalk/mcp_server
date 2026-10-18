@@ -1,0 +1,268 @@
+name: Release
+
+# Publishes a GitHub Release carrying the topaz file-out -- the .gs a 3.7.x installation without
+# Rowan installs with `./install.sh --from-gs` -- whenever a version tag is pushed:
+#
+#   git tag v0.9.0 <the release merge on main> && git push origin v0.9.0
+#
+# Three jobs, each gating the next:
+#   file-out  checks the tag against the version the code carries, exports the .gs once, and
+#             hands it on as a workflow artifact (a file passed between jobs of this run only).
+#   test      files THAT .gs into a stock extent0.dbf on 3.7.5 and on 3.7.6 and runs every suite.
+#   publish   creates the Release, with that version's CHANGELOG entry as its notes, and attaches
+#             the .gs and its SHA-256 as release assets -- permanent, public downloads.
+# Nothing is published unless every test leg passes, and what is published is byte-for-byte the
+# file that was tested.
+#
+# A pull request that touches this workflow or export-gs.sh runs the first two jobs as a dry run,
+# so the release machinery is exercised before it is ever needed. publish runs only for a tag.
+#
+# Deliberately self-contained rather than sharing steps with health-check.yml, and deliberately
+# without actions/cache: a cache written by a pull request and restored here would put
+# pull-request-controlled bytes into a published artifact. Each run downloads GemStone afresh. See
+# health-check.yml for why each GemStone setup step is the way it is.
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - export-gs.sh
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  file-out:
+    name: Export the topaz file-out
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    env:
+      # Any product that ships Rowan 3 exports the same bytes (see export-gs.sh); 3.7.6 is simply
+      # the newest released one.
+      GEMSTONE_VERSION: '3.7.6'
+      GEMSTONE_DOWNLOAD_BASE: 'https://downloads.gemtalksystems.com/pub/GemStone64/3.7.6'
+    steps:
+      - name: Check out mcp_server
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history, so a tag can be checked against main below.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # THE VERSION HAS THREE HOMES, and a release must not go out with them disagreeing: the tag,
+      # rowan/project.ston's projectVersion, and McpServer class>>defaultServerVersion -- what a
+      # client sees as serverInfo.version, which export-gs.sh writes into the .gs header. The first
+      # two are checked here; the third after the export, from the file itself. On a pull request
+      # there is no tag, so project.ston alone names the version.
+      #
+      # A tag must also be on main: Development.md's release process ends with the release pull
+      # request merged into main, and tagging anything else would publish code no review passed.
+      - name: Settle the version
+        id: version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          PROJECT_VERSION="$(sed -n "s/^[[:space:]]*#projectVersion : '\([^']*\)'.*/\1/p" rowan/project.ston)"
+          if [ -z "$PROJECT_VERSION" ]; then
+            echo "::error::no projectVersion in rowan/project.ston"
+            exit 1
+          fi
+          if [ "$REF_TYPE" = tag ]; then
+            if [ "$REF_NAME" != "v$PROJECT_VERSION" ]; then
+              echo "::error::tag $REF_NAME does not match rowan/project.ston's projectVersion $PROJECT_VERSION (expected v$PROJECT_VERSION)"
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+              echo "::error::tag $REF_NAME is not on main -- tag the release merge on main"
+              exit 1
+            fi
+          fi
+          echo "version=$PROJECT_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Download and install GemStone
+        run: |
+          FILENAME="GemStone64Bit${GEMSTONE_VERSION}-x86_64.Linux.zip"
+          curl -fL --no-progress-meter -o "$RUNNER_TEMP/$FILENAME" "${GEMSTONE_DOWNLOAD_BASE}/${FILENAME}"
+          mkdir -p "$HOME/gemstone"
+          unzip -q "$RUNNER_TEMP/$FILENAME" -d "$HOME/gemstone"
+          echo "GEMSTONE=$HOME/gemstone/GemStone64Bit${GEMSTONE_VERSION}-x86_64.Linux" >> "$GITHUB_ENV"
+
+      - name: Export
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p dist
+          GS="mcp_server-$VERSION.gs"
+          ./export-gs.sh "dist/$GS"
+          # The third home of the version: what the code itself reports.
+          if ! head -1 "dist/$GS" | grep -qF "! mcp_server $VERSION -- "; then
+            echo "::error::McpServer class>>defaultServerVersion does not match projectVersion $VERSION; the file-out says: $(head -1 "dist/$GS")"
+            exit 1
+          fi
+          (cd dist && sha256sum "$GS" > "$GS.sha256")
+          cat "dist/$GS.sha256"
+
+      - name: Hand the file-out to the next jobs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: file-out
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  test:
+    name: Test the file-out on GemStone ${{ matrix.gemstone-version }}
+    needs: file-out
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - gemstone-version: '3.7.5'
+            download-base: 'https://downloads.gemtalksystems.com/pub/GemStone64/3.7.5'
+          - gemstone-version: '3.7.6'
+            download-base: 'https://downloads.gemtalksystems.com/pub/GemStone64/3.7.6'
+    env:
+      GEMSTONE_VERSION: ${{ matrix.gemstone-version }}
+      GEMSTONE_DOWNLOAD_BASE: ${{ matrix.download-base }}
+      VERSION: ${{ needs.file-out.outputs.version }}
+    steps:
+      # The scripts come from the checkout; the code under test comes only from the artifact.
+      - name: Check out mcp_server
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch the file-out
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: file-out
+          path: dist
+
+      - name: Verify its checksum
+        run: cd dist && sha256sum -c "mcp_server-$VERSION.gs.sha256"
+
+      - name: Download and install GemStone
+        run: |
+          FILENAME="GemStone64Bit${GEMSTONE_VERSION}-x86_64.Linux.zip"
+          curl -fL --no-progress-meter -o "$RUNNER_TEMP/$FILENAME" "${GEMSTONE_DOWNLOAD_BASE}/${FILENAME}"
+          mkdir -p "$HOME/gemstone"
+          unzip -q "$RUNNER_TEMP/$FILENAME" -d "$HOME/gemstone"
+          GEMSTONE="$HOME/gemstone/GemStone64Bit${GEMSTONE_VERSION}-x86_64.Linux"
+          {
+            echo "GEMSTONE=$GEMSTONE"
+            echo "GEMSTONE_GLOBAL_DIR=$GEMSTONE/global"
+          } >> "$GITHUB_ENV"
+          echo "$GEMSTONE/bin" >> "$GITHUB_PATH"
+
+      # The stock extent: the image a 3.7.x installation without Rowan runs on.
+      - name: Create a fresh extent
+        run: |
+          mkdir -p "$GEMSTONE_GLOBAL_DIR/locks" "$GEMSTONE_GLOBAL_DIR/log" "$GEMSTONE/data"
+          copydbf "$GEMSTONE/bin/extent0.dbf" "$GEMSTONE/data/extent0.dbf"
+          chmod 600 "$GEMSTONE/data/extent0.dbf"
+          if [ ! -f "$GEMSTONE/sys/gemstone.key" ] && [ -f "$GEMSTONE/sys/community.starter.key" ]; then
+            echo "KEYFILE = $GEMSTONE/sys/community.starter.key;" >> "$GEMSTONE/data/system.conf"
+          fi
+
+      - name: Start Stone and NetLDI
+        run: |
+          startstone gs64stone
+          startnetldi -g -a "$USER" gs64ldi
+
+      - name: Install the file-out
+        run: ./install.sh --from-gs "dist/mcp_server-$VERSION.gs"
+
+      - name: Run unit tests
+        run: ./run-unit-tests.sh
+
+      - name: Run wire-level integration test
+        run: ./test.sh
+
+      - name: Run wire-level integration test over TLS
+        run: ./test-tls.sh
+
+      - name: Stop Stone and NetLDI
+        if: always()
+        run: |
+          stopnetldi gs64ldi || true
+          echo swordfish | stopstone gs64stone DataCurator -i || true
+
+  publish:
+    name: Publish the GitHub Release
+    needs: [file-out, test]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # The one job that writes: creating a Release and uploading its assets needs contents: write.
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.file-out.outputs.version }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Check out mcp_server
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: CHANGELOG.md
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Fetch the file-out
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: file-out
+          path: dist
+
+      # The notes are this version's CHANGELOG entry -- the `## <version> — <date>` section, up to
+      # the next `## ` -- which the release process puts in the same pull request as the bump. A
+      # missing entry stops the release rather than publishing one with no notes.
+      - name: Write the release notes
+        run: |
+          awk -v v="$VERSION" '
+            index($0, "## " v " ") == 1 || $0 == "## " v { on = 1; next }
+            on && /^## /                                 { exit }
+            on                                           { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/entry.md"
+          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/entry.md"; then
+            echo "::error::CHANGELOG.md has no '## $VERSION' entry"
+            exit 1
+          fi
+          {
+            cat "$RUNNER_TEMP/entry.md"
+            echo
+            echo "## Installing on GemStone 3.7.x without Rowan"
+            echo
+            echo "Download \`mcp_server-$VERSION.gs\` below and this release's source code archive,"
+            echo "unpack the archive, and from its directory run:"
+            echo
+            echo '```bash'
+            echo "./install.sh --from-gs /path/to/mcp_server-$VERSION.gs"
+            echo '```'
+            echo
+            echo "The file is the \`Core\` and \`Auth\` components with their unit tests, tested on"
+            echo "3.7.5 and 3.7.6 before this release was published. On a Rowan image, install from the"
+            echo "source with \`./install.sh\` instead. See the README's **Install & run**."
+          } > "$RUNNER_TEMP/notes.md"
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "mcp_server $VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            "dist/mcp_server-$VERSION.gs" \
+            "dist/mcp_server-$VERSION.gs.sha256"
