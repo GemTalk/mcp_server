@@ -46,6 +46,15 @@ reasoning has nowhere better to live, not that the entry should grow.
   resolve, or resolved to a LAN address, no worker could log in. A host the login names is still
   used. New suite `McpWorkerLoginTest`.
 
+* **`find_python_senders` takes every position from Grail**
+  ([#58](https://github.com/GemTalk/mcp_server/issues/58)). Calls and references are placed by
+  `BaseException pythonSendSitesIn:selector:`
+  ([GemTalk/Grail#1137](https://github.com/GemTalk/Grail/issues/1137)), which answers each send
+  from the VM's send table with its Python position, the same way on both codegen paths. The
+  readers that parsed `___curPos___` stores and `___GRAILPOS___` trailers out of generated
+  Smalltalk are gone, as is the IR path's line counting. A builtin's probe twin is still one hit,
+  now keyed by its PEP 657 span.
+
 * **Every JSON parse failure is now a `-32700`.** `McpBase class>>parseBody:` caught only `Error`,
   and not everything the kernel parser can signal is one. It now catches the kernel's `Exception`,
   looked up through `Globals` because a Grail image binds `#Exception` to Python's class first.

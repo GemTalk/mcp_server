@@ -111,103 +111,46 @@ McpGrailToolset >> absentSenderReport: aName searched: aSearchedString notSearch
 ]
 
 { #category : 'private' }
-McpGrailToolset >> callSitesIn: aSourceString forSelector: aSelector [
-  "Where the sends of aSelector are in aSourceString, as an OrderedCollection of
-   {pythonLineOrNil. callSiteTextOrNil} -- one entry per send, in source order.
+McpGrailToolset >> callSitesIn: aMethod forSelector: aSelector [
+  "Where aMethod sends aSelector, as an OrderedCollection of {pythonLineOrNil. callSiteTextOrNil}
+   -- one entry per Python call, in source order, whichever codegen path compiled aMethod.
 
-   HOW A GENERATED METHOD CARRIES ITS PYTHON POSITION. Grail's codegen writes a store before each
-   statement (AbstractNode>>___emitCurPosStore___:on:) in one of two shapes: a bare line,
-   `___curPos___ := 42`, or the 5-element PEP 657 literal
-   `___curPos___ := #(43 15 43 47 '        return gemstone.sessionDict(self._name)')` -- beginLine,
-   colno, endLine, endColno and the raw source line (AbstractLocationNode>>___pyPositionLiteralArray).
-   So a send's position is whatever the nearest store ABOVE it says. That is the derivation Grail
-   itself makes at run time in BaseException class>>___pythonLineForMethod___:ip:, which it reaches
-   from an instruction pointer this search does not have.
+   GRAIL SAYS WHERE. BaseException pythonSendSitesIn:selector: (GemTalk/Grail#1373, which resolved
+   GemTalk/Grail#1137) answers every send aMethod makes from the VM's own send table
+   (GsNMethod>>_sourceOffsetsOfSends), each with its PEP 657 position, on both paths. Nothing here
+   reads the generated text, so nothing here can mistake text for a send: a selector that appears
+   only in a string literal, a comment, a position literal or the method's own selector pattern is
+   not in the table, and neither is any send in the method sources a module body embeds as
+   literals. Those were the rules a text scan had to enforce by hand, and a module body's embedded
+   stores and trailers are what it got wrong (GemTalk/mcp_server#36, #37).
 
-   WHAT IS NOT A SEND, measured against `_grail_session.SessionDict` on 3.7.5. A naive substring
-   scan for the sent selector reported 27 sites where there are 12, and every extra one came from
-   one of four places:
+   ONE CALL CAN BE TWO SENDS. Grail wraps a call to a BUILTIN in a global-shadow probe that prints
+   the arguments once per branch, so on the text path `iter(self._dict())` sends `_dict` twice. The
+   twins share their PEP 657 span, and two real calls in one statement
+   (`self._dict().update(self._dict())`) do not, so a send whose position comes from the position
+   map -- it has a nodeRange -- is keyed by its span. Not by the nodeRange itself: the twins' ranges
+   differ (GemTalk/Grail#1389). A send the map does not cover is placed by the store in effect,
+   which a whole statement shares, so it is keyed by its own index instead and never merged:
+   `_grail_session`'s module body sends `new` twice under one bare line store, and both are kept.
+   Under IR the probe is not printed twice, and the twins are one send to begin with.
 
-     1. THE POSITION LITERAL'S OWN TEXT. The store embeds the Python source line, so searching for
-        `_dict` inside `#(55 ... '        return key in self._dict()')` finds the very name being
-        searched for and doubles every real hit.
-     2. A GENERATED STRING LITERAL. The varargs entry point raises
-        `TypeError: 'SessionDict._dict() takes 0 positional arguments'`, which names the method in
-        prose.
-     3. THE METHOD'S OWN SELECTOR PATTERN. Line one of `_dict` is the word `_dict`.
-     4. A LONGER IDENTIFIER. `_dict` is a substring of `__dict:`, which is the SAME name's varargs
-        selector -- so every fast path appeared to be sent from its own arity glue.
-     5. THE SAME CALL PRINTED TWICE. Grail wraps a call to a BUILTIN in a runtime global-shadow
-        probe and prints the arguments ONCE PER BRANCH on purpose (de439ecb, 6efa71bb), so
-        `iter(self._dict())` holds the text `(self _dict)` twice under one store. Both are real
-        sends; only one is a Python call site.
-
-   So this walks the source once tracking string-literal and comment state, starts after the
-   selector pattern, and requires an identifier boundary on each side of the match. Comments are
-   skipped for consistency, not because codegen writes prose into them: the one comment it does
-   write is a position store (___emitCurPosRestoreCommentFor___:on:), which is already read from the
-   raw text by #positionStoresIn: before this walk begins.
-
-   THE FIFTH IS NOT A TEXT PROBLEM, so it is not closed by a text rule. Nothing about the twin is
-   wrong -- it is the same call, printed again -- and the store cannot separate the two because it
-   is what they share. What does separate them is the ___GRAILPOS___ trailer, which gives every
-   stretch of generated code the PYTHON RANGE it came from: the twins carry one span, while two
-   genuine calls in one statement (`self._dict().update(self._dict())`) carry different columns. So
-   a site whose span has already been reported is dropped, and a site with no span -- no trailer, or
-   a trailer this cannot read -- is kept, which is the behaviour that was correct before the trailer
-   was read at all. See #grailPositionSpansIn:.
-
-   WHY IT READS TEXT AT ALL, AND WHERE THAT STOPS. Grail now publishes the positions a method
-   carries (BaseException pythonPositionsForMethod:, GemTalk/Grail#883), but not WHERE in the
-   generated source each one sits, and a position for a send found at an index is exactly what this
-   needs. Those entries also include the stores embedded in a module body's string literals, so they
-   could not stand in for #positionStoresIn: even taken in order. So the store in effect and the
-   trailer span are still read from the text, and both layouts are still an assumption; the public
-   call that would retire the reading is asked for in GemTalk/Grail#1137. What the assumption costs
-   is an ABSENT position rather than a wrong one, and a hit whose line is nil still names the method
-   it is in, which is the part a caller can get nowhere else. A method compiled direct to IR never
-   reaches this: its source is the user's Python, none of these rules apply to it, and
-   #pythonSendersOfName:in: asks Grail for the method's kind and sends such a method to
-   #irCallSitesIn:forSelector: instead."
-  | stores spans seen key sites i size c inString inComment |
-  stores := self positionStoresIn: aSourceString.
-  spans := self grailPositionSpansIn: aSourceString.
+   A send with no position is still a site, unplaced; #pythonSendersOfName:in: decides what an
+   unplaced site means. WHETHER a send is a Python call at all is not decided here: the argument
+   checks Grail compiles into a def send `size`, `at:` and the like in environment 0, and a search
+   for such a name reports them (GemTalk/mcp_server#38, waiting on GemTalk/Grail#1155)."
+  | seen sites |
   seen := Set new.
-  key := self firstKeywordOf: aSelector.
   sites := OrderedCollection new.
-  size := aSourceString size.
-  "Start after the selector pattern: no Python call site is in it, and its own name is."
-  i := (aSourceString indexOf: Character lf) + 1.
-  i = 1 ifTrue: [i := size + 1].
-  inString := false.
-  inComment := false.
-  [i <= size] whileTrue: [
-    c := aSourceString at: i.
-    inString
-      ifTrue: [
-        c = $' ifTrue: [
-          "A doubled quote is one quote INSIDE the literal, not the end of it."
-          (i < size and: [(aSourceString at: i + 1) = $'])
-            ifTrue: [i := i + 1]
-            ifFalse: [inString := false]]]
-      ifFalse: [
-        inComment
-          ifTrue: [c = $" ifTrue: [inComment := false]]
-          ifFalse: [
-            c = $'
-              ifTrue: [inString := true]
-              ifFalse: [
-                c = $"
-                  ifTrue: [inComment := true]
-                  ifFalse: [
-                    (self source: aSourceString hasSendOf: key at: i)
-                      ifTrue: [
-                        | spanKey |
-                        spanKey := self pythonSpanKeyAt: i in: spans.
-                        (spanKey isNil or: [(seen includes: spanKey) not]) ifTrue: [
-                          spanKey ifNotNil: [seen add: spanKey].
-                          sites add: (self storeInEffectAt: i in: stores)]]]]]].
-    i := i + 1].
+  ([BaseException pythonSendSitesIn: aMethod selector: aSelector]
+    on: Error, BaseException do: [:ex | #()]) do: [:site |
+      | pos key |
+      pos := site at: 3.
+      key := (pos notNil and: [(site at: 4) notNil])
+        ifTrue: [(pos copyFrom: 1 to: 4) printString]
+        ifFalse: [site at: 2].
+      (seen includes: key) ifFalse: [
+        seen add: key.
+        sites add: (self lineAndTextOf: pos)]].
   ^sites
 
 ]
@@ -533,106 +476,6 @@ McpGrailToolset >> grailDirectory [
 ]
 
 { #category : 'private' }
-McpGrailToolset >> grailPositionSpansIn: aSourceString [
-  "Every span Grail's ___GRAILPOS___ trailer records for aSourceString, as an OrderedCollection of
-   {startIndex. endIndex. beginLine. beginColumn. endLine. endColumn} in trailer order -- the first
-   two being 1-based INCLUSIVE indices into aSourceString, the last four the Python range that
-   stretch of generated code came from. Empty when aSourceString carries no trailer.
-
-   WHY IT IS READ. A send's position comes from the nearest ___curPos___ store above it, and that is
-   one store per STATEMENT -- which stopped being one store per Python CALL SITE when Grail began
-   wrapping every call to a builtin in a runtime global-shadow probe (de439ecb, 6efa71bb).
-   CallAst>>printGlobalShadowProbeOn:name:then: prints the arguments once per branch on purpose, so
-   `iter(self._dict())` generates the text `(self _dict)` twice under one store and a scan keyed on
-   the store alone reports one Python call twice. The trailer is what tells the two apart: probe
-   twins carry the SAME Python span, while two genuine calls in one statement carry different
-   columns. It is also what Grail itself derives positions from
-   (BaseException class>>___pythonLineForMethod___:ip:), so reading it outlasts any particular shape
-   of the probe.
-
-   TRAILERS INSIDE STRING LITERALS ARE NOT THIS SOURCE'S. A module's generated `initialize` builds
-   its classes by compiling each method FROM A SOURCE STRING, so every inner method -- its own
-   trailer included -- sits inside a quoted literal, with indices counted from that inner source.
-   Measured on `_grail_session>>initialize`: 14 trailers, of which 13 are embedded and one is the
-   method's own, and an embedded `246 257` addresses `age helpers.` in the outer source rather than
-   any call. So this walks the string tracking literal state and reads only the trailers it meets
-   outside one, by the same quote and comment rules #callSitesIn:forSelector: walks by."
-  | spans size i c inString commentStart |
-  spans := OrderedCollection new.
-  size := aSourceString size.
-  i := 1.
-  inString := false.
-  commentStart := nil.
-  [i <= size] whileTrue: [
-    c := aSourceString at: i.
-    inString
-      ifTrue: [
-        c = $' ifTrue: [
-          "A doubled quote is one quote INSIDE the literal, not the end of it."
-          (i < size and: [(aSourceString at: i + 1) = $'])
-            ifTrue: [i := i + 1]
-            ifFalse: [inString := false]]]
-      ifFalse: [
-        commentStart
-          ifNil: [
-            c = $' ifTrue: [inString := true].
-            c = $" ifTrue: [commentStart := i + 1]]
-          ifNotNil: [
-            c = $" ifTrue: [
-              commentStart <= (i - 1) ifTrue: [
-                spans addAll: (self grailSpansFromComment:
-                  (aSourceString copyFrom: commentStart to: i - 1))].
-              commentStart := nil]]].
-    i := i + 1].
-  ^spans
-
-]
-
-{ #category : 'private' }
-McpGrailToolset >> grailSpansFromComment: aCommentString [
-  "The 6-tuples one ___GRAILPOS___ comment body holds, or empty for any other comment.
-
-   The trailer is the marker followed by whitespace-separated non-negative integers, six per entry:
-   startIndex, endIndex, beginLine, beginColumn, endLine, endColumn. Measured over every generated
-   method reachable on a working image, each trailer's token count is a multiple of six and no token
-   holds anything but digits.
-
-   ANYTHING ELSE ANSWERS EMPTY, deliberately. A trailer carrying a token this cannot read is a
-   trailer whose shape has changed, and `no spans` degrades to exactly the behaviour that was
-   correct before the trailer was read at all -- which beats spans mis-grouped by six, since those
-   would silently collapse call sites that are not the same call."
-  | marker nums spans digits i size c |
-  marker := '___GRAILPOS___'.
-  spans := OrderedCollection new.
-  aCommentString size < marker size ifTrue: [^spans].
-  (aCommentString copyFrom: 1 to: marker size) = marker ifFalse: [^spans].
-  nums := OrderedCollection new.
-  digits := nil.
-  i := marker size + 1.
-  size := aCommentString size.
-  [i <= size] whileTrue: [
-    c := aCommentString at: i.
-    c isDigit
-      ifTrue: [
-        digits := digits isNil
-          ifTrue: [c digitValue]
-          ifFalse: [digits * 10 + c digitValue]]
-      ifFalse: [
-        c isSeparator ifFalse: [^OrderedCollection new].
-        digits ifNotNil: [nums add: digits. digits := nil]].
-    i := i + 1].
-  digits ifNotNil: [nums add: digits].
-  (nums size > 0 and: [nums size \\ 6 = 0]) ifFalse: [^OrderedCollection new].
-  1 to: nums size by: 6 do: [:k |
-    | span |
-    span := Array new: 6.
-    1 to: 6 do: [:n | span at: n put: (nums at: k + n - 1)].
-    ((span at: 1) > 0 and: [(span at: 1) <= (span at: 2)]) ifTrue: [spans add: span]].
-  ^spans
-
-]
-
-{ #category : 'private' }
 McpGrailToolset >> headed: aPath line: aLineNumber body: lineCollection [
   "A source block with its `# <path>:<line>` header, trailing blank lines removed."
   | body |
@@ -652,59 +495,6 @@ McpGrailToolset >> importPythonModuleNamed: aName [
     self evaluatePython: 'import importlib as _mcp_il
 _mcp_il.import_module(_mcp_mod_name)']
     on: Error, BaseException do: [:ex | nil]
-
-]
-
-{ #category : 'private' }
-McpGrailToolset >> irCallSitesIn: aMethod forSelector: aSelector [
-  "Where the sends of aSelector are in aMethod, a method compiled direct to IR, as an
-   OrderedCollection of {pythonLineOrNil. callSiteTextOrNil} -- one entry per Python call, in source
-   order. The same answer #callSitesIn:forSelector: gives for a method Grail compiled as text.
-
-   THE KERNEL ALREADY KNOWS WHERE EACH SEND IS. GsNMethod>>_sourceOffsetsOfSends answers an
-   {offset. selector} pair for every send site, blocks included, from the debug info the debugger
-   highlights a step with. In a text-compiled method that offset is into generated Smalltalk; an IR
-   method's attached source IS the user's Python, so there it lands in the Python, on the call's
-   opening parenthesis. Measured on `_grail_session.SessionDict` (4.0.0.a2, Grail 86eaf0be): all 12
-   `self._dict()` calls land on the lines the .py has them on.
-
-   THE OFFSET LOCATES; GRAIL'S LIST REBASES AND VOUCHES. The attached source is the def's slice of
-   the module, so counting newlines up to an offset gives a line WITHIN the slice. What Grail
-   publishes is BaseException pythonPositionsForMethod:, which for an #irSource method answers
-   {line. nil. nil. nil. text} for every non-blank line, in module lines: a superset of the call
-   sites that cannot say which line holds which call, so it cannot stand in for the offsets. It
-   does three smaller things, all in #irSitesAt:in:. Its first entry is the slice's first line --
-   the def or its first decorator, never blank -- so that entry's line, less one, turns a slice line
-   into a module line. The line's text is taken from it, so that comes from a public answer. And a
-   line it does not list gives an unplaced site rather than a wrong line. That last check is LOOSE:
-   it confirms only that the count lands on some non-blank line of the method.
-
-   The rebase is taken from the public answer rather than from Grail's layout because the layout
-   has already moved once: until GemTalk/Grail#1164 the slice was padded with a newline for every
-   line above the def, so a count WAS the module line, and when the padding went the count became
-   slice-relative and every IR call site went unplaced. The `# line N file PATH` comment that
-   replaced it is documented only on a private method. GemTalk/Grail#1137 asks for a position by
-   source index and leaves the IR path out of it, because here the source IS the Python and an index
-   becomes a line by counting.
-
-   ONE SITE PER OFFSET. A Python call Grail compiles into more than one send of the same selector
-   has one site, and every copy of the send carries that site's offset, while two calls in one
-   statement carry two offsets. So a repeated offset is one call -- the job the ___GRAILPOS___
-   trailer does for the text path.
-
-   WHAT THIS DOES NOT DECIDE is whether a send is a Python call at all. The argument checks Grail
-   compiles into a def send `size`, `at:` and the like in environment 0, all at the def's own
-   offset, so a search for such a name reports the def line. That is GemTalk/mcp_server#38, on both
-   paths, and it waits on GemTalk/Grail#1155."
-  | sends offsets |
-  sends := [aMethod _sourceOffsetsOfSends] on: Error do: [:ex | nil].
-  sends isNil ifTrue: [^OrderedCollection new].
-  offsets := Set new.
-  1 to: sends size - 1 by: 2 do: [:i |
-    | off |
-    off := sends at: i.
-    ((sends at: i + 1) = aSelector and: [(off isKindOf: Integer) and: [off > 0]]) ifTrue: [offsets add: off]].
-  ^self irSitesAt: offsets in: aMethod
 
 ]
 
@@ -755,19 +545,19 @@ McpGrailToolset >> irMethod: aMethod refersToName: aName [
 
 { #category : 'private' }
 McpGrailToolset >> irReferenceSitesIn: aMethod toName: aName [
-  "Where aMethod, compiled direct to IR, loads the Python name aName other than to call it, as the
-   sites #irSitesAt:in: answers -- one {pythonLineOrNil. lineTextOrNil} per reference, in source
-   order -- or nil when no send in it is on the name at all.
+  "Where aMethod, compiled direct to IR, loads the Python name aName other than to call it, as an
+   OrderedCollection of {pythonLineOrNil. lineTextOrNil} -- one per reference, in source order --
+   or nil when no send in it is on the name at all.
 
    A LOAD'S SEND IS ON THE NAME. Each first-class reference compiles to at least one send whose
-   offset (GsNMethod>>_sourceOffsetsOfSends) is on the name in the Python, or on the `.` just before
-   it: `g = self.target` on `.target`, `g = abs` on `abs`, `(helper, helper)` at two offsets. A load
-   compiled to several sends puts them all at one offset, so a repeated offset is one reference. A
-   call's offset is on its `(`, an attribute store's on its receiver and a keyword's on the call's
-   `(`, so none of them is on the name. This reads the Python at the offset rather than which
-   selectors Grail emits, because a module-scope name read under IR sends none of the text path's
-   #pythonReferenceMarkers, and the text does not change with codegen. Measured on 4.0.0.a2,
-   Grail 9f46b86c.
+   index (BaseException pythonSendSitesIn:selector:) is on the name in the Python, or on the `.` just
+   before it: `g = self.target` on `.target`, `g = abs` on `abs`, `(helper, helper)` at two
+   indices. A load compiled to several sends puts them all at one index, so a repeated index is one
+   reference. A call's index is on its `(`, an attribute store's on its receiver and a keyword's on
+   the call's `(`, so none of them is on the name. This reads the Python at the index rather than
+   which selectors Grail emits, because a module-scope name read under IR sends none of the text
+   path's #pythonReferenceMarkers, and the text does not change with codegen. Measured on 4.0.0.a2,
+   Grail 9f46b86c. The send's position comes with it, as on the text path (#referenceSitesIn:toName:).
 
    A GLOBAL STORE'S SEND IS ON THE NAME TOO. After `global helper`, `helper = 2` sends
    dynamicInstVarAt:put: at `helper`, and so do `helper += 1`, `for helper in xs:` and
@@ -778,15 +568,17 @@ McpGrailToolset >> irReferenceSitesIn: aMethod toName: aName [
    `a, helper = 1, 2`, and every `as` target (`with`, `import`, `except`) -- so nothing here can say
    whether such a method loads the name, and nil hands the caller back to the literal frame's single
    unplaced answer. Empty means every send on the name was a store: no reference."
-  | src sends onName loads |
+  | src sends onName seen sites |
   src := [aMethod sourceString] on: Error do: [:ex | nil].
-  sends := [aMethod _sourceOffsetsOfSends] on: Error do: [:ex | nil].
+  sends := [BaseException pythonSendSitesIn: aMethod selector: nil]
+    on: Error, BaseException do: [:ex | nil].
   (src isNil or: [sends isNil]) ifTrue: [^nil].
   onName := false.
-  loads := Set new.
-  1 to: sends size - 1 by: 2 do: [:i |
+  seen := Set new.
+  sites := OrderedCollection new.
+  sends do: [:site |
     | off start stop |
-    off := sends at: i.
+    off := site at: 2.
     ((off isKindOf: Integer) and: [off between: 1 and: src size]) ifTrue: [
       start := (src at: off) == $. ifTrue: [off + 1] ifFalse: [off].
       stop := start + aName size - 1.
@@ -796,37 +588,11 @@ McpGrailToolset >> irReferenceSitesIn: aMethod toName: aName [
         and: [stop = src size or: [(self isIdentifierCharacter: (src at: stop + 1)) not]]]])
           ifTrue: [
             onName := true.
-            (self pythonNameFrom: start to: stop isStoreIn: src) ifFalse: [loads add: off]]]].
+            ((self pythonNameFrom: start to: stop isStoreIn: src) or: [seen includes: off])
+              ifFalse: [
+                seen add: off.
+                sites add: (self lineAndTextOf: (site at: 3))]]]].
   onName ifFalse: [^nil].
-  ^self irSitesAt: loads in: aMethod
-
-]
-
-{ #category : 'private' }
-McpGrailToolset >> irSitesAt: offsets in: aMethod [
-  "Each send offset in offsets placed in aMethod, a method compiled direct to IR, as an
-   OrderedCollection of {pythonLineOrNil. lineTextOrNil} -- one per offset, in source order. The
-   step #irCallSitesIn:forSelector: and #irReferenceSitesIn:toName: share.
-
-   The line is counted from the offset within the def's slice of the module, and rebased to a
-   module line by BaseException pythonPositionsForMethod:, whose first entry is the slice's first
-   line; its text is taken from the same answer, and a line that answer does not list is left
-   unplaced. Why the count locates and Grail's list only rebases and vouches, and how loose that
-   check is, is on #irCallSitesIn:forSelector:."
-  | src positions lines base sites |
-  sites := OrderedCollection new.
-  src := [aMethod sourceString] on: Error do: [:ex | nil].
-  src isNil ifTrue: [^sites].
-  positions := [BaseException pythonPositionsForMethod: aMethod] on: Error, BaseException do: [:ex | #()].
-  lines := Dictionary new.
-  positions do: [:p | lines at: (p at: 1) put: (p at: 5)].
-  base := positions isEmpty ifTrue: [1] ifFalse: [(positions at: 1) at: 1].
-  offsets asSortedCollection do: [:off |
-    | line |
-    line := ((src copyFrom: 1 to: (off min: src size)) occurrencesOf: Character lf) + base.
-    sites add: ((lines includesKey: line)
-      ifTrue: [Array with: line with: (lines at: line)]
-      ifFalse: [Array with: nil with: nil])].
   ^sites
 
 ]
@@ -956,6 +722,16 @@ McpGrailToolset >> line: aLine hasWholeName: aName [
     (before or: [after]) ifFalse: [^true].
     at := aLine findString: aName startingAt: at + 1].
   ^false
+
+]
+
+{ #category : 'private' }
+McpGrailToolset >> lineAndTextOf: aPositionOrNil [
+  "The {pythonLineOrNil. lineTextOrNil} a hit carries, from a position as Grail answers one --
+   {beginLine. colno. endLine. endColno. sourceLine} -- or two nils when there is none. The line is
+   a module line on both codegen paths; the text is nil when the store it came from carried none."
+  aPositionOrNil isNil ifTrue: [^Array with: nil with: nil].
+  ^Array with: (aPositionOrNil at: 1) with: (aPositionOrNil at: 5)
 
 ]
 
@@ -1093,103 +869,6 @@ McpGrailToolset >> placeholderArgs: aCount [
     i > 1 ifTrue: [s nextPutAll: ', '].
     s nextPutAll: 'a' , i printString].
   ^s contents
-
-]
-
-{ #category : 'private' }
-McpGrailToolset >> positionLiteralAt: anIndex in: aSourceString [
-  "The {lineOrNil. sourceTextOrNil} a Grail position literal starting at anIndex denotes.
-
-   Both emitted shapes are read: `#(117 4 117 22 ' copyfile(src, dst)')` answers the line and the
-   text, a bare `117` answers the line and nil, and `#(117 4 117 22 nil)` -- which codegen writes
-   when the source line holds a double quote it could not embed -- answers the line and nil too.
-
-   The text is bounded by the literal's own quotes rather than by a character count, which is what
-   keeps a source line containing a bracket or a period from running the parse into the next
-   statement: everything before the first quote is the four integers, and the closing quote ends
-   the text. A doubled quote inside it is one quote, as codegen wrote it."
-  | i size line inLiteral text digits |
-  size := aSourceString size.
-  i := anIndex.
-  [i <= size and: [(aSourceString at: i) isSeparator]] whileTrue: [i := i + 1].
-  inLiteral := false.
-  (i <= size and: [(aSourceString at: i) = $#]) ifTrue: [
-    inLiteral := true.
-    i := i + 1.
-    [i <= size and: [(aSourceString at: i) ~= $(]] whileTrue: [i := i + 1].
-    i := i + 1].
-  digits := WriteStream on: String new.
-  [i <= size and: [(aSourceString at: i) isDigit]] whileTrue: [
-    digits nextPut: (aSourceString at: i).
-    i := i + 1].
-  line := digits contents isEmpty ifTrue: [nil] ifFalse: [digits contents asNumber].
-  text := nil.
-  inLiteral ifTrue: [
-    [i <= size and: [(aSourceString at: i) ~= $' and: [(aSourceString at: i) ~= $)]]]
-      whileTrue: [i := i + 1].
-    (i <= size and: [(aSourceString at: i) = $'])
-      ifTrue: [text := self quotedStringAt: i in: aSourceString]].
-  ^Array with: line with: text
-
-]
-
-{ #category : 'private' }
-McpGrailToolset >> positionStoresIn: aSourceString [
-  "Every Grail position store in aSourceString, as an OrderedCollection of
-   {sourceIndex. lineOrNil. textOrNil} in ascending index order -- the index being where the store
-   begins, which is what tells a send which store is in effect at it.
-
-   Collected in ONE pass and reused for every send, rather than re-scanning backwards from each:
-   a generated module method can hold hundreds of statements, and this is the whole cost of a
-   compiled-shape hit.
-
-   STORES INSIDE STRING LITERALS ARE NOT THIS SOURCE'S. A module's generated `initialize` builds its
-   classes by compiling each method FROM A SOURCE STRING, so every inner method -- its stores
-   included -- sits inside a quoted literal, counting lines in a DIFFERENT function. Measured on
-   `_grail_session>>initialize`: 17 stores, of which only the two ahead of the class build are the
-   module body's own, and the last embedded one put both sends of `new` in the body at line 81 --
-   the last line of `_grail_session.py`, inside `SessionDict.items()`, where the true line is 21.
-   Dropping the embedded ones can only move a hit from another function's line onto its own: a send
-   inside a literal is not counted as a send either (rule 2 of #callSitesIn:forSelector:), so an
-   embedded store can never be the position of anything reported. Which module this bit was luck,
-   not a rule the scan knew -- `gemdb` keeps its own stores interleaved among its class builds and
-   was already right, and only a body that runs out of outer stores first takes an inner line.
-
-   A STORE INSIDE A COMMENT IS KEPT, and that is why this tracks comment state rather than skipping
-   comments the way #callSitesIn:forSelector: does. LambdaAst restores the enclosing store as a
-   Smalltalk comment (AbstractNode>>___emitCurPosRestoreCommentFor___:on:) precisely so that a
-   backwards text scan sees it, so it is a real position; comment state is here only so that a
-   quote inside one -- the restored literal's own -- cannot open a literal that is not there."
-  | marker stores size i c inString inComment |
-  marker := '___curPos___ := '.
-  stores := OrderedCollection new.
-  size := aSourceString size.
-  i := 1.
-  inString := false.
-  inComment := false.
-  [i <= size] whileTrue: [
-    c := aSourceString at: i.
-    inString
-      ifTrue: [
-        c = $' ifTrue: [
-          "A doubled quote is one quote INSIDE the literal, not the end of it."
-          (i < size and: [(aSourceString at: i + 1) = $'])
-            ifTrue: [i := i + 1]
-            ifFalse: [inString := false]]]
-      ifFalse: [
-        (c = marker first and: [self source: aSourceString hasMarker: marker at: i])
-          ifTrue: [
-            | parsed |
-            parsed := self positionLiteralAt: i + marker size in: aSourceString.
-            stores add: (Array with: i with: (parsed at: 1) with: (parsed at: 2))]
-          ifFalse: [
-            inComment
-              ifTrue: [c = $" ifTrue: [inComment := false]]
-              ifFalse: [
-                c = $' ifTrue: [inString := true].
-                c = $" ifTrue: [inComment := true]]]].
-    i := i + 1].
-  ^stores
 
 ]
 
@@ -1357,8 +1036,10 @@ McpGrailToolset >> pythonNameOfSelector: aSelector [
 
 { #category : 'private' }
 McpGrailToolset >> pythonReferenceMarkers [
-  "The generated-code markers that carry a Python name as a Symbol literal rather than as a
-   selector, and so are the only trace a NON-CALL reference leaves.
+  "The first keywords of the generated sends that carry a Python name as a Symbol literal rather
+   than as a selector, and so are the only trace a NON-CALL reference leaves. They are matched
+   against the first keyword of each send Grail reports (#referenceSitesIn:toName:), never searched
+   for in the text.
 
    Measured by transpiling each form (compile_python) on 3.7.5:
 
@@ -1389,21 +1070,20 @@ McpGrailToolset >> pythonReferencesOfName: aName in: aClass [
 
    A first-class reference (`g = abs`, `f = helper`) compiles to a Symbol literal after one of
    #pythonReferenceMarkers, and there is no selector anywhere to find it by -- so this shape cannot
-   be answered from the selector pool the way #pythonSendersOfName:in: answers a call. It is text
-   matching, and it is bounded by matching the marker first and then parsing the Symbol literal
-   that follows: the name is compared as a whole Symbol, so `absolute` is not a reference to `abs`.
+   be answered from the selector pool the way #pythonSendersOfName:in: answers a call. In a method
+   compiled as text each marker is a send, and #referenceSitesIn:toName: reads the Symbol after it:
+   the name is compared as a whole Symbol, so `absolute` is not a reference to `abs`.
 
    A METHOD COMPILED DIRECT TO IR HAS NO GENERATED SMALLTALK TO MATCH: its source is the user's
    Python, so no marker ever occurs. Whether it refers to aName is read from its literal frame
-   instead (#irMethod:refersToName:), and where from the kernel's send offsets
-   (#irReferenceSitesIn:toName:), one hit per reference, as the text path reports them. When no
-   send is on the name at all, the method is reported once, with #irSource as the reason it has no
-   line -- the way #pythonSendersOfName:in: reports an IR sender it cannot place."
-  | hits markers |
+   instead (#irMethod:refersToName:), and where from its send sites (#irReferenceSitesIn:toName:),
+   one hit per reference, as the text path reports them. When no send is on the name at all, the
+   method is reported once, with #irSource as the reason it has no line -- the way
+   #pythonSendersOfName:in: reports an IR sender it cannot place."
+  | hits |
   hits := OrderedCollection new.
-  markers := self pythonReferenceMarkers.
   (aClass selectorsForEnvironment: 1) asSortedCollection do: [:sel |
-    | meth src ownName stores |
+    | meth ownName |
     meth := [aClass compiledMethodAt: sel environmentId: 1] on: Error do: [:ex | nil].
     ownName := self pythonNameOfSelector: sel.
     "A selector Grail will not decode is one of its own ___like_this___ slots, not a method the
@@ -1420,23 +1100,9 @@ McpGrailToolset >> pythonReferencesOfName: aName in: aClass [
               hits add: (Array with: ownName with: sel with: (site at: 1) with: (site at: 2)
                 with: ((site at: 1) isNil ifTrue: [#irSource] ifFalse: [nil]))]]]
         ifFalse: [
-          src := [aClass sourceCodeAt: sel environmentId: 1] on: Error do: [:ex | nil].
-          src notNil ifTrue: [
-            stores := self positionStoresIn: src.
-            markers do: [:marker |
-              | at |
-              at := src findString: marker startingAt: 1.
-              [at > 0] whileTrue: [
-                | after sym |
-                after := at + marker size.
-                [after <= src size and: [(src at: after) isSeparator]] whileTrue: [after := after + 1].
-                sym := self symbolLiteralAt: after in: src.
-                (sym notNil and: [sym = aName asString]) ifTrue: [
-                  | pos |
-                  pos := self storeInEffectAt: at in: stores.
-                  hits add: (Array with: ownName with: sel with: (pos at: 1) with: (pos at: 2)
-                    with: nil)].
-                at := src findString: marker startingAt: after]]]]]].
+          (self referenceSitesIn: meth toName: aName) do: [:site |
+            hits add: (Array with: ownName with: sel with: (site at: 1) with: (site at: 2)
+              with: nil)]]]].
   ^hits
 
 ]
@@ -1533,31 +1199,28 @@ McpGrailToolset >> pythonSendersOfName: aName in: aClass [
    {containingPythonName. smalltalkSelector. lineOrNil. callSiteTextOrNil. whyNoLineOrNil} -- one
    entry per call site, so a method calling aName twice is reported twice, on either codegen path.
 
-   THE SELECTOR POOL DECIDES WHETHER, THE SOURCE DECIDES WHERE. A method's pool is the exact set of
+   THE SELECTOR POOL DECIDES WHETHER, GRAIL SAYS WHERE. A method's pool is the exact set of
    selectors it sends, so decoding each one (#selector:callsPythonName:) answers the question
-   `is this a sender` without parsing anything. Only then is the source read, to say where.
+   `is this a sender` without parsing anything. Only then are its sites asked for
+   (#callSitesIn:forSelector:), the same way whether Grail compiled the method as text or direct to
+   IR (GRAIL_IR_CODEGEN, Grail's default since GemTalk/Grail#1087).
 
    GRAIL COMPILES EACH DEF TWICE, and the difference is why the glue clause is here. A def gets a
    fixed-arity fast path holding the body (`__contains__:`) and a varargs entry point that checks
    the argument count and delegates to it (`___contains__:kw:`) -- so `__dict:kw:` genuinely sends
-   `_dict`, and every Python name would otherwise be reported as calling itself once. That
-   delegation sits ahead of the body's first position store, so it is recognised as glue by having
-   NO position while standing in a method of the very name being searched for. A real recursive
-   call has a store above it and is reported. Measured on `_grail_session.SessionDict`: 12 real
+   `_dict`, and every Python name would otherwise be reported as calling itself once. The glue is
+   not compiled from Python (pythonPositionKindForMethod: answers nil for it), so Grail answers no
+   send sites for it, and the pool's proof alone reports it unplaced -- so it is recognised as glue
+   by having NO position while standing in a method of the very name being searched for. A real
+   recursive call has a position and is reported. Measured on `_grail_session.SessionDict`: 12 real
    senders of `_dict`, plus exactly one glue send from `__dict:kw:`.
 
-   A METHOD COMPILED DIRECT TO IR IS NOT READ AS SMALLTALK. Under GRAIL_IR_CODEGEN -- Grail's default
-   since GemTalk/Grail#1087 -- a def's method carries the user's Python as its source, with no
-   position store and no generated Smalltalk, and Grail says which kind a method is: BaseException
-   pythonPositionKindForMethod: answers #irSource. The rules #callSitesIn:forSelector: applies are
-   Smalltalk's, so on Python text they find a call only by luck, find a def line along with it, and
-   place neither. Such a method goes to #irCallSitesIn:forSelector:, which places each call from
-   the kernel's own record of where its send is. It is exempt from the glue clause, which would drop
-   a recursive call there if it could not be placed; the glue itself is never IR-compiled: its kind
-   is nil. A send the pool proves but that cannot be placed is still reported, with #irSource as the
-   reason it has no line.
+   A METHOD COMPILED DIRECT TO IR IS EXEMPT FROM THE GLUE CLAUSE, which would otherwise drop a
+   recursive call there that could not be placed; the glue itself is never IR-compiled. A send the
+   pool proves but that cannot be placed is still reported, with #irSource as the reason it has no
+   line when the method was compiled direct to IR.
 
-   Nothing here imports, resolves or compiles: it reads compiled methods and their source."
+   Nothing here imports, resolves or compiles: it reads compiled methods."
   | hits |
   hits := OrderedCollection new.
   (aClass selectorsForEnvironment: 1) asSortedCollection do: [:sel |
@@ -1572,27 +1235,15 @@ McpGrailToolset >> pythonSendersOfName: aName in: aClass [
       pool := [meth _selectorPool] on: Error do: [:ex | #()].
       pool do: [:sent |
         (self selector: sent callsPythonName: aName) ifTrue: [
-          ir
-            ifTrue: [
-              | sites |
-              sites := self irCallSitesIn: meth forSelector: sent.
-              sites isEmpty ifTrue: [sites := OrderedCollection with: (Array with: nil with: nil)].
-              sites do: [:site |
-                hits add: (Array with: ownName with: sel with: (site at: 1) with: (site at: 2)
-                  with: ((site at: 1) isNil ifTrue: [#irSource] ifFalse: [nil]))]]
-            ifFalse: [
-              | src sites |
-              src := [aClass sourceCodeAt: sel environmentId: 1] on: Error do: [:ex | nil].
-              sites := src isNil
-                ifTrue: [OrderedCollection new]
-                ifFalse: [self callSitesIn: src forSelector: sent].
-              "The pool proved the send; a source that cannot be read or located still reports
-               it, without a position."
-              sites isEmpty ifTrue: [sites := OrderedCollection with: (Array with: nil with: nil)].
-              sites do: [:site |
-                ((site at: 1) isNil and: [ownName = aName]) ifFalse: [
-                  hits add: (Array with: ownName with: sel with: (site at: 1) with: (site at: 2)
-                    with: nil)]]]]]]].
+          | sites |
+          sites := self callSitesIn: meth forSelector: sent.
+          "The pool proved the send; one that cannot be placed still reports it, without a
+           position."
+          sites isEmpty ifTrue: [sites := OrderedCollection with: (Array with: nil with: nil)].
+          sites do: [:site |
+            ((site at: 1) isNil and: [ir not and: [ownName = aName]]) ifFalse: [
+              hits add: (Array with: ownName with: sel with: (site at: 1) with: (site at: 2)
+                with: (((site at: 1) isNil and: [ir]) ifTrue: [#irSource] ifFalse: [nil]))]]]]]].
   ^hits
 
 ]
@@ -1654,34 +1305,6 @@ McpGrailToolset >> pythonSourceRootsIncludingTests: aBoolean [
 ]
 
 { #category : 'private' }
-McpGrailToolset >> pythonSpanKeyAt: anIndex in: aSpanCollection [
-  "The Python range the generated code at anIndex came from, as a comparable String key
-   ('61:20-61:32'), or nil when no span covers anIndex.
-
-   THE NARROWEST covering span is the answer. The trailer records a span per AST node, so a call
-   sits inside its own span, inside its statement's, and -- when it is an argument to a probed
-   builtin -- inside the whole probe expression's. Only the innermost identifies the call, and it is
-   the one the probe's two branches agree on.
-
-   A String rather than the Array itself because the caller keeps these in a Set: a String's
-   equality and hash are its characters in every version this files into."
-  | best bestWidth |
-  best := nil.
-  bestWidth := nil.
-  aSpanCollection do: [:span |
-    ((span at: 1) <= anIndex and: [anIndex <= (span at: 2)]) ifTrue: [
-      | width |
-      width := (span at: 2) - (span at: 1).
-      (best isNil or: [width < bestWidth]) ifTrue: [
-        best := span.
-        bestWidth := width]]].
-  best isNil ifTrue: [^nil].
-  ^(best at: 3) printString , ':' , (best at: 4) printString , '-'
-    , (best at: 5) printString , ':' , (best at: 6) printString
-
-]
-
-{ #category : 'private' }
 McpGrailToolset >> pythonTracebackFor: anException [
   "The formatted Python traceback for anException, or nil if one cannot be produced.
 
@@ -1730,6 +1353,38 @@ McpGrailToolset >> quotedStringAt: anIndex in: aSourceString [
           ifFalse: [^out contents]]
       ifFalse: [out nextPut: c. i := i + 1]].
   ^out contents
+
+]
+
+{ #category : 'private' }
+McpGrailToolset >> referenceSitesIn: aMethod toName: aName [
+  "Where aMethod, compiled as text, refers to the Python name aName other than by calling it, as an
+   OrderedCollection of {pythonLineOrNil. lineTextOrNil} -- one per reference, in source order.
+
+   A REFERENCE IS A SEND OF A MARKER. A first-class reference compiles to a send of one of
+   #pythonReferenceMarkers with the name as the Symbol literal after its first keyword
+   (`self @env1:___pyAttrLoad___: #'_name'`), so the name is in no selector and the sends are asked
+   for whole (BaseException pythonSendSitesIn:selector: with nil). The VM records a keyword send at
+   its first keyword, so the literal is read right after the marker at the send's index. Taking the
+   marker from the send table rather than from a search of the text is what keeps out a marker in a
+   module body's embedded method sources, and the send brings its own position."
+  | src sites |
+  sites := OrderedCollection new.
+  src := [aMethod sourceString] on: Error do: [:ex | nil].
+  src isNil ifTrue: [^sites].
+  ([BaseException pythonSendSitesIn: aMethod selector: nil]
+    on: Error, BaseException do: [:ex | #()]) do: [:site |
+      | marker at |
+      marker := self firstKeywordOf: (site at: 1).
+      at := site at: 2.
+      ((self pythonReferenceMarkers includes: marker)
+        and: [at + marker size - 1 <= src size
+        and: [(src copyFrom: at to: at + marker size - 1) = marker]]) ifTrue: [
+          at := at + marker size.
+          [at <= src size and: [(src at: at) isSeparator]] whileTrue: [at := at + 1].
+          (self symbolLiteralAt: at in: src) = aName asString
+            ifTrue: [sites add: (self lineAndTextOf: (site at: 3))]]].
+  ^sites
 
 ]
 
@@ -2039,11 +1694,11 @@ McpGrailToolset >> senderLineFor: aHit shape: aShapeLabel label: aLabel class: a
 
    WHEN THE REASON IS KNOWN, THE LINE SAYS IT, in the slot the call-site text would take. A hit from a
    method compiled direct to IR that carries no position (#irSource: a reference
-   #irReferenceSitesIn:toName: could not place, and a send #irCallSitesIn:forSelector: could not)
+   #irReferenceSitesIn:toName: could not place, and a send #callSitesIn:forSelector: could not)
    reads `line ?  [compiled to IR: no call-site positions]`, because that absence is a fact about the
    method, is not this tool failing to read something, and means the entry stands for every call or
    reference of that kind the method makes rather than for one. Any other absent line is a
-   source this could not read or place, and stays a bare `line ?`."
+   send Grail could not place, and stays a bare `line ?`."
   | line text |
   line := aHit at: 3.
   text := aHit at: 4.
@@ -2147,42 +1802,6 @@ McpGrailToolset >> signatureFor: aMethodName from: aSigTableOrNil on: aClass [
   parts do: [:t | any ifTrue: [s nextPutAll: ', ']. s nextPutAll: t. any := true].
   s nextPut: $).
   ^s contents
-
-]
-
-{ #category : 'private' }
-McpGrailToolset >> source: aSourceString hasMarker: aMarker at: anIndex [
-  "Whether aMarker occurs at anIndex, plainly -- and unlike #source:hasSendOf:at: with no identifier
-   boundary on either side. The one marker asked about here, the position store's `___curPos___ := `,
-   is generated punctuation rather than a name, and nothing longer can contain it."
-  | endIndex |
-  endIndex := anIndex + aMarker size - 1.
-  endIndex > aSourceString size ifTrue: [^false].
-  ^(aSourceString copyFrom: anIndex to: endIndex) = aMarker
-
-]
-
-{ #category : 'private' }
-McpGrailToolset >> source: aSourceString hasSendOf: aKey at: anIndex [
-  "Whether aKey occurs at anIndex as a whole name rather than inside a longer one.
-
-   The leading boundary is what separates the fast path `_dict` from the varargs selector `__dict:`
-   of the SAME Python name -- without it every method appeared to be sent from its own arity glue.
-   The trailing boundary is only needed for a unary key: a keyword key already ends in the colon
-   that terminates it, and what follows is the argument."
-  | size keySize endIndex |
-  size := aSourceString size.
-  keySize := aKey size.
-  endIndex := anIndex + keySize - 1.
-  endIndex > size ifTrue: [^false].
-  (aSourceString copyFrom: anIndex to: endIndex) = aKey ifFalse: [^false].
-  (anIndex > 1 and: [self isIdentifierCharacter: (aSourceString at: anIndex - 1)])
-    ifTrue: [^false].
-  aKey last = $: ifTrue: [^true].
-  ^(endIndex < size and: [
-      | next |
-      next := aSourceString at: endIndex + 1.
-      (self isIdentifierCharacter: next) or: [next = $:]]) not
 
 ]
 
@@ -2302,19 +1921,6 @@ McpGrailToolset >> storageBaseOf: aClass [
   c := aClass superclass.
   [c notNil and: [registered includes: c]] whileTrue: [c := c superclass].
   ^c ifNil: [aClass]
-
-]
-
-{ #category : 'private' }
-McpGrailToolset >> storeInEffectAt: anIndex in: aStoreCollection [
-  "The {lineOrNil. textOrNil} of the last position store before anIndex, or two nils when there is
-   none. The stores arrive in ascending source order (#positionStoresIn:), so the last one that
-   starts before the send is the one in effect at it."
-  | found |
-  found := Array with: nil with: nil.
-  aStoreCollection do: [:st |
-    (st at: 1) < anIndex ifTrue: [found := Array with: (st at: 2) with: (st at: 3)]].
-  ^found
 
 ]
 

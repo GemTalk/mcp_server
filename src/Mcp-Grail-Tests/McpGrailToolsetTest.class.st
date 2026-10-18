@@ -134,170 +134,86 @@ McpGrailToolsetTest >> signatureOf: aName fromEntry: anEntry [
 ]
 
 { #category : 'tests' }
-McpGrailToolsetTest >> testCallSitesCountGrailsProbeTwinsAsOneCall [
-  "One Python call that Grail prints twice is one call site, not two.
+McpGrailToolsetTest >> testCallSitesInAModuleBodyAreTheBodysOwn [
+  "A module body's call sites are its own, and two sends under one bare line store stay two.
 
-   Grail wraps every call to a BUILTIN in a runtime global-shadow probe -- `iter` may have been
-   rebound on the module, so the generated code asks at run time and branches --  and
-   CallAst>>printGlobalShadowProbeOn:name:then: prints the ARGUMENTS ONCE PER BRANCH, deliberately:
-   only one branch runs, so each is still evaluated at most once, and the cost is generated source
-   rather than work. Both copies are real sends of `_dict` and both sit under one ___curPos___
-   store, so a scan positioned from the store alone reports the same call site twice, with the same
-   line and the same text -- indistinguishable from a genuine second call. Measured against
-   `_grail_session.SessionDict` on 4.0.0.a2 with Grail bcf842c6: `compiled 14` where the .py has 12,
-   the extra two being __iter__ and __len__, the only two of the twelve that call a builtin.
+   A module's generated `initialize` builds its classes by compiling each method FROM A SOURCE
+   STRING, so it embeds every method's source, position stores and trailer included, as a literal.
+   A text scan read those as the body's own and put `_grail_session`'s two sends of `new` at line
+   81, inside `SessionDict.items()`, where the body has them at line 21 (GemTalk/mcp_server#37,
+   and #36 for the trailers). Grail's send table holds no send from a literal, so both come back
+   at 21.
 
-   The source below is `SessionDict>>__iter__` as Grail emits it, pasted whole, so this pins the
-   rule with no Grail checkout and no import. It is byte-exact ON PURPOSE: the trailer's indices
-   address this very string, so the first two assertions check the paste before the rule is tested
-   -- reflow the literal and they fail saying so, rather than the test passing for the wrong reason.
-
-   The last assertion is the fallback, and it matters as much as the rule: with no trailer to read
-   -- a direct-to-IR method, or a trailer whose shape this cannot parse -- the same source reports
-   BOTH sends. Nothing is collapsed on a guess."
-  | ts src sites |
-  ts := McpGrailToolset new.
-  src := '__iter__
-<grailPython>
-| ___curPos___ |
-___curPos___ := #(61 15 61 33 ''        return iter(self._dict())'').
-^ (((_grail_session @env0:___instance___ @env0:dynamicInstVarAt: #''iter'') isNil ifTrue: [(((Python @env0:at: #builtins) instance) iter: ((self _dict)))] ifFalse: [(_grail_session @env0:___instance___ @env0:dynamicInstVarAt: #''iter'') @env1:___pyCallValue___: { ((self _dict)). } kw: nil])).
-
-"___GRAILPOS___ 246 257 61 20 61 32 370 381 61 20 61 32 112 395 61 15 61 33 "'.
-  "The trailer addresses this string: both spans hold the same call, printed twice."
-  self assert: (src copyFrom: 246 to: 257) equals: '(self _dict)'.
-  self assert: (src copyFrom: 370 to: 381) equals: '(self _dict)'.
-  "Three spans: the two twins, which share a Python range, and the whole probe expression."
-  self assert: (ts grailPositionSpansIn: src) size equals: 3.
-  self assert: (ts pythonSpanKeyAt: 252 in: (ts grailPositionSpansIn: src))
-    equals: (ts pythonSpanKeyAt: 376 in: (ts grailPositionSpansIn: src)).
-  "So the two sends are one call site, positioned from the store as before."
-  sites := ts callSitesIn: src forSelector: #'_dict'.
-  self assert: sites size equals: 1.
-  self assert: ((sites at: 1) at: 1) equals: 61.
-  self assert: ((sites at: 1) at: 2) equals: '        return iter(self._dict())'.
-  "With the trailer gone there is nothing to collapse ON, and both sends are reported."
-  self assert: (ts callSitesIn: (src copyFrom: 1 to: (src findString: '"___GRAILPOS___' startingAt: 1) - 1)
-    forSelector: #'_dict') size equals: 2
+   Both sit under a bare `___curPos___ := 21` and no position-map range covers either, so they
+   share a position with no columns. Keyed on that, they would merge into one site; they are keyed
+   by their own indices instead, and stay two."
+  | checkout ts body sites |
+  checkout := self grailCheckoutOrNil.
+  checkout isNil ifTrue: [^self assert: true].
+  ts := self grailToolsetOn: checkout.
+  self withFreshScopeDo: [
+    ts ensureGrailConfigured.
+    ts canonicalClassNamed: '_grail_session.SessionDict'].
+  body := ((System myUserProfile objectNamed: #PythonModules) at: #'_grail_session')
+    compiledMethodAt: #initialize environmentId: 1.
+  self assert: (BaseException pythonPositionKindForMethod: body) equals: #curPos.
+  sites := ts callSitesIn: body forSelector: #new.
+  self assert: (sites collect: [:s | s at: 1]) asArray equals: #(21 21)
 
 ]
 
 { #category : 'tests' }
-McpGrailToolsetTest >> testCallSitesIgnoreLiteralsCommentsAndLongerNames [
-  "The four ways a substring scan for a sent selector finds something that is not a send. Each was
-   measured against `_grail_session.SessionDict`, where the naive version reported 27 sites for the
-   12 that exist -- so these are regression assertions, not hypotheticals.
+McpGrailToolsetTest >> testCallSitesKeyACallByItsSpanOnBothPaths [
+  "One Python call is one site and two calls are two, whichever path compiled the method.
 
-   The last one is the one with teeth: `_dict` is a substring of `__dict:`, the SAME Python name's
-   varargs selector, so without an identifier boundary every fast-path method appeared to be called
-   from its own arity glue."
-  | ts src sites |
-  ts := McpGrailToolset new.
-  "1: the position literal embeds the Python source line, which names what is being searched for.
-   2: codegen writes the method name into a TypeError message.
-   3: the selector pattern on line one is the name itself.
-   4: `_dict` inside `__dict:` is a different selector."
-  src := '_dict
-| ___curPos___ |
-___curPos___ := #(43 15 43 47 ''        return self._dict()'').
-TypeError ___signal___: ''SessionDict._dict() takes 0 positional arguments''.
-"a comment mentioning _dict".
-^self __dict: { } kw: nil'.
-  sites := ts callSitesIn: src forSelector: #'_dict'.
-  self assert: sites isEmpty.
-  "The same source DOES report the send it really makes, positioned by the store above it."
-  sites := ts callSitesIn: src forSelector: #'__dict:kw:'.
-  self assert: sites size equals: 1.
-  self assert: ((sites at: 1) at: 1) equals: 43.
-  "A doubled quote inside a literal does not end it, so what follows stays excluded."
-  self assert: (ts callSitesIn: '_dict
-x := ''it''''s _dict here''.
-^1' forSelector: #'_dict') isEmpty
+   Grail wraps a call to a BUILTIN in a global-shadow probe that prints its arguments once per
+   branch, so as text `iter(self.mcp_ir_seq())` sends mcp_ir_seq TWICE. That is asserted first,
+   from Grail's own answer, so the collapse that follows is shown to have something to collapse.
+   The twins share their PEP 657 span, while `self.mcp_ir_seq().update(self.mcp_ir_seq())` is two
+   calls with two spans and must stay two. The node range would not do: the twins' ranges differ
+   (GemTalk/Grail#1389). Under IR the probe is not printed twice, so the twin is one send there.
 
-]
-
-{ #category : 'tests' }
-McpGrailToolsetTest >> testCallSitesKeepTwoRealCallsInOneStatementApart [
-  "Two calls to the same name in ONE statement are two call sites, and the probe rule must not eat
-   them.
-
-   This is the case that separates reading the trailer from the cheaper fix. Collapsing sites per
-   ___curPos___ store would also answer 1 here -- the two calls share a statement, so they share a
-   store -- and that would break the contract #pythonSendersOfName:in: states: one entry per call
-   site, so a method calling aName twice is reported twice. The trailer keeps them apart because
-   they occupy different COLUMNS: 5:15-5:27 and 5:35-5:47, against the probe twins' identical
-   61:20-61:32.
-
-   The source is what Grail emits for `return self._dict().update(self._dict())`, pasted whole and
-   checked against its own trailer first, as in #testCallSitesCountGrailsProbeTwinsAsOneCall. Note
-   what is NOT probed here: `update` is a method call, and only builtins get the shadow probe, which
-   is why eleven of SessionDict's twelve senders never doubled."
-  | ts src sites spans |
-  ts := McpGrailToolset new.
-  src := 'twice_in_one_statement
-<grailPython>
-| ___curPos___ |
-___curPos___ := #(5 15 5 48 ''        return self._dict().update(self._dict())'').
-^ ((((self _dict)) @env1:___pyAttrLoad___: #''update'') @env1:value: { ((self _dict)). } value: nil).
-
-"___GRAILPOS___ 141 152 5 15 5 27 140 187 5 15 5 34 206 217 5 35 5 47 139 232 5 15 5 48 "'.
-  self assert: (src copyFrom: 141 to: 152) equals: '(self _dict)'.
-  self assert: (src copyFrom: 206 to: 217) equals: '(self _dict)'.
-  "Different Python columns, so different spans -- and two sites."
-  spans := ts grailPositionSpansIn: src.
-  self assert: (ts pythonSpanKeyAt: 147 in: spans) equals: '5:15-5:27'.
-  self assert: (ts pythonSpanKeyAt: 212 in: spans) equals: '5:35-5:47'.
-  sites := ts callSitesIn: src forSelector: #'_dict'.
-  self assert: sites size equals: 2.
-  self assert: ((sites at: 1) at: 1) equals: 5.
-  self assert: ((sites at: 2) at: 1) equals: 5
-
-]
-
-{ #category : 'tests' }
-McpGrailToolsetTest >> testCallSitesReadThePositionLiteralGrailEmits [
-  "The position derivation, pinned against generated text this test writes itself -- so it needs no
-   import, no compiled module and no Grail checkout, and can state both literal shapes exactly.
-
-   Grail writes a position store before each statement, either the 5-element PEP 657 literal
-   #(beginLine colno endLine endColno sourceLine) or a bare line number. A sender search reports a
-   Python line by reading the nearest store ABOVE the send, so the two sends below must come back
-   attributed to 117 WITH the call text and to 120 WITHOUT it -- a bare store carries no text. Both
-   attributed to the first store is what a scan that stops looking after one store would answer.
-
-   The last two assertions pin the degradation, which matters more than the happy path: a send with
-   no store above it reports its line as ABSENT rather than guessing one, and a direct-to-IR method
-   (GRAIL_IR_CODEGEN), whose source is the user's Python rather than generated Smalltalk, yields no
-   text-locatable send at all -- so the caller reports the method with no position instead of
-   reporting no sender. See GemTalk/Grail#883."
-  | ts src sites |
-  ts := McpGrailToolset new.
-  src := 'copy: src kw: kwargs
-  | ___curPos___ |
-  ___curPos___ := #(117 4 117 22 ''  copyfile(src, dst)'').
-  (self _copyfile: { (src). (dst). } kw: nil).
-  ___curPos___ := 120.
-  ^self _copyfile: { (src). } kw: nil'.
-  sites := ts callSitesIn: src forSelector: #'_copyfile:kw:'.
-  self assert: sites size equals: 2.
-  self assert: ((sites at: 1) at: 1) equals: 117.
-  self assert: ((sites at: 1) at: 2) equals: '  copyfile(src, dst)'.
-  self assert: ((sites at: 2) at: 1) equals: 120.
-  self assert: ((sites at: 2) at: 2) isNil.
-  "A store whose text could not be embedded keeps its line."
-  sites := ts callSitesIn: '  ___curPos___ := #(9 0 9 4 nil).
-  ^self _copyfile: { (src). } kw: nil' forSelector: #'_copyfile:kw:'.
-  self assert: sites size equals: 1.
-  self assert: ((sites at: 1) at: 1) equals: 9.
-  self assert: ((sites at: 1) at: 2) isNil.
-  "No store at all: the send is found, the position is absent."
-  sites := ts callSitesIn: 'copy: src kw: kwargs
-  ^self _copyfile: { (src). } kw: nil' forSelector: #'_copyfile:kw:'.
-  self assert: sites size equals: 1.
-  self assert: ((sites at: 1) at: 1) isNil.
-  "Python source, as a direct-to-IR method carries: nothing to locate by keyword."
-  self assert: (ts callSitesIn: 'def copy(src, dst):
-    return _copyfile(src, dst)' forSelector: #'_copyfile:kw:') isEmpty
+   With #testCallSitesInAModuleBodyAreTheBodysOwn, this replaces the tests that pinned the
+   generated-text readers on pasted sources -- the ___GRAILPOS___ trailer, the ___curPos___ store
+   literals, and the string, comment and selector rules. Grail answers all of that now
+   (BaseException pythonSendSitesIn:selector:), so what is left to test is the rule this toolset
+   adds on top, on real compiled methods. A method Grail did not compile from Python has no sites
+   at all, which leaves a send in it to the selector pool's proof (#pythonSendersOfName:in:).
+   Skips where Grail cannot build IR."
+  | checkout ts |
+  checkout := self grailCheckoutOrNil.
+  checkout isNil ifTrue: [^self assert: true].
+  importlib ___irCodegenSupported___ ifFalse: [^self assert: true].
+  ts := self grailToolsetOn: checkout.
+  ts ensureGrailConfigured.
+  self withIrProbeClassesDo: [:classes |
+    | textClass irClass twins pair out |
+    textClass := classes at: 1.
+    irClass := classes at: 2.
+    twins := textClass compiledMethodAt: #mcp_ir_twins environmentId: 1.
+    self assert: (BaseException pythonPositionKindForMethod: twins) equals: #curPos.
+    self assert: (BaseException pythonSendSitesIn: twins selector: #mcp_ir_seq) size equals: 2.
+    self assert: (ts callSitesIn: twins forSelector: #mcp_ir_seq) asArray
+      equals: #( #(50 '        return iter(self.mcp_ir_seq())') ).
+    pair := textClass compiledMethodAt: #mcp_ir_two_calls environmentId: 1.
+    self assert: ((ts callSitesIn: pair forSelector: #mcp_ir_seq) collect: [:s | s at: 1]) asArray
+      equals: #(53 53).
+    "Direct to IR: the same answers."
+    twins := irClass compiledMethodAt: #mcp_ir_twins environmentId: 1.
+    self assert: (BaseException pythonPositionKindForMethod: twins) equals: #irSource.
+    self assert: (ts callSitesIn: twins forSelector: #mcp_ir_seq) asArray
+      equals: #( #(50 '        return iter(self.mcp_ir_seq())') ).
+    pair := irClass compiledMethodAt: #mcp_ir_two_calls environmentId: 1.
+    self assert: ((ts callSitesIn: pair forSelector: #mcp_ir_seq) collect: [:s | s at: 1]) asArray
+      equals: #(53 53).
+    "And through the tool, three calls on each path."
+    #( 'mcp_grail_text_probe' 'mcp_grail_ir_probe' ) do: [:scope |
+      out := ts tool_find_python_senders: (Dictionary new
+        at: 'name' put: 'mcp_ir_seq'; at: 'shapes' put: #( 'compiled' );
+        at: 'scope' put: scope; yourself).
+      self assert: (self includesCS: 'compiled 3,' in: out)]].
+  self assert: (ts callSitesIn: (McpGrailToolset compiledMethodAt: #shapeTag:)
+    forSelector: #nextPutAll:) isEmpty
 
 ]
 
@@ -806,15 +722,14 @@ McpGrailToolsetTest >> testFindPythonSendersPlacesEachCallInAMethodCompiledToIR 
    `mcp_ir_caller` calls the target twice in one statement, so twice at line 8, and the recursive
    call is at line 4.
 
-   AS TEXT, each call is placed from the position store above it. DIRECT TO IR, a method carries the
-   user's Python with no position store, and Grail says so (pythonPositionKindForMethod: answers
-   #irSource), so each call is placed from the kernel's send offsets instead -- see
-   #irCallSitesIn:forSelector:. Before that, an IR method was one unplaced entry per selector it
-   sent, which folded the two calls on line 8 into one; and before THAT, reading its Python as
-   generated Smalltalk dropped the recursive call, because a call with no position in a method of
-   the very name searched for is the rule that recognises arity glue. IR methods are exempt from
-   that rule, which is only safe while the glue itself (`_mcp_ir_target:kw:`) is not IR-compiled --
-   asserted too.
+   Grail places each send on either path (BaseException pythonSendSitesIn:selector:, see
+   #callSitesIn:forSelector:). Before it did, an IR method was placed from the kernel's send
+   offsets counted into its Python; before THAT, an IR method was one unplaced entry per selector
+   it sent, which folded the two calls on line 8 into one; and before that again, reading its
+   Python as generated Smalltalk dropped the recursive call, because a call with no position in a
+   method of the very name searched for is the rule that recognises arity glue. IR methods are
+   exempt from that rule, which is only safe while the glue itself (`_mcp_ir_target:kw:`) is not
+   IR-compiled -- asserted too.
 
    The seam must really produce IR here, or the second half passes for the wrong reason, so the
    kinds are asserted before anything that depends on them. Skips where Grail cannot build IR."
@@ -996,15 +911,15 @@ McpGrailToolsetTest >> testFindsTheRealSendersOfAPythonMethodNotGrailsArityGlue 
    having at all -- so this test asserts the stock answer too, and will start failing if some later
    GemStone makes it right.
 
-   The counts are exact on purpose: 12 hits, every one carrying a position, is what says the scan
-   neither missed a call nor invented one. An earlier substring-matching version of this reported
-   27 for the same class (see #testCallSitesIgnoreLiteralsCommentsAndLongerNames).
+   The counts are exact on purpose: 12 hits, every one carrying a position, is what says the search
+   neither missed a call nor invented one. An early substring-matching version of this reported 27
+   for the same class.
 
    It holds on EITHER codegen path, and this test does not choose one: the module is compiled the
-   way Grail compiles it by default, which since GemTalk/Grail#1087 is direct to IR. On that path
-   `iter(self._dict())` sends `_dict` twice at one offset -- the builtin's global-shadow probe -- so
-   the exact count also says that twin is one call there, as the ___GRAILPOS___ trailer makes it one
-   on the text path. #testFindPythonSendersPlacesEachCallInAMethodCompiledToIR forces each path.
+   way Grail compiles it by default, which since GemTalk/Grail#1087 is direct to IR. On the text
+   path `iter(self._dict())` sends `_dict` twice -- the builtin's global-shadow probe -- and the
+   exact count says that twin is one call. #testFindPythonSendersPlacesEachCallInAMethodCompiledToIR
+   and #testCallSitesKeyACallByItsSpanOnBothPaths force each path.
 
    And `_dict` must NOT be among the senders. Grail compiles each def twice -- a fixed-arity fast
    path holding the body, and a varargs entry point that checks the argument count and delegates --
@@ -1124,62 +1039,6 @@ McpGrailToolsetTest >> testGrailEmitsTheParameterKindsTheSignatureNeeds [
 ]
 
 { #category : 'tests' }
-McpGrailToolsetTest >> testGrailPositionSpansIgnoreTrailersInsideStringLiterals [
-  "A trailer inside a string literal belongs to a DIFFERENT source, and its indices address that
-   one.
-
-   A module's generated `initialize` builds its classes by compiling each method from a source
-   string, so every inner method -- its own trailer included -- sits inside a quoted literal, with
-   indices counted from the inner source. Measured on `_grail_session>>initialize`: 14 ___GRAILPOS___
-   trailers, 13 of them embedded and one the method's own, and the embedded `246 257` addresses
-   `age helpers.` in the outer source rather than any call. Read those as the outer method's and the
-   span rule collapses or scatters sites on numbers that mean nothing here -- so the scan tracks
-   literal state, by the same quote rules #callSitesIn:forSelector: walks by.
-
-   The fixture is that shape in miniature, with the embedded trailer deliberately carrying the
-   numbers measured from SessionDict>>__iter__.
-
-   THE SITE'S LINE is asserted here too, and it is the OUTER store's. #positionStoresIn: once
-   scanned the raw text with no notion of a literal, so this same fixture answered the embedded
-   method's line 43; that half of the defect is pinned by
-   #testPositionStoresIgnoreStoresInsideStringLiterals, and asserting it here as well is what stops
-   the two scans drifting apart on one source."
-  | ts src spans sites |
-  ts := McpGrailToolset new.
-  src := 'initialize
-<grailPython>
-| ___curPos___ |
-___curPos___ := #(30 16 30 26 ''class Holder:'').
-Holder @env0:compileMethod: ''get
-| ___curPos___ |
-___curPos___ := #(43 15 43 27 ''''        return self._dict()'''').
-^ ((self _dict)).
-
-"___GRAILPOS___ 246 257 43 15 43 27 "''.
-^ ((self _dict)).
-
-"___GRAILPOS___ 267 278 30 16 30 26 "'.
-  "The outer trailer addresses the outer call; the embedded one addresses the inner source."
-  self assert: (src copyFrom: 267 to: 278) equals: '(self _dict)'.
-  spans := ts grailPositionSpansIn: src.
-  self assert: spans size equals: 1.
-  self assert: (spans at: 1) equals: #( 267 278 30 16 30 26 ).
-  "One send is outside the literal; the one inside it was never a send to begin with -- and it is
-   positioned from the outer store rather than from the embedded one lying between them."
-  sites := ts callSitesIn: src forSelector: #'_dict'.
-  self assert: sites size equals: 1.
-  self assert: ((sites at: 1) at: 1) equals: 30.
-  self assert: ((sites at: 1) at: 2) equals: 'class Holder:'.
-  "A comment that is not a trailer contributes nothing, and a malformed trailer is refused whole
-   rather than mis-grouped by six."
-  self assert: (ts grailSpansFromComment: 'just a comment') isEmpty.
-  self assert: (ts grailSpansFromComment: '___GRAILPOS___ 1 2 3 4 5') isEmpty.
-  self assert: (ts grailSpansFromComment: '___GRAILPOS___ 1 2 3 4 5 six') isEmpty.
-  self assert: (ts grailSpansFromComment: '___GRAILPOS___ 1 2 3 4 5 6') size equals: 1
-
-]
-
-{ #category : 'tests' }
 McpGrailToolsetTest >> testGrailToolsetIsExposedOnlyWhenNamed [
   "LOADED IS NOT EXPOSED. This suite only exists on a Grail-equipped image, so McpGrailToolset
    certainly resolves here -- and an unconfigured router's surface still does not contain it, and no
@@ -1195,25 +1054,6 @@ McpGrailToolsetTest >> testGrailToolsetIsExposedOnlyWhenNamed [
   self assert: ((McpRouter new toolsetNames: McpServer defaultToolsetNames , #('McpGrailToolset'))
     effectiveToolsetNames includes: 'McpGrailToolset').
   self assert: (self grailServer allToolNames includes: 'eval_python')
-
-]
-
-{ #category : 'tests' }
-McpGrailToolsetTest >> testIrCallSitesDoNotGuessALineGrailDoesNotVouchFor [
-  "A send the kernel locates, on a line Grail's public positions do not name, is reported UNPLACED
-   rather than at the line the offset was counted to -- the fallback for an IR source whose layout
-   is not the one #irCallSitesIn:forSelector: expects.
-
-   A plain Smalltalk method stands in for that source, with no import: the kernel answers its send
-   offsets as for any method, and Grail answers no positions for a method that is not Python. One
-   entry per distinct offset, and none for a selector the method does not send."
-  | ts meth sites |
-  ts := McpGrailToolset new.
-  meth := McpGrailToolset compiledMethodAt: #shapeTag:.
-  sites := ts irCallSitesIn: meth forSelector: #nextPutAll:.
-  self assert: sites asArray equals: #( #(nil nil) ).
-  sites := ts irCallSitesIn: meth forSelector: #noSuchSelectorSentHere.
-  self assert: sites isEmpty
 
 ]
 
@@ -1275,85 +1115,6 @@ McpGrailToolsetTest >> testListPythonMethodsPagesButKeepsWhatNamesTheClass [
   self assert: firstSigs size equals: 2.
   self assert: secondSigs size equals: 2.
   firstSigs do: [:sig | self deny: (secondSigs includes: sig)]
-
-]
-
-{ #category : 'tests' }
-McpGrailToolsetTest >> testPositionStoresIgnoreStoresInsideStringLiterals [
-  "A ___curPos___ store inside a string literal counts lines in a DIFFERENT function.
-
-   A module's generated `initialize` builds its classes by compiling each method FROM A SOURCE
-   STRING, so every inner method's stores sit inside a quoted literal. Read those as the outer
-   method's and a send in the module body is positioned from whichever inner method was embedded
-   most recently -- the hit real, the method right, the LINE belonging to another function.
-   Measured on `_grail_session>>initialize`: 17 stores raw, of which 2 are the module body's own,
-   and both sends of `new` in the body reported line 81, the last line of `_grail_session.py`,
-   inside `SessionDict.items()`, where the true line is 21. This is the store-scan half of what
-   #testGrailPositionSpansIgnoreTrailersInsideStringLiterals pins for the trailer scan.
-
-   WHICH MODULE IT BIT WAS PLACEMENT, not a rule the scan knew, so both shapes are here. Measured on
-   the same image, `gemdb>>initialize` keeps its own stores interleaved among its class builds (122
-   raw, 25 outside literals), so the store in effect after a build is an outer one either way and
-   its module-scope call at `gemdb/__init__.py:415` was always reported correctly. The second
-   fixture is that shape, and it pins the fix as leaving the module that was already right alone.
-
-   A STORE INSIDE A COMMENT IS KEPT, which is the third fixture and the reason this scan tracks
-   comment state rather than skipping comments the way the send scan does. LambdaAst restores the
-   enclosing store as a Smalltalk comment (AbstractNode>>___emitCurPosRestoreCommentFor___:on:)
-   precisely so that a backwards text scan sees it, so it is a real position: drop it and a send
-   after the lambda takes the lambda body's line instead of the statement's."
-  | ts embedded interleaved restored stores sites |
-  ts := McpGrailToolset new.
-  "_grail_session's shape: every outer store lies AHEAD of the class build."
-  embedded := 'initialize
-| ___curPos___ |
-___curPos___ := #(1 0 1 16 ''Session helpers.'').
-___curPos___ := #(21 0 21 18 ''class SessionDict:'').
-SessionDict @env0:compileMethod: ''items
-| ___curPos___ |
-___curPos___ := #(81 15 81 33 ''''        return self._dict().items()'''').
-^ ((self _dict) items).
-''.
-^ (Holder new).'.
-  stores := ts positionStoresIn: embedded.
-  self assert: stores size equals: 2.
-  self assert: ((stores at: 1) at: 2) equals: 1.
-  self assert: ((stores at: 2) at: 2) equals: 21.
-  self assert: ((stores at: 2) at: 3) equals: 'class SessionDict:'.
-  sites := ts callSitesIn: embedded forSelector: #new.
-  self assert: sites size equals: 1.
-  self assert: ((sites at: 1) at: 1) equals: 21.
-  self assert: ((sites at: 1) at: 2) equals: 'class SessionDict:'.
-  "gemdb's shape: an outer store AFTER the build, so the body was already right."
-  interleaved := 'initialize
-| ___curPos___ |
-___curPos___ := #(21 0 21 18 ''class SessionDict:'').
-SessionDict @env0:compileMethod: ''items
-| ___curPos___ |
-___curPos___ := #(81 15 81 33 ''''        return self._dict().items()'''').
-^ ((self _dict) items).
-''.
-___curPos___ := #(415 4 415 25 ''    getattr(_self, _name)'').
-^ (Holder new).'.
-  stores := ts positionStoresIn: interleaved.
-  self assert: stores size equals: 2.
-  sites := ts callSitesIn: interleaved forSelector: #new.
-  self assert: sites size equals: 1.
-  self assert: ((sites at: 1) at: 1) equals: 415.
-  self assert: ((sites at: 1) at: 2) equals: '    getattr(_self, _name)'.
-  "A lambda''s restored store is a comment, and it is a position like any other."
-  restored := 'run
-| ___curPos___ |
-___curPos___ := #(7 4 7 20 ''f = lambda: g()'').
-f := [ :a | | ___curPos___ | ___curPos___ := #(16 11 16 14 ''g()''). (g value) ] "___curPos___ := #(7 4 7 20 ''f = lambda: g()'')" .
-^ (Holder new).'.
-  stores := ts positionStoresIn: restored.
-  self assert: stores size equals: 3.
-  self assert: ((stores at: 3) at: 2) equals: 7.
-  self assert: ((stores at: 3) at: 3) equals: 'f = lambda: g()'.
-  sites := ts callSitesIn: restored forSelector: #new.
-  self assert: sites size equals: 1.
-  self assert: ((sites at: 1) at: 1) equals: 7
 
 ]
 
@@ -2127,11 +1888,14 @@ McpGrailToolsetTest >> withIrProbeClassesDo: aBlock [
    seam and registry selectors are Grail's test fixtures, not its public API; a test may lean on
    them where the toolset may not.
 
-   TWO HALVES OF ONE CLASS. The first two methods CALL the target and are what the compiled shape
-   is tested on; the rest never call it, only REFER to it or write it, so they add nothing to that
-   shape's counts and are what the references shape is tested on. They come after, so the
-   compiled test's line numbers do not move. The last three read, store and delete a module
-   global, `mcp_ir_shared`, the one kind of store whose send lands on the name.
+   THREE PARTS OF ONE CLASS. The first two methods CALL the target and are what the compiled shape
+   is tested on; the next ones never call it, only REFER to it or write it, so they add nothing to
+   that shape's counts and are what the references shape is tested on. They come after, so the
+   compiled test's line numbers do not move. Of those, the last three read, store and delete a
+   module global, `mcp_ir_shared`, the one kind of store whose send lands on the name. The last
+   three methods of all call a second target, `mcp_ir_seq`, so as to leave every count above alone:
+   once as the argument of a BUILTIN, which the text path prints twice (Grail's global-shadow
+   probe), and twice in one statement.
 
    Both imports are rolled back by Grail's snapshot and restore, not by an abort, so the caller's
    transaction is left where it was. Nothing here commits."
@@ -2183,6 +1947,15 @@ McpGrailToolsetTest >> withIrProbeClassesDo: aBlock [
     def mcp_ir_shared_del(self):
         global mcp_ir_shared
         del mcp_ir_shared
+
+    def mcp_ir_seq(self):
+        return {}
+
+    def mcp_ir_twins(self):
+        return iter(self.mcp_ir_seq())
+
+    def mcp_ir_two_calls(self):
+        return self.mcp_ir_seq().update(self.mcp_ir_seq())
 '; close.
   snap := importlib ___canonicalRegistrySnapshot___.
   ^[importlib ___irCodegenForce___: false.
