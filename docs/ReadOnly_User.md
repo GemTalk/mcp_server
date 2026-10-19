@@ -5,7 +5,7 @@ provisions. Nothing is read off a manual alone.
 
 ## Why this is the only boundary
 
-`mcp_server` has no read-only mode. It had one until the release after 0.8.0 — a per-router flag, and a
+`mcp_server` has no read-only mode. It had one through 0.8.0 — a per-router flag, and a
 `readOnlySafeToolNames` allow-list each toolset declared — and it was removed rather than extended,
 because it could never have been more than advisory:
 

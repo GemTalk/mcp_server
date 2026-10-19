@@ -1709,16 +1709,8 @@ default stays plaintext — nothing to restore even if interrupted. Uses port `8
 
 ## Future work
 
-- Exposing class and method source as MCP **resources**, so a client is notified when another gem
-  recompiles a method and its cached source goes stale.
-- Carrying messages that originate in a **worker** gem — progress during a long tool call, log lines
-  from tool internals — which needs a worker→router channel.
-- SSE resumability (`Last-Event-ID`).
-- Mapping **OAuth scopes to toolsets**, so a token's scopes select what it may *see* rather than only
-  whether it may write.
-- Tracing the **outbound** half — responses, the error bodies behind a refusal, and server-initiated
-  stream frames — to complete [Message trace](#message-trace), which today records only what the
-  client sent.
-- The draft `2026-07-28` protocol revision, which first needs a decision about how per-client
+- Document how to use object security to hide objects from an MCP client.
+- Support the `2026-07-28` protocol, which first needs a decision about how per-client
   worker-gem isolation survives a protocol with no session id — see
   [Protocol conformance](#protocol-conformance).
+- Reorganize and rewrite documentation.

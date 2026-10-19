@@ -15,7 +15,7 @@ has to act on. The measurements, the alternatives weighed and the kernel behavio
 belong in its commit message and in `docs/` — an entry that has to carry all of that is a sign the
 reasoning has nowhere better to live, not that the entry should grow.
 
-## Unreleased
+## 0.9.0 — 2026-10-18
 
 * **The server is now a Rowan project, `Mcp`, in Tonel.** **Breaking:** installing needs a stone on a
   Rowan 3 extent (`extent0.rowan3.dbf`); `install.sh` refuses one without Rowan. The packages
