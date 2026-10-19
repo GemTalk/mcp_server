@@ -55,6 +55,12 @@ reasoning has nowhere better to live, not that the entry should grow.
   Smalltalk are gone, as is the IR path's line counting. A builtin's probe twin is still one hit,
   now keyed by its PEP 657 span.
 
+* **`compile_method` ends the stored source with a newline**
+  ([#64](https://github.com/GemTalk/mcp_server/issues/64)). A client almost never sends one, and
+  every other way a method reaches the image stores one, so `./write-project.sh` wrote a method
+  compiled through the tool without the blank line before its closing `]`. Only a missing final
+  newline is added; a source that already ends in one is stored as sent.
+
 * **Every JSON parse failure is now a `-32700`.** `McpBase class>>parseBody:` caught only `Error`,
   and not everything the kernel parser can signal is one. It now catches the kernel's `Exception`,
   looked up through `Globals` because a Grail image binds `#Exception` to Python's class first.
