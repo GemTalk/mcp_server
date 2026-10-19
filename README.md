@@ -85,6 +85,9 @@ are two ways to install it:
   Rowan exporter from any 3.7.5-or-later product tree; it reads the Tonel from disk and needs no
   stone. `./install.sh --from-gs mcp_server.gs` then files it into the stone you name. The file is
   generated, never committed; CI exports and installs it on 3.7.5 and 3.7.6 for every pull request.
+  Each [release](https://github.com/GemTalk/mcp_server/releases) attaches the file, tested on both,
+  as `mcp_server-<version>.gs`. Download it with that release's source archive, which carries the
+  scripts.
 
 The two optional parts are selected differently on purpose. Loading `McpAuthRouter` is inert —
 nothing instantiates it until you fork one with `run-auth-server.sh` — so it can be detected rather

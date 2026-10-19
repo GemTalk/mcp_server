@@ -31,7 +31,8 @@ reasoning has nowhere better to live, not that the entry should grow.
   `./install.sh --from-gs <file>` files it into a stock `extent0.dbf`. The file is never committed.
   CI now runs four legs on every pull request: 3.7.5 and 3.7.6 from the file-out on a stock extent,
   and 4.0.0.a5 — moved up from a3 — through Rowan on its `extent0.rowan3.dbf`, with and without
-  Grail.
+  Grail. Pushing a `v<version>` tag on `main` now publishes a GitHub Release with the file-out
+  attached, after testing that exact file on 3.7.5 and 3.7.6 (`release.yml`).
 
 * **Every JSON parse failure is now a `-32700`.** `McpBase class>>parseBody:` caught only `Error`,
   and not everything the kernel parser can signal is one. It now catches the kernel's `Exception`,
