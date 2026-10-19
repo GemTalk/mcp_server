@@ -1,0 +1,10 @@
+RwLoadComponent {
+	#name : 'Core',
+	#projectNames : [ ],
+	#componentNames : [ ],
+	#packageNames : [
+		'Mcp-Core',
+		'Mcp-Tests'
+	],
+	#comment : 'The server and its unit tests: what every install loads.'
+}

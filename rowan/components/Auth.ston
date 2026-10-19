@@ -1,0 +1,10 @@
+RwLoadComponent {
+	#name : 'Auth',
+	#projectNames : [ ],
+	#componentNames : [ ],
+	#packageNames : [
+		'Mcp-Auth',
+		'Mcp-Auth-Tests'
+	],
+	#comment : 'The OAuth/OIDC front end (McpAuthRouter) and its suites. Needs the kernel JWT classes.'
+}

@@ -426,7 +426,7 @@ fresh stone against.
 
 ## JWT and OIDC
 
-Only relevant to `src/auth`, which needs 3.7.5 or later for `JsonWebToken`, `JwtSecurityData` and
+Only relevant to the `Auth` component (`src/Mcp-Auth`), which needs 3.7.5 or later for `JsonWebToken`, `JwtSecurityData` and
 `GsTsExternalSession>>jwtPassword:`.
 
 **`aud` must be a single string.** `UserProfile>>validateJwtPassword:` fails with

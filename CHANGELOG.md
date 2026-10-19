@@ -17,6 +17,22 @@ reasoning has nowhere better to live, not that the entry should grow.
 
 ## Unreleased
 
+* **The server is now a Rowan project, `Mcp`, in Tonel.** **Breaking:** installing needs a stone on a
+  Rowan 3 extent (`extent0.rowan3.dbf`); `install.sh` refuses one without Rowan. The packages
+  (`Mcp-Core`, `Mcp-Tests`, `Mcp-Auth`, `Mcp-Auth-Tests`, `Mcp-Grail`, `Mcp-Grail-Tests`) live under
+  `src/`, the specs and the `Core`, `Auth` and optional `Grail` components under `rowan/`, and the
+  `.gs` groups and their loaders are gone. Changes are made in the image and written out with the new
+  `./write-project.sh`. `install.sh` migrates an image installed from `.gs`. `--grail` now loads the
+  `Grail` component, which needs a 4.0 image with both Grail and Rowan — 4.0.0.a5 is the first to
+  ship a Rowan extent.
+
+* **3.7.x without Rowan installs a generated topaz file-out.** `./export-gs.sh` writes `Core` +
+  `Auth` as one `mcp_server.gs` with GemStone's own Rowan exporter (no stone needed), and
+  `./install.sh --from-gs <file>` files it into a stock `extent0.dbf`. The file is never committed.
+  CI now runs four legs on every pull request: 3.7.5 and 3.7.6 from the file-out on a stock extent,
+  and 4.0.0.a5 — moved up from a3 — through Rowan on its `extent0.rowan3.dbf`, with and without
+  Grail.
+
 * **Every JSON parse failure is now a `-32700`.** `McpBase class>>parseBody:` caught only `Error`,
   and not everything the kernel parser can signal is one. It now catches the kernel's `Exception`,
   looked up through `Globals` because a Grail image binds `#Exception` to Python's class first.

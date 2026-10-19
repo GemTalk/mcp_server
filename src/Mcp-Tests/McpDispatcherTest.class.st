@@ -1,0 +1,353 @@
+Class {
+	#name : 'McpDispatcherTest',
+	#superclass : 'GsTestCase',
+	#category : 'Mcp-Tests'
+}
+
+{ #category : 'session view' }
+McpDispatcherTest class >> movesTheSessionView [
+  "Why this suite cannot be run from a session that has uncommitted work. See
+   McpTestingToolset class>>sessionViewRefusalFor:, which is what asks.
+   Most of the aborts here are removable, but not the one in
+   #testCleanSessionGetsNoTransactionNote: a test that a CLEAN session gets no note has no way to
+   run except from a clean session."
+  ^'it aborts to reach the clean session one of its tests is about, and to clear the probes the others plant'
+
+]
+
+{ #category : 'helpers' }
+McpDispatcherTest >> dispatch: requestDict [
+  "Route requestDict through a fresh dispatcher; answer the response Dictionary (or nil)."
+  ^(McpDispatcher withToolRegistry: McpServer new toolRegistry) handle: requestDict
+
+]
+
+{ #category : 'helpers' }
+McpDispatcherTest >> notification: methodName [
+  "A JSON-RPC notification (no id)."
+  | d |
+  d := Dictionary new.
+  d at: 'jsonrpc' put: '2.0'.
+  d at: 'method' put: methodName.
+  ^d
+
+]
+
+{ #category : 'helpers' }
+McpDispatcherTest >> request: methodName params: paramsDict [
+  | d |
+  d := Dictionary new.
+  d at: 'jsonrpc' put: '2.0'.
+  d at: 'id' put: 1.
+  d at: 'method' put: methodName.
+  paramsDict ifNotNil: [d at: 'params' put: paramsDict].
+  ^d
+
+]
+
+{ #category : 'helpers' }
+McpDispatcherTest >> resultTextOf: aResponse [
+  "The text of a tools/call response's first content item."
+  ^(((aResponse at: 'result') at: 'content') at: 1) at: 'text'
+
+]
+
+{ #category : 'running' }
+McpDispatcherTest >> tearDown [
+  "The transaction tests below deliberately leave the session dirty. Nothing they plant is ever
+   committed, so one abort undoes all of it -- and leaving a dirty session behind would change what
+   the NEXT suite's tools/call sees, now that a call no longer aborts on the way in."
+  System abortTransaction
+
+]
+
+{ #category : 'tests' }
+McpDispatcherTest >> testCleanSessionGetsNoTransactionNote [
+  "The note is for state the model must act on, so a clean session gets none: a warning on every
+   single call would be noise the model learns to skip past."
+  | text |
+  System abortTransaction.
+  text := self resultTextOf: (self dispatch: (self toolCall: 'status')).
+  self deny: (text includesString: '[session]')
+
+]
+
+{ #category : 'tests' }
+McpDispatcherTest >> testHandleJsonString [
+  "The worker entry (McpServer class>>handleJsonString:) parses + dispatches a raw JSON-RPC
+   request in a per-gem worker instance and answers the response string; a notification -> ''."
+  | out |
+  "Clear the cached worker instance before and after: SessionTemps outlives each test, so a server
+   left here would be reused by any later test that drives this entry -- with a different surface."
+  SessionTemps current removeKey: #McpServer ifAbsent: [nil].
+  [out := McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'.
+   self assert: (out includesString: '"tools"').
+   self assert: (McpServer handleJsonString: '{"jsonrpc":"2.0","method":"notifications/initialized"}') isEmpty]
+     ensure: [SessionTemps current removeKey: #McpServer ifAbsent: [nil]]
+
+]
+
+{ #category : 'tests' }
+McpDispatcherTest >> testInitialize [
+  "With no requested protocolVersion, initialize answers our preferred (latest) supported version."
+  | result |
+  result := (self dispatch: (self request: 'initialize' params: Dictionary new)) at: 'result'.
+  self assert: (result at: 'protocolVersion') equals: '2025-11-25'.
+  self assert: ((result at: 'serverInfo') at: 'name') equals: 'gemstone-mcp'.
+  "no title unless a deployment set one: the key is absent, not null, so a client displays the name"
+  self deny: ((result at: 'serverInfo') includesKey: 'title').
+  self assert: ((result at: 'capabilities') includesKey: 'tools')
+
+]
+
+{ #category : 'tests' }
+McpDispatcherTest >> testInitializeCarriesTransactionInstructions [
+  "initialize carries `instructions`, the spec's hint to the model. What it must contain is the
+   part no tool description can carry on its own: that work survives from one call to the next,
+   that only `commit` commits, and how to read the [session] line the server appends to results."
+  | result text |
+  result := (self dispatch: (self request: 'initialize' params: Dictionary new)) at: 'result'.
+  self assert: (result includesKey: 'instructions').
+  text := result at: 'instructions'.
+  self assert: (text includesString: 'NOTHING COMMITS FOR YOU').
+  self assert: (text includesString: '[session]').
+  self assert: (text includesString: 'abort')
+
+]
+
+{ #category : 'tests' }
+McpDispatcherTest >> testInitializeDeclaresToolsAndNothingElse [
+  "A server may send only what it has declared, and must not declare what it cannot do. Tools are
+   the whole of it. 'logging' was declared until 2026-08-27 to license notifications/message for the
+   front end's idle and session-ending warnings; those are gone, so the promise goes with them.
+   The absences are as deliberate as the presence: no listChanged (a session's tool surface is fixed
+   at initialize), no resources, prompts or completions -- and nothing for progress, which is a
+   base-protocol utility the CLIENT opts into per request."
+  | caps |
+  caps := ((self dispatch: (self request: 'initialize' params: Dictionary new)) at: 'result')
+    at: 'capabilities'.
+  self assert: (caps includesKey: 'tools').
+  self deny: (caps includesKey: 'logging').
+  self deny: ((caps at: 'tools') includesKey: 'listChanged').
+  self deny: (caps includesKey: 'resources').
+  self deny: (caps includesKey: 'prompts').
+  self deny: (caps includesKey: 'completions')
+
+]
+
+{ #category : 'tests' }
+McpDispatcherTest >> testInitializeFallsBackForUnsupportedVersion [
+  "An unsupported requested protocolVersion falls back to our preferred (latest) version. 2025-03-26
+   is unsupported on purpose: it mandates receiving JSON-RPC batches, which we don't handle."
+  | result |
+  result := (self dispatch: (self request: 'initialize' params:
+    (Dictionary new at: 'protocolVersion' put: '2025-03-26'; yourself))) at: 'result'.
+  self assert: (result at: 'protocolVersion') equals: '2025-11-25'
+
+]
+
+{ #category : 'tests' }
+McpDispatcherTest >> testInitializeNegotiatesRequestedVersion [
+  "A supported requested protocolVersion is echoed back (MCP version negotiation)."
+  | result |
+  result := (self dispatch: (self request: 'initialize' params:
+    (Dictionary new at: 'protocolVersion' put: '2025-06-18'; yourself))) at: 'result'.
+  self assert: (result at: 'protocolVersion') equals: '2025-06-18'
+
+]
+
+{ #category : 'tests' }
+McpDispatcherTest >> testNilRequestReturnsParseError [
+  self assert: (((self dispatch: nil) at: 'error') at: 'code') equals: -32700
+
+]
+
+{ #category : 'tests' }
+McpDispatcherTest >> testNotificationReturnsNil [
+  self assert: (self dispatch: (self notification: 'notifications/initialized')) isNil
+
+]
+
+{ #category : 'tests' }
+McpDispatcherTest >> testToolCallKeepsUncommittedWork [
+  "The 10.11 regression test, at the seam where it went wrong. handleToolsCall:id: sent
+   System abortTransaction before every tool until 2026-08-28, so a value planted by one call was
+   gone by the next -- which is why `commit` committed a transaction emptied a microsecond earlier
+   and reported success. The pre-call refresh must take a current view WITHOUT destroying work."
+  System abortTransaction.
+  UserGlobals at: #McpDispatcherTxnProbe put: 'planted'.
+  self dispatch: (self toolCall: 'status').
+  self assert: (UserGlobals at: #McpDispatcherTxnProbe ifAbsent: [nil]) equals: 'planted'.
+  self assert: System needsCommit
+
+]
+
+{ #category : 'tests' }
+McpDispatcherTest >> testToolErrorIsAnnotatedToo [
+  "A tool that RAISED is exactly when pending work most needs reporting -- the call the model just
+   made did not do what it asked, and it has to decide what to do with what it already had. The
+   error envelope's structuredContent is left alone, so a client branching on the kind is
+   unaffected by prose meant for the model.
+   The raiser is execute_code 1/0 because it needs no fixture and cannot succeed. It used to be
+   compile_method on a kernel class, which stopped raising when the kernel guard was removed."
+  | response text err |
+  System abortTransaction.
+  UserGlobals at: #McpDispatcherTxnProbe put: 'planted'.
+  response := self dispatch: (self request: 'tools/call' params:
+    (Dictionary new
+      at: 'name' put: 'execute_code';
+      at: 'arguments' put: (Dictionary new at: 'code' put: '1/0'; yourself);
+      yourself)).
+  self assert: ((response at: 'result') at: 'isError').
+  text := self resultTextOf: response.
+  self assert: (text includesString: 'ZeroDivide').
+  self assert: (text includesString: '[session] You have uncommitted changes').
+  err := ((response at: 'result') at: 'structuredContent') at: 'error'.
+  self assert: (err includesKey: 'kind').
+  self deny: ((err at: 'message') includesString: '[session]')
+
+]
+
+{ #category : 'tests' }
+McpDispatcherTest >> testToolsCallSuccessEnvelope [
+  | result |
+  result := (self dispatch: (self toolCall: 'execute_code' args: (Dictionary new at: 'code' put: '3 + 4'; yourself))) at: 'result'.
+  self deny: (result at: 'isError').
+  self assert: ((result at: 'content') first at: 'text') equals: '7'
+
+]
+
+{ #category : 'tests' }
+McpDispatcherTest >> testToolsCallWrapsErrorsAsIsError [
+  | result |
+  result := (self dispatch: (self toolCall: 'execute_code' args: (Dictionary new at: 'code' put: '1/0'; yourself))) at: 'result'.
+  self assert: (result at: 'isError').
+  self assert: (((result at: 'content') first at: 'text') includesString: 'ZeroDivide')
+
+]
+
+{ #category : 'tests' }
+McpDispatcherTest >> testToolsListIsAlphabeticalAnd31 [
+  | tools names |
+  tools := ((self dispatch: (self request: 'tools/list' params: nil)) at: 'result') at: 'tools'.
+  names := (tools collect: [:d | d at: 'name']) asArray.
+  self assert: names size equals: 31.
+  self assert: names equals: names asSortedCollection asArray
+
+]
+
+{ #category : 'tests' }
+McpDispatcherTest >> testToolsListIsOnePageAndSaysSoByOmission [
+  "MCP's pagination makes nextCursor optional and defines its ABSENCE as the end of the results, so
+   a server that answers everything in one page says so by not sending the key. Absent, not null: a
+   client treats a present cursor as a position it may resume from."
+  | result |
+  result := (self dispatch: (self request: 'tools/list' params: nil)) at: 'result'.
+  self deny: (result at: 'tools') isEmpty.
+  self deny: (result includesKey: 'nextCursor')
+
+]
+
+{ #category : 'tests' }
+McpDispatcherTest >> testToolsListRefusesACursorItCouldNotHaveIssued [
+  "Every cursor is an invalid cursor here, because this server issues none -- so one arrives only
+   from another server or from a client persisting cursors across sessions, which the spec forbids.
+   'Invalid cursors SHOULD result in an error with code -32602 (Invalid params)', and the wrong
+   answer is the quiet one: returning page 1 to a client that asked to resume elsewhere."
+  | resp err |
+  resp := self dispatch: (self request: 'tools/list'
+    params: (Dictionary new at: 'cursor' put: 'eyJwYWdlIjogMn0='; yourself)).
+  self deny: (resp includesKey: 'result').
+  err := resp at: 'error'.
+  self assert: (err at: 'code') equals: -32602.
+  self assert: ((err at: 'data') at: 'kind') equals: 'invalidParams'
+
+]
+
+{ #category : 'tests' }
+McpDispatcherTest >> testToolsListTreatsANullCursorAsNoCursor [
+  "A client that sends `cursor: null` has sent no cursor: the parser answers nil for JSON null, and
+   an absent cursor is the first page. Refusing this one would refuse a legal first request."
+  | result |
+  result := (self dispatch: (self request: 'tools/list'
+    params: (Dictionary new at: 'cursor' put: nil; yourself))) at: 'result'.
+  self deny: (result at: 'tools') isEmpty.
+  self deny: (result includesKey: 'nextCursor')
+
+]
+
+{ #category : 'tests' }
+McpDispatcherTest >> testUncommittedWorkIsReportedInTheResult [
+  "A dirty session is reported on every result until it is resolved, because the two moves that
+   resolve it (commit, abort) are the model's to make and nothing else will make them."
+  | text |
+  System abortTransaction.
+  UserGlobals at: #McpDispatcherTxnProbe put: 'planted'.
+  text := self resultTextOf: (self dispatch: (self toolCall: 'status')).
+  self assert: (text includesString: '[session] You have uncommitted changes').
+  self assert: (text includesString: 'commit')
+
+]
+
+{ #category : 'tests' }
+McpDispatcherTest >> testUncommittedWorkWarningNamesTheDeadlineWhenOneIsKnown [
+  "The warning is worth more when it says WHICH deadline is coming and how long is left, and only
+   the front end knows that -- so it arrives with the request and the worker renders it. Without one
+   the warning keeps its unqualified form rather than guessing.
+
+   The deadline is an instant and the worker subtracts the clock from it when it renders, so the
+   pass that sets it and reads the warning back is repeated until it fits inside one second of
+   System timeGmt; otherwise 240 seconds ahead reads back as 239 seconds, not 4 minutes."
+  | srv text now attempts |
+  System abortTransaction.
+  srv := McpServer new.
+  UserGlobals at: #McpDispatcherTxnProbe put: 'planted'.
+  text := ((((McpDispatcher withToolRegistry: srv toolRegistry server: srv) handle:
+    (self toolCall: 'status')) at: 'result') at: 'content') first at: 'text'.
+  self assert: (text includesString: 'lost if this session ends first').
+  attempts := 0.
+  [attempts := attempts + 1.
+   now := System timeGmt.
+   srv handleJsonString: '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+     lifetimeBounds: (Array with: now + 240 with: 'your access credential'
+       with: nil with: nil).
+   text := ((((McpDispatcher withToolRegistry: srv toolRegistry server: srv) handle:
+     (self toolCall: 'status')) at: 'result') at: 'content') first at: 'text'.
+   System timeGmt = now or: [attempts >= 5]] whileFalse.
+  self assert: (text includesString: 'lost when this session ends: 4 minutes left on your access credential')
+
+]
+
+{ #category : 'tests' }
+McpDispatcherTest >> testUnknownMethodReturns32601 [
+  | resp |
+  resp := self dispatch: (self request: 'no/such/method' params: nil).
+  self assert: ((resp at: 'error') at: 'code') equals: -32601
+
+]
+
+{ #category : 'tests' }
+McpDispatcherTest >> testUnknownToolReturns32602 [
+  | resp |
+  resp := self dispatch: (self toolCall: 'does_not_exist' args: Dictionary new).
+  self assert: ((resp at: 'error') at: 'code') equals: -32602
+
+]
+
+{ #category : 'helpers' }
+McpDispatcherTest >> toolCall: aToolName [
+  "A tools/call request for a no-argument tool."
+  | params |
+  params := Dictionary new.
+  params at: 'name' put: aToolName.
+  params at: 'arguments' put: Dictionary new.
+  ^self request: 'tools/call' params: params
+
+]
+
+{ #category : 'helpers' }
+McpDispatcherTest >> toolCall: toolName args: argsDict [
+  ^self request: 'tools/call' params:
+    (Dictionary new at: 'name' put: toolName; at: 'arguments' put: argsDict; yourself)
+
+]
