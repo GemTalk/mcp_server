@@ -1000,7 +1000,8 @@ McpRouter >> forkOnPort: aPort [
    goes idle, so spawn a real gem via GsTsExternalSession and run the blocking accept loop there.
    This router's config travels to the child IN the fork string as JSON (configDict -- paths +
    identifiers only, never key material), so nothing is committed and multiple differently-configured
-   routers can run at once. The child logs in as the current user via a one-time password.
+   routers can run at once. The child logs in as the current user via a one-time password, over
+   loopback (McpBase class>>newLocalExternalSession) -- and so do the workers it forks in turn.
    Stop it by port with ./stop-server.sh, or via `System stopSession: <id>` / `kill <pid>` (both
    printed below). Answers a status string. Requires GsTsExternalSession."
   | es sid pid s |
@@ -1009,7 +1010,7 @@ McpRouter >> forkOnPort: aPort [
    port that never opens, with the reason buried in a detached gem's log."
   self validateWorkerConfig.
   self validateTimerConfig.
-  es := GsTsExternalSession newDefaultForGemHost: 'localhost'.
+  es := self class newLocalExternalSession.
   es useOnetimePassword.
   es login.
   "Capture the child's id/pid BEFORE launching the loop -- once the non-blocking call is running the

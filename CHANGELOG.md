@@ -39,6 +39,13 @@ reasoning has nowhere better to live, not that the entry should grow.
   checkout made `install.sh` report a failed load over one that had succeeded. CI now plants a hostile
   one on every leg and fails if any topaz reads it.
 
+* **Forked gems reach the stone by `localhost`**
+  ([#56](https://github.com/GemTalk/mcp_server/issues/56)). The front end, each worker and a Grail
+  test gem pinned their own host to `localhost` but took the stone's from the machine's host name
+  whenever the launching login named none — as `run-server.sh`'s does. Where that name did not
+  resolve, or resolved to a LAN address, no worker could log in. A host the login names is still
+  used. New suite `McpWorkerLoginTest`.
+
 * **Every JSON parse failure is now a `-32700`.** `McpBase class>>parseBody:` caught only `Error`,
   and not everything the kernel parser can signal is one. It now catches the kernel's `Exception`,
   looked up through `Globals` because a Grail image binds `#Exception` to Python's class first.

@@ -71,7 +71,7 @@ MCP_GRAIL_DIR="${MCP_GRAIL_DIR:-}"
 mcp_require_netldi_if_forking_suite_installed() {
   local nm have
   for nm in McpExternalSessionTest McpTransactionTest McpWorkerDeadlineTest McpAuthTest \
-            McpConcurrentEditTest McpGrailToolsetTest; do
+            McpConcurrentEditTest McpWorkerLoginTest McpGrailToolsetTest; do
     gs_env_image_has "$nm" && have=0 || have=$?
     case "$have" in
       0) gs_env_require_netldi; return $? ;;
@@ -127,7 +127,7 @@ fi
 SUITES="McpJsonTest McpUtf8Test McpBlindWriteTest McpConcurrentEditTest McpToolTest
 McpDispatcherTest McpSessionTest McpOutboxTest McpProgressTest
 McpStreamTest McpLifetimeTest McpViewHygieneTest McpTransportTest McpContractTest McpGemNameTest
-McpExtensionTest McpExternalSessionTest McpTransactionTest McpWorkerDeadlineTest
+McpExtensionTest McpExternalSessionTest McpTransactionTest McpWorkerDeadlineTest McpWorkerLoginTest
 McpAuthTest McpAuthConformanceTest McpGrailToolsetTest"
 
 # Colored, curated output. Topaz itself never emits ANSI codes and echoes back every line it is

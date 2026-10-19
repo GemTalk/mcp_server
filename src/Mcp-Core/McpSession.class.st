@@ -525,11 +525,9 @@ McpSession >> maintenanceCallTimeoutSeconds: aSecondCount [
 
 { #category : 'initialization' }
 McpSession >> newWorkerSession [
-  "A fresh, not-yet-logged-in GsTsExternalSession worker gem on localhost.
-   The host is named explicitly rather than left to #newDefault, which takes its node from
-   #currentGemHostName. Pinning the node to 'localhost' keeps the worker on this machine even where
-   the host name does not resolve."
-  ^GsTsExternalSession newDefaultForGemHost: 'localhost'
+  "A fresh, not-yet-logged-in GsTsExternalSession worker gem on this machine, reaching the stone over
+   loopback -- see McpBase class>>newLocalExternalSession, which every gem this server starts shares."
+  ^McpBase newLocalExternalSession
 
 ]
 

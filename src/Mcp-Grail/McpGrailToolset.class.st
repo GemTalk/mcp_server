@@ -986,7 +986,8 @@ McpGrailToolset >> memoryNoteFor: usedBytes of: maxBytes percent: aPercent [
 McpGrailToolset >> newGrailTestSession [
   "A fresh, logged-in gem to run Grail's tests in, with the memory budget Grail's own runner gives
    one. Logged in as the current user with a one-time password, so it needs no credentials and
-   inherits this session's permissions and nothing else.
+   inherits this session's permissions and nothing else. It reaches the stone over loopback, like
+   every gem this server starts (McpBase class>>newLocalExternalSession).
    The caller logs it out in an ensure:. Nothing is ever committed in it, so a run leaves the
    repository as it found it whether it ends well or badly.
 
@@ -1006,7 +1007,7 @@ McpGrailToolset >> newGrailTestSession [
    GEMSTONE_EXE_CONF or netldi restart is involved -- which matters, because none of those are
    reachable from a gem asked to run a tool."
   | sess |
-  sess := GsTsExternalSession newDefault
+  sess := McpBase newLocalExternalSession
     gemNRS: (GsNetworkResourceString defaultGemNRSFromCurrent
       node: 'localhost';
       body: 'gemnetobject -C ' , self testGemConfig;

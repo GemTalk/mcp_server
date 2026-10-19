@@ -1568,6 +1568,12 @@ flag, so a missing suite is a skip and not an error:
   hierarchies (`McpBase` holds the limit, `McpRouter` and `McpSession` build the two names), so they
   are pinned together rather than in three suites. Every test that can rename the *driving* session
   restores it.
+- `McpWorkerLoginTest` — how every gem the server forks addresses the stone: by `localhost` when the
+  launching login named no host (a bare stone name, as `run-server.sh` logs in), rather than by the
+  machine's host name, which need not resolve or reach the stone
+  ([#56](https://github.com/GemTalk/mcp_server/issues/56)); a host the login *did* name is kept,
+  with or without a protocol and among NRS modifiers; and only the node changes. One test forks a
+  real worker and asks it which host its own login named.
 - `McpStreamTest` — the whole server-to-client pathway with no sockets: the session-scoped GET
   (`400`/`404`/stream), the drain onto the stream, a closing outbox getting its last flush, a POSTed
   JSON-RPC response → `202` and its correlation back to the ping that caused it, the probe over an
@@ -1640,26 +1646,26 @@ flag, so a missing suite is a skip and not an error:
 
 Run a single suite while a server is up via the `run_test_class` tool (e.g. `run_test_class
 McpToolTest`). `./run-unit-tests.sh` runs them all and exits 0 when every test passes: the
-socket-less suites `McpJsonTest` (12), `McpUtf8Test` (7), `McpBlindWriteTest` (41),
+socket-less suites `McpJsonTest` (12), `McpUtf8Test` (10), `McpBlindWriteTest` (41),
 `McpToolTest` (65), `McpDispatcherTest` (21), `McpSessionTest` (24), `McpOutboxTest` (9),
 `McpProgressTest` (19), `McpStreamTest` (18), `McpLifetimeTest` (56), `McpViewHygieneTest` (46),
 `McpTransportTest` (49), `McpContractTest` (22), `McpExtensionTest` (13) and `McpGemNameTest` (16),
-plus `McpConcurrentEditTest` (18), `McpExternalSessionTest` (5), `McpTransactionTest` (10) and
-`McpWorkerDeadlineTest` (4) — **455 tests**,
+plus `McpConcurrentEditTest` (18), `McpExternalSessionTest` (5), `McpTransactionTest` (10),
+`McpWorkerDeadlineTest` (4) and `McpWorkerLoginTest` (9) — **467 tests**,
 which is the whole suite on a base install. Where the optional groups are installed the runner picks
-their suites up automatically: plus `McpAuthTest` (28) and `McpAuthConformanceTest` (25) — **508
-tests** — and **570 with the 62 in `McpGrailToolsetTest`** on a Grail image.
+their suites up automatically: plus `McpAuthTest` (28) and `McpAuthConformanceTest` (25) — **520
+tests** — and **584 with the 64 in `McpGrailToolsetTest`** on a Grail image.
 
-Seven suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
+Eight suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
 `McpAuthConformanceTest` commit a throwaway JWT user and spawn real worker gems; they are in the
 runner anyway, because they are the only cover for the token → session path.
 `McpExternalSessionTest` checks that a result arrives out of a real worker gem carrying the bytes
 the worker sent, `McpTransactionTest` that a *second* gem committing a conflicting change leaves
 this session in the state a failed commit really produces, and `McpWorkerDeadlineTest` that a call
 which outruns the request deadline is really broken in a real one, and `McpConcurrentEditTest` that
-the blind-write guardrail holds against a real second session — so the runner asks for a netldi on
-any image where they are installed, which is every image, since all four are part of the base
-install. `McpGrailToolsetTest` joins them on a Grail image, because `run_python_tests` forks the gem
+the blind-write guardrail holds against a real second session, and `McpWorkerLoginTest` that a real
+worker reaches the stone by the address it was given — so the runner asks for a netldi on any image
+where they are installed, which is every image, since all five are part of the base install. `McpGrailToolsetTest` joins them on a Grail image, because `run_python_tests` forks the gem
 it runs Grail's classes in. That is no new burden in practice: mcp_server gives every
 client its own worker gem, so it cannot serve a single request without a netldi either.
 

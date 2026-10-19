@@ -176,6 +176,10 @@ r=$(post <<'JSON'
 JSON
 )
 check "status reports user"                   'user='                    "$r"
+# The worker's own stone name. run-server.sh logs in with a bare stone name, so the router and each
+# worker it forks must reach the stone by localhost rather than by the machine's host name (#56).
+# Logins succeed either way wherever that name resolves, as on CI, so only this catches a regression.
+check "worker reached the stone by localhost" 'stone=!@localhost#'       "$r"
 echo "      server session: $(printf '%s' "$r" | grep -oE 'session=[0-9]+')"
 
 # --- describe_class / get_method_source ---
