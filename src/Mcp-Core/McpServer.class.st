@@ -184,7 +184,7 @@ McpServer class >> defaultServerTitle [
 { #category : 'identity' }
 McpServer class >> defaultServerVersion [
   "See defaultServerName."
-  ^'0.8.0'
+  ^'0.9.0'
 
 ]
 
