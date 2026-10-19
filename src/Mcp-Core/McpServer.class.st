@@ -635,7 +635,9 @@ McpServer >> lifetimeNote [
    RENDERED NOW, not when the request arrived, which is the whole reason the front end sends values
    rather than a sentence (McpRouter>>lifetimeBoundsFor:). A countdown rendered on arrival is wrong
    by the length of the call by the time the client reads it, and wrong in the dangerous direction:
-   it would promise 24 minutes to a client a six-minute tool call has left 18.
+   it would promise 24 minutes to a client a six-minute tool call has left 18. The countdown is
+   phrased by phraseForSecondsLeft:, the configured inactivity bound by phraseForSeconds:, the same
+   phrasing the front end uses when that bound reaps a session.
 
    Both bounds are reported when both exist, NEARER FIRST -- 'nearer' meaning which would release
    this session first if the client stopped calling now, which is the question the client is
@@ -649,7 +651,7 @@ McpServer >> lifetimeNote [
   inactivity := lifetimeBounds at: 3.
   label := lifetimeBounds at: 4.
   deadlineAt ifNotNil: [:at |
-    deadlineClause := (self phraseForSeconds: ((at - now) max: 0)) , ' left on ' , source].
+    deadlineClause := (self phraseForSecondsLeft: ((at - now) max: 0)) , ' left on ' , source].
   inactivity ifNotNil: [:secs |
     inactivityClause := (self phraseForSeconds: secs) , ' ' , label].
   deadlineClause isNil ifTrue: [^inactivityClause].
@@ -777,6 +779,25 @@ McpServer >> ownCommitsBehind [
    needs for a worker's, and is why this exists here as well as there. Used only to put a number in
    the note that tells the client its view was refreshed; a nil simply leaves the number out."
   ^[(System descriptionOfSession: System session) at: 16] on: Error do: [:ex | nil]
+
+]
+
+{ #category : 'session lifetime' }
+McpServer >> phraseForSecondsLeft: aSeconds [
+  "The time left before a deadline as a phrase -- '32 minutes', '1 minute', '59 seconds': whole
+   minutes ROUNDED DOWN from one minute up, seconds below that.
+
+   Not phraseForSeconds:, which says minutes only for an exact multiple of one. That rule suits a
+   configured interval, a number an operator can find in their own configuration. A countdown is
+   an instant minus the clock and almost never a whole number of minutes, so under that rule it read
+   '1979 seconds left' nearly every time (#47). Rounding down keeps the note on the safe side: it
+   never promises a client time it does not have."
+  | minutes |
+  minutes := aSeconds // 60.
+  minutes > 1 ifTrue: [^minutes printString , ' minutes'].
+  minutes = 1 ifTrue: [^'1 minute'].
+  aSeconds = 1 ifTrue: [^'1 second'].
+  ^aSeconds printString , ' seconds'
 
 ]
 

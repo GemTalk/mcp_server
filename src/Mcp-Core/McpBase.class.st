@@ -447,9 +447,10 @@ McpBase >> phraseForSeconds: aSeconds [
    names a CONFIGURED interval (the notice a reaped client is sent) it is often the only account of
    a reap an operator ever sees, so it should say a number they can find in their own configuration.
 
-   Shared rather than the router's alone: the router phrases a bound it has configured, and the
-   worker phrases the time left against one (McpServer>>lifetimeNote), and the two must not drift
-   into describing the same interval differently."
+   Shared rather than the router's alone: the router names an inactivity bound when it reaps a
+   session, the worker names the same bound in its lifetime note (McpServer>>lifetimeNote), and the
+   two must not drift into describing the same interval differently. The time left before a
+   deadline is not a configured interval, and McpServer>>phraseForSecondsLeft: phrases it."
   | minutes |
   minutes := aSeconds // 60.
   ((minutes > 1) and: [minutes * 60 = aSeconds]) ifTrue: [^minutes printString , ' minutes'].
