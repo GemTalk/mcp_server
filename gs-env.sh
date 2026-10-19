@@ -259,7 +259,7 @@ gs_env_image_has() {
   tmp="$(mktemp "${TMPDIR:-/tmp}/gs-env-probe.XXXXXX")"
   # `|| true`: topaz's exit status is not the answer here -- the sentinel below is -- and a
   # non-zero exit under the caller's `set -e` would abort before we could read it.
-  "$TOPAZ" -l >"$tmp" 2>&1 <<TPZ || true
+  "$TOPAZ" -l -i >"$tmp" 2>&1 <<TPZ || true
 set gemstone ${GS_STONE:-gs64stone}
 set username ${GS_USER:-DataCurator}
 set password ${GS_PASS:-swordfish}

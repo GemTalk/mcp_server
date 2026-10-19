@@ -193,6 +193,19 @@ jobs:
           ./install_base.sh
           ./install.sh
 
+      # Every script starts topaz with -i, so no .topazini reaches it. Plant the worst one in the
+      # repository root -- where the scripts cd, and where topaz looks before $HOME -- and leave it
+      # for the rest of the job: its login makes a script's own login fail with ERROR 2147, and its
+      # output push hides everything that follows. Planted after Grail, whose scripts run from
+      # grail/ and depend on the ~/.topazini written above.
+      - name: Plant a .topazini the scripts must ignore
+        run: |
+          {
+            echo "set gemstone gs64stone user DataCurator pass swordfish"
+            echo "login"
+            echo "output push $RUNNER_TEMP/topazini.out only"
+          } > .topazini
+
       # Exported by this leg's own product tree. Which tree exports it does not matter -- 3.7.5,
       # 3.7.6 and 4.0.0.a5 write byte-identical files from the same Tonel (export-gs.sh) -- so this
       # is the file a release would publish from this commit.
@@ -220,6 +233,15 @@ jobs:
 
       - name: Run wire-level integration test over TLS
         run: ./test-tls.sh
+
+      # A script whose topaz read the planted .topazini wrote this file, even if it went on to pass.
+      - name: Check that no topaz read the planted .topazini
+        run: |
+          if [ -e "$RUNNER_TEMP/topazini.out" ]; then
+            echo "a topaz login read .topazini (missing -i):" >&2
+            cat "$RUNNER_TEMP/topazini.out" >&2
+            exit 1
+          fi
 
       - name: Stop Stone and NetLDI
         if: always()

@@ -277,7 +277,7 @@ if [ -n "${MCP_GRAIL_DIR:-}" ]; then
 fi
 
 echo "Forking McpAuthRouter onto ${MCP_BIND_ADDRESS:-127.0.0.1}:$MCP_PORT (issuer=$MCP_ISSUER; detached; this script returns)..."
-"$TOPAZ" -l <<TPZ
+"$TOPAZ" -l -i <<TPZ
 set gemstone $GS_STONE
 set username $GS_USER
 set password $GS_PASS

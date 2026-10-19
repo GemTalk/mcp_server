@@ -167,6 +167,12 @@ needs `GEMSTONE_GLOBAL_DIR` and nothing else — no netldi, no NRS, no service e
 routes the login through netldi instead, which works equally well once `GEMSTONE_GLOBAL_DIR` is
 right, but it would make `install.sh` depend on a netldi it otherwise has no use for.
 
+**No `.topazini`.** The scripts also pass `-i`, so topaz reads no `.topazini` — not the one in your
+home directory, and not one in the checkout, which would otherwise win. Each script sets the stone
+and credentials and logs in itself; a `login` in an init file makes that login fail (ERROR 2147),
+and an `output push` hides the result the script checks. Settings these scripts need belong in
+`.setenv`.
+
 
 ## Transport
 

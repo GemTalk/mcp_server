@@ -79,7 +79,7 @@ echo "Provisioning in $GS_STONE ..."
 
 USER_LIST=$(printf "'%s' " $MCP_USERS)
 
-"$TOPAZ" -l <<TPZ
+"$TOPAZ" -l -i <<TPZ
 set gemstone $GS_STONE
 set username $GS_USER
 set password $GS_PASS

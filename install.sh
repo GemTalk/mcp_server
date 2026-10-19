@@ -510,7 +510,7 @@ set +e
   mcp_topaz_prelude
   if [ -n "$GS_FILE" ]; then mcp_topaz_gs_load; else mcp_topaz_rowan_load; fi
   mcp_topaz_verify
-} | "$TOPAZ" -l 2>&1 | tee "$TMP"
+} | "$TOPAZ" -l -i 2>&1 | tee "$TMP"
 rc=${PIPESTATUS[1]}
 set -e
 OUT="$(cat "$TMP")"
