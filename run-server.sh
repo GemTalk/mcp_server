@@ -44,14 +44,16 @@
 #                     an OPTIONAL toolset is turned on -- name the core seven plus it. The Python
 #                     toolset is the worked example, and the one this project ships:
 #
-#                       MCP_TOOLSETS="McpBrowsingToolset McpExecutionToolset McpListingToolset \
-#                         McpMutationToolset McpSearchToolset McpSessionToolset McpTestingToolset \
+#                       MCP_TOOLSETS="McpSessionToolset McpBrowsingToolset McpExecutionToolset \
+#                         McpListingToolset McpMutationToolset McpSearchToolset McpTestingToolset \
 #                         McpGrailToolset" \
 #                       MCP_GRAIL_DIR=/path/to/Grail ./run-server.sh
 #
 #                     Your own toolset goes on the same line. Naming it is the whole of the wiring:
 #                     the front end resolves the class, the worker registers its tools, and
-#                     MCP_TOOLSET_OPTIONS below configures it.
+#                     MCP_TOOLSET_OPTIONS below configures it. The order is the order of the
+#                     initialize instructions, so keep McpSessionToolset first: its text opens
+#                     with what the server is.
 #   MCP_GRAIL_DIR - path to the Grail CHECKOUT, for a server whose MCP_TOOLSETS include
 #                     McpGrailToolset. It CONFIGURES that toolset; it does not add it. Grail's
 #                     Python lives in the image, but its .py stdlib and its test fixtures
@@ -101,13 +103,14 @@
 #                     "GemStone - staging (gs64stone)". Empty means no title at all: the key is
 #                     omitted and clients display the server name. Use this -- not a relabeled
 #                     serverName -- to tell two deployments of the same software apart.
-#   MCP_INSTRUCTIONS_FILE - a UTF-8 text file whose contents REPLACE the initialize instructions
-#                     (McpRouter>>serverInstructions:). Unset sends the stock text, which explains
-#                     the transaction and names the tools that manage it -- so set this when
-#                     MCP_TOOLSETS narrows the surface past those tools. An EMPTY file (or /dev/null)
-#                     sends no instructions at all. Capped at 32768 characters
-#                     (McpRouter class>>maxServerInstructionsSize). A relative path is taken from the
-#                     directory you ran this script in.
+#   MCP_DEPLOYMENT_INSTRUCTIONS_FILE - a UTF-8 text file whose contents are APPENDED to the
+#                     initialize instructions (McpRouter>>deploymentInstructions:), after what each
+#                     served toolset says about itself. For what is particular to this database:
+#                     what it holds, what a client must not do to it. It cannot replace the
+#                     toolsets' own text, which is hard-coded (McpToolset>>instructions). An empty
+#                     file appends nothing. Capped at 32768 characters
+#                     (McpRouter class>>maxDeploymentInstructionsSize). A relative path is taken from
+#                     the directory you ran this script in.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -121,7 +124,7 @@ MCP_TOOLSETS="${MCP_TOOLSETS:-}"
 MCP_GRAIL_DIR="${MCP_GRAIL_DIR:-}"
 MCP_TOOLSET_OPTIONS="${MCP_TOOLSET_OPTIONS:-}"
 MCP_TITLE="${MCP_TITLE:-}"
-MCP_INSTRUCTIONS_FILE="${MCP_INSTRUCTIONS_FILE:-}"
+MCP_DEPLOYMENT_INSTRUCTIONS_FILE="${MCP_DEPLOYMENT_INSTRUCTIONS_FILE:-}"
 MCP_TRACE="${MCP_TRACE:-0}"
 MCP_TRACE_LIMIT="${MCP_TRACE_LIMIT:-}"
 
@@ -231,14 +234,14 @@ fi
 # below, any line holding a lone % would end the run block. The launching gem reads the file, and the
 # text then travels in the fork string like every other setting -- no front end or worker reads it.
 # The script has cd'd to its own directory, so a relative path is resolved against the caller's.
-if [ -n "$MCP_INSTRUCTIONS_FILE" ]; then
-  case "$MCP_INSTRUCTIONS_FILE" in /*) ;; *) MCP_INSTRUCTIONS_FILE="$OLDPWD/$MCP_INSTRUCTIONS_FILE" ;; esac
-  if [ -d "$MCP_INSTRUCTIONS_FILE" ] || [ ! -r "$MCP_INSTRUCTIONS_FILE" ]; then
-    echo "error: MCP_INSTRUCTIONS_FILE=$MCP_INSTRUCTIONS_FILE is not a readable file." >&2
+if [ -n "$MCP_DEPLOYMENT_INSTRUCTIONS_FILE" ]; then
+  case "$MCP_DEPLOYMENT_INSTRUCTIONS_FILE" in /*) ;; *) MCP_DEPLOYMENT_INSTRUCTIONS_FILE="$OLDPWD/$MCP_DEPLOYMENT_INSTRUCTIONS_FILE" ;; esac
+  if [ -d "$MCP_DEPLOYMENT_INSTRUCTIONS_FILE" ] || [ ! -r "$MCP_DEPLOYMENT_INSTRUCTIONS_FILE" ]; then
+    echo "error: MCP_DEPLOYMENT_INSTRUCTIONS_FILE=$MCP_DEPLOYMENT_INSTRUCTIONS_FILE is not a readable file." >&2
     exit 1
   fi
   CONFIG="$CONFIG
-r serverInstructions: (GsFile getContentsOfServerFile: '$(printf '%s' "$MCP_INSTRUCTIONS_FILE" | sed "s/'/''/g")')
+r deploymentInstructions: (GsFile getContentsOfServerFile: '$(printf '%s' "$MCP_DEPLOYMENT_INSTRUCTIONS_FILE" | sed "s/'/''/g")')
   decodeFromUTF8ToUnicode."
 fi
 if [ -n "$MCP_WORKER_USER" ]; then

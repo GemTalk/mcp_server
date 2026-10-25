@@ -192,10 +192,10 @@ McpGemNameTest >> testWorkerAppliesTheNameTheFrontEndSent [
   self savingGemCacheNameDo: [
     SessionTemps current removeKey: #McpServer ifAbsent: [nil].
     [McpServer prepareWorkerWithToolsets: #() options: nil
-       serverName: nil title: nil version: nil instructions: nil frontEnd: nil cacheName: 'McpServer:9:feedface'.
+       serverName: nil title: nil version: nil deploymentInstructions: nil frontEnd: nil cacheName: 'McpServer:9:feedface'.
      self assert: McpBase gemCacheName equals: 'McpServer:9:feedface'.
      McpServer prepareWorkerWithToolsets: #() options: nil
-       serverName: nil title: nil version: nil instructions: nil frontEnd: nil cacheName: nil.
+       serverName: nil title: nil version: nil deploymentInstructions: nil frontEnd: nil cacheName: nil.
      self assert: McpBase gemCacheName equals: 'McpServer:9:feedface']
       ensure: [SessionTemps current removeKey: #McpServer ifAbsent: [nil]]]
 

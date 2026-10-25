@@ -16,12 +16,18 @@ config. Your class must be visible in the
 WORKER gem's symbol list (Mcp, not the operator's UserGlobals), because the worker may log in
 as a different user.
 
+INSTRUCTIONS. A toolset can also tell the model what no single tool's description can -- a
+property that spans calls, or advice that bears on several of its tools. Answer it from
+instructions: the server sends every toolset's text in registration order, then whatever the
+deployment appends (McpRouter>>deploymentInstructions:). It is hard-coded rather than an option,
+because it describes how the toolset's tools behave: a deployment can add to it but not replace it.
+
 DEPLOYMENT OPTIONS. A toolset may also need configuration the core cannot know -- where a vendor's
 data directory is, which host a subsystem talks to. Declare the names you accept in
 class>>declaredOptionNames and read them with optionNamed:ifAbsent:; an operator sets them on the
 ROUTER (McpRouter>>toolsetOptions:), keyed by toolset name, and they are carried into the worker with
 the rest of the session config. This completes what a toolset declares about itself -- its tools
-(toolNames) and how it may be configured -- rather than growing the core a new ivar per vendor.
+(toolNames), what it tells the model (instructions) and how it may be configured -- rather than growing the core a new ivar per vendor.
 
 declaredOptionNames is an ALLOW-LIST, checked by the router when the option is set: an undeclared
 name is refused at configuration time, naming what this toolset does declare. That is the same
@@ -517,6 +523,28 @@ McpToolset >> hasReadKey: aKey [
    question is answered 'no', so the caller refuses rather than proceeds."
   server isNil ifTrue: [^false].
   ^server hasRead: aKey
+
+]
+
+{ #category : 'accessing' }
+McpToolset >> instructions [
+  "What this toolset adds to the server's initialize `instructions`, or nil for nothing (the default).
+   The server sends every registered toolset's text, in registration order, followed by whatever the
+   deployment appends (McpServer>>serverInstructions).
+
+   MCP calls the instructions a hint to the MODEL. They are sent once and stay in its context for the
+   whole conversation, so they carry only what a tool description read on its own cannot: a property
+   that spans calls, or advice that bears on several tools at once. Anything about one tool belongs in
+   that tool's description, where it is read at the moment it matters. Name only tools THIS toolset
+   registers -- a deployment may load it without any other -- and write the text to stand on its own,
+   since the deployment chooses the order.
+
+   HARD-CODED ON PURPOSE. No option or router setting replaces it: the text describes how this
+   toolset's tools behave, so it is part of the toolset rather than configuration, and a deployment
+   that rewrote it could tell the model something the tools do not do. A deployment adds to it
+   (McpRouter>>deploymentInstructions:); one that wants different text loads a different toolset --
+   a copy of this one, or a subclass overriding this method."
+  ^nil
 
 ]
 

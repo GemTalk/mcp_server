@@ -55,6 +55,22 @@ McpMutationToolset >> dictionaryForClassNamed: aName requested: aDictionaryNameO
 
 ]
 
+{ #category : 'accessing' }
+McpMutationToolset >> instructions [
+  "Two things true of every tool here, so said once rather than in seven descriptions: none of them
+   commits, and a compile conflicts per CLASS. Worded to stand without McpSessionToolset, which a
+   deployment may leave out -- so it says commit and abort as words, not as tools to call."
+  | lf |
+  lf := String with: Character lf.
+  ^'The tools that change the image (compile_method, compile_class_definition, delete_class, '
+    , 'delete_method, set_class_comment, add_dictionary, remove_dictionary) leave their work '
+    , 'uncommitted: it stays in your session, invisible to others, until you commit or abort it.'
+    , lf , lf
+    , 'Compile conflicts are per CLASS, not per method: two sessions compiling different methods '
+    , 'on one class still collide.'
+
+]
+
 { #category : 'private' }
 McpMutationToolset >> recompileMethodsFrom: oldClass into: newClass named: classNameSymbol [
   "Recompile every instance- and class-side method of oldClass onto newClass, preserving

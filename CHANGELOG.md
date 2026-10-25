@@ -15,6 +15,23 @@ has to act on. The measurements, the alternatives weighed and the kernel behavio
 belong in its commit message and in `docs/` — an entry that has to carry all of that is a sign the
 reasoning has nowhere better to live, not that the entry should grow.
 
+## Unreleased
+
+* **Each toolset supplies its own `instructions`, and a deployment appends to them rather than
+  replacing them.** The `initialize` instructions are now each toolset's own text
+  (`McpToolset>>instructions`), joined in registration order. The server-wide text is split three
+  ways: `McpSessionToolset` has the transaction text, `McpExecutionToolset` has the searching advice,
+  and `McpMutationToolset` has the uncommitted-work and compile-conflict lines. Because each text
+  names only its own toolset's tools, a narrowed surface is no longer told about tools it lacks.
+  `McpSessionToolset` now comes first in `McpServer defaultToolsetNames`. The toolsets' text is
+  hard-coded; if you want different wording, load a different toolset. **Breaking:**
+  `McpRouter>>serverInstructions:` is now `deploymentInstructions:` and **appends**, so neither `''`
+  nor any other value can replace or silence the toolsets' text. `MCP_INSTRUCTIONS_FILE` is now
+  `MCP_DEPLOYMENT_INSTRUCTIONS_FILE`, and the old name is ignored. Other renames:
+  `maxServerInstructionsSize` is now `maxDeploymentInstructionsSize`, and the bootstrap keyword
+  `instructions:` is now `deploymentInstructions:`. `McpServer class>>defaultServerInstructions` is
+  gone.
+
 ## 0.9.0 — 2026-10-18
 
 * **The server is now a Rowan project, `Mcp`, in Tonel.** **Breaking:** installing needs a stone on a

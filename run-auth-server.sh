@@ -93,13 +93,14 @@
 #                         "GemStone - geode teststone 3.7.6". Empty means no title at all: the key is
 #                         omitted and clients display the server name. Use this -- not a relabeled
 #                         serverName -- to tell two deployments of the same software apart.
-#   MCP_INSTRUCTIONS_FILE - a UTF-8 text file whose contents REPLACE the initialize instructions
-#                         (McpRouter>>serverInstructions:). Unset sends the stock text, which explains
-#                         the transaction and names the tools that manage it -- so set this when
-#                         MCP_TOOLSETS narrows the surface past those tools. An EMPTY file (or /dev/null)
-#                         sends no instructions at all. Capped at 32768 characters
-#                         (McpRouter class>>maxServerInstructionsSize). A relative path is taken from the
-#                         directory you ran this script in.
+#   MCP_DEPLOYMENT_INSTRUCTIONS_FILE - a UTF-8 text file whose contents are APPENDED to the
+#                         initialize instructions (McpRouter>>deploymentInstructions:), after what
+#                         each served toolset says about itself. For what is particular to this
+#                         database: what it holds, what a client must not do to it. It cannot replace
+#                         the toolsets' own text, which is hard-coded (McpToolset>>instructions). An
+#                         empty file appends nothing. Capped at 32768 characters
+#                         (McpRouter class>>maxDeploymentInstructionsSize). A relative path is taken
+#                         from the directory you ran this script in.
 #   MCP_BIND_ADDRESS    - local address to bind (default: loopback only). Set to an interface address
 #                         (e.g. 172.16.73.10) or 0.0.0.0 to accept connections from other hosts.
 #                         Safe here precisely because this router requires a bearer token; never do
@@ -124,7 +125,7 @@ MCP_REQUIRED_SCOPES="${MCP_REQUIRED_SCOPES:-mcp:use}"
 MCP_EXTRA_SCOPES="${MCP_EXTRA_SCOPES:-}"
 MCP_TOOLSETS="${MCP_TOOLSETS:-}"
 MCP_TITLE="${MCP_TITLE:-}"
-MCP_INSTRUCTIONS_FILE="${MCP_INSTRUCTIONS_FILE:-}"
+MCP_DEPLOYMENT_INSTRUCTIONS_FILE="${MCP_DEPLOYMENT_INSTRUCTIONS_FILE:-}"
 MCP_TRACE="${MCP_TRACE:-0}"
 MCP_TRACE_LIMIT="${MCP_TRACE_LIMIT:-}"
 MCP_BIND_ADDRESS="${MCP_BIND_ADDRESS:-}"
@@ -230,13 +231,13 @@ TITLE_LINE=""
 INSTRUCTIONS_LINE=""
 # Read by the launching gem rather than pasted into the heredoc -- see run-server.sh for why. The
 # script has cd'd to its own directory, so a relative path is resolved against the caller's.
-if [ -n "$MCP_INSTRUCTIONS_FILE" ]; then
-  case "$MCP_INSTRUCTIONS_FILE" in /*) ;; *) MCP_INSTRUCTIONS_FILE="$OLDPWD/$MCP_INSTRUCTIONS_FILE" ;; esac
-  if [ -d "$MCP_INSTRUCTIONS_FILE" ] || [ ! -r "$MCP_INSTRUCTIONS_FILE" ]; then
-    echo "error: MCP_INSTRUCTIONS_FILE=$MCP_INSTRUCTIONS_FILE is not a readable file." >&2
+if [ -n "$MCP_DEPLOYMENT_INSTRUCTIONS_FILE" ]; then
+  case "$MCP_DEPLOYMENT_INSTRUCTIONS_FILE" in /*) ;; *) MCP_DEPLOYMENT_INSTRUCTIONS_FILE="$OLDPWD/$MCP_DEPLOYMENT_INSTRUCTIONS_FILE" ;; esac
+  if [ -d "$MCP_DEPLOYMENT_INSTRUCTIONS_FILE" ] || [ ! -r "$MCP_DEPLOYMENT_INSTRUCTIONS_FILE" ]; then
+    echo "error: MCP_DEPLOYMENT_INSTRUCTIONS_FILE=$MCP_DEPLOYMENT_INSTRUCTIONS_FILE is not a readable file." >&2
     exit 1
   fi
-  INSTRUCTIONS_LINE="r serverInstructions: (GsFile getContentsOfServerFile: '$(printf '%s' "$MCP_INSTRUCTIONS_FILE" | sed "s/'/''/g")')
+  INSTRUCTIONS_LINE="r deploymentInstructions: (GsFile getContentsOfServerFile: '$(printf '%s' "$MCP_DEPLOYMENT_INSTRUCTIONS_FILE" | sed "s/'/''/g")')
   decodeFromUTF8ToUnicode."
 fi
 

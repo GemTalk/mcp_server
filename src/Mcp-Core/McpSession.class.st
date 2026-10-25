@@ -47,7 +47,7 @@ Class {
 		'serverName',
 		'serverTitle',
 		'serverVersion',
-		'serverInstructions',
+		'deploymentInstructions',
 		'workerPid',
 		'workerStoneSession',
 		'outbox',
@@ -280,6 +280,13 @@ McpSession >> commitsBehind [
    quoted in a log line or a client-facing note is the one the decision was made on rather than a
    second reading that may have moved since."
   ^commitsBehind
+
+]
+
+{ #category : 'accessing' }
+McpSession >> deploymentInstructions: aStringOrNil [
+  "What this worker should append to its toolsets' initialize instructions (nil = nothing)."
+  deploymentInstructions := aStringOrNil
 
 ]
 
@@ -916,13 +923,6 @@ McpSession >> secondsUntilExpiry [
 ]
 
 { #category : 'accessing' }
-McpSession >> serverInstructions: aStringOrNil [
-  "The initialize instructions this worker should send (nil = the worker's own default, '' = none)."
-  serverInstructions := aStringOrNil
-
-]
-
-{ #category : 'accessing' }
 McpSession >> serverName: aStringOrNil [
   "The serverInfo name this worker should advertise (nil = the worker's own default)."
   serverName := aStringOrNil
@@ -1147,10 +1147,10 @@ McpSession >> workerBootstrapExpression [
    named, so the worker instantiates what it is told rather than choosing for itself. Names are plain
    identifiers (McpRouter validated them when the router was configured) and the strings are embedded
    via printString, so this cannot smuggle anything into the worker's compiler. That printString is
-   load-bearing for the title and the instructions in particular: unlike a name or a version they are
+   load-bearing for the title and the deployment instructions in particular: unlike a name or a version they are
    free-form operator prose, so quotes in them must be doubled rather than closing the literal. The
    instructions are also the one argument long enough to meet the compiler's limit on a single string
-   literal (about 100,000 characters), which is why McpRouter>>serverInstructions: caps them.
+   literal (about 100,000 characters), which is why McpRouter>>deploymentInstructions: caps them.
 
    The toolset options travel as ONE printString-quoted JSON string, which the worker parses
    (McpServer class>>prepareWorkerWithToolsets:options:...). They are the only argument here whose
@@ -1169,7 +1169,7 @@ McpSession >> workerBootstrapExpression [
     , ' serverName: ' , (serverName isNil ifTrue: ['nil'] ifFalse: [serverName printString])
     , ' title: ' , (serverTitle isNil ifTrue: ['nil'] ifFalse: [serverTitle printString])
     , ' version: ' , (serverVersion isNil ifTrue: ['nil'] ifFalse: [serverVersion printString])
-    , ' instructions: ' , (serverInstructions isNil ifTrue: ['nil'] ifFalse: [serverInstructions printString])
+    , ' deploymentInstructions: ' , (deploymentInstructions isNil ifTrue: ['nil'] ifFalse: [deploymentInstructions printString])
     , ' frontEnd: ' , System session printString
     , ' cacheName: ' , self workerCacheName printString
 
