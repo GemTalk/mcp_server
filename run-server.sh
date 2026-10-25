@@ -44,16 +44,16 @@
 #                     an OPTIONAL toolset is turned on -- name the core seven plus it. The Python
 #                     toolset is the worked example, and the one this project ships:
 #
-#                       MCP_TOOLSETS="McpSessionToolset McpBrowsingToolset McpExecutionToolset \
-#                         McpListingToolset McpMutationToolset McpSearchToolset McpTestingToolset \
+#                       MCP_TOOLSETS="McpSessionToolset McpMutationToolset McpExecutionToolset \
+#                         McpBrowsingToolset McpListingToolset McpSearchToolset McpTestingToolset \
 #                         McpGrailToolset" \
 #                       MCP_GRAIL_DIR=/path/to/Grail ./run-server.sh
 #
 #                     Your own toolset goes on the same line. Naming it is the whole of the wiring:
 #                     the front end resolves the class, the worker registers its tools, and
 #                     MCP_TOOLSET_OPTIONS below configures it. The order is the order of the
-#                     initialize instructions, so keep McpSessionToolset first: its text opens
-#                     with what the server is.
+#                     initialize instructions, so keep the three that have any first, in this
+#                     order: Session, Mutation, Execution.
 #   MCP_GRAIL_DIR - path to the Grail CHECKOUT, for a server whose MCP_TOOLSETS include
 #                     McpGrailToolset. It CONFIGURES that toolset; it does not add it. Grail's
 #                     Python lives in the image, but its .py stdlib and its test fixtures

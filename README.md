@@ -62,8 +62,8 @@ MCP_WORKER_CLASS=MyMcpServer ./run-server.sh                         # ...a subc
 
 # ...the core tools PLUS the optional Python toolset. Naming it is what turns it on: installing
 # --grail puts McpGrailToolset in the image, and nothing more. Same shape for your own toolset.
-MCP_TOOLSETS="McpSessionToolset McpBrowsingToolset McpExecutionToolset McpListingToolset \
-  McpMutationToolset McpSearchToolset McpTestingToolset McpGrailToolset" \
+MCP_TOOLSETS="McpSessionToolset McpMutationToolset McpExecutionToolset McpBrowsingToolset \
+  McpListingToolset McpSearchToolset McpTestingToolset McpGrailToolset" \
   MCP_GRAIL_DIR=/path/to/Grail ./run-server.sh
 MCP_TRACE=1 ./run-server.sh         # ...logging every message a client sends (see Message trace)
 ./run-auth-server.sh                # ...the OAuth/OIDC network-facing server (McpAuthRouter)
@@ -666,8 +666,8 @@ worked example for configuring your own.
 > surface, and the checkout named as its option.
 >
 > ```bash
-> MCP_TOOLSETS="McpSessionToolset McpBrowsingToolset McpExecutionToolset McpListingToolset \
->   McpMutationToolset McpSearchToolset McpTestingToolset McpGrailToolset" \
+> MCP_TOOLSETS="McpSessionToolset McpMutationToolset McpExecutionToolset McpBrowsingToolset \
+>   McpListingToolset McpSearchToolset McpTestingToolset McpGrailToolset" \
 >   MCP_GRAIL_DIR=/opt/Grail ./run-server.sh
 > ```
 >
@@ -705,8 +705,8 @@ worked example for configuring your own.
 > `MCP_GRAIL_DIR` rather than adding to it:
 >
 > ```bash
-> MCP_TOOLSETS="McpSessionToolset McpBrowsingToolset McpExecutionToolset McpListingToolset \
->   McpMutationToolset McpSearchToolset McpTestingToolset McpGrailToolset" \
+> MCP_TOOLSETS="McpSessionToolset McpMutationToolset McpExecutionToolset McpBrowsingToolset \
+>   McpListingToolset McpSearchToolset McpTestingToolset McpGrailToolset" \
 >   MCP_TOOLSET_OPTIONS='{"McpGrailToolset":
 >   {"grailDirectory":"/opt/Grail","testGemConfig":"GEM_TEMPOBJ_CACHE_SIZE=300000;"}}' \
 >   ./run-server.sh
@@ -1381,14 +1381,15 @@ the toolsets are registered, a blank line apart. Of the core seven, three have s
 | toolset | what its instructions cover |
 |---|---|
 | `McpSessionToolset` | what a session is, the snapshot view, why a commit can fail, and how to read the `[session]` line |
+| `McpMutationToolset` | that compile conflicts are per class, not per method |
 | `McpExecutionToolset` | how to search a production database's objects without a scan that runs for hours |
-| `McpMutationToolset` | that the image-changing tools leave their work uncommitted, and that compile conflicts are per class |
 
 A toolset's text names only tools that toolset registers, so a narrowed surface is never told about a
-tool it does not have. `McpSessionToolset` comes first in `McpServer defaultToolsetNames` because its
-text opens with what the server is. (`tools/list` is sorted by name, so the order changes nothing
-else.) A toolset with no instructions adds nothing, and a surface where no toolset has any sends no
-`instructions` key at all.
+tool it does not have. `McpServer defaultToolsetNames` lists these three first, in the order shown,
+so the compile-conflict line follows the account of commits it adds to; the other four follow
+alphabetically. (`tools/list` is sorted by name, so the order changes nothing else.) Keep the same
+order when you name the toolsets yourself in `MCP_TOOLSETS`. A toolset with no instructions adds
+nothing, and a surface where no toolset has any sends no `instructions` key at all.
 
 The toolsets' text is **hard-coded**: no router setting or toolset option replaces it, because it
 describes how those tools behave. A deployment instead **appends** its own text, for what is

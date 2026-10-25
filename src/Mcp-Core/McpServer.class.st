@@ -126,12 +126,14 @@ McpServer class >> defaultToolsetNames [
    carry a dependency the image knows nothing about: Grail's tools read the .py checkout that
    grailDirectory points at, so a server that offered them merely because src/grail was filed in
    would answer for a directory nobody chose.
-   McpSessionToolset comes FIRST and the rest follow alphabetically. Registration order is the order
-   of the initialize instructions (serverInstructions), and the session's text opens with what this
-   server is; tools/list sorts by tool name whatever the order, so nothing else depends on it.
+   The order is the order of the initialize instructions (serverInstructions), so the toolsets that
+   have instructions come first, in the order they read: McpSessionToolset says what a session is,
+   McpMutationToolset adds how a compile conflicts, and McpExecutionToolset's searching advice
+   follows. The ones with nothing to say come after, alphabetically. tools/list sorts by tool name
+   whatever the order, so nothing else depends on it.
    A deployment that wants a different surface names its own (see McpToolset)."
-  ^#( 'McpSessionToolset' 'McpBrowsingToolset' 'McpExecutionToolset' 'McpListingToolset'
-      'McpMutationToolset' 'McpSearchToolset' 'McpTestingToolset' )
+  ^#( 'McpSessionToolset' 'McpMutationToolset' 'McpExecutionToolset'
+      'McpBrowsingToolset' 'McpListingToolset' 'McpSearchToolset' 'McpTestingToolset' )
 
 ]
 

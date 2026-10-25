@@ -38,9 +38,10 @@ McpSessionToolset >> instructions [
   "What a session IS here, and which of its properties outlive a call. No tool's description is the
    right place to explain that a change made by one call is still there for the next, and the terse
    [session] line the server appends to results (McpDispatcher>>transactionNote) is unintelligible
-   without it. Names only this toolset's tools: what the image-changing tools leave behind is
-   McpMutationToolset's to say. Registered first in McpServer class>>defaultToolsetNames, because it
-   opens with what the server is.
+   without it. Names only this toolset's tools: that the image-changing tools leave their work
+   uncommitted is in each one's description, and how they conflict is McpMutationToolset's to
+   say. Registered first in McpServer class>>defaultToolsetNames, because it opens with what the
+   server is.
    Kept short on purpose: it is prepended to the model's context for the whole conversation, so
    every sentence competes with the client's own prompt for attention."
   | lf |

@@ -81,17 +81,21 @@ McpContractTest >> request: methodName params: paramsDict [
 ]
 
 { #category : 'tests - identity' }
-McpContractTest >> testDefaultInstructionsOpenWithTheSession [
-  "The default surface registers McpSessionToolset FIRST, so its account of what a session is opens
-   the instructions rather than following advice that assumes it. Registration order is all that sets
-   this: tools/list sorts by name whatever it is. The other two core texts follow."
-  | text |
-  self assert: McpServer defaultToolsetNames first equals: 'McpSessionToolset'.
-  text := McpServer new serverInstructions.
-  self assert: (text beginsWith:
-    (McpServer newWithToolsetNames: #('McpSessionToolset')) serverInstructions).
-  self assert: (text includesString: 'SEARCHING THE APPLICATION''S OBJECTS').
-  self assert: (text includesString: 'compile_method')
+McpContractTest >> testDefaultInstructionsFollowTheReadingOrder [
+  "The default surface registers the toolsets that have instructions first, in the order they read:
+   McpSessionToolset's account of what a session is, then McpMutationToolset's line on how a compile
+   conflicts, which builds on it, then McpExecutionToolset's searching advice. Registration order is
+   all that sets this -- tools/list sorts by name whatever it is -- so it is pinned against each
+   toolset's own text: this fails if the order slips, not only if a text goes missing, and it also
+   shows the other four core toolsets add nothing."
+  | sep |
+  sep := String with: Character lf with: Character lf.
+  self assert: (McpServer defaultToolsetNames copyFrom: 1 to: 3)
+    equals: #('McpSessionToolset' 'McpMutationToolset' 'McpExecutionToolset').
+  self assert: McpServer new serverInstructions
+    equals: (McpServer newWithToolsetNames: #('McpSessionToolset')) serverInstructions
+      , sep , (McpServer newWithToolsetNames: #('McpMutationToolset')) serverInstructions
+      , sep , (McpServer newWithToolsetNames: #('McpExecutionToolset')) serverInstructions
 
 ]
 
