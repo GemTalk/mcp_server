@@ -15,7 +15,7 @@ has to act on. The measurements, the alternatives weighed and the kernel behavio
 belong in its commit message and in `docs/` — an entry that has to carry all of that is a sign the
 reasoning has nowhere better to live, not that the entry should grow.
 
-## Unreleased
+## 0.10.0 — 2026-10-25
 
 * **Each toolset supplies its own `instructions`, and a deployment appends to them rather than
   replacing them.** The `initialize` instructions are now each toolset's own text
