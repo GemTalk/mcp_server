@@ -71,12 +71,11 @@ An empty list is legal and means a server offering no tools at all. serverName s
 this is, so it is set here (a different product), not to distinguish deployments:
     (McpRouter new toolsetNames: #('AcmeDbToolset'); serverName: 'acme-db-mcp'; serverVersion: '2.5.0')
       forkOnPort: 8000
-The stock initialize instructions describe the transaction tools, so a surface without them should say
-what it IS instead -- replace the text, add to it, or send none with an empty string:
-    (McpRouter new toolsetNames: #('AcmeDbToolset'); serverInstructions: 'Acme label database. ...')
+The initialize instructions are what the toolsets say about themselves (McpToolset>>instructions),
+in the order they are registered. A deployment cannot replace them, but APPENDS its own -- what
+this database holds, what a client must not do to it:
+    (McpRouter new deploymentInstructions: 'Acme label database. Printed labels are immutable.')
       forkOnPort: 8000
-    (McpRouter new serverInstructions: McpServer defaultServerInstructions , '...') forkOnPort: 8000
-    (McpRouter new toolsetNames: #('AcmeDbToolset'); serverInstructions: '') forkOnPort: 8000
 Name an McpServer subclass for the workers (nothing auto-detects one -- subclass to change BEHAVIOR;
 to add tools write an McpToolset instead):
     (McpRouter new workerClassName: 'AcmeDbServer') forkOnPort: 8000
@@ -123,7 +122,7 @@ Class {
 		'serverName',
 		'serverTitle',
 		'serverVersion',
-		'serverInstructions',
+		'deploymentInstructions',
 		'pendingRequests',
 		'pendingMutex',
 		'serverRequestCounter',
@@ -388,17 +387,17 @@ McpRouter class >> loopbackAddress [
 ]
 
 { #category : 'worker identity' }
-McpRouter class >> maxServerInstructionsSize [
-  "The longest initialize instructions a router accepts, in characters: 32768. The instructions
-   travel to the child gem inside the fork string's config JSON and to each worker as a string
-   literal in its bootstrap expression, and the GemStone compiler refuses a single string literal of
-   about 100,000 characters (measured on 4.0.0.a2: 99,997 compiles, 100,000 does not). Past that the
-   failure would be a CompileError in a DETACHED gem -- a port that never opens, the reason in a log
-   -- so the cap refuses it where it is configured, well short of the limit so the rest of the config
-   has room beside it.
+McpRouter class >> maxDeploymentInstructionsSize [
+  "The longest deployment instructions a router accepts, in characters: 32768. They travel to the
+   child gem inside the fork string's config JSON and to each worker as a string literal in its
+   bootstrap expression, and the GemStone compiler refuses a single string literal of about 100,000
+   characters (measured on 4.0.0.a2: 99,997 compiles, 100,000 does not). Past that the failure would
+   be a CompileError in a DETACHED gem -- a port that never opens, the reason in a log -- so the cap
+   refuses it where it is configured, well short of the limit so the rest of the config has room
+   beside it. Only the deployment's text travels this way: a toolset's own instructions are built in
+   the worker and never do.
    Not a tuning knob: text this long is almost certainly a mistake, since the instructions sit in the
-   model's context for the whole conversation (McpServer class>>defaultServerInstructions is about
-   3,000)."
+   model's context for the whole conversation (the core toolsets' together are about 3,000)."
   ^32768
 
 ]
@@ -538,8 +537,8 @@ McpRouter >> applyConfig: aConfigDict [
   serverVersion := aConfigDict at: 'serverVersion' ifAbsent: [serverVersion].
   "Through the SETTER: it is capped, and a config that exceeds the cap must fail in the child gem
    rather than reach a worker's compiler."
-  (aConfigDict includesKey: 'serverInstructions')
-    ifTrue: [self serverInstructions: (aConfigDict at: 'serverInstructions')].
+  (aConfigDict includesKey: 'deploymentInstructions')
+    ifTrue: [self deploymentInstructions: (aConfigDict at: 'deploymentInstructions')].
   requestTimeoutSeconds := aConfigDict at: 'requestTimeoutSeconds' ifAbsent: [requestTimeoutSeconds].
   sessionIdleTimeoutSeconds := aConfigDict at: 'sessionIdleTimeoutSeconds' ifAbsent: [sessionIdleTimeoutSeconds].
   streamlessIdleTimeoutSeconds := aConfigDict at: 'streamlessIdleTimeoutSeconds' ifAbsent: [streamlessIdleTimeoutSeconds].
@@ -763,7 +762,7 @@ McpRouter >> configDict [
   d at: 'serverName' put: serverName.
   d at: 'serverTitle' put: serverTitle.
   d at: 'serverVersion' put: serverVersion.
-  d at: 'serverInstructions' put: serverInstructions.
+  d at: 'deploymentInstructions' put: deploymentInstructions.
   d at: 'requestTimeoutSeconds' put: requestTimeoutSeconds.
   d at: 'sessionIdleTimeoutSeconds' put: sessionIdleTimeoutSeconds.
   d at: 'streamlessIdleTimeoutSeconds' put: streamlessIdleTimeoutSeconds.
@@ -850,6 +849,35 @@ McpRouter >> deadlineSourceFor: sess [
     and: [sess expiresAtSeconds = (sess startedAtSeconds + maxSessionLifetimeSeconds)])
       ifTrue: [^'this server''s session lifetime cap'].
   ^'your access credential, which refreshing it extends'
+
+]
+
+{ #category : 'worker identity' }
+McpRouter >> deploymentInstructions [
+  "What this router's workers append to their toolsets' initialize instructions: nil for nothing --
+   see McpServer>>serverInstructions."
+  ^deploymentInstructions
+
+]
+
+{ #category : 'worker identity' }
+McpRouter >> deploymentInstructions: aStringOrNil [
+  "Append this deployment's own text to the initialize instructions its workers send, after
+   everything its toolsets say (McpToolset>>instructions). What belongs here is what is particular to
+   THIS database -- what it holds, what a client must not do to it -- since the toolsets have already
+   said how their tools behave. There is no setting that replaces their text: a deployment that wants
+   different wording loads a different toolset.
+
+     McpRouter new deploymentInstructions: 'Acme label database. Printed labels are immutable.'
+
+   nil and an empty string both append nothing. Refused past maxDeploymentInstructionsSize, HERE,
+   because a longer value would fail later in a gem nobody is watching."
+  (aStringOrNil notNil and: [aStringOrNil size > self class maxDeploymentInstructionsSize])
+    ifTrue: [^self error: 'deploymentInstructions is ' , aStringOrNil size printString
+      , ' characters; the most a router accepts is '
+      , self class maxDeploymentInstructionsSize printString
+      , ' (McpRouter class>>maxDeploymentInstructionsSize).'].
+  deploymentInstructions := aStringOrNil
 
 ]
 
@@ -1197,7 +1225,7 @@ McpRouter >> initialize [
   serverName := nil.       "nil = the worker's own default (McpServer class>>defaultServerName)"
   serverTitle := nil.
   serverVersion := nil.
-  serverInstructions := nil.  "nil = the worker's own default (McpServer class>>defaultServerInstructions)"
+  deploymentInstructions := nil.  "nil = nothing after what the toolsets say (McpServer>>serverInstructions)"
   "The mode a DETACHED front-end gem puts itself in (#applyFrontEndTransactionMode). Seeded rather
    than left nil, because nil could only mean 'keep whatever STN_GEM_INITIAL_TRANSACTION_MODE gave
    this gem at login', and that is the pinned-view behaviour this default exists to end."
@@ -1835,7 +1863,7 @@ McpRouter >> openSessionCreating: aOneArgBlock [
       serverName: self serverName;
       serverTitle: self serverTitle;
       serverVersion: self serverVersion;
-      serverInstructions: self serverInstructions;
+      deploymentInstructions: self deploymentInstructions;
       requestTimeoutSeconds: self requestTimeoutSeconds;
       maintenanceCallTimeoutSeconds: self maintenanceCallTimeoutSeconds;
       prepareWorker.
@@ -2815,35 +2843,6 @@ McpRouter >> servePost: req on: conn [
       progressToken: (self progressTokenFor: parsed accepting: req)
       sessionId: (self sessionIdOf: req)
       on: conn
-
-]
-
-{ #category : 'worker identity' }
-McpRouter >> serverInstructions [
-  "The initialize instructions this router's workers send: nil for the worker's own default
-   (McpServer class>>defaultServerInstructions), an empty string for none -- see
-   McpServer>>serverInstructions."
-  ^serverInstructions
-
-]
-
-{ #category : 'worker identity' }
-McpRouter >> serverInstructions: aStringOrNil [
-  "Replace the initialize instructions this router's workers send. The stock text is about the
-   transaction and names the tools that manage it, so it is true only of a surface that offers them:
-   a deployment that narrows toolsetNames: past those tools, or serves its own, says here what its
-   server is instead. To ADD to the stock text rather than replace it, compose it, as with the
-   toolset list:
-
-     McpRouter new serverInstructions: McpServer defaultServerInstructions , '...'
-
-   nil restores the default and an empty string sends none. Refused past maxServerInstructionsSize,
-   HERE, because a longer value would fail later in a gem nobody is watching."
-  (aStringOrNil notNil and: [aStringOrNil size > self class maxServerInstructionsSize])
-    ifTrue: [^self error: 'serverInstructions is ' , aStringOrNil size printString
-      , ' characters; the most a router accepts is ' , self class maxServerInstructionsSize printString
-      , ' (McpRouter class>>maxServerInstructionsSize).'].
-  serverInstructions := aStringOrNil
 
 ]
 

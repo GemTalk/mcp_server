@@ -33,6 +33,49 @@ Class {
 	#category : 'Mcp-Core'
 }
 
+{ #category : 'accessing' }
+McpSessionToolset >> instructions [
+  "What a session IS here, and which of its properties outlive a call. No tool's description is the
+   right place to explain that a change made by one call is still there for the next, and the terse
+   [session] line the server appends to results (McpDispatcher>>transactionNote) is unintelligible
+   without it. Names only this toolset's tools: that the image-changing tools leave their work
+   uncommitted is in each one's description, and how they conflict is McpMutationToolset's to
+   say. Registered first in McpServer class>>defaultToolsetNames, because it opens with what the
+   server is.
+   Kept short on purpose: it is prepended to the model's context for the whole conversation, so
+   every sentence competes with the client's own prompt for attention."
+  | lf |
+  lf := String with: Character lf.
+  ^'This server is one GemStone session for as long as the connection lasts, working in a sequence '
+    , 'of transactions.' , lf , lf
+    , 'YOUR VIEW IS A SNAPSHOT of the repository at one instant. `commit`, `abort` and `refresh` '
+    , 'each take a current view. The server also refreshes it for you if it falls far enough '
+    , 'behind to hold the repository''s commit records open -- only between your calls, keeping '
+    , 'your uncommitted changes, and your next result says so. Anything you read before the view '
+    , 'last moved may since have changed.' , lf , lf
+    , 'COMMITS NEVER SILENTLY OVERWRITE. If you change an object another session has committed '
+    , 'since your view was taken, your `commit` fails and writes nothing. That protection is what '
+    , 'the snapshot is for, and it is why a view move in the middle of a plan is not free: every '
+    , 'view move, yours or the server''s, adopts their version, so a change based on something you '
+    , 'read BEFORE the move commits cleanly and erases their work. Re-read before acting on '
+    , 'anything you read earlier.' , lf , lf
+    , 'NOTHING COMMITS FOR YOU. Your changes stay in your session, invisible to others, until you '
+    , '`commit` or `abort` -- so you can make a change, test it, then decide. `abort` discards '
+    , 'them; `refresh` keeps them.' , lf , lf
+    , 'THE [session] LINE ends a result only when something needs doing, and describes your '
+    , 'session, not the tool you called:' , lf
+    , '  - uncommitted changes pending -> commit or abort them. The line says what will end the '
+    , 'session and when; if it ends, they are lost.' , lf
+    , '  - your commit FAILED, or a server refresh left your changes CONFLICTING -> nothing was '
+    , 'written, and this is the one failure you cannot retry your way out of: no commit can '
+    , 'succeed until you `abort`, which discards them. Save what you need, abort, re-read, redo.'
+    , lf
+    , '  - the server refreshed your view -> your changes were kept. Re-read what you are about to '
+    , 'act on: only what you read through a tool is tracked, so the line can name what it knows '
+    , 'went stale and no more.'
+
+]
+
 { #category : 'registration' }
 McpSessionToolset >> registerOn: aToolRegistry [
   | noArgs |

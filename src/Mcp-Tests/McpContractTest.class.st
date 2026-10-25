@@ -53,6 +53,14 @@ McpContractTest >> includesCS: aSubstring in: aString [
 ]
 
 { #category : 'helpers' }
+McpContractTest >> initializeInstructionsFrom: aDispatcher [
+  "The initialize result's instructions through aDispatcher, or nil when the key is absent."
+  ^((aDispatcher handle: (self request: 'initialize' params: Dictionary new)) at: 'result')
+    at: 'instructions' ifAbsent: [nil]
+
+]
+
+{ #category : 'helpers' }
 McpContractTest >> listedToolNames [
   "The tool names returned by tools/list through the dispatcher."
   ^(((self dispatch: (self request: 'tools/list' params: nil)) at: 'result') at: 'tools')
@@ -72,6 +80,25 @@ McpContractTest >> request: methodName params: paramsDict [
 
 ]
 
+{ #category : 'tests - identity' }
+McpContractTest >> testDefaultInstructionsFollowTheReadingOrder [
+  "The default surface registers the toolsets that have instructions first, in the order they read:
+   McpSessionToolset's account of what a session is, then McpMutationToolset's line on how a compile
+   conflicts, which builds on it, then McpExecutionToolset's searching advice. Registration order is
+   all that sets this -- tools/list sorts by name whatever it is -- so it is pinned against each
+   toolset's own text: this fails if the order slips, not only if a text goes missing, and it also
+   shows the other four core toolsets add nothing."
+  | sep |
+  sep := String with: Character lf with: Character lf.
+  self assert: (McpServer defaultToolsetNames copyFrom: 1 to: 3)
+    equals: #('McpSessionToolset' 'McpMutationToolset' 'McpExecutionToolset').
+  self assert: McpServer new serverInstructions
+    equals: (McpServer newWithToolsetNames: #('McpSessionToolset')) serverInstructions
+      , sep , (McpServer newWithToolsetNames: #('McpMutationToolset')) serverInstructions
+      , sep , (McpServer newWithToolsetNames: #('McpExecutionToolset')) serverInstructions
+
+]
+
 { #category : 'tests - toolsets' }
 McpContractTest >> testDefaultToolsetSurfaceIsTheCoreSevenOnly [
   "The front end resolves the default surface with McpServer class>>defaultToolsetNames
@@ -85,6 +112,47 @@ McpContractTest >> testDefaultToolsetSurfaceIsTheCoreSevenOnly [
   self assert: surface size equals: 7.
   self deny: (surface includes: 'McpGrailToolset').
   surface do: [:n | self assert: (n beginsWith: 'Mcp')]
+
+]
+
+{ #category : 'tests - identity' }
+McpContractTest >> testDeploymentInstructionsComeAfterTheToolsets [
+  "A deployment's text is APPENDED to what the toolsets say, after a blank line, and never replaces
+   it: nil and an empty text both leave exactly the toolsets' part, so no config can silence a
+   toolset. Asked through a dispatcher built before the text is set, so this also pins that it asks
+   rather than caching."
+  | s dsp stock lf |
+  lf := String with: Character lf.
+  s := McpServer new.
+  dsp := McpDispatcher withToolRegistry: s toolRegistry server: s.
+  stock := self initializeInstructionsFrom: dsp.
+  self assert: stock notNil.
+  s deploymentInstructions: 'Acme label database. Read-only.'.
+  self assert: (self initializeInstructionsFrom: dsp)
+    equals: stock , lf , lf , 'Acme label database. Read-only.'.
+  s deploymentInstructions: ''.
+  self assert: (self initializeInstructionsFrom: dsp) equals: stock.
+  s deploymentInstructions: nil.
+  self assert: (self initializeInstructionsFrom: dsp) equals: stock
+
+]
+
+{ #category : 'tests - identity' }
+McpContractTest >> testEachToolsetsInstructionsNameOnlyItsOwnTools [
+  "A deployment may load any toolset without the others, so a toolset's text must not name a tool
+   another one registers. That was the flaw in the server-wide text this replaced: it told a model
+   about compile_method on a surface that had no such tool. Checked for every core toolset against
+   every core tool; a snake_case name anywhere, or any name in backticks, counts as naming it."
+  | all |
+  all := Set new.
+  McpServer defaultToolsetNames do: [:n |
+    all addAll: (McpServer newWithToolsetNames: (Array with: n)) toolsets first toolNames].
+  McpServer defaultToolsetNames do: [:n | | own text |
+    own := (McpServer newWithToolsetNames: (Array with: n)) toolsets first toolNames.
+    text := (McpServer newWithToolsetNames: (Array with: n)) serverInstructions ifNil: [''].
+    (all reject: [:t | own includes: t]) do: [:t |
+      self deny: (text includesString: '`' , t , '`') description: n , ' names ' , t.
+      self deny: ((t includes: $_) and: [text includesString: t]) description: n , ' names ' , t]]
 
 ]
 
@@ -123,6 +191,24 @@ McpContractTest >> testEveryToolIsListed [
   self assert: names size equals: 31.
   self assert: (names includes: 'compile_method').
   self assert: (names includes: 'execute_code')
+
+]
+
+{ #category : 'tests - identity' }
+McpContractTest >> testInstructionsFollowTheToolsetOrder [
+  "The instructions are the toolsets' own texts in the order the server registered them, one blank
+   line apart. Reversing the list reverses the text: the order is the deployment's, not alphabetical
+   and not fixed by the core."
+  | ses exe sep |
+  sep := String with: Character lf with: Character lf.
+  ses := (McpServer newWithToolsetNames: #('McpSessionToolset')) serverInstructions.
+  exe := (McpServer newWithToolsetNames: #('McpExecutionToolset')) serverInstructions.
+  self assert: (McpServer newWithToolsetNames: #('McpSessionToolset' 'McpExecutionToolset'))
+      serverInstructions
+    equals: ses , sep , exe.
+  self assert: (McpServer newWithToolsetNames: #('McpExecutionToolset' 'McpSessionToolset'))
+      serverInstructions
+    equals: exe , sep , ses
 
 ]
 
@@ -208,7 +294,7 @@ McpContractTest >> testPrepareWorkerBuildsNamedSurfaceAndCaches [
   self withFreshWorkerCacheDo: [ | note listed |
     note := McpServer
       prepareWorkerWithToolsets: #('McpBrowsingToolset') options: nil
-      serverName: 'acme-db-mcp' title: 'Acme Labels - sandbox' version: '2.5.0' instructions: nil
+      serverName: 'acme-db-mcp' title: 'Acme Labels - sandbox' version: '2.5.0' deploymentInstructions: nil
       frontEnd: nil cacheName: nil.
     self assert: (self includesCS: 'McpServer ready' in: note).
     listed := (((McpServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
@@ -292,28 +378,6 @@ McpContractTest >> testServerInfoFollowsDeploymentConfig [
 
 ]
 
-{ #category : 'tests - identity' }
-McpContractTest >> testServerInstructionsFollowDeploymentConfig [
-  "The initialize instructions take the same precedence as serverInfo: a deployment's text replaces
-   the class default, and nil brings the default back. The third state is the one serverInfo has no
-   counterpart for -- an EMPTY text means send none, and none is an ABSENT key, never an empty or
-   null one. Asked through a dispatcher built before the text is set, so this also pins that it asks
-   rather than caching."
-  | s dsp result |
-  s := McpServer new.
-  dsp := McpDispatcher withToolRegistry: s toolRegistry server: s.
-  s serverInstructions: 'Acme label database. Read-only.'.
-  result := (dsp handle: (self request: 'initialize' params: Dictionary new)) at: 'result'.
-  self assert: (result at: 'instructions') equals: 'Acme label database. Read-only.'.
-  s serverInstructions: ''.
-  result := (dsp handle: (self request: 'initialize' params: Dictionary new)) at: 'result'.
-  self deny: (result includesKey: 'instructions').
-  s serverInstructions: nil.
-  result := (dsp handle: (self request: 'initialize' params: Dictionary new)) at: 'result'.
-  self assert: (result at: 'instructions') equals: McpServer defaultServerInstructions
-
-]
-
 { #category : 'tests - errors' }
 McpContractTest >> testSyntaxErrorClassifiedAsCompileError [
   "#10: a transpile-time (syntax / undefined-name) error is classified 'compileError' -- distinct
@@ -338,6 +402,24 @@ McpContractTest >> testToolsetsCoverEveryRegisteredTool [
   registered := server toolRegistry descriptors collect: [:d | d at: 'name'].
   self assert: declared asSortedCollection asArray
     equals: registered asSortedCollection asArray
+
+]
+
+{ #category : 'tests - identity' }
+McpContractTest >> testToolsetWithoutInstructionsAddsNothing [
+  "Most toolsets say nothing beyond their tools' descriptions. One that answers nil adds no text AND
+   no separator, wherever it sits in the list. A surface where nothing has anything to say sends NO
+   instructions -- the key is left out, not sent empty -- and a deployment's text alone is then the
+   whole of it, with nothing in front."
+  | s |
+  self assert: (McpServer newWithToolsetNames: #('McpBrowsingToolset' 'McpSessionToolset' 'McpListingToolset'))
+      serverInstructions
+    equals: (McpServer newWithToolsetNames: #('McpSessionToolset')) serverInstructions.
+  s := McpServer newWithToolsetNames: #('McpBrowsingToolset').
+  self assert: s serverInstructions isNil.
+  self assert: (self initializeInstructionsFrom: (McpDispatcher withToolRegistry: s toolRegistry server: s)) isNil.
+  s deploymentInstructions: 'Acme labels.'.
+  self assert: s serverInstructions equals: 'Acme labels.'
 
 ]
 

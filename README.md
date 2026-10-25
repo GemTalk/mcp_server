@@ -62,8 +62,8 @@ MCP_WORKER_CLASS=MyMcpServer ./run-server.sh                         # ...a subc
 
 # ...the core tools PLUS the optional Python toolset. Naming it is what turns it on: installing
 # --grail puts McpGrailToolset in the image, and nothing more. Same shape for your own toolset.
-MCP_TOOLSETS="McpBrowsingToolset McpExecutionToolset McpListingToolset McpMutationToolset \
-  McpSearchToolset McpSessionToolset McpTestingToolset McpGrailToolset" \
+MCP_TOOLSETS="McpSessionToolset McpMutationToolset McpExecutionToolset McpBrowsingToolset \
+  McpListingToolset McpSearchToolset McpTestingToolset McpGrailToolset" \
   MCP_GRAIL_DIR=/path/to/Grail ./run-server.sh
 MCP_TRACE=1 ./run-server.sh         # ...logging every message a client sends (see Message trace)
 ./run-auth-server.sh                # ...the OAuth/OIDC network-facing server (McpAuthRouter)
@@ -666,8 +666,8 @@ worked example for configuring your own.
 > surface, and the checkout named as its option.
 >
 > ```bash
-> MCP_TOOLSETS="McpBrowsingToolset McpExecutionToolset McpListingToolset McpMutationToolset \
->   McpSearchToolset McpSessionToolset McpTestingToolset McpGrailToolset" \
+> MCP_TOOLSETS="McpSessionToolset McpMutationToolset McpExecutionToolset McpBrowsingToolset \
+>   McpListingToolset McpSearchToolset McpTestingToolset McpGrailToolset" \
 >   MCP_GRAIL_DIR=/opt/Grail ./run-server.sh
 > ```
 >
@@ -705,8 +705,8 @@ worked example for configuring your own.
 > `MCP_GRAIL_DIR` rather than adding to it:
 >
 > ```bash
-> MCP_TOOLSETS="McpBrowsingToolset McpExecutionToolset McpListingToolset McpMutationToolset \
->   McpSearchToolset McpSessionToolset McpTestingToolset McpGrailToolset" \
+> MCP_TOOLSETS="McpSessionToolset McpMutationToolset McpExecutionToolset McpBrowsingToolset \
+>   McpListingToolset McpSearchToolset McpTestingToolset McpGrailToolset" \
 >   MCP_TOOLSET_OPTIONS='{"McpGrailToolset":
 >   {"grailDirectory":"/opt/Grail","testGemConfig":"GEM_TEMPOBJ_CACHE_SIZE=300000;"}}' \
 >   ./run-server.sh
@@ -943,7 +943,7 @@ tools itself (those run in the per-client `McpServer` workers):
 - **`initialize`** → the front end opens a `McpSession` (a `GsTsExternalSession` worker gem,
   logged in via a one-time password as `workerUserId` — the front end's own user unless a
   restricted one is configured), **prepares** it with a single
-  `prepareWorkerWithToolsets:options:serverName:title:version:instructions:frontEnd:cacheName:` call —
+  `prepareWorkerWithToolsets:options:serverName:title:version:deploymentInstructions:frontEnd:cacheName:` call —
   which names the worker's gem in the shared cache, resolves the
   named toolsets, applies the advertised identity, and pre-builds the server so the client's first
   request has no registration to do — assigns a server-side id, and returns it in the
@@ -1374,31 +1374,47 @@ means a human deliberately labeled that instance. A product that wants its own d
 
 ### Server instructions
 
-The `initialize` result also carries `instructions`, which MCP defines as a hint for the model. The
-stock text (class-side `McpServer defaultServerInstructions`) explains the session's transactions
-and the `[session]` line, and how to search a production database's objects without a scan that runs
-for hours. It names the tools that manage the transaction: `commit`, `abort`, `refresh` and the tools
-that change the image. It is accurate only for a surface that offers those tools. A deployment that
-narrows `toolsetNames` past them, or serves only its own toolsets, should say what its server is
-instead. Precedence is the same as for `serverName`: router config wins over the
-class default, and a product sets its own text by overriding the class-side default.
+The `initialize` result also carries `instructions`, which MCP defines as a hint for the model. Each
+toolset supplies its own part (`McpToolset>>instructions`), and the server joins them in the order
+the toolsets are registered, a blank line apart. Of the core seven, three have something to say:
+
+| toolset | what its instructions cover |
+|---|---|
+| `McpSessionToolset` | what a session is, the snapshot view, why a commit can fail, and how to read the `[session]` line |
+| `McpMutationToolset` | that compile conflicts are per class, not per method |
+| `McpExecutionToolset` | how to search a production database's objects without a scan that runs for hours |
+
+A toolset's text names only tools that toolset registers, so a narrowed surface is never told about a
+tool it does not have. `McpServer defaultToolsetNames` lists these three first, in the order shown,
+so the compile-conflict line follows the account of commits it adds to; the other four follow
+alphabetically. (`tools/list` is sorted by name, so the order changes nothing else.) Keep the same
+order when you name the toolsets yourself in `MCP_TOOLSETS`. A toolset with no instructions adds
+nothing, and a surface where no toolset has any sends no `instructions` key at all.
+
+The toolsets' text is **hard-coded**: no router setting or toolset option replaces it, because it
+describes how those tools behave. A deployment instead **appends** its own text, for what is
+particular to its database:
 
 ```smalltalk
-"replace the text"
-(McpRouter new toolsetNames: #('AcmeDbToolset');
-   serverInstructions: 'Acme label database. Every tool is read-only.') forkOnPort: 8000
-"add to the stock text"
-(McpRouter new serverInstructions: McpServer defaultServerInstructions , '...') forkOnPort: 8000
-"send none: the key is left out of the result"
-(McpRouter new toolsetNames: #('AcmeDbToolset'); serverInstructions: '') forkOnPort: 8000
+(McpRouter new deploymentInstructions: 'Acme label database. Printed labels are immutable.')
+  forkOnPort: 8000
 ```
 
-`nil` (the default) sends the stock text. From the scripts, set `MCP_INSTRUCTIONS_FILE` to a UTF-8
-file whose contents replace the stock text; an empty file sends none. The text is limited to
-`McpRouter maxServerInstructionsSize` (32,768 characters) and a longer value is refused when it is
-set. The limit exists because the text reaches the child gem and each worker inside a Smalltalk
-string literal, and the compiler refuses a single literal of about 100,000 characters. Without the
-check, an oversized value would fail inside a detached gem instead of where it was configured.
+`nil` (the default) and an empty string both append nothing. From the scripts, set
+`MCP_DEPLOYMENT_INSTRUCTIONS_FILE` to a UTF-8 file whose contents are appended.
+`deployment-instructions.txt.example` is a starting point: copy it to `deployment-instructions.txt`
+(git-ignored), replace its placeholder text, then run with
+`MCP_DEPLOYMENT_INSTRUCTIONS_FILE=deployment-instructions.txt`; the scripts never read it otherwise.
+The whole file is sent as written, so it can hold no comments, and each paragraph belongs on one
+line. If you want different
+wording for a toolset, load a different toolset: a copy of it, or a subclass that overrides
+`instructions`. A toolset of your own describes itself the same way.
+
+The deployment's text is limited to `McpRouter maxDeploymentInstructionsSize` (32,768 characters),
+and a longer value is refused when it is set. The limit exists because that text reaches the child
+gem and each worker inside a Smalltalk string literal, and the compiler refuses a single literal of
+about 100,000 characters. Without the check, an oversized value would fail inside a detached gem
+instead of where it was configured. The toolsets' own text is built in the worker and never travels.
 
 > **Where your classes must live:** a worker gem may log in as a *different user* than the front end
 > (under `McpAuthRouter`, as the token's own GemStone user), so your toolsets and any worker subclass
@@ -1650,12 +1666,12 @@ McpToolTest`). `./run-unit-tests.sh` runs them all and exits 0 when every test p
 socket-less suites `McpJsonTest` (12), `McpUtf8Test` (10), `McpBlindWriteTest` (41),
 `McpToolTest` (68), `McpDispatcherTest` (21), `McpSessionTest` (24), `McpOutboxTest` (9),
 `McpProgressTest` (19), `McpStreamTest` (18), `McpLifetimeTest` (56), `McpViewHygieneTest` (46),
-`McpTransportTest` (49), `McpContractTest` (22), `McpExtensionTest` (13) and `McpGemNameTest` (16),
+`McpTransportTest` (49), `McpContractTest` (26), `McpExtensionTest` (13) and `McpGemNameTest` (16),
 plus `McpConcurrentEditTest` (18), `McpExternalSessionTest` (5), `McpTransactionTest` (10),
-`McpWorkerDeadlineTest` (4) and `McpWorkerLoginTest` (9) — **470 tests**,
+`McpWorkerDeadlineTest` (4) and `McpWorkerLoginTest` (9) — **474 tests**,
 which is the whole suite on a base install. Where the optional groups are installed the runner picks
-their suites up automatically: plus `McpAuthTest` (28) and `McpAuthConformanceTest` (25) — **523
-tests** — and **582 with the 59 in `McpGrailToolsetTest`** on a Grail image.
+their suites up automatically: plus `McpAuthTest` (28) and `McpAuthConformanceTest` (25) — **527
+tests** — and **586 with the 59 in `McpGrailToolsetTest`** on a Grail image.
 
 Eight suites are not purely in-image and need a **netldi** running. `McpAuthTest` and
 `McpAuthConformanceTest` commit a throwaway JWT user and spawn real worker gems; they are in the

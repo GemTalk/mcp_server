@@ -55,6 +55,19 @@ McpMutationToolset >> dictionaryForClassNamed: aName requested: aDictionaryNameO
 
 ]
 
+{ #category : 'accessing' }
+McpMutationToolset >> instructions [
+  "That a compile conflicts per CLASS, not per method -- the one thing about these tools that bears
+   on planning rather than on any single call, since it decides whether two sessions' changes can
+   both commit. That their work is uncommitted is NOT said here: every tool's description says so,
+   McpSessionToolset's text says nothing commits by itself, and the [session] line reports the
+   pending work after each call. Registered right after McpSessionToolset in
+   McpServer class>>defaultToolsetNames, so this follows the account of commits it adds to."
+  ^'Compile conflicts are per CLASS, not per method: two sessions compiling different methods '
+    , 'on one class still collide.'
+
+]
+
 { #category : 'private' }
 McpMutationToolset >> recompileMethodsFrom: oldClass into: newClass named: classNameSymbol [
   "Recompile every instance- and class-side method of oldClass onto newClass, preserving

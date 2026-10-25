@@ -24,6 +24,14 @@ McpFixtureToolset class >> declaredOptionNames [
 
 ]
 
+{ #category : 'accessing' }
+McpFixtureToolset >> instructions [
+  "Proves a third-party toolset's text joins the initialize instructions the way a core one's does
+   (McpExtensionTest)."
+  ^'Fixture tools for the extension tests.'
+
+]
+
 { #category : 'registration' }
 McpFixtureToolset >> registerOn: aToolRegistry [
   aToolRegistry name: 'fixture_echo'

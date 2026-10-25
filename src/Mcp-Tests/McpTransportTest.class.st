@@ -581,7 +581,7 @@ McpTransportTest >> testConfigJsonRoundTrips [
     serverName: 'acme-db-mcp';
     serverTitle: 'Acme Labels - production';
     serverVersion: '2.5.0';
-    serverInstructions: 'Acme''s labels.' , (String with: Character lf) , 'Read-only.';
+    deploymentInstructions: 'Acme''s labels.' , (String with: Character lf) , 'Read-only.';
     messageTrace: true;
     messageTraceLimit: 512.
   dst := McpRouter new applyConfigJson: src configJson.
@@ -595,7 +595,7 @@ McpTransportTest >> testConfigJsonRoundTrips [
   self assert: dst serverTitle equals: 'Acme Labels - production'.
   self assert: dst serverVersion equals: '2.5.0'.
   "prose, with a quote and a line feed, through JSON and the fork string's quoting"
-  self assert: dst serverInstructions equals: 'Acme''s labels.' , (String with: Character lf) , 'Read-only.'.
+  self assert: dst deploymentInstructions equals: 'Acme''s labels.' , (String with: Character lf) , 'Read-only.'.
   self assert: dst requestTimeoutSeconds equals: 5.
   self assert: dst tlsCertificateFile isNil.     "unset optional stays nil through the round-trip"
   self assert: dst tlsPrivateKeyFile isNil.
@@ -642,6 +642,27 @@ McpTransportTest >> testDeleteWithoutSessionReturns400 [
   out := (self runRequest: (self simpleRequest: 'DELETE')) output.
   self assert: (self includesCS: 'HTTP/1.1 400 Bad Request' in: out).
   self assert: (self includesCS: 'MCP-Session-Id' in: out)
+
+]
+
+{ #category : 'tests - worker config' }
+McpTransportTest >> testDeploymentInstructionsAreCappedWhereTheyAreConfigured [
+  "A deployment's instructions travel as a string literal the worker compiles, and a literal the compiler refuses
+   would fail in a detached gem. So the cap is enforced by the setter, in the configuring session --
+   and again when the child applies its config JSON, which must not write past the setter. The
+   limit itself is accepted; one more character is not. The empty string is legal: it appends nothing."
+  | r max big |
+  max := McpRouter maxDeploymentInstructionsSize.
+  r := McpRouter new.
+  r deploymentInstructions: ((String new: max) atAllPut: $a; yourself).
+  self assert: r deploymentInstructions size equals: max.
+  big := (String new: max + 1) atAllPut: $a; yourself.
+  self should: [r deploymentInstructions: big] raise: Error.
+  self assert: r deploymentInstructions size equals: max.   "a refused value leaves the old one"
+  r deploymentInstructions: ''.
+  self assert: r deploymentInstructions equals: ''.
+  self should: [McpRouter new applyConfigJson: (McpJson write: (Dictionary new
+      at: 'deploymentInstructions' put: big; yourself))] raise: Error
 
 ]
 
@@ -877,27 +898,6 @@ McpTransportTest >> testPostWithoutSessionReturnsError [
 
 ]
 
-{ #category : 'tests - worker config' }
-McpTransportTest >> testServerInstructionsAreCappedWhereTheyAreConfigured [
-  "Instructions travel as a string literal the worker compiles, and a literal the compiler refuses
-   would fail in a detached gem. So the cap is enforced by the setter, in the configuring session --
-   and again when the child applies its config JSON, which must not write past the setter. The
-   limit itself is accepted; one more character is not. The empty string is legal: it means none."
-  | r max big |
-  max := McpRouter maxServerInstructionsSize.
-  r := McpRouter new.
-  r serverInstructions: ((String new: max) atAllPut: $a; yourself).
-  self assert: r serverInstructions size equals: max.
-  big := (String new: max + 1) atAllPut: $a; yourself.
-  self should: [r serverInstructions: big] raise: Error.
-  self assert: r serverInstructions size equals: max.   "a refused value leaves the old one"
-  r serverInstructions: ''.
-  self assert: r serverInstructions equals: ''.
-  self should: [McpRouter new applyConfigJson: (McpJson write: (Dictionary new
-      at: 'serverInstructions' put: big; yourself))] raise: Error
-
-]
-
 { #category : 'tests' }
 McpTransportTest >> testSessionIdIsRandomHex [
   "Session ids are cryptographically-random 128-bit tokens (32 hex chars), not sequential.
@@ -1067,7 +1067,7 @@ McpTransportTest >> testWorkerConfigDefaultsAreResolvedByTheFrontEnd [
   self assert: r toolsetNames isNil.
   self assert: r serverName isNil.
   self assert: r serverTitle isNil.   "no instance label until an operator sets one"
-  self assert: r serverInstructions isNil.   "the worker's own default, not an empty text"
+  self assert: r deploymentInstructions isNil.   "nothing appended to what the toolsets say"
   self assert: r effectiveWorkerClassName equals: 'McpServer'.
   self assert: r effectiveToolsetNames equals: McpServer defaultToolsetNames.
   "configured values win, and an EMPTY toolset list is legal -- a server with no tools"

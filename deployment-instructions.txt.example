@@ -1,0 +1,1 @@
+This application's objects are in `AcmeCollection jobRegistry` and `AcmeCollection customerRegistry` (both indexed). Never change a job once it has been invoiced.

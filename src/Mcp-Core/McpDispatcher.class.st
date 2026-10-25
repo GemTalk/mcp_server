@@ -261,7 +261,7 @@ McpDispatcher >> initializeResultFor: params [
   "instructions: OMITTED when nil, on the same rule as title -- an absent key is what a client
    treats as 'none given', and sending null would have it render or forward the word. The spec
    calls this a hint to the model, so what goes in it is what a model cannot get from tool
-   descriptions read one at a time: see McpServer class>>defaultServerInstructions."
+   descriptions read one at a time: see McpToolset>>instructions."
   self serverInstructions ifNotNil: [:i | d at: 'instructions' put: i].
   ^d
 
@@ -302,8 +302,9 @@ McpDispatcher >> resultFor: id with: resultObj [
 { #category : 'accessing' }
 McpDispatcher >> serverInstructions [
   "The initialize result's `instructions`, or nil for none -- see serverName for why this asks the
-   server rather than caching. nil means the key is omitted entirely."
-  ^server isNil ifTrue: [McpServer defaultServerInstructions] ifFalse: [server serverInstructions]
+   server rather than caching. nil means the key is omitted entirely. With no server there are no
+   toolsets, so nothing to say."
+  ^server isNil ifTrue: [nil] ifFalse: [server serverInstructions]
 
 ]
 

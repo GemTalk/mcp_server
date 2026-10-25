@@ -17,6 +17,29 @@ Class {
 	#category : 'Mcp-Core'
 }
 
+{ #category : 'accessing' }
+McpExecutionToolset >> instructions [
+  "How to search the application's objects. It bears on every way of running code, and execute_code
+   is how a model would run a loop over those objects: on a production database such a loop can run
+   for hours where an indexed selection block would not."
+  | lf |
+  lf := String with: Character lf.
+  ^'SEARCHING THE APPLICATION''S OBJECTS. Avoid repository-wide scans such as `allInstances` '
+    , 'and `listInstances:` unless the user asks for one: on a large database they can take hours, '
+    , 'and they can pick up disconnected (dead) objects that the application no longer references. '
+    , 'Instead, find the collection the application keeps the objects in.' , lf , lf
+    , 'Linear scans of a very large collection -- `do:`, `detect:` or `select:` with an ordinary '
+    , '`[:each | ...]` block -- can also take many minutes, and an application built to best '
+    , 'practice will have put GemStone indexes on such collections. So check the collection for '
+    , 'indexes (`IndexManager current getAllNSCRoots` lists every indexed collection; '
+    , '`aCollection equalityIndexedPaths` names a collection''s indexed paths). Then query with a '
+    , 'selection block -- curly braces, and a path of instance variable names rather than message '
+    , 'sends: `customers select: {:each | each.address.zipCode = ''97201''}`. It uses an index '
+    , 'when one exists and falls back to a scan when none does. Do not create an index unless the '
+    , 'user asks.'
+
+]
+
 { #category : 'registration' }
 McpExecutionToolset >> registerOn: aToolRegistry [
   aToolRegistry

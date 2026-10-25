@@ -55,7 +55,7 @@ McpExtensionTest >> testBootstrapBuildsTheNamedSubclassWithItsNamedToolsets [
   self withFreshWorkerCacheDo: [ | note out |
     note := McpFixtureServer
       prepareWorkerWithToolsets: #('McpFixtureToolset') options: nil
-      serverName: nil title: nil version: nil instructions: nil frontEnd: nil cacheName: nil.
+      serverName: nil title: nil version: nil deploymentInstructions: nil frontEnd: nil cacheName: nil.
     self assert: (self includesCS: 'McpFixtureServer ready' in: note).
     out := McpFixtureServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'.
     self assert: (self includesCS: 'fixture_echo' in: out).
@@ -63,16 +63,20 @@ McpExtensionTest >> testBootstrapBuildsTheNamedSubclassWithItsNamedToolsets [
     self deny: (self includesCS: 'describe_class' in: out).
     "with no identity in config the subclass's own default is reported"
     out := McpFixtureServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'.
-    self assert: (self includesCS: 'fixture-mcp' in: out)].
+    self assert: (self includesCS: 'fixture-mcp' in: out).
+    "a third-party toolset's instructions join like a core one's, here as the whole text"
+    self assert: (self includesCS: '"instructions":"Fixture tools for the extension tests."' in: out)].
   "...and a deployment that DOES name the server in config relabels it, through the same bootstrap"
   self withFreshWorkerCacheDo: [ | out |
     McpFixtureServer prepareWorkerWithToolsets: #('McpFixtureToolset') options: nil
       serverName: 'billing-mcp' title: 'Billing - staging' version: '1.1.1'
-      instructions: 'Billing tools only.' frontEnd: nil cacheName: nil.
+      deploymentInstructions: 'Billing tools only.' frontEnd: nil cacheName: nil.
     out := McpFixtureServer handleJsonString: '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'.
     self assert: (self includesCS: 'billing-mcp' in: out).
     self assert: (self includesCS: 'Billing - staging' in: out).
-    self assert: (self includesCS: '"instructions":"Billing tools only."' in: out).
+    "the deployment's text comes AFTER the toolset's, never in place of it"
+    self assert: (self includesCS:
+      '"instructions":"Fixture tools for the extension tests.\n\nBilling tools only."' in: out).
     self deny: (self includesCS: 'fixture-mcp' in: out)]
 
 ]
@@ -197,24 +201,24 @@ McpExtensionTest >> testOptionsSurviveTheConfigRoundTripAndTheForkString [
 ]
 
 { #category : 'tests - worker class' }
-McpExtensionTest >> testRouterCarriesInstructionsToTheSessionAsOneLiteral [
-  "Instructions are the one bootstrap argument that is PROSE -- several paragraphs, apostrophes
+McpExtensionTest >> testRouterCarriesDeploymentInstructionsToTheSessionAsOneLiteral [
+  "A deployment's instructions are the one bootstrap argument that is PROSE -- several paragraphs, apostrophes
    included -- so they are where a quoting mistake would show: an unescaped quote closes the literal
    and the rest of the text is compiled as code in the worker. Evaluating the literal the expression
    carries must give back the text exactly, line feeds and all."
   | r sess text expr start literal |
   text := 'Acme''s label database.' , (String with: Character lf) , 'It''s read-only.'.
   r := McpRouter new.
-  r toolsetNames: #('McpFixtureToolset'); serverInstructions: text.
+  r toolsetNames: #('McpFixtureToolset'); deploymentInstructions: text.
   sess := r openSessionCreating: [:id | McpStubSession new].
   expr := sess workerBootstrapExpression.
   literal := text printString.
-  self assert: (self includesCS: ' instructions: ' , literal , ' frontEnd: ' in: expr).
-  start := (expr indexOfSubCollection: ' instructions: ') + ' instructions: ' size.
+  self assert: (self includesCS: ' deploymentInstructions: ' , literal , ' frontEnd: ' in: expr).
+  start := (expr indexOfSubCollection: ' deploymentInstructions: ') + ' deploymentInstructions: ' size.
   self assert: (expr copyFrom: start to: start + literal size - 1) evaluate equals: text.
-  "unconfigured, nil travels -- the worker's own default, not an empty text"
+  "unconfigured, nil travels -- nothing to append, not an empty text"
   sess := McpRouter new openSessionCreating: [:id | McpStubSession new].
-  self assert: (self includesCS: ' instructions: nil ' in: sess workerBootstrapExpression)
+  self assert: (self includesCS: ' deploymentInstructions: nil ' in: sess workerBootstrapExpression)
 
 ]
 

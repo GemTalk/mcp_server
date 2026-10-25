@@ -102,16 +102,22 @@ McpDispatcherTest >> testInitialize [
 
 { #category : 'tests' }
 McpDispatcherTest >> testInitializeCarriesTransactionInstructions [
-  "initialize carries `instructions`, the spec's hint to the model. What it must contain is the
-   part no tool description can carry on its own: that work survives from one call to the next,
-   that only `commit` commits, and how to read the [session] line the server appends to results."
-  | result text |
-  result := (self dispatch: (self request: 'initialize' params: Dictionary new)) at: 'result'.
+  "initialize carries `instructions`, the spec's hint to the model, and on the core surface they
+   include the part no tool description can carry on its own: that work survives from one call to
+   the next, that only `commit` commits, and how to read the [session] line the server appends to
+   results. They come from the server's toolsets, so a dispatcher with no server has none to send --
+   the key is left out, not sent empty."
+  | srv result text |
+  srv := McpServer new.
+  result := ((McpDispatcher withToolRegistry: srv toolRegistry server: srv)
+    handle: (self request: 'initialize' params: Dictionary new)) at: 'result'.
   self assert: (result includesKey: 'instructions').
   text := result at: 'instructions'.
   self assert: (text includesString: 'NOTHING COMMITS FOR YOU').
   self assert: (text includesString: '[session]').
-  self assert: (text includesString: 'abort')
+  self assert: (text includesString: 'abort').
+  result := (self dispatch: (self request: 'initialize' params: Dictionary new)) at: 'result'.
+  self deny: (result includesKey: 'instructions')
 
 ]
 
