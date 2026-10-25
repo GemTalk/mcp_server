@@ -100,7 +100,10 @@
 #                         the toolsets' own text, which is hard-coded (McpToolset>>instructions). An
 #                         empty file appends nothing. Capped at 32768 characters
 #                         (McpRouter class>>maxDeploymentInstructionsSize). A relative path is taken
-#                         from the directory you ran this script in.
+#                         from the directory you ran this script in. To start, edit
+#                         deployment-instructions.txt beside this script, which holds placeholder
+#                         text, and pass MCP_DEPLOYMENT_INSTRUCTIONS_FILE=deployment-instructions.txt.
+#                         Nothing reads that file unless you name it here.
 #   MCP_BIND_ADDRESS    - local address to bind (default: loopback only). Set to an interface address
 #                         (e.g. 172.16.73.10) or 0.0.0.0 to accept connections from other hosts.
 #                         Safe here precisely because this router requires a bearer token; never do
