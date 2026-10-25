@@ -1401,8 +1401,9 @@ particular to its database:
 ```
 
 `nil` (the default) and an empty string both append nothing. From the scripts, set
-`MCP_DEPLOYMENT_INSTRUCTIONS_FILE` to a UTF-8 file whose contents are appended. The repository ships
-`deployment-instructions.txt` as a place to start. Replace its placeholder text, then run with
+`MCP_DEPLOYMENT_INSTRUCTIONS_FILE` to a UTF-8 file whose contents are appended.
+`deployment-instructions.txt.example` is a starting point: copy it to `deployment-instructions.txt`
+(git-ignored), replace its placeholder text, then run with
 `MCP_DEPLOYMENT_INSTRUCTIONS_FILE=deployment-instructions.txt`; the scripts never read it otherwise.
 The whole file is sent as written, so it can hold no comments, and each paragraph belongs on one
 line. If you want different

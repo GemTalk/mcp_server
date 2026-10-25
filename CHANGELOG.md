@@ -31,7 +31,8 @@ reasoning has nowhere better to live, not that the entry should grow.
   `MCP_DEPLOYMENT_INSTRUCTIONS_FILE`, and the old name is ignored. Other renames:
   `maxServerInstructionsSize` is now `maxDeploymentInstructionsSize`, and the bootstrap keyword
   `instructions:` is now `deploymentInstructions:`. `McpServer class>>defaultServerInstructions` is
-  gone. A new `deployment-instructions.txt` holds placeholder text to edit and pass as
+  gone. A new `deployment-instructions.txt.example` holds placeholder text: copy it to
+  `deployment-instructions.txt` (git-ignored), edit it, and pass that as
   `MCP_DEPLOYMENT_INSTRUCTIONS_FILE`; the scripts don't read it unless you name it.
 
 ## 0.9.0 — 2026-10-18

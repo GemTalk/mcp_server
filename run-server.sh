@@ -110,10 +110,11 @@
 #                     toolsets' own text, which is hard-coded (McpToolset>>instructions). An empty
 #                     file appends nothing. Capped at 32768 characters
 #                     (McpRouter class>>maxDeploymentInstructionsSize). A relative path is taken from
-#                     the directory you ran this script in. To start, edit deployment-instructions.txt
-#                     beside this script, which holds placeholder text, and pass
-#                     MCP_DEPLOYMENT_INSTRUCTIONS_FILE=deployment-instructions.txt. Nothing reads that
-#                     file unless you name it here.
+#                     the directory you ran this script in. To start, copy
+#                     deployment-instructions.txt.example beside this script to
+#                     deployment-instructions.txt (git-ignored), replace its placeholder text, and
+#                     pass MCP_DEPLOYMENT_INSTRUCTIONS_FILE=deployment-instructions.txt. Nothing reads
+#                     that file unless you name it here.
 set -euo pipefail
 cd "$(dirname "$0")"
 
