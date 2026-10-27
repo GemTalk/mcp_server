@@ -52,7 +52,7 @@ jobs:
         #                      for something newer than 3.7.5 fails where it was made rather than
         #                      at the next release.
         #   install: rowan     the 4.0 audience, and how the project is developed: a Rowan 3 extent
-        #                      (extent0.rowan3.dbf, which 4.0.0.a5 ships), loading the project from
+        #                      (extent0.rowan3.dbf, which 4.0.0.a8 ships), loading the project from
         #                      this checkout. `grail: true` clones GemTalk/Grail (see below) and adds
         #                      --grail, the only way to exercise the Grail component -- and Grail
         #                      needs 4.0, so the Grail leg is a 4.0 leg.
@@ -72,9 +72,10 @@ jobs:
         # THE ALPHA DIRECTORY IS NOT AN ARCHIVE -- or was not. dl.gemdb.com kept one alpha at a
         # time through 4.0.0.a3: on 2026-09-16 4.0.0.a2 replaced 4.0.0.Alpha1 and the Alpha1
         # directory began answering 404, which breaks this leg at the download rather than at
-        # anything testable. a3, a4 and a5 are all listed as of 2026-10-18, but do not count on an
-        # old one staying. Note the spelling changed too -- `Alpha1` to a lowercase `a2` -- so the
-        # next one cannot be guessed by incrementing this one; read it off the catalog.
+        # anything testable. a3, a4 and a5 were all listed on 2026-10-18, but by 2026-10-27 only
+        # a5 and a8 were -- so do not count on an old one staying. Note the spelling changed too --
+        # `Alpha1` to a lowercase `a2` -- so the next one cannot be guessed by incrementing this
+        # one; read it off the catalog.
         include:
           - gemstone-version: '3.7.5'
             download-base: 'https://downloads.gemtalksystems.com/pub/GemStone64/3.7.5'
@@ -84,12 +85,12 @@ jobs:
             download-base: 'https://downloads.gemtalksystems.com/pub/GemStone64/3.7.6'
             install: file-out
             grail: false
-          - gemstone-version: '4.0.0.a5'
-            download-base: 'https://dl.gemdb.com/4.0.0.a5'
+          - gemstone-version: '4.0.0.a8'
+            download-base: 'https://dl.gemdb.com/4.0.0.a8'
             install: rowan
             grail: false
-          - gemstone-version: '4.0.0.a5'
-            download-base: 'https://dl.gemdb.com/4.0.0.a5'
+          - gemstone-version: '4.0.0.a8'
+            download-base: 'https://dl.gemdb.com/4.0.0.a8'
             install: rowan
             grail: true
     env:
