@@ -139,8 +139,8 @@ request, in four legs — one per audience and version:
 |---|---|---|
 | 3.7.5 file-out | stock `extent0.dbf` | `export-gs.sh`, then `install.sh --from-gs` |
 | 3.7.6 file-out | stock `extent0.dbf` | ditto |
-| 4.0.0.a5 Rowan | `extent0.rowan3.dbf` | `install.sh` |
-| 4.0.0.a5 Rowan + Grail | `extent0.rowan3.dbf` | clones [GemTalk/Grail](https://github.com/GemTalk/Grail), installs it, then `install.sh --grail`, so `McpGrailToolsetTest` runs too |
+| 4.0.0.a8 Rowan | `extent0.rowan3.dbf` | `install.sh` |
+| 4.0.0.a8 Rowan + Grail | `extent0.rowan3.dbf` | clones [GemTalk/Grail](https://github.com/GemTalk/Grail), installs it, then `install.sh --grail`, so `McpGrailToolsetTest` runs too |
 
 The file-out legs are what keep 3.7 honest between releases: they file in exactly what a release
 would publish from that commit, so a change that reaches for something newer than 3.7.5 fails in the
@@ -184,11 +184,11 @@ Expected failures are real signal, not noise:
 
 ## Version support
 
-**Supported: 3.7.5, 3.7.6+ and 4.0.0.a5.** The server's view handling relies on those images'
+**Supported: 3.7.5, 3.7.6+ and 4.0.0.a8.** The server's view handling relies on those images'
 implementation of `System continueTransaction`; earlier ones differ below the Smalltalk, in ways
 nothing in `src/` can detect or work around. Whether the floor settles at 3.7.5 or 3.7.6 is not yet
 decided. Both ends are held by CI rather than by assumption — 3.7.5 and 3.7.6 from the topaz
-file-out on a stock extent, 4.0.0.a5 through Rowan, including the Grail toolset, which 4.0 alone can
+file-out on a stock extent, 4.0.0.a8 through Rowan, including the Grail toolset, which 4.0 alone can
 load.
 
 | image | base server | OAuth/OIDC front end | notes |
@@ -197,7 +197,7 @@ load.
 | 3.7.2 | **no** | no — no kernel JWT classes | dropped 2026-09-10: `System continueTransaction` differs below the image in two ways nothing in `src/` can detect or cover, and it carries #51438 |
 | 3.7.5 | yes | yes, against a local IdP | **in CI**, from the file-out. **No Grail**: Grail dropped 3.7.x on 2026-09-12 and requires 4.0 |
 | 3.7.6+ | yes | yes, including an external OIDC IdP | ditto (3.7.6) |
-| 4.0.0.a5 | yes | yes | **in CI**, through Rowan, and the only image that can carry Grail |
+| 4.0.0.a8 | yes | yes | **in CI**, through Rowan, and the only image that can carry Grail |
 
 **Grail is tested on 4.0 and nowhere else, because nowhere else can run it.** Grail's own
 `install_base.sh` refuses anything before 4.0, so CI has no 3.7 Grail leg and runs the Grail leg on
@@ -212,8 +212,8 @@ what users actually have.
 **Do not count on that catalog keeping an old alpha, so the pinned version can expire.** 4.0.0.a2
 replaced 4.0.0.Alpha1 on 2026-09-16 and the Alpha1 directory now answers 404, which takes the leg
 down at the download step; a3 replaced a2 the same way. (On 2026-10-18 it listed a3, a4 and a5
-together, so the policy may have changed — but a leg that breaks at the download says nothing about
-the code.) When that happens the fix is to read the current name off `https://dl.gemdb.com` and
+together, so the policy may have changed — but by 2026-10-27 it listed only a5 and a8, and a leg
+that breaks at the download says nothing about the code.) When that happens the fix is to read the current name off `https://dl.gemdb.com` and
 bump both the `gemstone-version` entry and its `download-base` — the spelling is not predictable
 (`Alpha1` became a lowercase `a2`), so it cannot be derived from the previous one.
 
