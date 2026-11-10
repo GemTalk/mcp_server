@@ -367,29 +367,8 @@ run
 "Load the project from this checkout. The load spec's gitUrl is for loading straight from GitHub;
  diskUrl points this load at the working tree instead, so what loads is exactly what is checked out.
  RwSpecification is not in an ordinary user's symbol list -- only Rowan is -- so it is found the way
- the product's own rowan3/bin/installProject.stone finds it.
-
- GRAIL WORKAROUND. Each src/Mcp-*/package.st holds the Tonel marker literal
- \`Package { #name : '...' }\`, and Rowan's reader resolves that class name through the loading user's
- symbol list. Grail defines its OWN Package (in PythonAst, a ModuleAst subclass -- a Python AST
- node), and the Python dictionaries precede Globals, so on a Grail image Rowan gets an AST node and
- the load dies with 'a Package does not understand #at:ifAbsent:' before any of our code loads.
- So the #Package BINDING is moved out of the way for the load and put back afterwards -- the one
- key, NOT the whole dictionary: hiding all of PythonAst also hides ModuleAst, which the Grail
- component needs to compile. Name resolution matters only while compiling, so compiled Grail methods are unaffected.
- The load runs under on:do: rather than ensure: ON PURPOSE: topaz's \`iferr 1 exit 1\` ends the
- session AT the error, so an ensure: never runs, and a failed load would leave the image with no
- Package. If a crash ever does leave it out, restore it by hand with
-   (that dictionary) at: #Package put: <the class>   'PythonAst, a ModuleAst subclass'
- On an image without Grail, objectNamed: #Package is nil and this is a plain load. Take it out when
- Rowan resolves the marker robustly or Grail renames its class."
-| up shadow shadowed specClass spec components result |
-up := System myUserProfile.
-shadow := (up objectNamed: #Package) isNil
-  ifTrue: [ nil ]
-  ifFalse: [ up symbolList detect: [:d | d includesKey: #Package ] ifNone: [ nil ] ].
-shadowed := shadow isNil ifTrue: [ nil ] ifFalse: [ shadow at: #Package ].
-shadow ifNotNil: [ shadow removeKey: #Package. System commitTransaction ].
+ the product's own rowan3/bin/installProject.stone finds it."
+| specClass spec components result |
 components := OrderedCollection new.
 ${COMPONENT_ADDS}result := [
   specClass := (Rowan globalNamed: 'RwSpecification')
@@ -403,10 +382,7 @@ ${COMPONENT_ADDS}result := [
 ] on: Error do: [:ex |
   System abortTransaction.
   'MCP ROWAN LOAD FAILED: ' , ([ ex description ] on: Error do: [:x | ex class name asString ]) ].
-shadow ifNotNil: [ shadow at: #Package put: shadowed. System commitTransaction ].
-result , (shadow isNil
-  ifTrue: [ '' ]
-  ifFalse: [ ' (moved ' , shadow name asString , ' #Package aside; restored)' ])
+result
 %
 errorcount
 output pop

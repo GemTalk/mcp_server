@@ -15,6 +15,15 @@ has to act on. The measurements, the alternatives weighed and the kernel behavio
 belong in its commit message and in `docs/` — an entry that has to carry all of that is a sign the
 reasoning has nowhere better to live, not that the entry should grow.
 
+## Unreleased
+
+* **`install.sh` no longer moves a `#Package` binding aside for the Rowan load.** It did so because
+  an older Grail bound a class named `Package`, which the Tonel reader in 4.0.0.a5's Rowan picked
+  up in place of `package.st`'s marker. 4.0.0.a8's Rowan prefers the reader's own class map
+  (`masterV4` `bafddb0f6`), so the load passes with any `Package` bound, and a current Grail removes
+  its leftover class on install anyway. **Breaking** only for a 4.0.0.a5 image that still carries
+  that class: install Grail at or after GemTalk/Grail#1801 first, or move to 4.0.0.a8 (#71).
+
 ## 0.10.0 — 2026-10-25
 
 * **Each toolset supplies its own `instructions`, and a deployment appends to them rather than
