@@ -5,12 +5,14 @@ name: Release
 #
 #   git tag v0.9.0 <the release merge on main> && git push origin v0.9.0
 #
-# Three jobs, each gating the next:
+# Four jobs, each gating the next:
 #   file-out  checks the tag against the version the code carries, exports the .gs once, and
 #             hands it on as a workflow artifact (a file passed between jobs of this run only).
 #   test      files THAT .gs into a stock extent0.dbf on 3.7.5 and on 3.7.6 and runs every suite.
 #   publish   creates the Release, with that version's CHANGELOG entry as its notes, and attaches
 #             the .gs and its SHA-256 as release assets -- permanent, public downloads.
+#   verify    installs what was published, as a user would, from the public URLs with no checkout
+#             (verify-release.yml).
 # Nothing is published unless every test leg passes, and what is published is byte-for-byte the
 # file that was tested.
 #
@@ -266,3 +268,13 @@ jobs:
             --notes-file "$RUNNER_TEMP/notes.md" \
             "dist/mcp_server-$VERSION.gs" \
             "dist/mcp_server-$VERSION.gs.sha256"
+
+  # After publishing, install what a user downloads -- the release asset and the source archive,
+  # with no checkout -- on a stock 3.7.x extent. Called rather than triggered by the release event,
+  # because a Release created with GITHUB_TOKEN starts no other workflow. See verify-release.yml.
+  verify:
+    name: Verify the published release
+    needs: publish
+    uses: ./.github/workflows/verify-release.yml
+    with:
+      tag: ${{ github.ref_name }}

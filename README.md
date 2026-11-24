@@ -10,6 +10,34 @@ Python), OAuth 2.1 / JWT + TLS, per-router worker identity and server-initiated 
 and verified end-to-end — by curl, by a TLS run, and by the in-image suites. What is *not* built is
 listed under [Future work](#future-work).
 
+## Installing on GemStone 3.7.x without Rowan
+
+A stock 3.7.5 or 3.7.6+ installation runs `extent0.dbf`, which has no Rowan. You do not need it:
+every [release](https://github.com/GemTalk/mcp_server/releases) attaches the server as one topaz
+file-out, `mcp_server-<version>.gs`, tested on both versions before it is published and again
+after, from the downloads themselves. Take the `.gs` and the release's source code archive (which
+carries the scripts), and install from the unpacked archive:
+
+```bash
+VERSION=0.10.0   # the release you want
+curl -fLO https://github.com/GemTalk/mcp_server/releases/download/v$VERSION/mcp_server-$VERSION.gs
+curl -fLO https://github.com/GemTalk/mcp_server/releases/download/v$VERSION/mcp_server-$VERSION.gs.sha256
+sha256sum -c mcp_server-$VERSION.gs.sha256        # macOS: shasum -a 256 -c
+curl -fL https://github.com/GemTalk/mcp_server/archive/refs/tags/v$VERSION.tar.gz | tar -xz
+cd mcp_server-$VERSION
+
+export GEMSTONE=/path/to/GemStone64Bit3.7.x       # and GS_STONE, GS_USER, GS_PASS if not the defaults
+./install.sh --check --from-gs ../mcp_server-$VERSION.gs   # verify the environment first
+./install.sh --from-gs ../mcp_server-$VERSION.gs           # file in and commit
+./run-server.sh                                            # start the server
+```
+
+The file-out carries the server and its OAuth/OIDC front end, but not the optional Grail (Python)
+toolset, which needs Rowan on 4.0. Use `install.sh` rather than filing the `.gs` in by hand: it
+creates the `Mcp` symbol dictionary and adds it to every user's symbol list first. It refuses a
+stone where Rowan already manages these classes. [Environment](#environment) covers what else a
+login may need; [Install & run](#install--run) covers the Rowan install and every option.
+
 **A note about versions.** The supported images are **3.7.5 and 3.7.6+**, whose implementation of
 `System continueTransaction` the server's view handling relies on — see
 [docs/GemStone_Notes.md](docs/GemStone_Notes.md#version-to-version-differences) for the
@@ -81,7 +109,9 @@ are two ways to install it:
   `Auth` component when the image can compile it, and the `Grail` component on `--grail` (or
   `MCP_WITH_GRAIL=1`) — which needs a 4.0 image with both Grail and Rowan (see **Source layout**).
 * **From a topaz file-out** — for a 3.7.x installation on the stock `extent0.dbf`, with no Rowan.
-  `./export-gs.sh` writes the whole of `Core` + `Auth` as one `mcp_server.gs`, using GemStone's own
+  Most people should take the file from a release, as
+  [Installing on GemStone 3.7.x without Rowan](#installing-on-gemstone-37x-without-rowan) shows. To
+  build it yourself instead, `./export-gs.sh` writes the whole of `Core` + `Auth` as one `mcp_server.gs`, using GemStone's own
   Rowan exporter from any 3.7.5-or-later product tree; it reads the Tonel from disk and needs no
   stone. `./install.sh --from-gs mcp_server.gs` then files it into the stone you name. The file is
   generated, never committed; CI exports and installs it on 3.7.5 and 3.7.6 for every pull request.

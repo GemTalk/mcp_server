@@ -1,0 +1,150 @@
+name: Verify Release
+
+# Installs a PUBLISHED release the way its notes tell a 3.7.x user to: download mcp_server-<v>.gs
+# and the release's source code archive from GitHub, unpack the archive, and run its install.sh
+# --from-gs into a stone on the stock extent0.dbf -- no Rowan, and no checkout of this repository.
+# Then the archive's own suites run against it.
+#
+# release.yml's test job already proves the file-out before it is published, but it does so with
+# the scripts from a checkout and the .gs from a workflow artifact. This proves what a user
+# actually receives: the asset as GitHub serves it, its published checksum, and the scripts as the
+# source archive carries them (anything .gitattributes export-ignores, for instance, would show
+# up here first).
+#
+# Runs three ways:
+#   * called by release.yml after its publish job, for the tag just released;
+#   * by hand (workflow_dispatch), for any tag, to re-check a release already out;
+#   * on a pull request that touches this file, against the latest release, as a dry run.
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag to verify, e.g. v0.10.0
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to verify, e.g. v0.10.0 (empty for the latest release)
+        required: false
+        type: string
+  pull_request:
+    paths:
+      - .github/workflows/verify-release.yml
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    name: Resolve the release
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - name: Settle the tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Through the environment, never expanded into the script's text.
+          REQUESTED_TAG: ${{ inputs.tag }}
+        run: |
+          TAG="$REQUESTED_TAG"
+          if [ -z "$TAG" ]; then
+            TAG="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)"
+          fi
+          case "$TAG" in
+            v[0-9]*) ;;
+            *) echo "::error::'$TAG' is not a release tag (expected v<version>)"; exit 1 ;;
+          esac
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+  verify:
+    name: Install ${{ needs.resolve.outputs.tag }} on GemStone ${{ matrix.gemstone-version }}
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - gemstone-version: '3.7.5'
+            download-base: 'https://downloads.gemtalksystems.com/pub/GemStone64/3.7.5'
+          - gemstone-version: '3.7.6'
+            download-base: 'https://downloads.gemtalksystems.com/pub/GemStone64/3.7.6'
+    env:
+      GEMSTONE_VERSION: ${{ matrix.gemstone-version }}
+      GEMSTONE_DOWNLOAD_BASE: ${{ matrix.download-base }}
+      TAG: ${{ needs.resolve.outputs.tag }}
+      VERSION: ${{ needs.resolve.outputs.version }}
+    steps:
+      # Plain public URLs, no token: exactly what a user's browser or curl fetches. The archive is
+      # unpacked with its top directory stripped, so its name (repo-version) need not be guessed.
+      - name: Download the release
+        run: |
+          BASE="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG"
+          mkdir -p "$RUNNER_TEMP/release" "$RUNNER_TEMP/mcp_server"
+          cd "$RUNNER_TEMP/release"
+          curl -fL --no-progress-meter -O "$BASE/mcp_server-$VERSION.gs"
+          curl -fL --no-progress-meter -O "$BASE/mcp_server-$VERSION.gs.sha256"
+          curl -fL --no-progress-meter -o source.tar.gz \
+            "https://github.com/$GITHUB_REPOSITORY/archive/refs/tags/$TAG.tar.gz"
+          sha256sum -c "mcp_server-$VERSION.gs.sha256"
+          tar -xzf source.tar.gz --strip-components=1 -C "$RUNNER_TEMP/mcp_server"
+
+      # Deliberately self-contained, like release.yml, and without actions/cache. See
+      # health-check.yml for why each GemStone setup step is the way it is.
+      - name: Download and install GemStone
+        run: |
+          FILENAME="GemStone64Bit${GEMSTONE_VERSION}-x86_64.Linux.zip"
+          curl -fL --no-progress-meter -o "$RUNNER_TEMP/$FILENAME" "${GEMSTONE_DOWNLOAD_BASE}/${FILENAME}"
+          mkdir -p "$HOME/gemstone"
+          unzip -q "$RUNNER_TEMP/$FILENAME" -d "$HOME/gemstone"
+          GEMSTONE="$HOME/gemstone/GemStone64Bit${GEMSTONE_VERSION}-x86_64.Linux"
+          {
+            echo "GEMSTONE=$GEMSTONE"
+            echo "GEMSTONE_GLOBAL_DIR=$GEMSTONE/global"
+          } >> "$GITHUB_ENV"
+          echo "$GEMSTONE/bin" >> "$GITHUB_PATH"
+
+      # The stock extent: the image a 3.7.x installation without Rowan runs on.
+      - name: Create a fresh extent
+        run: |
+          mkdir -p "$GEMSTONE_GLOBAL_DIR/locks" "$GEMSTONE_GLOBAL_DIR/log" "$GEMSTONE/data"
+          copydbf "$GEMSTONE/bin/extent0.dbf" "$GEMSTONE/data/extent0.dbf"
+          chmod 600 "$GEMSTONE/data/extent0.dbf"
+          if [ ! -f "$GEMSTONE/sys/gemstone.key" ] && [ -f "$GEMSTONE/sys/community.starter.key" ]; then
+            echo "KEYFILE = $GEMSTONE/sys/community.starter.key;" >> "$GEMSTONE/data/system.conf"
+          fi
+
+      - name: Start Stone and NetLDI
+        run: |
+          startstone gs64stone
+          startnetldi -g -a "$USER" gs64ldi
+
+      # Everything from here runs from the unpacked archive -- the release notes' instruction.
+      - name: Install the release
+        working-directory: ${{ runner.temp }}/mcp_server
+        run: ./install.sh --from-gs "$RUNNER_TEMP/release/mcp_server-$VERSION.gs"
+
+      - name: Run unit tests
+        working-directory: ${{ runner.temp }}/mcp_server
+        run: ./run-unit-tests.sh
+
+      - name: Run wire-level integration test
+        working-directory: ${{ runner.temp }}/mcp_server
+        run: ./test.sh
+
+      - name: Run wire-level integration test over TLS
+        working-directory: ${{ runner.temp }}/mcp_server
+        run: ./test-tls.sh
+
+      - name: Stop Stone and NetLDI
+        if: always()
+        run: |
+          stopnetldi gs64ldi || true
+          echo swordfish | stopstone gs64stone DataCurator -i || true
