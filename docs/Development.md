@@ -286,8 +286,15 @@ Pushing the tag runs `.github/workflows/release.yml`, which publishes the releas
   `https://github.com/GemTalk/mcp_server/releases/download/v<version>/mcp_server-<version>.gs`.
   GitHub attaches the tagged source as `.zip` and `.tar.gz` by itself; that archive is where a 3.7
   user gets `install.sh` and the `run-*.sh` scripts.
+* **Then it verifies what was published** (`.github/workflows/verify-release.yml`): it downloads the
+  `.gs`, its `.sha256` and the source archive from their public URLs, with no checkout, and installs
+  them as the release notes say on a stock 3.7.5 and 3.7.6 extent, running the archive's own suites.
+  This is the only check of the user's path itself — the asset as served and the scripts as the
+  archive carries them. Run it by hand on any tag from the Actions tab (empty input: the latest
+  release); a pull request that changes it verifies the latest release as a dry run.
 
-If the run fails, nothing is published. Fix it through an ordinary pull request, then move the tag
+If the export or test job fails, nothing is published. If only the verification fails, the release
+is already out: fix the cause and publish a new version rather than moving the tag. Fix it through an ordinary pull request, then move the tag
 to the new merge — `git push --delete origin v<version>`, re-tag, push — which is safe precisely
 because no release was made from the old one. A pull request that changes `release.yml` or
 `export-gs.sh` runs the export and test jobs as a dry run, so the workflow does not wait for a
